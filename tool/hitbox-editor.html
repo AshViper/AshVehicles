@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AshVehicles Hitbox Editor</title>
+<style>
+  :root {
+    --bg: #14171a; --panel: #1c2126; --line: #2c343c; --ink: #dfe6ec; --dim: #8b98a5;
+    --accent: #3be86a; --pylon: #ff4040; --sel: #ffd23b; --model: #55708c;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink); display: flex;
+    font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  #side {
+    width: 340px; flex: none; background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #views { flex: 1; display: grid; grid-template: 1fr 1fr / 1fr 1fr; gap: 1px; background: var(--line); }
+  .view { position: relative; background: var(--bg); overflow: hidden; }
+  .view canvas { display: block; width: 100%; height: 100%; }
+  .view .tag {
+    position: absolute; left: 8px; top: 6px; color: var(--dim); pointer-events: none;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .view .hint { position: absolute; right: 8px; bottom: 6px; color: #55606b; pointer-events: none; }
+  h2 {
+    margin: 0; padding: 9px 12px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); border-bottom: 1px solid var(--line); background: #191e23;
+  }
+  .pad { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .scroll { overflow-y: auto; flex: 1; }
+  button {
+    font: inherit; background: #232a31; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 3px; padding: 4px 9px; cursor: pointer;
+  }
+  button:hover { background: #2b343d; }
+  button.on { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+  input, select {
+    font: inherit; background: #101418; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 3px; padding: 3px 5px; width: 100%;
+  }
+  input:focus, select:focus { outline: 1px solid var(--accent); }
+  label { color: var(--dim); display: block; margin-bottom: 2px; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row > * { min-width: 0; }
+  .triple { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-bottom: 7px; }
+  .list { max-height: 190px; overflow-y: auto; border: 1px solid var(--line); border-radius: 3px; }
+  .item {
+    padding: 4px 8px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px;
+    border-bottom: 1px solid #232930;
+  }
+  .item:last-child { border-bottom: 0; }
+  .item:hover { background: #232a31; }
+  .item.sel { background: #2f3a2c; color: var(--sel); }
+  .item .sub { color: var(--dim); }
+  .item.pylon.sel { background: #3a2a2a; }
+  textarea {
+    width: 100%; height: 150px; font: 11px/1.45 ui-monospace, Consolas, monospace; resize: vertical;
+    background: #101418; color: var(--ink); border: 1px solid var(--line); border-radius: 3px; padding: 6px;
+  }
+  .warn { color: #ffb454; }
+  .muted { color: var(--dim); }
+  .drop { border: 1px dashed var(--line); border-radius: 4px; padding: 14px; text-align: center; color: var(--dim); }
+  .drop.over { border-color: var(--accent); color: var(--accent); }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .sp { height: 7px; }
+</style>
+</head>
+<body>
+
+<div id="side">
+  <h2>Model</h2>
+  <div class="pad">
+    <div id="drop" class="drop">Drop a <b>.geo.json</b> here<br><span class="muted">or click to choose</span></div>
+    <input id="file" type="file" accept=".json" hidden>
+    <div class="sp"></div>
+    <div class="row">
+      <div style="flex:1"><label>model scale</label><input id="scale" type="number" step="0.01" value="1"></div>
+      <div style="flex:1"><label>aircraft id</label><input id="acid" type="text" value="su_25"></div>
+    </div>
+    <div class="sp"></div>
+    <div class="row">
+      <button id="solid" class="on" style="flex:1">Solid model</button>
+      <button id="wire" style="flex:1">Wireframe</button>
+    </div>
+    <div class="sp"></div>
+    <div class="muted" id="modelinfo">no model loaded</div>
+  </div>
+
+  <h2>Parts</h2>
+  <div class="pad">
+    <div class="tabs">
+      <button id="tabBox" class="on">Collision boxes</button>
+      <button id="tabPyl">Pylons</button>
+    </div>
+    <div class="row" style="margin-bottom:7px">
+      <button id="add">Add</button>
+      <button id="dup">Duplicate</button>
+      <button id="del">Delete</button>
+      <button id="fit" title="Size the box to the model cubes it covers">Fit</button>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+
+  <div class="scroll">
+    <div class="pad" id="editor">
+      <div class="muted">Nothing selected.</div>
+    </div>
+
+    <h2>Export</h2>
+    <div class="pad">
+      <div class="row" style="margin-bottom:7px">
+        <button id="expColl">collision json</button>
+        <button id="expHard">hardpoints</button>
+        <button id="copy">Copy</button>
+        <button id="save">Save…</button>
+      </div>
+      <textarea id="out" spellcheck="false"></textarea>
+      <div class="sp"></div>
+      <div class="row">
+        <button id="importBtn" style="flex:1">Load JSON from the box above</button>
+      </div>
+      <div class="muted" style="margin-top:6px">
+        Paste an existing <code>collision/*.json</code> or an aircraft <code>*.json</code>
+        (its <code>hardpoints</code> and <code>model.scale</code> are read).
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="views">
+  <div class="view"><canvas id="cTop"></canvas><div class="tag">top &mdash; x / z</div><div class="hint">wheel zoom &middot; right-drag pan &middot; left-drag move</div></div>
+  <div class="view"><canvas id="cSide"></canvas><div class="tag">side &mdash; z / y</div><div class="hint">nose to the right</div></div>
+  <div class="view"><canvas id="cFront"></canvas><div class="tag">front &mdash; x / y</div><div class="hint">looking at the nose</div></div>
+  <div class="view"><canvas id="cIso"></canvas><div class="tag">iso</div><div class="hint">left-drag orbit</div></div>
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * Coordinates
+ *
+ * A .geo.json is written in model units, sixteen to a block, Y up, and the
+ * geometry faces north. AshVehicles describes an aircraft in blocks in the
+ * aircraft's own frame: x to the right, y up, z towards the nose. The renderer
+ * turns the model by a half circle about Y and scales it, so
+ *
+ *     aircraft = (mx * k, my * k, -mz * k),  k = model scale / 16
+ *
+ * That mapping was checked against the Su-25: the model spans 14.50 blocks
+ * across and 15.49 along, and its hand-fitted collision boxes span 14.48 and
+ * 15.44. Everything below works in the aircraft frame, in blocks, so what you
+ * read here is exactly what goes in the file.
+ * ------------------------------------------------------------------ */
+
+const state = {
+  scale: 1,
+  aircraftId: "su_25",
+  edges: [],        // model wireframe, aircraft frame: [x1,y1,z1,x2,y2,z2]
+  cubes: [],        // model solids: { pts: [8 corners], hue }
+  bounds: null,
+  solid: true,      // draw the model filled rather than as a thicket of lines
+  boxes: [],        // {name, offset:[x,y,z], size:[x,y,z], rotation:[x,y,z]}
+  pylons: [],       // {name, pos:[x,y,z], fixed:string}
+  mode: "box",      // which list is being edited
+  sel: -1,
+};
+
+/* ---------- maths ---------- */
+
+const deg = d => d * Math.PI / 180;
+
+function matMul(a, b) {
+  const m = [[0,0,0],[0,0,0],[0,0,0]];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+    m[i][j] = a[i][0]*b[0][j] + a[i][1]*b[1][j] + a[i][2]*b[2][j];
+  return m;
+}
+const Rx = d => { const c = Math.cos(deg(d)), s = Math.sin(deg(d)); return [[1,0,0],[0,c,-s],[0,s,c]]; };
+const Ry = d => { const c = Math.cos(deg(d)), s = Math.sin(deg(d)); return [[c,0,s],[0,1,0],[-s,0,c]]; };
+const Rz = d => { const c = Math.cos(deg(d)), s = Math.sin(deg(d)); return [[c,-s,0],[s,c,0],[0,0,1]]; };
+const apply = (m, v) => [
+  m[0][0]*v[0] + m[0][1]*v[1] + m[0][2]*v[2],
+  m[1][0]*v[0] + m[1][1]*v[1] + m[1][2]*v[2],
+  m[2][0]*v[0] + m[2][1]*v[1] + m[2][2]*v[2],
+];
+
+/**
+ * How GeckoLib turns a bone or a cube.
+ *
+ * <p>Taken from the library rather than guessed. GeckoLib's loader negates the x and y figures and
+ * leaves z alone, and its renderer pushes Z, then Y, then X onto the pose stack, which
+ * post-multiplies — so in its own space the matrix is Rz . Ry . Rx, with x reaching the point first.
+ *
+ * <p>But that space is not this one. GeckoLib draws with +X to the left, and this editor works in
+ * the frame the file is written in, where +X is right. Seen through that mirror a yaw and a roll
+ * both turn the other way, while a pitch is unchanged — so the signs on z and y flip and the one on
+ * x stays. Getting this wrong leaves single-axis parts looking right and quietly scrambles anything
+ * turned about two axes at once, which on this model is most of the interesting geometry.
+ *
+ * <p>Checked against the aeroplane itself: an Su-25 is left-right symmetric, and of the plausible
+ * conventions only this one brings the reconstructed model close to symmetric (5.7% of corners
+ * without a mirror partner, against 8.8-9.5% for the others; what is left is the cockpit and the
+ * pitot boom, which really are asymmetric).
+ */
+let bbRot = r => matMul(matMul(Rz(-r[2]), Ry(r[1])), Rx(-r[0]));
+
+/**
+ * The mod's own box orientation, seen from this editor's frame.
+ *
+ * <p>`AircraftShape.Box.orientation()` builds Ry(-yaw) . Rx(-pitch) . Rz(roll) — but the game then
+ * applies it in a frame where +X points *left*, which is why its renderer negates offset.x. This
+ * editor works in the frame the file is written in, where +X is right, and a rotation seen through
+ * a mirror is a rotation the other way. Mirroring about X leaves the pitch alone and turns the yaw
+ * and the roll around, which is exactly the pair that used to come out backwards here.
+ *
+ * <p>What comes out now agrees with what the record documents: x pitches the nose up, y yaws to the
+ * right, z drops the right-hand side.
+ */
+const boxRot = r => matMul(matMul(Ry(r[1]), Rx(-r[0])), Rz(-r[2]));
+
+/** Half-extents of the axis-aligned box that encloses a rotated one. */
+function aabbOf(size, rotation) {
+  const m = boxRot(rotation), h = size.map(s => s / 2);
+  return [0,1,2].map(a => 2 * (Math.abs(m[a][0])*h[0] + Math.abs(m[a][1])*h[1] + Math.abs(m[a][2])*h[2]));
+}
+
+/* ---------- reading a .geo.json ---------- */
+
+function loadGeo(text) {
+  const doc = JSON.parse(text);
+  const geo = doc["minecraft:geometry"] && doc["minecraft:geometry"][0];
+  if (!geo) throw new Error("not a geometry file: no minecraft:geometry");
+
+  const bones = geo.bones || [];
+  const byName = new Map(bones.map(b => [b.name, b]));
+  const k = state.scale / 16;
+  const edges = [];
+  const cubes = [];
+  let lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+
+  const chain = bone => {                       // this bone, then its parents
+    const out = []; let b = bone, guard = 0;
+    while (b && guard++ < 32) { out.push(b); b = byName.get(b.parent); }
+    return out;
+  };
+
+  // The twelve edges of a unit box, as pairs of corner indices.
+  const LINKS = [[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]];
+
+  for (let bi = 0; bi < bones.length; bi++) {
+    const bone = bones[bi];
+    // A hue per bone, stepped by the golden angle so that neighbouring parts never share one.
+    const hue = Math.round((bi * 137.508) % 360);
+    const parents = chain(bone);
+    for (const cube of bone.cubes || []) {
+      const o = cube.origin, s = cube.size;
+      if (!o || !s) continue;
+      const pivot = cube.pivot || [o[0] + s[0]/2, o[1] + s[1]/2, o[2] + s[2]/2];
+      const cm = cube.rotation ? bbRot(cube.rotation) : null;
+      const corners = [];
+
+      for (let i = 0; i < 8; i++) {
+        let p = [o[0] + (i & 1 ? s[0] : 0), o[1] + (i & 2 ? s[1] : 0), o[2] + (i & 4 ? s[2] : 0)];
+        if (cm) {
+          p = p.map((v, j) => v - pivot[j]);
+          p = apply(cm, p);
+          p = p.map((v, j) => v + pivot[j]);
+        }
+        for (const bn of parents) {
+          if (!bn.rotation) continue;
+          const bp = bn.pivot || [0, 0, 0];
+          p = p.map((v, j) => v - bp[j]);
+          p = apply(bbRot(bn.rotation), p);
+          p = p.map((v, j) => v + bp[j]);
+        }
+        const a = [p[0] * k, p[1] * k, -p[2] * k];   // into the aircraft frame
+        corners.push(a);
+        for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], a[j]); hi[j] = Math.max(hi[j], a[j]); }
+      }
+
+      for (const [a, b] of LINKS) edges.push([...corners[a], ...corners[b]]);
+      cubes.push({ pts: corners, hue });
+    }
+  }
+
+  state.edges = edges;
+  state.cubes = cubes;
+  state.bounds = edges.length ? { lo, hi } : null;
+  info();
+}
+
+/* ---------- drawing the model ---------- */
+
+/** The outline of a set of projected points, by Andrew's monotone chain. */
+function hull(points) {
+  const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0]-o[0]) * (b[1]-o[1]) - (a[1]-o[1]) * (b[0]-o[0]);
+  const half = list => {
+    const out = [];
+    for (const q of list) {
+      while (out.length >= 2 && cross(out[out.length-2], out[out.length-1], q) <= 0) out.pop();
+      out.push(q);
+    }
+    out.pop();
+    return out;
+  };
+  return half(p).concat(half(p.reverse()));
+}
+
+/**
+ * Draws the model as solid shapes rather than a thicket of lines.
+ *
+ * <p>Five hundred cubes of wireframe on top of each other is a haze you cannot read a shape out of,
+ * and the whole point of having the model here is to see what you are fitting boxes to. Each cube is
+ * filled instead, tinted by which bone it belongs to so that a wing reads as a wing and not as part
+ * of the fuselage behind it, and painted back to front so the near side covers the far one.
+ *
+ * @param project turns an aircraft-frame point into screen pixels
+ * @param depth how far from the viewer a point is, for deciding what covers what
+ */
+function drawModel(g, project, depth) {
+  if (!state.cubes.length) return;
+
+  if (!state.solid) {
+    g.strokeStyle = "#6d8aa8"; g.globalAlpha = 0.5; g.lineWidth = 1;
+    g.beginPath();
+    for (const e of state.edges) {
+      const a = project([e[0], e[1], e[2]]), b = project([e[3], e[4], e[5]]);
+      g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]);
+    }
+    g.stroke(); g.globalAlpha = 1;
+    return;
+  }
+
+  const order = state.cubes
+    .map((c, i) => [i, c.pts.reduce((s, p) => s + depth(p), 0) / 8])
+    .sort((a, b) => b[1] - a[1]);
+
+  // Nearly opaque, so that painting back to front actually hides what is behind. Half-transparent
+  // solids look tidy on their own and turn into a single muddled colour once four of them overlap,
+  // which is every part of an aeroplane. Depth is spent on lightness instead: far parts sit back
+  // into the dark, near ones come forward, and the shape reads without any of it being see-through.
+  const far = order[0][1], near = order[order.length - 1][1];
+  const span = Math.abs(far - near) || 1;
+
+  g.lineWidth = 1;
+  for (const [i, d] of order) {
+    const c = state.cubes[i];
+    const ring = hull(c.pts.map(project));
+    if (ring.length < 3) continue;
+    const t = Math.abs(d - far) / span;             // 0 furthest, 1 nearest
+    const light = 26 + t * 26;
+    g.beginPath();
+    g.moveTo(ring[0][0], ring[0][1]);
+    for (let n = 1; n < ring.length; n++) g.lineTo(ring[n][0], ring[n][1]);
+    g.closePath();
+    g.fillStyle = `hsl(${c.hue}, 30%, ${light}%)`;
+    g.fill();
+    g.strokeStyle = `hsl(${c.hue}, 34%, ${light + 16}%)`;
+    g.stroke();
+  }
+}
+
+function info() {
+  const el = document.getElementById("modelinfo");
+  if (!state.bounds) { el.textContent = "no model loaded"; return; }
+  const { lo, hi } = state.bounds;
+  const f = n => n.toFixed(2);
+  let html = `${state.edges.length / 12} cubes &middot; span `
+    + `x ${f(hi[0]-lo[0])}  y ${f(hi[1]-lo[1])}  z ${f(hi[2]-lo[2])} blocks<br>`
+    + `<span class="muted">x ${f(lo[0])}..${f(hi[0])} &nbsp; y ${f(lo[1])}..${f(hi[1])} &nbsp; z ${f(lo[2])}..${f(hi[2])}</span>`;
+
+  // The one mistake that makes everything look wrong: a model built at the wrong scale sits
+  // beside boxes that are already in blocks, and no amount of dragging will ever make it fit.
+  // The boxes say how big the aeroplane really is, so they can be asked.
+  if (state.boxes.length) {
+    const blo = [0,1,2].map(j => Math.min(...state.boxes.map(b => b.offset[j] - b.size[j]/2)));
+    const bhi = [0,1,2].map(j => Math.max(...state.boxes.map(b => b.offset[j] + b.size[j]/2)));
+    const mSpan = Math.max(hi[0]-lo[0], hi[2]-lo[2]);
+    const bSpan = Math.max(bhi[0]-blo[0], bhi[2]-blo[2]);
+    const ratio = bSpan / (mSpan || 1);
+    if (ratio > 1.08 || ratio < 0.93) {
+      const want = Math.round(state.scale * ratio * 1000) / 1000;
+      html += `<br><span class="warn">The model is ${(1/ratio).toFixed(2)}&times; the size of the boxes.`
+        + ` The scale is probably wrong &mdash; try <b>${want}</b>`
+        + ` <button id="fixscale" style="padding:1px 6px">use it</button></span>`;
+    }
+  }
+  el.innerHTML = html;
+
+  const fix = document.getElementById("fixscale");
+  if (fix) fix.onclick = () => {
+    const blo = [0,1,2].map(j => Math.min(...state.boxes.map(b => b.offset[j] - b.size[j]/2)));
+    const bhi = [0,1,2].map(j => Math.max(...state.boxes.map(b => b.offset[j] + b.size[j]/2)));
+    const mSpan = Math.max(hi[0]-lo[0], hi[2]-lo[2]);
+    const bSpan = Math.max(bhi[0]-blo[0], bhi[2]-blo[2]);
+    state.scale = Math.round(state.scale * (bSpan / (mSpan || 1)) * 1000) / 1000;
+    document.getElementById("scale").value = state.scale;
+    if (lastGeoText) loadGeo(lastGeoText);
+    frameAll();
+    draw();
+  };
+}
+
+/* ---------- views ---------- */
+
+/** Each pane maps the aircraft frame onto the screen its own way. */
+const VIEWS = [
+  { id: "cTop",   ax: 0, ay: 2, sx: 1, sy: -1 },   // top:   x right, z up (nose up)
+  { id: "cSide",  ax: 2, ay: 1, sx: 1, sy: -1 },   // side:  z right (nose right), y up
+  { id: "cFront", ax: 0, ay: 1, sx: 1, sy: -1 },   // front: x right, y up
+];
+
+for (const v of VIEWS) { v.zoom = 34; v.px = 0; v.py = 0; }
+const iso = { zoom: 26, yaw: -35, pitch: 22, px: 0, py: 0 };
+
+const toScreen = (v, p, w, h) => [
+  w / 2 + (p[v.ax] * v.sx) * v.zoom + v.px,
+  h / 2 + (p[v.ay] * v.sy) * v.zoom + v.py,
+];
+const toWorld = (v, sx, sy, w, h) => [
+  ((sx - w / 2 - v.px) / v.zoom) * v.sx,
+  ((sy - h / 2 - v.py) / v.zoom) * v.sy,
+];
+
+function isoScreen(p, w, h) {
+  const cy = Math.cos(deg(iso.yaw)), sy = Math.sin(deg(iso.yaw));
+  const cp = Math.cos(deg(iso.pitch)), sp = Math.sin(deg(iso.pitch));
+  const x = p[0] * cy - p[2] * sy;
+  const z = p[0] * sy + p[2] * cy;
+  const y = p[1] * cp - z * sp;
+  return [w / 2 + x * iso.zoom + iso.px, h / 2 - y * iso.zoom + iso.py];
+}
+
+function boxCorners(box) {
+  const m = boxRot(box.rotation), h = box.size.map(s => s / 2), out = [];
+  for (let i = 0; i < 8; i++) {
+    const local = [(i & 1 ? h[0] : -h[0]), (i & 2 ? h[1] : -h[1]), (i & 4 ? h[2] : -h[2])];
+    const r = apply(m, local);
+    out.push([r[0] + box.offset[0], r[1] + box.offset[1], r[2] + box.offset[2]]);
+  }
+  return out;
+}
+const LINKS = [[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]];
+
+function draw() {
+  for (const v of VIEWS) drawOrtho(v);
+  drawIso();
+}
+
+function drawOrtho(v) {
+  const cv = document.getElementById(v.id);
+  const w = cv.width = cv.clientWidth, h = cv.height = cv.clientHeight;
+  const g = cv.getContext("2d");
+  g.clearRect(0, 0, w, h);
+  grid(g, v, w, h);
+
+  // The axis this view looks along decides what is in front of what.
+  const along = 3 - v.ax - v.ay;
+  const towards = (v.ax === 0 && v.ay === 2) ? -1 : 1;   // the top view looks down
+  drawModel(g, p => toScreen(v, p, w, h), p => p[along] * towards);
+
+  state.boxes.forEach((box, i) => {
+    const on = state.mode === "box" && i === state.sel;
+    g.strokeStyle = on ? "#ffd23b" : "#3be86a";
+    g.lineWidth = on ? 2 : 1;
+    const c = boxCorners(box).map(p => toScreen(v, p, w, h));
+    g.beginPath();
+    for (const [a, b] of LINKS) { g.moveTo(c[a][0], c[a][1]); g.lineTo(c[b][0], c[b][1]); }
+    g.stroke();
+
+    if (on && (box.rotation[0] || box.rotation[1] || box.rotation[2])) {
+      // What the game will really collide with, which is never smaller.
+      const s = aabbOf(box.size, box.rotation);
+      const fake = { offset: box.offset, size: s, rotation: [0, 0, 0] };
+      const fc = boxCorners(fake).map(p => toScreen(v, p, w, h));
+      g.setLineDash([3, 3]); g.strokeStyle = "#ffb454"; g.lineWidth = 1;
+      g.beginPath();
+      for (const [a, b] of LINKS) { g.moveTo(fc[a][0], fc[a][1]); g.lineTo(fc[b][0], fc[b][1]); }
+      g.stroke(); g.setLineDash([]);
+    }
+  });
+
+  state.pylons.forEach((p, i) => {
+    const on = state.mode === "pylon" && i === state.sel;
+    const s = toScreen(v, p.pos, w, h);
+    g.strokeStyle = on ? "#ffd23b" : "#ff4040";
+    g.lineWidth = on ? 2 : 1.5;
+    const r = 6;
+    g.beginPath();
+    g.moveTo(s[0] - r, s[1]); g.lineTo(s[0] + r, s[1]);
+    g.moveTo(s[0], s[1] - r); g.lineTo(s[0], s[1] + r);
+    g.stroke();
+    g.beginPath(); g.arc(s[0], s[1], r * 0.62, 0, Math.PI * 2); g.stroke();
+  });
+}
+
+function grid(g, v, w, h) {
+  g.strokeStyle = "#232a31"; g.lineWidth = 1;
+  const step = v.zoom >= 20 ? 1 : 5;
+  g.beginPath();
+  for (let n = -40; n <= 40; n += step) {
+    const a = toScreen(v, [0,0,0].map((_, j) => j === v.ax ? n : 0), w, h);
+    g.moveTo(a[0], 0); g.lineTo(a[0], h);
+    const b = toScreen(v, [0,0,0].map((_, j) => j === v.ay ? n : 0), w, h);
+    g.moveTo(0, b[1]); g.lineTo(w, b[1]);
+  }
+  g.stroke();
+  const o = toScreen(v, [0, 0, 0], w, h);
+  g.strokeStyle = "#3a4650";
+  g.beginPath(); g.moveTo(o[0], 0); g.lineTo(o[0], h); g.moveTo(0, o[1]); g.lineTo(w, o[1]); g.stroke();
+}
+
+function drawIso() {
+  const cv = document.getElementById("cIso");
+  const w = cv.width = cv.clientWidth, h = cv.height = cv.clientHeight;
+  const g = cv.getContext("2d");
+  g.clearRect(0, 0, w, h);
+
+  // Depth along the turntable's own line of sight, so the near side covers the far one.
+  const cy = Math.cos(deg(iso.yaw)), sy = Math.sin(deg(iso.yaw)), sp = Math.sin(deg(iso.pitch));
+  drawModel(g, p => isoScreen(p, w, h), p => (p[0] * sy + p[2] * cy) + p[1] * sp);
+
+  state.boxes.forEach((box, i) => {
+    g.strokeStyle = (state.mode === "box" && i === state.sel) ? "#ffd23b" : "#3be86a";
+    g.lineWidth = (state.mode === "box" && i === state.sel) ? 2 : 1;
+    const c = boxCorners(box).map(p => isoScreen(p, w, h));
+    g.beginPath();
+    for (const [a, b] of LINKS) { g.moveTo(c[a][0], c[a][1]); g.lineTo(c[b][0], c[b][1]); }
+    g.stroke();
+  });
+
+  state.pylons.forEach((p, i) => {
+    const s = isoScreen(p.pos, w, h);
+    g.strokeStyle = (state.mode === "pylon" && i === state.sel) ? "#ffd23b" : "#ff4040";
+    g.lineWidth = 1.5;
+    g.beginPath(); g.arc(s[0], s[1], 4, 0, Math.PI * 2); g.stroke();
+  });
+}
+
+/* ---------- interaction ---------- */
+
+function bindOrtho(v) {
+  const cv = document.getElementById(v.id);
+  let drag = null;
+
+  cv.addEventListener("contextmenu", e => e.preventDefault());
+  cv.addEventListener("wheel", e => {
+    e.preventDefault();
+    const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    v.zoom = Math.max(4, Math.min(320, v.zoom * f));
+    draw();
+  }, { passive: false });
+
+  cv.addEventListener("mousedown", e => {
+    const r = cv.getBoundingClientRect();
+    const sx = e.clientX - r.left, sy = e.clientY - r.top;
+    if (e.button === 2 || e.shiftKey) { drag = { pan: true, sx, sy, px: v.px, py: v.py }; return; }
+
+    const w = cv.width, h = cv.height;
+    const hit = pick(v, sx, sy, w, h);
+    if (hit) { state.mode = hit.mode; state.sel = hit.index; refresh(); }
+    const target = current();
+    if (target) drag = { sx, sy, start: (state.mode === "box" ? [...target.offset] : [...target.pos]) };
+  });
+
+  window.addEventListener("mousemove", e => {
+    if (!drag) return;
+    const r = cv.getBoundingClientRect();
+    const sx = e.clientX - r.left, sy = e.clientY - r.top;
+    if (drag.pan) { v.px = drag.px + (sx - drag.sx); v.py = drag.py + (sy - drag.sy); draw(); return; }
+    const target = current();
+    if (!target) return;
+    const dx = ((sx - drag.sx) / v.zoom) * v.sx;
+    const dy = ((sy - drag.sy) / v.zoom) * v.sy;
+    const p = state.mode === "box" ? target.offset : target.pos;
+    p[v.ax] = round(drag.start[v.ax] + dx);
+    p[v.ay] = round(drag.start[v.ay] + dy);
+    refresh();
+  });
+
+  window.addEventListener("mouseup", () => { drag = null; });
+}
+
+const round = n => Math.round(n * 100) / 100;
+
+function pick(v, sx, sy, w, h) {
+  for (let i = state.pylons.length - 1; i >= 0; i--) {
+    const s = toScreen(v, state.pylons[i].pos, w, h);
+    if (Math.hypot(s[0] - sx, s[1] - sy) < 9) return { mode: "pylon", index: i };
+  }
+  for (let i = state.boxes.length - 1; i >= 0; i--) {
+    const c = boxCorners(state.boxes[i]).map(p => toScreen(v, p, w, h));
+    const xs = c.map(p => p[0]), ys = c.map(p => p[1]);
+    if (sx >= Math.min(...xs) && sx <= Math.max(...xs) && sy >= Math.min(...ys) && sy <= Math.max(...ys))
+      return { mode: "box", index: i };
+  }
+  return null;
+}
+
+(function bindIso() {
+  const cv = document.getElementById("cIso");
+  let drag = null;
+  cv.addEventListener("contextmenu", e => e.preventDefault());
+  cv.addEventListener("wheel", e => {
+    e.preventDefault();
+    iso.zoom = Math.max(4, Math.min(200, iso.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+    draw();
+  }, { passive: false });
+  cv.addEventListener("mousedown", e => { drag = { x: e.clientX, y: e.clientY, yaw: iso.yaw, pitch: iso.pitch }; });
+  window.addEventListener("mousemove", e => {
+    if (!drag) return;
+    iso.yaw = drag.yaw + (e.clientX - drag.x) * 0.5;
+    iso.pitch = Math.max(-89, Math.min(89, drag.pitch + (e.clientY - drag.y) * 0.5));
+    draw();
+  });
+  window.addEventListener("mouseup", () => { drag = null; });
+})();
+
+VIEWS.forEach(bindOrtho);
+
+/* ---------- the list and the editor ---------- */
+
+const current = () => {
+  const arr = state.mode === "box" ? state.boxes : state.pylons;
+  return state.sel >= 0 && state.sel < arr.length ? arr[state.sel] : null;
+};
+
+function refresh() { renderList(); renderEditor(); draw(); }
+
+function renderList() {
+  const el = document.getElementById("list");
+  const arr = state.mode === "box" ? state.boxes : state.pylons;
+  el.innerHTML = "";
+  arr.forEach((it, i) => {
+    const d = document.createElement("div");
+    d.className = "item" + (i === state.sel ? " sel" : "") + (state.mode === "pylon" ? " pylon" : "");
+    const where = state.mode === "box" ? it.offset : it.pos;
+    d.innerHTML = `<span>${it.name || "(unnamed)"}</span>`
+      + `<span class="sub">${where.map(n => n.toFixed(2)).join(", ")}</span>`;
+    d.onclick = () => { state.sel = i; refresh(); };
+    el.appendChild(d);
+  });
+  document.getElementById("tabBox").className = state.mode === "box" ? "on" : "";
+  document.getElementById("tabPyl").className = state.mode === "pylon" ? "on" : "";
+  document.getElementById("fit").style.display = state.mode === "box" ? "" : "none";
+}
+
+function field(label, value, onInput, step) {
+  return `<div><label>${label}</label><input data-k="${label}" type="number" step="${step || 0.05}" value="${value}"></div>`;
+}
+
+function renderEditor() {
+  const el = document.getElementById("editor");
+  const it = current();
+  if (!it) { el.innerHTML = '<div class="muted">Nothing selected.</div>'; return; }
+
+  if (state.mode === "pylon") {
+    el.innerHTML = `
+      <label>name</label><input id="f-name" value="${it.name || ""}">
+      <div class="sp"></div>
+      <label>pos &mdash; x right, y up, z nose</label>
+      <div class="triple">
+        ${field("px", it.pos[0])}${field("py", it.pos[1])}${field("pz", it.pos[2])}
+      </div>
+      <label>fixed weapon (blank for a bare pylon)</label>
+      <input id="f-fixed" value="${it.fixed || ""}" placeholder="ashvehicles:gsh_30_2">`;
+  } else {
+    const a = aabbOf(it.size, it.rotation);
+    const vol = (a[0]*a[1]*a[2]) / (it.size[0]*it.size[1]*it.size[2] || 1);
+    const rotated = it.rotation.some(n => n);
+    el.innerHTML = `
+      <label>name</label><input id="f-name" value="${it.name || ""}">
+      <div class="sp"></div>
+      <label>offset &mdash; middle of the box</label>
+      <div class="triple">${field("ox", it.offset[0])}${field("oy", it.offset[1])}${field("oz", it.offset[2])}</div>
+      <label>size</label>
+      <div class="triple">${field("sx", it.size[0])}${field("sy", it.size[1])}${field("sz", it.size[2])}</div>
+      <label>rotation &mdash; x nose up, y yaw right, z right side down</label>
+      <div class="triple">${field("rx", it.rotation[0], null, 1)}${field("ry", it.rotation[1], null, 1)}${field("rz", it.rotation[2], null, 1)}</div>
+      ${rotated ? `<div class="warn">The game collides with the upright box around this one:
+        ${a.map(n => n.toFixed(2)).join(" &times; ")} &mdash; ${vol.toFixed(2)}&times; the volume.
+        Shown dashed. Several small unrotated boxes usually fit tighter than one rotated one.</div>`
+        : `<div class="muted">No rotation: the box is exactly what the game collides with.</div>`}`;
+  }
+
+  el.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const it2 = current();
+      if (!it2) return;
+      const k = inp.dataset.k;
+      if (inp.id === "f-name") it2.name = inp.value;
+      else if (inp.id === "f-fixed") it2.fixed = inp.value;
+      else {
+        const n = parseFloat(inp.value);
+        if (Number.isNaN(n)) return;
+        const map = { ox:["offset",0], oy:["offset",1], oz:["offset",2],
+                      sx:["size",0], sy:["size",1], sz:["size",2],
+                      rx:["rotation",0], ry:["rotation",1], rz:["rotation",2],
+                      px:["pos",0], py:["pos",1], pz:["pos",2] };
+        const [prop, idx] = map[k];
+        it2[prop][idx] = n;
+      }
+      renderList(); draw();
+      if (state.mode === "box") {
+        // keep the inflation note live without stealing focus
+        const note = document.querySelector("#editor .warn, #editor .muted");
+        const it3 = current();
+        if (note && it3.rotation) {
+          const aa = aabbOf(it3.size, it3.rotation);
+          const v = (aa[0]*aa[1]*aa[2]) / (it3.size[0]*it3.size[1]*it3.size[2] || 1);
+          if (it3.rotation.some(n => n)) {
+            note.className = "warn";
+            note.innerHTML = `The game collides with the upright box around this one:
+              ${aa.map(n => n.toFixed(2)).join(" &times; ")} &mdash; ${v.toFixed(2)}&times; the volume.
+              Shown dashed. Several small unrotated boxes usually fit tighter than one rotated one.`;
+          } else {
+            note.className = "muted";
+            note.textContent = "No rotation: the box is exactly what the game collides with.";
+          }
+        }
+      }
+    });
+  });
+}
+
+/* ---------- buttons ---------- */
+
+const setSolid = on => {
+  state.solid = on;
+  document.getElementById("solid").className = on ? "on" : "";
+  document.getElementById("wire").className = on ? "" : "on";
+  draw();
+};
+document.getElementById("solid").onclick = () => setSolid(true);
+document.getElementById("wire").onclick = () => setSolid(false);
+
+document.getElementById("tabBox").onclick = () => { state.mode = "box"; state.sel = -1; refresh(); };
+document.getElementById("tabPyl").onclick = () => { state.mode = "pylon"; state.sel = -1; refresh(); };
+
+document.getElementById("add").onclick = () => {
+  if (state.mode === "box") {
+    state.boxes.push({ name: "part" + (state.boxes.length + 1), offset: [0, 1, 0], size: [2, 1, 2], rotation: [0, 0, 0] });
+    state.sel = state.boxes.length - 1;
+  } else {
+    state.pylons.push({ name: "pylon" + (state.pylons.length + 1), pos: [0, 1, 0], fixed: "" });
+    state.sel = state.pylons.length - 1;
+  }
+  refresh();
+};
+
+document.getElementById("dup").onclick = () => {
+  const it = current(); if (!it) return;
+  const copy = JSON.parse(JSON.stringify(it));
+  copy.name = (copy.name || "part") + "_copy";
+  if (state.mode === "box") { state.boxes.push(copy); state.sel = state.boxes.length - 1; }
+  else { state.pylons.push(copy); state.sel = state.pylons.length - 1; }
+  refresh();
+};
+
+document.getElementById("del").onclick = () => {
+  const arr = state.mode === "box" ? state.boxes : state.pylons;
+  if (state.sel < 0) return;
+  arr.splice(state.sel, 1);
+  state.sel = Math.min(state.sel, arr.length - 1);
+  refresh();
+};
+
+/** Shrink the selected box onto whatever model geometry it already contains. */
+document.getElementById("fit").onclick = () => {
+  const box = current();
+  if (!box || state.mode !== "box" || !state.edges.length) return;
+  const h = box.size.map(s => s / 2);
+  let lo = [1e9,1e9,1e9], hi = [-1e9,-1e9,-1e9], found = false;
+  for (const e of state.edges) {
+    for (const p of [[e[0],e[1],e[2]], [e[3],e[4],e[5]]]) {
+      const inside = [0,1,2].every(j => Math.abs(p[j] - box.offset[j]) <= h[j] + 1e-6);
+      if (!inside) continue;
+      found = true;
+      for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], p[j]); hi[j] = Math.max(hi[j], p[j]); }
+    }
+  }
+  if (!found) { alert("No model geometry inside this box — make it bigger first, then Fit."); return; }
+  box.offset = [0,1,2].map(j => round((lo[j] + hi[j]) / 2));
+  box.size = [0,1,2].map(j => Math.max(0.05, round(hi[j] - lo[j])));
+  refresh();
+};
+
+/* ---------- import and export ---------- */
+
+const out = document.getElementById("out");
+
+document.getElementById("expColl").onclick = () => {
+  out.value = JSON.stringify({
+    boxes: state.boxes.map(b => {
+      const o = { name: b.name || "part", offset: b.offset.map(round), size: b.size.map(round) };
+      if (b.rotation.some(n => n)) o.rotation = b.rotation.map(round);
+      return o;
+    })
+  }, null, 2);
+  out.dataset.kind = "collision";
+};
+
+document.getElementById("expHard").onclick = () => {
+  out.value = JSON.stringify({
+    hardpoints: state.pylons.map(p => {
+      const o = { name: p.name || "pylon", pos: p.pos.map(round) };
+      if (p.fixed) o.fixed = p.fixed;
+      return o;
+    })
+  }, null, 2);
+  out.dataset.kind = "hardpoints";
+};
+
+document.getElementById("copy").onclick = async () => {
+  out.select();
+  try { await navigator.clipboard.writeText(out.value); } catch { document.execCommand("copy"); }
+};
+
+document.getElementById("save").onclick = () => {
+  const kind = out.dataset.kind === "hardpoints" ? "hardpoints" : "collision";
+  const name = kind === "hardpoints" ? state.aircraftId + "-hardpoints.json" : state.aircraftId + ".json";
+  const blob = new Blob([out.value], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+document.getElementById("importBtn").onclick = () => {
+  let doc;
+  try { doc = JSON.parse(out.value); }
+  catch (err) { alert("That is not JSON: " + err.message); return; }
+  takeJson(doc);
+};
+
+function takeJson(doc) {
+  let took = [];
+  if (Array.isArray(doc.boxes)) {
+    state.boxes = doc.boxes.map(b => ({
+      name: b.name || "part",
+      offset: (b.offset || [0,0,0]).slice(0, 3),
+      size: (b.size || [1,1,1]).slice(0, 3),
+      rotation: (b.rotation || [0,0,0]).slice(0, 3),
+    }));
+    took.push(state.boxes.length + " boxes");
+  }
+  if (Array.isArray(doc.hardpoints)) {
+    state.pylons = doc.hardpoints.map(p => ({
+      name: p.name || "pylon",
+      pos: (p.pos || [0,0,0]).slice(0, 3),
+      fixed: p.fixed || "",
+    }));
+    took.push(state.pylons.length + " pylons");
+  }
+  if (doc.model && typeof doc.model.scale === "number") {
+    state.scale = doc.model.scale;
+    document.getElementById("scale").value = state.scale;
+    took.push("scale " + state.scale);
+  }
+  if (!took.length) { alert("Found no boxes, hardpoints or model.scale in that JSON."); return; }
+  state.sel = -1;
+  refresh();
+}
+
+/* ---------- loading a model ---------- */
+
+const drop = document.getElementById("drop");
+const file = document.getElementById("file");
+drop.onclick = () => file.click();
+file.onchange = () => { if (file.files[0]) readFile(file.files[0]); };
+
+["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => {
+  e.preventDefault(); drop.classList.add("over");
+}));
+["dragleave", "drop"].forEach(t => drop.addEventListener(t, e => {
+  e.preventDefault(); drop.classList.remove("over");
+}));
+drop.addEventListener("drop", e => { if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
+document.body.addEventListener("dragover", e => e.preventDefault());
+document.body.addEventListener("drop", e => {
+  e.preventDefault();
+  if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+});
+
+function readFile(f) {
+  const r = new FileReader();
+  r.onload = () => {
+    const text = String(r.result);
+    let doc;
+    try { doc = JSON.parse(text); }
+    catch (err) { alert("Could not read that file: " + err.message); return; }
+
+    if (doc["minecraft:geometry"]) {
+      if (/\.geo\.json$/i.test(f.name)) {
+        const id = f.name.replace(/\.geo\.json$/i, "");
+        state.aircraftId = id;
+        document.getElementById("acid").value = id;
+      }
+      // Take whatever is in the scale box. Without this a model dropped in is built at whatever
+      // scale was last used in code rather than the one on screen, and lands at the wrong size
+      // against boxes that are already in blocks — which looks like the model itself is wrong.
+      const typed = parseFloat(document.getElementById("scale").value);
+      if (!Number.isNaN(typed) && typed > 0) state.scale = typed;
+      try { loadGeo(text); }
+      catch (err) { alert(err.message); return; }
+      frameAll();
+    } else {
+      takeJson(doc);      // a collision file or an aircraft file
+    }
+    refresh();
+  };
+  r.readAsText(f);
+}
+
+document.getElementById("scale").oninput = e => {
+  const n = parseFloat(e.target.value);
+  if (!Number.isNaN(n) && n > 0 && lastGeoText) {
+    state.scale = n;
+    try { loadGeo(lastGeoText); } catch {}
+    draw();
+  }
+};
+document.getElementById("acid").oninput = e => { state.aircraftId = e.target.value.trim() || "aircraft"; };
+
+let lastGeoText = null;
+const rawLoadGeo = loadGeo;
+loadGeo = function (text) { lastGeoText = text; rawLoadGeo(text); };
+
+/** Zoom every pane so the whole aeroplane is on screen. */
+function frameAll() {
+  if (!state.bounds) return;
+  const { lo, hi } = state.bounds;
+  const span = [hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]];
+  for (const v of VIEWS) {
+    const cv = document.getElementById(v.id);
+    const need = Math.max(span[v.ax] || 1, span[v.ay] || 1);
+    v.zoom = Math.min(cv.clientWidth, cv.clientHeight) / (need * 1.25);
+    v.px = 0; v.py = 0;
+  }
+  const cv = document.getElementById("cIso");
+  iso.zoom = Math.min(cv.clientWidth, cv.clientHeight) / (Math.max(...span) * 1.5);
+  iso.px = 0; iso.py = 0;
+}
+
+window.addEventListener("resize", draw);
+refresh();
+</script>
+</body>
+</html>

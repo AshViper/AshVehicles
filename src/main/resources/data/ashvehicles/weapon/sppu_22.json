@@ -1,0 +1,16 @@
+{
+  "type": "gun",
+  "item": true,
+  "ammo": 260,
+  "firing": {
+    "rounds_per_second": 33.0,
+    "spread": 1.2
+  },
+  "projectile": {
+    "damage": 5.0,
+    "speed": 37.0,
+    "gravity": 0.02,
+    "range": 700.0,
+    "tracer": "FFB347"
+  }
+}

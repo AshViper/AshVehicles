@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "com.ashvehicles.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "EntityTrackingMixin"
+  ],
+  "client": [
+    "CameraMixin",
+    "HitboxMixin",
+    "MouseLookMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

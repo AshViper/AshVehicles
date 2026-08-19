@@ -1,0 +1,63 @@
+package com.ashvehicles.item;
+
+import java.util.function.Supplier;
+
+import com.ashvehicles.aircraft.Attitude;
+import com.ashvehicles.entity.AircraftEntity;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.gameevent.GameEvent;
+
+/** Places the aircraft it was registered with onto the clicked block, facing the player. */
+public class AircraftItem extends Item {
+    private final Supplier<? extends EntityType<? extends AircraftEntity>> type;
+
+    public AircraftItem(Supplier<? extends EntityType<? extends AircraftEntity>> type, Properties properties) {
+        super(properties);
+        this.type = type;
+    }
+
+    @Override
+    public InteractionResult useOn(UseOnContext context) {
+        Level level = context.getLevel();
+
+        if (level instanceof ServerLevel serverLevel) {
+            BlockPos pos = context.getClickedPos().relative(context.getClickedFace());
+            AircraftEntity aircraft = this.type.get().create(serverLevel);
+
+            if (aircraft == null) {
+                return InteractionResult.FAIL;
+            }
+
+            Player player = context.getPlayer();
+            float yaw = player == null ? 0.0F : player.getYRot();
+            aircraft.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, yaw, 0.0F);
+            // An aircraft is pointed by its attitude, and moveTo only sets the pair of angles
+            // Minecraft keeps. Without this the aeroplane keeps the attitude it was born with and
+            // sits facing due south whichever way it was put down — and its boxes, which are placed
+            // from the attitude, sit facing south with it.
+            aircraft.snapAttitude(Attitude.of(yaw, 0.0F));
+
+            // Only the fuselage has to be clear. Demanding room for the full wingspan would make the
+            // aircraft unplaceable almost everywhere, and an overhanging wingtip does no harm.
+            double margin = aircraft.getBbWidth() / 3.0;
+
+            if (!serverLevel.noCollision(aircraft, aircraft.getBoundingBox().deflate(margin))) {
+                return InteractionResult.FAIL;
+            }
+
+            serverLevel.addFreshEntity(aircraft);
+            serverLevel.gameEvent(player, GameEvent.ENTITY_PLACE, pos);
+            context.getItemInHand().consume(1, player);
+        }
+
+        return InteractionResult.sidedSuccess(level.isClientSide);
+    }
+}

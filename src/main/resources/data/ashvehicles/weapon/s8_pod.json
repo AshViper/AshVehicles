@@ -1,0 +1,23 @@
+{
+  "type": "rocket",
+  "item": true,
+  "ammo": 20,
+  "firing": {
+    "rounds_per_second": 4.0,
+    "spread": 0.8,
+    "salvo": 2,
+    "salvo_spread": 2.5
+  },
+  "projectile": {
+    "damage": 6.0,
+    "speed": 3.0,
+    "thrust": 0.9,
+    "burn_ticks": 20,
+    "top_speed": 16.0,
+    "gravity": 0.01,
+    "range": 500.0,
+    "explosion": 2.5,
+    "tracer": "FF8844",
+    "trail": true
+  }
+}

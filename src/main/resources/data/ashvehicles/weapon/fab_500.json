@@ -1,0 +1,24 @@
+{
+  "type": "bomb",
+  "item": true,
+  "ammo": 1,
+  "firing": {
+    "rounds_per_second": 2.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 40.0,
+    "speed": 0.15,
+    "gravity": 0.0245,
+    "range": 4000.0,
+    "explosion": 11.0,
+    "fire": true,
+    "tracer": "7C806E",
+    "trail": false
+  },
+  "sound": {
+    "volume": 1.0,
+    "pitch": 0.6
+  }
+}

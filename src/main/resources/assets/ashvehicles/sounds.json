@@ -1,0 +1,20 @@
+{
+  "engine.default": {
+    "subtitle": "subtitles.ashvehicles.engine",
+    "sounds": [
+      "ashvehicles:enginesound"
+    ]
+  },
+  "weapon.gun": {
+    "subtitle": "subtitles.ashvehicles.gun",
+    "sounds": [
+      "ashvehicles:gunsound"
+    ]
+  },
+  "weapon.launch": {
+    "subtitle": "subtitles.ashvehicles.launch",
+    "sounds": [
+      "ashvehicles:launchsound"
+    ]
+  }
+}
