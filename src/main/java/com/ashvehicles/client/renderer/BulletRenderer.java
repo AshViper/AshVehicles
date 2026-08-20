@@ -1,5 +1,6 @@
 package com.ashvehicles.client.renderer;
 
+import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -7,6 +8,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
@@ -37,19 +39,52 @@ public class BulletRenderer extends EntityRenderer<BulletEntity> {
         super(context);
     }
 
+    /**
+     * Stands down beyond the ghost start distance, where the ghost pass takes over and draws the
+     * same streak from a snapshot. The test is the one the pass makes, from the same camera, so a
+     * round is always one or the other's and never both.
+     */
+    @Override
+    public boolean shouldRender(BulletEntity bullet, Frustum frustum, double camX, double camY, double camZ) {
+        if (GhostRenderDispatcher.claims(bullet, camX, camY, camZ)) {
+            return false;
+        }
+
+        return super.shouldRender(bullet, frustum, camX, camY, camZ);
+    }
+
+    /**
+     * A tracer is not lit — the render type it is drawn with ignores light entirely — so there is
+     * nothing to do here but draw it. Being seen at all over unloaded ground, and being kept out of
+     * the fog that would otherwise swallow a stream of them, belongs to the ghost pass, which draws
+     * the same streak from {@code BulletGhostAdapter} once a round is past the hand-over.
+     */
     @Override
     public void render(BulletEntity bullet, float yaw, float partialTick, PoseStack poseStack,
             MultiBufferSource bufferSource, int packedLight) {
+        this.drawTracer(bullet, partialTick, poseStack, bufferSource);
+    }
+
+    private void drawTracer(BulletEntity bullet, float partialTick, PoseStack poseStack,
+            MultiBufferSource bufferSource) {
         WeaponDefinition.Projectile round = bullet.getWeapon().projectile();
-        Vec3 travel = bullet.getDeltaMovement();
+        // The step being drawn rather than the next one, so the streak lies along the line the round
+        // is actually travelling down this frame.
+        Vec3 travel = bullet.travel(partialTick);
 
         if (travel.lengthSqr() < 1.0E-6) {
             return;
         }
 
         // Back along the flight path: the entity is where the round is now, and the streak is where
-        // it has just been.
+        // it has just been. Cut off at a length that still reads as a tracer -- a cannon round
+        // crosses forty blocks in a tick, and forty blocks of streak is a beam. The ghost pass draws
+        // it the same way, so nothing about a round changes as it crosses the hand-over.
         Vec3 tail = travel.scale(-LENGTH);
+
+        if (tail.lengthSqr() > MAX_LENGTH * MAX_LENGTH) {
+            tail = tail.normalize().scale(MAX_LENGTH);
+        }
         // Square to both the streak and the viewer, so it reads as a line from any angle.
         Vec3 across = travel.normalize().cross(new Vec3(0.0, 1.0, 0.0));
         across = (across.lengthSqr() < 1.0E-6 ? new Vec3(1.0, 0.0, 0.0) : across.normalize()).scale(HALF_WIDTH);

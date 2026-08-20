@@ -89,15 +89,17 @@ config="${mod_id}.mixins.json"
     ordering="NONE"
     side="BOTH"
 
-# Distant Horizons is a hard dependency: an aeroplane covers ground faster than chunks arrive, and
-# flying over the edge of the world is not worth doing.
+# Distant Horizons is optional: an aeroplane covers ground faster than chunks arrive, and flying
+# over the edge of the world is far better with terrain drawn out to the horizon under it — but
+# the mod loads, and the ghost rendering works, without it. Only its published API is compiled
+# against, from one class that is never loaded unless the mod is present.
 [[dependencies.${mod_id}]]
     modId="distanthorizons"
-    type="required"
-    reason="AshVehicles is built to be flown with terrain drawn out to the horizon, which is what Distant Horizons provides."
+    type="optional"
+    reason="Distant Horizons draws the terrain under aircraft flying beyond the loaded world, and lets distant ghosts be hidden behind its hills."
     versionRange="[${distant_horizons_version},)"
-    ordering="NONE"
-    side="BOTH"
+    ordering="AFTER"
+    side="CLIENT"
 
 # GeckoLib is a hard dependency: the game will refuse to load this mod without it.
 [[dependencies.${mod_id}]]

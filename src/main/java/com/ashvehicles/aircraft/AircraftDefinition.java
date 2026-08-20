@@ -53,7 +53,7 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
             new Engine(0.02F, 0.02F),
             new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 0.02F, 0.15F),
             new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F),
-            new Airframe(100.0F, 0.9F, 3.0F, 0.0F, List.of(new Vec3(0.0, 0.5, 0.0))),
+            new Airframe(Airframe.DEFAULT_HEALTH, 0.9F, 3.0F, 0.0F, List.of(new Vec3(0.0, 0.5, 0.0))),
             new Undercarriage(40, 0.6F, 0.995F, 0.85F),
             new Surface(20, 0.5F, 0.4F),
             CameraMount.DEFAULT,
@@ -123,6 +123,8 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
         public static final String FLAP_LEFT = "flap_left";
         public static final String FLAP_RIGHT = "flap_right";
         public static final String RUDDER = "rudder";
+        public static final String RUDDER_LEFT = "rudder_left";
+        public static final String RUDDER_RIGHT = "rudder_right";
         public static final String NOSE_GEAR = "nose_gear";
         public static final String LEFT_GEAR = "left_gear";
         public static final String RIGHT_GEAR = "right_gear";
@@ -226,19 +228,23 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
     }
 
     /**
-     * @param durability damage the airframe absorbs before it breaks up; incoming damage is scaled
-     *                   by ten, as it is for boats
+     * @param health how much the airframe can take before it comes apart, in hit points. Damage is
+     *               taken off point for point: a cannon shell that would cost a player two hearts
+     *               costs the aeroplane four of these. Left out, {@link #DEFAULT_HEALTH}
      * @param crashSpeed impact speed above which hitting something writes the aircraft off
      * @param maxG how many times its own weight the airframe is stressed for. Pull harder than this
      *             and it starts to come apart. Zero or less means it never will
      * @param seats one entry per seat, along the aircraft's own axes: x right, y up, z towards the
      *              nose. The number of entries is the number of people who can climb aboard.
      */
-    public record Airframe(float durability, float crashSpeed, float explosionPower, float maxG,
+    public record Airframe(float health, float crashSpeed, float explosionPower, float maxG,
             List<Vec3> seats) {
 
+        /** What an aeroplane is worth in hit points if its file does not say. */
+        public static final float DEFAULT_HEALTH = 300.0F;
+
         public static final Codec<Airframe> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Codec.FLOAT.fieldOf("durability").forGetter(Airframe::durability),
+                Codec.FLOAT.optionalFieldOf("health", DEFAULT_HEALTH).forGetter(Airframe::health),
                 Codec.FLOAT.fieldOf("crash_speed").forGetter(Airframe::crashSpeed),
                 Codec.FLOAT.fieldOf("explosion_power").forGetter(Airframe::explosionPower),
                 Codec.FLOAT.optionalFieldOf("max_g", 0.0F).forGetter(Airframe::maxG),
@@ -286,6 +292,9 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * expressed by playing it louder and faster, not by switching recordings.
      *
      * @param engine sound event to use, or empty to look one up by the aircraft's name
+     * @param gear sound event for the undercarriage travelling, or empty to look one up by the
+     *             aircraft's name. Also a loop, played only while the legs are on their way, and
+     *             played at one volume and one pitch: the figures below are the engine's alone
      * @param volume how loud at full throttle, next to the aircraft; 1 is the recording as made
      * @param idleVolume fraction of that at zero throttle while the engine is still turning
      * @param pitchMin playback speed at zero throttle
@@ -293,13 +302,14 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * @param range distance, in blocks, beyond which the engine cannot be heard at all. It fades
      *              steadily out to there
      */
-    public record SoundSetup(Optional<ResourceLocation> engine, float volume, float idleVolume,
-            float pitchMin, float pitchMax, float range) {
+    public record SoundSetup(Optional<ResourceLocation> engine, Optional<ResourceLocation> gear,
+            float volume, float idleVolume, float pitchMin, float pitchMax, float range) {
         public static final SoundSetup DEFAULT =
-                new SoundSetup(Optional.empty(), 1.0F, 0.35F, 0.7F, 1.25F, 128.0F);
+                new SoundSetup(Optional.empty(), Optional.empty(), 1.0F, 0.35F, 0.7F, 1.25F, 128.0F);
 
         public static final Codec<SoundSetup> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("engine").forGetter(SoundSetup::engine),
+                ResourceLocation.CODEC.optionalFieldOf("gear").forGetter(SoundSetup::gear),
                 Codec.FLOAT.optionalFieldOf("volume", DEFAULT.volume()).forGetter(SoundSetup::volume),
                 Codec.FLOAT.optionalFieldOf("idle_volume", DEFAULT.idleVolume()).forGetter(SoundSetup::idleVolume),
                 Codec.FLOAT.optionalFieldOf("pitch_min", DEFAULT.pitchMin()).forGetter(SoundSetup::pitchMin),

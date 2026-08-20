@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 
 import com.ashvehicles.registry.ModEntities;
 import com.ashvehicles.registry.ModItems;
+import com.ashvehicles.registry.ModParticles;
 import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -63,6 +64,7 @@ public class AshVehicles {
             .icon(() -> EXAMPLE_ITEM.get().getDefaultInstance())
             .displayItems((parameters, output) -> {
                 output.accept(EXAMPLE_ITEM.get()); // Add the example item to the tab. For your own tabs, this method is preferred over the event
+                output.accept(ModItems.WRENCH.get());
                 ModItems.aircraft().values().forEach(item -> output.accept(item.get()));
                 ModItems.weapons().values().forEach(item -> output.accept(item.get()));
             }).build());
@@ -83,6 +85,7 @@ public class AshVehicles {
         // The mod's own content lives in the registry package
         ModEntities.ENTITY_TYPES.register(modEventBus);
         ModItems.ITEMS.register(modEventBus);
+        ModParticles.PARTICLE_TYPES.register(modEventBus);
 
         // Register ourselves for server and other game events we are interested in.
         // Note that this is necessary if and only if we want *this* class (AshVehicles) to respond directly to events.

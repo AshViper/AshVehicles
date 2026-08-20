@@ -45,11 +45,10 @@ public class AircraftItem extends Item {
             // from the attitude, sit facing south with it.
             aircraft.snapAttitude(Attitude.of(yaw, 0.0F));
 
-            // Only the fuselage has to be clear. Demanding room for the full wingspan would make the
-            // aircraft unplaceable almost everywhere, and an overhanging wingtip does no harm.
-            double margin = aircraft.getBbWidth() / 3.0;
-
-            if (!serverLevel.noCollision(aircraft, aircraft.getBoundingBox().deflate(margin))) {
+            // The whole shape has to be clear, not just the middle of it. An aircraft's wings stop
+            // against the world now, so one set down with a wingtip inside a hillside would be
+            // wedged there for good. The margin lets a tip rest a little way into a slope.
+            if (!aircraft.hasRoomHere(0.25)) {
                 return InteractionResult.FAIL;
             }
 

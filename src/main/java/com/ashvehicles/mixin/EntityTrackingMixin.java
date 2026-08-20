@@ -4,6 +4,7 @@ import java.util.Set;
 
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.AircraftProjectile;
 
 import net.minecraft.server.level.ServerEntity;
 import net.minecraft.server.level.ServerPlayer;
@@ -17,7 +18,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Keeps sending an aircraft to players long after the world around it has stopped being sent.
+ * Keeps sending an aircraft, and anything it fires, to players long after the world around it has
+ * stopped being sent.
  *
  * <p>Minecraft decides who hears about an entity twice over: the entity's own tracking range, capped
  * at whatever the player's view distance is, and then whether that player has the entity's chunk
@@ -27,13 +29,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * obviously to anyone running a low vanilla render distance behind Distant Horizons, which is
  * exactly who wants to watch aircraft in the distance.
  *
- * <p>So for an aircraft, and only for an aircraft, both limits are set aside and its own
- * {@code ghost_range} is used instead. What arrives at that distance is a real entity, positioned
- * and turned like any other, and {@link com.ashvehicles.client.renderer.AircraftRenderer} draws it
- * as a ghost once it is beyond the world the player can actually see.
+ * <p>So for an aircraft both limits are set aside and its own {@code ghost_range} is used instead.
+ * What arrives at that distance is a real entity, positioned and turned like any other, and
+ * {@link com.ashvehicles.client.renderer.AircraftRenderer} draws it as a ghost once it is beyond the
+ * world the player can actually see.
  *
- * <p>Everything else is left exactly as it was: the aircraft still has to want to be broadcast to
- * that player, and every other entity in the game goes through the vanilla path untouched.
+ * <p>A round or a missile gets the same treatment for the same reason, but keeps the range its
+ * entity type was registered with. The view-distance cap is the part that matters there: a missile
+ * is aimed at something three hundred blocks away and is worth watching all the way in, and a client
+ * running eight chunks would otherwise lose sight of it at a hundred and twenty — while the aircraft
+ * that fired it is still perfectly visible.
+ *
+ * <p>Everything else is left exactly as it was: the entity still has to want to be broadcast to that
+ * player, and every other entity in the game goes through the vanilla path untouched.
  */
 @Mixin(targets = "net.minecraft.server.level.ChunkMap$TrackedEntity")
 public abstract class EntityTrackingMixin {
@@ -49,16 +57,26 @@ public abstract class EntityTrackingMixin {
     private Set<ServerPlayerConnection> seenBy;
 
     @Inject(method = "updatePlayer", at = @At("HEAD"), cancellable = true)
-    private void ashvehicles$trackAircraftBeyondTheWorld(ServerPlayer player, CallbackInfo callback) {
-        if (player == this.entity || !(this.entity instanceof AircraftEntity aircraft)) {
+    private void ashvehicles$trackBeyondTheWorld(ServerPlayer player, CallbackInfo callback) {
+        if (player == this.entity) {
             return;
         }
 
-        callback.cancel();
+        if (this.entity instanceof AircraftEntity aircraft) {
+            callback.cancel();
+            this.ashvehicles$report(player, withinGhostRange(aircraft, player));
+        } else if (this.entity instanceof AircraftProjectile) {
+            callback.cancel();
+            // The range its entity type was registered with, in blocks, and nothing else: it is
+            // the capping against the player's view distance that has to go, not the range itself.
+            this.ashvehicles$report(player,
+                    this.ashvehicles$within(player, this.entity.getType().clientTrackingRange() * 16.0));
+        }
+    }
 
-        boolean inRange = aircraft.broadcastToPlayer(player) && withinGhostRange(aircraft, player);
-
-        if (inRange) {
+    /** Vanilla's own bookkeeping, once this has decided for itself whether the player can see it. */
+    private void ashvehicles$report(ServerPlayer player, boolean inRange) {
+        if (inRange && this.entity.broadcastToPlayer(player)) {
             if (this.seenBy.add(player.connection)) {
                 this.serverEntity.addPairing(player);
             }
@@ -75,16 +93,16 @@ public abstract class EntityTrackingMixin {
      * than about the world, and there are never many aircraft, so the cost is a position packet a
      * tick each rather than anything that scales with how big the world is.
      */
-    private static boolean withinGhostRange(AircraftEntity aircraft, ServerPlayer player) {
+    private boolean withinGhostRange(AircraftEntity aircraft, ServerPlayer player) {
         AircraftDefinition.Hitbox hitbox = aircraft.getStats().hitbox();
 
-        if (!hitbox.hasGhostLimit()) {
-            return true;
-        }
+        return !hitbox.hasGhostLimit() || this.ashvehicles$within(player, hitbox.ghostRange());
+    }
 
-        double range = hitbox.ghostRange();
-        double dx = player.getX() - aircraft.getX();
-        double dz = player.getZ() - aircraft.getZ();
+    /** Flat distance, as vanilla measures tracking: how high something is has nothing to do with it. */
+    private boolean ashvehicles$within(ServerPlayer player, double range) {
+        double dx = player.getX() - this.entity.getX();
+        double dz = player.getZ() - this.entity.getZ();
 
         return dx * dx + dz * dz <= range * range;
     }

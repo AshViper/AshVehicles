@@ -38,21 +38,32 @@ public final class ModEntities {
                     () -> EntityType.Builder.<BulletEntity>of(BulletEntity::new, MobCategory.MISC)
                             .sized(0.2F, 0.2F)
                             .clientTrackingRange(16)
-                            .updateInterval(1)
-                            .setShouldReceiveVelocityUpdates(true)
+                            // Rarely, and without the velocity. Both of those would do more harm
+                            // than good: the packets that carry an entity's speed cannot express one
+                            // this fast and clamp it to a tenth of the truth, and a position that is
+                            // one tick stale is a forty-block jump. The client is told the real speed
+                            // once, in synched data, and flies the round itself from there; the
+                            // occasional position is a check rather than a correction. See
+                            // AircraftProjectile.
+                            .updateInterval(20)
+                            .setShouldReceiveVelocityUpdates(false)
                             .build("bullet"));
 
     /**
      * A rocket or a missile. Bigger and slower than a round, and worth watching all the way in, so
-     * it is tracked further out than one.
+     * it is tracked further out than one — and, since {@link com.ashvehicles.mixin.EntityTrackingMixin}
+     * lifts the cap against the player's view distance, that range is the one it actually gets.
      */
     public static final DeferredHolder<EntityType<?>, EntityType<RocketEntity>> ROCKET =
             ENTITY_TYPES.register("rocket",
                     () -> EntityType.Builder.<RocketEntity>of(RocketEntity::new, MobCategory.MISC)
                             .sized(0.4F, 0.4F)
-                            .clientTrackingRange(24)
-                            .updateInterval(1)
-                            .setShouldReceiveVelocityUpdates(true)
+                            .clientTrackingRange(32)
+                            // More often than a round, for the same reasons set out there: a missile
+                            // steers, and the two sides can only agree about that for as long as they
+                            // agree about what it is steering at.
+                            .updateInterval(5)
+                            .setShouldReceiveVelocityUpdates(false)
                             .build("rocket"));
 
     private static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> registerAll() {

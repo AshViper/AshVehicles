@@ -2,6 +2,7 @@ package com.ashvehicles.client.sound;
 
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -10,12 +11,12 @@ import javax.annotation.Nullable;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftManager;
 import com.ashvehicles.weapon.WeaponDefinition;
+import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.sounds.SoundManager;
-import net.minecraft.client.sounds.WeighedSoundEvents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
 import net.neoforged.api.distmarker.Dist;
@@ -24,17 +25,35 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
 
 /**
- * Gives a weapon with no firing sound of its own the mod's default one.
+ * Finds something to play for any of the mod's one-shot weapon sounds that a resource pack has not
+ * provided.
  *
  * <p>The server decides what to play and names a sound event, because that is all it can do: sounds
  * live in resource packs, which the server has never seen. So a weapon with no recording would
  * simply be silent, and only the client is in a position to notice. This catches any of the mod's
- * {@code weapon.*} events that the resource packs cannot resolve and swaps in
- * {@code ashvehicles:weapon.gun} at the same place.
+ * {@code weapon.*} events that the resource packs cannot resolve and puts the nearest thing that
+ * does exist in its place, at the same position.
  *
- * <p>Giving a weapon its own sound therefore needs nothing but the files: add
+ * <p>What the nearest thing is depends on the event:
+ *
+ * <ul>
+ * <li>An event named after a weapon, {@code weapon.<name>}, falls back on the mod's default for that
+ *     sort of weapon: {@code weapon.gun} for a gun, {@code weapon.launch} for anything with a motor,
+ *     and {@code weapon.release} for a bomb, which is let go rather than fired and sounds like a rack
+ *     banging open rather than like anything going off.
+ * <li>{@code weapon.release} itself falls back on {@code weapon.launch}, which the mod does ship. So
+ *     a bomb sounds like something leaving the aeroplane until somebody records the clunk it should
+ *     be, rather than sounding like nothing.
+ * <li>{@code weapon.load}, the ground crew at work, falls back on the game's own metal-on-metal.
+ * <li>{@code weapon.gun} and {@code weapon.launch} fall back on nothing: the mod ships both, and a
+ *     pack that has taken them away has said what it wants.
+ * </ul>
+ *
+ * <p>Giving a weapon a sound of its own therefore needs nothing but the files: add
  * {@code weapon.<name>} to {@code sounds.json} with an {@code .ogg} beside it, and it is used
- * instead. The engine note works the same way; see {@link EngineSounds}.
+ * instead. The engine note works the same way; see {@link EngineSounds}. What a weapon sounds like
+ * in the air rather than at the moment of firing is not here at all, because a loop cannot be
+ * substituted for sensibly; see {@link ProjectileSounds}.
  *
  * <p>How loud and at what pitch comes from the weapon's own file rather than from the sound being
  * replaced. It has to: this event is fired before the sound engine has looked the recording up, so
@@ -42,14 +61,21 @@ import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class WeaponSounds {
-    /** What a gun falls back on. */
-    public static final ResourceLocation DEFAULT_GUN =
-            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "weapon.gun");
-    /** What anything with a motor falls back on: a rocket does not sound like a cannon. */
-    public static final ResourceLocation DEFAULT_LAUNCH =
-            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "weapon.launch");
-    /** Events under this prefix are ours to fall back on; anything else is left alone. */
-    private static final String WEAPON_PREFIX = "weapon.";
+    /**
+     * What ground crew fall back on: the game's own iron trapdoor, which is the closest it has to
+     * something heavy being clamped onto something else.
+     */
+    private static final ResourceLocation LOAD_FALLBACK =
+            ResourceLocation.withDefaultNamespace("block.iron_trapdoor.close");
+
+    /**
+     * How loud the ground crew are. The same figures the server asked for, taken from the one place
+     * that owns them, because they cannot be read back off the sound at this point. The pitch is the
+     * one used for hanging a store: a stand-in for a sound the pack does not have is not worth
+     * telling apart from the one used for taking one off.
+     */
+    private static final WeaponDefinition.SoundSetup LOAD_SETUP = new WeaponDefinition.SoundSetup(
+            Optional.empty(), WeaponMounts.LOAD_VOLUME, WeaponMounts.LOAD_PITCH);
 
     private static final Set<ResourceLocation> WARNED = new HashSet<>();
     /** Whether the log already carries one report of this going wrong. */
@@ -69,7 +95,7 @@ public final class WeaponSounds {
             substituteDefault(event);
         } catch (Exception exception) {
             if (FAILED.compareAndSet(false, true)) {
-                AshVehicles.LOGGER.error("Cannot choose a firing sound; leaving it to the server's choice", exception);
+                AshVehicles.LOGGER.error("Cannot choose a weapon sound; leaving it to the server's choice", exception);
             }
         }
     }
@@ -83,32 +109,70 @@ public final class WeaponSounds {
 
         ResourceLocation id = sound.getLocation();
 
-        if (!AshVehicles.MODID.equals(id.getNamespace()) || !id.getPath().startsWith(WEAPON_PREFIX)
-                || id.equals(DEFAULT_GUN) || id.equals(DEFAULT_LAUNCH)) {
+        if (!AshVehicles.MODID.equals(id.getNamespace()) || !id.getPath().startsWith(ModSounds.WEAPON_PREFIX)) {
             return;
         }
 
         SoundManager sounds = Minecraft.getInstance().getSoundManager();
 
-        if (exists(sounds, id)) {
+        if (ModSounds.exists(sounds, id)) {
             return;
         }
 
-        // Same place and the same figures the weapon's file asks for: only the recording changes,
-        // and which recording depends on what kind of weapon it is.
         WeaponDefinition weapon = weaponFor(id);
-        ResourceLocation fallback = weapon != null && weapon.type() != WeaponDefinition.Type.GUN
-                ? DEFAULT_LAUNCH
-                : DEFAULT_GUN;
+        ResourceLocation fallback = fallbackFor(sounds, id, weapon);
 
-        if (WARNED.add(id)) {
-            AshVehicles.LOGGER.info("No resource pack provides {}; firing sounds fall back on {}", id, fallback);
+        if (fallback == null) {
+            return;
         }
 
-        WeaponDefinition.SoundSetup setup = weapon != null ? weapon.sound() : WeaponDefinition.SoundSetup.DEFAULT;
+        if (WARNED.add(id)) {
+            AshVehicles.LOGGER.info("No resource pack provides {}; falling back on {}", id, fallback);
+        }
+
+        // Same place and the same figures whatever asked for it wanted: only the recording changes.
+        WeaponDefinition.SoundSetup setup = setupFor(id, weapon);
         event.setSound(new SimpleSoundInstance(SoundEvent.createVariableRangeEvent(fallback),
                 sound.getSource(), setup.volume(), setup.pitch(), SoundInstance.createUnseededRandom(),
                 sound.getX(), sound.getY(), sound.getZ()));
+    }
+
+    /**
+     * The nearest thing to this event that a resource pack does provide, or null if there is nothing
+     * worth putting in its place.
+     */
+    @Nullable
+    private static ResourceLocation fallbackFor(SoundManager sounds, ResourceLocation id,
+            @Nullable WeaponDefinition weapon) {
+        if (id.equals(ModSounds.LOAD)) {
+            return LOAD_FALLBACK;
+        }
+
+        if (id.equals(ModSounds.RELEASE)) {
+            return ModSounds.firstPresent(sounds, ModSounds.LAUNCH);
+        }
+
+        // The two the mod ships. If neither is there, the pack has replaced the mod's sounds with
+        // nothing at all, and putting one of the game's own in its place would be second-guessing it.
+        if (id.equals(ModSounds.GUN) || id.equals(ModSounds.LAUNCH)) {
+            return null;
+        }
+
+        // Anything else under weapon.* is a weapon's own name, which nothing answers to.
+        return switch (weapon == null ? WeaponDefinition.Type.GUN : weapon.type()) {
+            case GUN -> ModSounds.firstPresent(sounds, ModSounds.GUN);
+            case ROCKET, MISSILE -> ModSounds.firstPresent(sounds, ModSounds.LAUNCH);
+            case BOMB -> ModSounds.firstPresent(sounds, ModSounds.RELEASE, ModSounds.LAUNCH);
+        };
+    }
+
+    /** How loud and at what pitch: the weapon's own figures, or the ones whoever asked for it used. */
+    private static WeaponDefinition.SoundSetup setupFor(ResourceLocation id, @Nullable WeaponDefinition weapon) {
+        if (weapon != null) {
+            return weapon.sound();
+        }
+
+        return id.equals(ModSounds.LOAD) ? LOAD_SETUP : WeaponDefinition.SoundSetup.DEFAULT;
     }
 
     /**
@@ -123,7 +187,7 @@ public final class WeaponSounds {
     private static WeaponDefinition weaponFor(ResourceLocation event) {
         for (Map.Entry<ResourceLocation, WeaponDefinition> entry : AircraftManager.allWeapons().entrySet()) {
             ResourceLocation fire = entry.getValue().sound().fire()
-                    .orElseGet(() -> entry.getKey().withPath(WEAPON_PREFIX + entry.getKey().getPath()));
+                    .orElseGet(() -> ModSounds.named(entry.getKey(), ModSounds.WEAPON_PREFIX));
 
             if (fire.equals(event)) {
                 return entry.getValue();
@@ -131,13 +195,6 @@ public final class WeaponSounds {
         }
 
         return null;
-    }
-
-    /** True if the resource packs define this event and at least one of its files was found. */
-    private static boolean exists(SoundManager sounds, ResourceLocation id) {
-        WeighedSoundEvents weighed = sounds.getSoundEvent(id);
-
-        return weighed != null && weighed.getWeight() > 0;
     }
 
     private WeaponSounds() {

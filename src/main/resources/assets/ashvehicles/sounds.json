@@ -1,20 +1,10 @@
 {
-  "engine.default": {
-    "subtitle": "subtitles.ashvehicles.engine",
-    "sounds": [
-      "ashvehicles:enginesound"
-    ]
-  },
-  "weapon.gun": {
-    "subtitle": "subtitles.ashvehicles.gun",
-    "sounds": [
-      "ashvehicles:gunsound"
-    ]
-  },
-  "weapon.launch": {
-    "subtitle": "subtitles.ashvehicles.launch",
-    "sounds": [
-      "ashvehicles:launchsound"
-    ]
-  }
+  "engine.default": { "subtitle": "subtitles.ashvehicles.engine",  "sounds": ["ashvehicles:enginesound"] },
+  "weapon.gun":     { "subtitle": "subtitles.ashvehicles.gun",     "sounds": ["ashvehicles:gunsound"] },
+  "weapon.launch":  { "subtitle": "subtitles.ashvehicles.launch",  "sounds": ["ashvehicles:launchsound"] },
+  "weapon.fall":    { "subtitle": "subtitles.ashvehicles.fall",    "sounds": ["ashvehicles:fallsound"] },
+  "weapon.flight":  { "subtitle": "subtitles.ashvehicles.flight",  "sounds": ["ashvehicles:flightsound"] },
+  "weapon.load":    { "subtitle": "subtitles.ashvehicles.load",    "sounds": ["ashvehicles:loadsound"] },
+  "weapon.blast":   { "subtitle": "subtitles.ashvehicles.blast",   "sounds": ["ashvehicles:blastsound"] },
+  "gear.default":   { "subtitle": "subtitles.ashvehicles.gear",    "sounds": ["ashvehicles:gearsound"] }
 }

@@ -71,6 +71,12 @@ neoForge {
 
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+
+            // `gradlew runClient -PquickPlayWorld=<save name>` goes straight into a world, which is
+            // what an unattended test run wants.
+            if (project.hasProperty('quickPlayWorld')) {
+                programArguments.addAll '--quickPlaySingleplayer', project.property('quickPlayWorld').toString()
+            }
         }
 
         server {
@@ -135,10 +141,11 @@ dependencies {
     // GeckoLib is a hard dependency of this mod: it is required at both compile time and runtime.
     implementation "software.bernie.geckolib:geckolib-neoforge-${minecraft_version}:${geckolib_version}"
 
-    // Distant Horizons is a hard dependency too, but nothing here compiles against it: the mod only
-    // needs it present so that there is terrain under the aircraft this mod draws at long range.
-    // localRuntime, not implementation, so it is there for the development client without becoming
-    // part of what this mod publishes.
+    // Distant Horizons is what puts terrain under the aircraft this mod draws at long range. Only
+    // its API is compiled against, and only from one class that is never loaded unless the mod is
+    // actually there, so this stays optional; localRuntime rather than implementation puts it in the
+    // development client without making it part of what this mod publishes.
+    compileOnly "maven.modrinth:distanthorizons:${distant_horizons_version}-${minecraft_version}"
     localRuntime "maven.modrinth:distanthorizons:${distant_horizons_version}-${minecraft_version}"
 
     // Example optional mod dependency with JEI

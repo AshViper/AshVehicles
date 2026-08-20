@@ -7,6 +7,7 @@ import java.util.Map;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.item.AircraftItem;
 import com.ashvehicles.item.WeaponItem;
+import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.weapon.WeaponLoader;
 
 import net.minecraft.resources.ResourceLocation;
@@ -20,6 +21,10 @@ import net.neoforged.neoforge.registries.DeferredRegister;
  */
 public final class ModItems {
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(AshVehicles.MODID);
+
+    /** The one item that is not an aircraft or a weapon: what aircraft are taken apart with. */
+    public static final DeferredItem<WrenchItem> WRENCH =
+            ITEMS.registerItem("wrench", WrenchItem::new, new Item.Properties().stacksTo(1));
 
     private static final Map<ResourceLocation, DeferredItem<AircraftItem>> AIRCRAFT = registerAircraft();
     private static final Map<ResourceLocation, DeferredItem<WeaponItem>> WEAPONS = registerWeapons();

@@ -80,6 +80,12 @@ public class RocketEntity extends AircraftProjectile implements GeoEntity {
         return this.age <= this.getRound().burnTicks();
     }
 
+    /** Under power there is a plume at the nozzle; coasting there is only the trail behind. */
+    @Override
+    protected boolean underPower() {
+        return this.getRound().hasMotor() && this.isBurning();
+    }
+
     @Override
     protected void steer() {
         WeaponDefinition.Projectile round = this.getRound();

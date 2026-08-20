@@ -2,6 +2,7 @@ package com.ashvehicles.weapon;
 
 import java.util.Optional;
 
+import com.mojang.datafixers.util.Either;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -30,6 +31,17 @@ import net.minecraft.util.StringRepresentable;
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing, Projectile projectile,
         Optional<Guidance> guidance, SoundSetup sound) {
+
+    /** {@code RRGGBB}, with or without a leading hash, as everything in these files writes colour. */
+    static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
+            text -> {
+                try {
+                    return DataResult.success(Integer.parseInt(text.replace("#", ""), 16));
+                } catch (NumberFormatException exception) {
+                    return DataResult.error(() -> "Not a colour: " + text);
+                }
+            },
+            colour -> String.format("%06X", colour));
 
     public static final Codec<WeaponDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Type.CODEC.optionalFieldOf("type", Type.GUN).forGetter(WeaponDefinition::type),
@@ -152,23 +164,27 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      *                  something that simply hits
      * @param fire whether the blast sets light to what it lands on
      * @param tracer colour it is drawn in, as {@code RRGGBB}
-     * @param trail whether it leaves smoke behind it
+     * @param trail the smoke it leaves behind it, if it leaves any
      */
     public record Projectile(float damage, float speed, float thrust, int burnTicks, float topSpeed,
-            float gravity, float range, float explosion, boolean fire, int tracer, boolean trail) {
+            float gravity, float range, float explosion, boolean fire, int tracer,
+            Optional<Trail> trail, Optional<Boolean> chunkLoading) {
 
-        public static final Projectile DEFAULT =
-                new Projectile(2.0F, 20.0F, 0.0F, 0, 0.0F, 0.02F, 200.0F, 0.0F, false, 0xFFC864, false);
+        public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0.0F, 0.02F,
+                200.0F, 0.0F, false, 0xFFC864, Optional.empty(), Optional.empty());
 
-        private static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
-                text -> {
-                    try {
-                        return DataResult.success(Integer.parseInt(text.replace("#", ""), 16));
-                    } catch (NumberFormatException exception) {
-                        return DataResult.error(() -> "Not a colour: " + text);
-                    }
-                },
-                colour -> String.format("%06X", colour));
+        /**
+         * Reads the whole description of a trail, or the plain {@code true} that used to be all
+         * there was to say. An older weapon file therefore still means what it meant, and gets the
+         * ordinary trail; a newer one can say what colour its motor's smoke is.
+         */
+        private static final Codec<Optional<Trail>> TRAIL =
+                Codec.either(Codec.BOOL, Trail.CODEC).xmap(
+                        either -> either.map(
+                                on -> on ? Optional.of(Trail.DEFAULT) : Optional.<Trail>empty(),
+                                Optional::of),
+                        trail -> trail.<Either<Boolean, Trail>>map(Either::right)
+                                .orElseGet(() -> Either.left(false)));
 
         public static final Codec<Projectile> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.fieldOf("damage").forGetter(Projectile::damage),
@@ -181,12 +197,33 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
                 Codec.FLOAT.optionalFieldOf("explosion", 0.0F).forGetter(Projectile::explosion),
                 Codec.BOOL.optionalFieldOf("fire", false).forGetter(Projectile::fire),
                 COLOUR.optionalFieldOf("tracer", 0xFFC864).forGetter(Projectile::tracer),
-                Codec.BOOL.optionalFieldOf("trail", false).forGetter(Projectile::trail)
+                TRAIL.optionalFieldOf("trail", Optional.empty()).forGetter(Projectile::trail),
+                Codec.BOOL.optionalFieldOf("chunk_loading").forGetter(Projectile::chunkLoading)
         ).apply(instance, Projectile::new));
 
         /** Whether a motor pushes this along after it has left. */
         public boolean hasMotor() {
             return this.burnTicks > 0 && this.thrust > 0.0F;
+        }
+
+        /**
+         * Whether a round of this sort holds open the ground it is flying over.
+         *
+         * <p>It has to, or a weapon aimed past the edge of the loaded world lands on nothing. Chunks
+         * exist around players and nowhere else, an aircraft holds open only the one it is over, and
+         * a bomb released from three thousand feet is a long way from either by the time it arrives.
+         * Blocks out there are not asked about at all — asking would generate the terrain on the spot
+         * and on the main thread — so without a claim of its own the bomb falls through ground nobody
+         * has loaded and is given up on in mid-air. See {@link
+         * com.ashvehicles.entity.WeaponChunkLoader}.
+         *
+         * <p>Left out, a round claims ground if it carries a warhead, which is the same question
+         * asked twice: something that will crater the ground has business loading it, and something
+         * that will not has none. Say it outright either way to overrule that — {@code false} on a
+         * rocket pod that fires eight at once, {@code true} on a heavy cannon meant for hard targets.
+         */
+        public boolean loadsChunks() {
+            return this.chunkLoading.orElse(this.explosion > 0.0F);
         }
 
         /**
@@ -199,6 +236,33 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
 
             return Math.max(1, Math.round(this.range / Math.max(pace, 1.0E-3F)));
         }
+    }
+
+    /**
+     * The smoke a motor leaves behind it.
+     *
+     * <p>There are two halves to it, because there are two things to see. The plume is what is
+     * coming out of the nozzle now: thick, close, still moving with the missile, and only there
+     * while the motor is burning. The trail is what that plume turned into a second ago, hanging
+     * where the missile used to be and drifting apart. Nothing is drawn for a motor that has burnt
+     * out, which is how a rocket's smoke stops at the point it went ballistic and how anyone
+     * watching can tell.
+     *
+     * @param colour the trail proper, as {@code RRGGBB}: cold smoke, some way behind
+     * @param exhaust the plume at the nozzle, which is hotter and usually darker
+     * @param density puffs laid down per block flown. Below one leaves gaps on purpose
+     * @param size how big each puff is, against the ordinary one
+     */
+    public record Trail(int colour, int exhaust, float density, float size) {
+        /** What a weapon file that says no more than {@code "trail": true} gets. */
+        public static final Trail DEFAULT = new Trail(0xD8D5CD, 0x9A958B, 1.3F, 1.0F);
+
+        public static final Codec<Trail> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                COLOUR.optionalFieldOf("colour", DEFAULT.colour()).forGetter(Trail::colour),
+                COLOUR.optionalFieldOf("exhaust", DEFAULT.exhaust()).forGetter(Trail::exhaust),
+                Codec.FLOAT.optionalFieldOf("density", DEFAULT.density()).forGetter(Trail::density),
+                Codec.FLOAT.optionalFieldOf("size", DEFAULT.size()).forGetter(Trail::size)
+        ).apply(instance, Trail::new));
     }
 
     /**

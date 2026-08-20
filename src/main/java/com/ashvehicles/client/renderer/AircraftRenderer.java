@@ -4,20 +4,20 @@ import java.util.List;
 
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.aircraft.AircraftManager;
+import com.ashvehicles.client.ghost.GhostRenderContext;
+import com.ashvehicles.client.ghost.GhostRenderDispatcher;
+import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
 import com.ashvehicles.client.model.AircraftModel;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.weapon.WeaponMounts;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.phys.Vec3;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 import software.bernie.geckolib.renderer.GeoObjectRenderer;
@@ -28,26 +28,23 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 /**
  * Draws any aircraft, taking its scale and its attitude from the aircraft itself.
  *
- * <p>An aircraft beyond the world the player has actually loaded is drawn as a <em>ghost</em>: the
- * same shape, translucent, lit by nothing, and — the point of the exercise — in front of the fog
- * rather than behind it. The server keeps reporting aircraft out to their {@code ghost_range}, far
- * past the chunks anyone has, because an aeroplane at altitude is visible from much further away
- * than the ground beneath it. Drawn normally, one out there would be a solid model hanging over an
- * empty void, or more likely a shape swallowed whole by the fog at the edge of the loaded world.
- * Drawn as a ghost it reads for what it is: a contact, seen at a distance, not quite of the
- * world in front of you.
+ * <p>This renderer draws the aircraft in full out to the ghost start distance. Beyond that it
+ * stands down — {@link #shouldRender} says no — and the ghost pass ({@link GhostRenderDispatcher})
+ * draws the aircraft instead, from a snapshot, through {@code AircraftGhostAdapter}. The one case
+ * in which this renderer is used out of the ordinary is an aircraft the game's own entity loop
+ * declined to draw (no built chunk section under it); the ghost pass then calls it directly, and
+ * {@link GhostRenderContext} says so.
+ *
+ * <p>An aircraft with nothing behind it at all is drawn as a <em>ghost</em>: the same shape,
+ * see-through, reading for what it is — a contact, seen at a distance, not quite of the world in
+ * front of you. Over terrain the player can still see, which for anyone running Distant Horizons is
+ * most of what is out there, an aeroplane stays an aeroplane.
  */
 public class AircraftRenderer extends GeoEntityRenderer<AircraftEntity> {
-    /**
-     * How much of the loaded world's radius an aircraft has to be beyond before it is a ghost. Kept
-     * just inside the edge so that the change happens while the aircraft is still in clear air,
-     * rather than at the exact line where the terrain stops being drawn.
-     */
-    private static final double GHOST_FRACTION = 0.85;
     /** How solid a ghost is. Enough to read against the sky, far too little to mistake for near. */
-    private static final float GHOST_ALPHA = 0.55F;
+    private static final float GHOST_ALPHA = GhostGeoRenderer.GHOST_ALPHA;
 
-    /** Set for the duration of one aircraft's draw, so the model hooks know which way to draw it. */
+    /** Set for the duration of one aircraft's draw, so the model hooks know how to draw it. */
     private boolean drawingGhost;
 
     public AircraftRenderer(EntityRendererProvider.Context context) {
@@ -55,32 +52,17 @@ public class AircraftRenderer extends GeoEntityRenderer<AircraftEntity> {
     }
 
     /**
-     * Whether this aircraft is beyond the world the player can actually see, and so should be drawn
-     * as a ghost rather than as an aeroplane.
-     *
-     * <p>Measured against the render distance rather than against a fixed number of blocks, because
-     * that is the thing that decides how much world there is to be in front of. Anything in a chunk
-     * the client has not got is a ghost whatever the distance, which is what catches an aircraft
-     * over ground that was never loaded.
+     * Stands down beyond the ghost start distance, where the ghost pass takes over. The test is the
+     * same one the pass makes, from the same camera, so an aircraft is always one or the other's
+     * and never both.
      */
-    private static boolean isGhost(AircraftEntity aircraft) {
-        Minecraft minecraft = Minecraft.getInstance();
-        double loaded = loadedRadius() * GHOST_FRACTION;
-        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
-
-        if (aircraft.position().distanceToSqr(camera) > loaded * loaded) {
-            return true;
+    @Override
+    public boolean shouldRender(AircraftEntity aircraft, Frustum frustum, double camX, double camY, double camZ) {
+        if (GhostRenderDispatcher.claims(aircraft, camX, camY, camZ)) {
+            return false;
         }
 
-        return !aircraft.level().hasChunkAt(aircraft.blockPosition());
-    }
-
-    /**
-     * How far out this client actually has blocks, in blocks. Past here there is nothing to ask
-     * about: unloaded ground is not solid to anything the client can see, whatever is really there.
-     */
-    private static double loadedRadius() {
-        return Minecraft.getInstance().options.getEffectiveRenderDistance() * 16.0;
+        return super.shouldRender(aircraft, frustum, camX, camY, camZ);
     }
 
     /**
@@ -89,54 +71,19 @@ public class AircraftRenderer extends GeoEntityRenderer<AircraftEntity> {
      * <p>Only pylons are drawn. A gun built into the airframe is already part of the model, and
      * drawing something at its muzzle would put a floating pod on the nose.
      *
-     * <p>A ghost is drawn with the fog pushed out beyond the horizon and put back afterwards. Fog is
-     * a property of the shader rather than of the model, so the only way to keep a distant aircraft
-     * out of it is to move the fog for the length of its draw; and because the buffer source batches
-     * everything by material and draws it later, the batch has to be flushed while the fog is still
-     * moved, or the change would land on whatever happened to be drawn next instead.
+     * <p>Everything about being a long way off — being drawn at all out there, being drawn near
+     * enough for the projection, and being kept out of the fog — belongs to the ghost pass and
+     * happens around this call. All that is decided here is what the aeroplane should look like.
      */
     @Override
     public void render(AircraftEntity aircraft, float yaw, float partialTick, PoseStack poseStack,
             MultiBufferSource bufferSource, int packedLight) {
-        this.drawingGhost = isGhost(aircraft);
-
-        if (this.drawingGhost) {
-            // A ghost is drawn without fog and lit by nothing so that it reads against the sky. The
-            // same treatment would have it read straight through a hillside, so one with the world
-            // in the way is not drawn at all.
-            if (aircraft.isHiddenFrom(Minecraft.getInstance().gameRenderer.getMainCamera().getPosition(),
-                    loadedRadius())) {
-                return;
-            }
-
-            this.renderGhost(aircraft, yaw, partialTick, poseStack, bufferSource);
-
-            return;
-        }
-
+        // Translucent only when the ghost pass is drawing this and says there is genuinely nothing
+        // behind it. Over ground somebody else is still drawing — Distant Horizons, most likely —
+        // an aeroplane is an aeroplane and should look like one; it simply cannot be lit or fogged
+        // like one, there being no chunks out there to say what the light is doing.
+        this.drawingGhost = GhostRenderContext.isTranslucent();
         this.renderSolid(aircraft, yaw, partialTick, poseStack, bufferSource, packedLight);
-    }
-
-    /** The aircraft as a contact in the distance: no fog, no shading, and see-through. */
-    private void renderGhost(AircraftEntity aircraft, float yaw, float partialTick, PoseStack poseStack,
-            MultiBufferSource bufferSource) {
-        float fogStart = RenderSystem.getShaderFogStart();
-        float fogEnd = RenderSystem.getShaderFogEnd();
-        RenderSystem.setShaderFogStart(Float.MAX_VALUE);
-        RenderSystem.setShaderFogEnd(Float.MAX_VALUE);
-
-        try {
-            // Lit by nothing, because there is no telling what the light is like somewhere the
-            // client has never loaded, and a ghost that went black over unlit ground would vanish.
-            this.renderSolid(aircraft, yaw, partialTick, poseStack, bufferSource, LightTexture.FULL_BRIGHT);
-
-            if (bufferSource instanceof MultiBufferSource.BufferSource batched) {
-                batched.endBatch();
-            }
-        } finally {
-            RenderSystem.setShaderFogStart(fogStart);
-            RenderSystem.setShaderFogEnd(fogEnd);
-        }
     }
 
     private void renderSolid(AircraftEntity aircraft, float yaw, float partialTick, PoseStack poseStack,

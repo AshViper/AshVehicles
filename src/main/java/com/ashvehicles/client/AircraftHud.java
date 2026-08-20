@@ -47,6 +47,9 @@ public final class AircraftHud implements LayeredDraw.Layer {
     private static final int WARNING = 0xFFFF5A3B;
     private static final int SHADOW = 0x90000000;
 
+    /** Fraction of the airframe left below which the readout goes amber. */
+    private static final float LOW_HEALTH = 0.3F;
+
     /** Screen pixels the horizon slides for every degree of pitch. */
     private static final float PIXELS_PER_DEGREE = 3.0F;
     /** Rungs of the pitch ladder, in degrees. */
@@ -408,6 +411,13 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int left = 8;
         int bottom = graphics.guiHeight() - 8;
 
+        // What is left of the airframe, and a warning colour once there is little enough of it that
+        // the pilot should be thinking about home rather than about the fight.
+        float health = aircraft.getHealth();
+        int colour = aircraft.getHealthFraction() <= LOW_HEALTH ? WARNING : GREEN;
+        value(graphics, font, String.format("HP %d/%d", Math.round(health), Math.round(aircraft.getMaxHealth())),
+                left, bottom - 52, colour);
+
         int throttle = Math.round(aircraft.getThrottle() * 100.0F);
         value(graphics, font, "THR " + throttle + "%", left, bottom - 42);
         value(graphics, font, "GEAR " + (aircraft.isGearDown() ? "DOWN" : "UP"), left, bottom - 32);
@@ -549,8 +559,13 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     private static void value(GuiGraphics graphics, Font font, String text, int x, int y) {
+        value(graphics, font, text, x, y, GREEN);
+    }
+
+    /** The same, in a colour of its own, for a reading that is worth noticing. */
+    private static void value(GuiGraphics graphics, Font font, String text, int x, int y, int colour) {
         graphics.fill(x - 2, y - 2, x + font.width(text) + 2, y + 10, SHADOW);
-        graphics.drawString(font, text, x, y, GREEN, true);
+        graphics.drawString(font, text, x, y, colour, true);
     }
 
     private static Vec3 toVec3(org.joml.Vector3f vector) {

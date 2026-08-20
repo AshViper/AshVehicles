@@ -6,6 +6,7 @@ import java.util.Objects;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.aircraft.AircraftManager;
 import com.ashvehicles.aircraft.Attitude;
@@ -49,7 +50,23 @@ public final class WeaponMounts {
     /** Ticks a parked aircraft takes to refill a mount from empty. Ground crew, abstracted. */
     private static final int REARM_TICKS = 200;
     /** Prefix of the sound event a weapon is matched to by name: {@code weapon.<name>}. */
-    private static final String SOUND_PREFIX = "weapon.";
+    public static final String SOUND_PREFIX = "weapon.";
+
+    /**
+     * The ground crew at work: a store going onto a pylon, or coming back off one.
+     *
+     * <p>Named here rather than with the rest of the mod's sounds because this is the one of them the
+     * server asks for by name, and the server cannot see the client's list. A client with no
+     * recording under this name falls back on something of the game's; see
+     * {@link com.ashvehicles.client.sound.WeaponSounds}.
+     */
+    public static final ResourceLocation LOAD_SOUND =
+            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, SOUND_PREFIX + "load");
+    /** How loud that is. Work on the ground, heard by whoever is standing at the aeroplane. */
+    public static final float LOAD_VOLUME = 0.9F;
+    /** Hanging one on, and taking one off, which is the same noise made backwards. */
+    public static final float LOAD_PITCH = 1.0F;
+    public static final float UNLOAD_PITCH = 0.85F;
 
     /** One hardpoint's load. */
     public static final class Mount {
@@ -227,6 +244,7 @@ public final class WeaponMounts {
         }
 
         this.dirty = true;
+        this.playLoadSound(true);
 
         return true;
     }
@@ -259,6 +277,7 @@ public final class WeaponMounts {
         }
 
         this.dirty = true;
+        this.playLoadSound(true);
 
         return true;
     }
@@ -286,6 +305,7 @@ public final class WeaponMounts {
         mount.set(null, 0);
         this.dirty = true;
         this.reselect();
+        this.playLoadSound(false);
 
         return stack;
     }
@@ -309,6 +329,7 @@ public final class WeaponMounts {
             mount.set(null, 0);
             this.dirty = true;
             this.reselect();
+            this.playLoadSound(false);
 
             return stack;
         }
@@ -496,7 +517,9 @@ public final class WeaponMounts {
 
             shot.setup(weaponId, this.aircraft, pilot);
             shot.setPos(muzzle);
-            shot.setDeltaMovement(velocity);
+            // launch rather than setDeltaMovement: the speed has to reach the clients, and it is too
+            // fast for the packets that would ordinarily carry it. See AircraftProjectile.
+            shot.launch(velocity);
 
             if (shot instanceof RocketEntity rocket && locked != null) {
                 rocket.setTarget(locked);
@@ -518,6 +541,22 @@ public final class WeaponMounts {
         this.aircraft.level().playSound(null, this.aircraft.getX(), this.aircraft.getY(), this.aircraft.getZ(),
                 SoundEvent.createVariableRangeEvent(event), SoundSource.NEUTRAL,
                 weapon.sound().volume(), weapon.sound().pitch());
+    }
+
+    /**
+     * A store going onto a pylon or coming back off it, heard by whoever is standing about the
+     * aeroplane.
+     *
+     * <p>Played the ordinary way, unlike everything else the weapons do, because this is the one
+     * thing that happens with the aircraft on the ground and someone next to it: sixteen blocks or so
+     * of reach is exactly right, and nobody further off has any business hearing the ground crew.
+     *
+     * @param hanging true for a store going on, false for one coming off
+     */
+    private void playLoadSound(boolean hanging) {
+        this.aircraft.level().playSound(null, this.aircraft.getX(), this.aircraft.getY(), this.aircraft.getZ(),
+                SoundEvent.createVariableRangeEvent(LOAD_SOUND), SoundSource.NEUTRAL,
+                LOAD_VOLUME, hanging ? LOAD_PITCH : UNLOAD_PITCH);
     }
 
     /** On the ground with the engine off and not rolling: safe for the ground crew to approach. */

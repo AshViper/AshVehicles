@@ -15,9 +15,14 @@
     "burn_ticks": 20,
     "top_speed": 16.0,
     "gravity": 0.01,
-    "range": 500.0,
+    "range": 5000.0,
     "explosion": 2.5,
     "tracer": "FF8844",
-    "trail": true
+    "trail": {
+      "colour": "DEDBD3",
+      "exhaust": "8A857A",
+      "density": 1.6,
+      "size": 0.85
+    }
   }
 }

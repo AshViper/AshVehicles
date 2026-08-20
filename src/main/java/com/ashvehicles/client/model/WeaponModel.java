@@ -49,9 +49,21 @@ public abstract class WeaponModel<T extends GeoAnimatable> extends GeoModel<T> {
         return ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "animations/weapon/default.animation.json");
     }
 
-    private ResourceLocation file(String directory, T animatable, String suffix) {
-        ResourceLocation weapon = this.weaponId(animatable);
+    /** The geometry a weapon is drawn from, by its id; what {@link #getModelResource} answers. */
+    public static ResourceLocation geometryFile(ResourceLocation weapon) {
+        return found(file("geo/weapon/", weapon, ".geo.json"), DEFAULT_GEOMETRY);
+    }
 
+    /** The texture a weapon is drawn with, by its id; what {@link #getTextureResource} answers. */
+    public static ResourceLocation textureFile(ResourceLocation weapon) {
+        return found(file("textures/weapon/", weapon, ".png"), DEFAULT_TEXTURE);
+    }
+
+    private ResourceLocation file(String directory, T animatable, String suffix) {
+        return file(directory, this.weaponId(animatable), suffix);
+    }
+
+    private static ResourceLocation file(String directory, ResourceLocation weapon, String suffix) {
         return ResourceLocation.fromNamespaceAndPath(weapon.getNamespace(),
                 directory + weapon.getPath() + suffix);
     }

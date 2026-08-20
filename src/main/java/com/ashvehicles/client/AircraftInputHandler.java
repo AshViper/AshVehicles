@@ -49,8 +49,12 @@ public final class AircraftInputHandler {
         }
 
         // Q, E and F are the rudder and the flaps up here. Vanilla reads them later in the same tick,
-        // so emptying the click queues now stops the pilot dropping their sword out of the cockpit.
+        // so emptying the click queues now stops the pilot dropping their sword out of the cockpit,
+        // opening their inventory over the canopy, or swapping hands mid-turn.
         while (minecraft.options.keyDrop.consumeClick()) {
+        }
+
+        while (minecraft.options.keyInventory.consumeClick()) {
         }
 
         while (minecraft.options.keySwapOffhand.consumeClick()) {

@@ -18,7 +18,12 @@
     "explosion": 6.0,
     "fire": true,
     "tracer": "FFAA55",
-    "trail": true
+    "trail": {
+      "colour": "C6C0B4",
+      "exhaust": "5E574C",
+      "density": 1.4,
+      "size": 1.35
+    }
   },
   "guidance": {
     "turn_rate": 3.5,

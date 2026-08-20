@@ -17,7 +17,12 @@
     "range": 900.0,
     "explosion": 3.0,
     "tracer": "FFDD66",
-    "trail": true
+    "trail": {
+      "colour": "E7E4DD",
+      "exhaust": "A39D92",
+      "density": 1.0,
+      "size": 0.7
+    }
   },
   "guidance": {
     "turn_rate": 7.0,

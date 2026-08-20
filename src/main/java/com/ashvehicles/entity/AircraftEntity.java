@@ -1,6 +1,9 @@
 package com.ashvehicles.entity;
 
 import java.util.List;
+import java.util.Optional;
+
+import javax.annotation.Nullable;
 
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.aircraft.Attitude;
@@ -8,10 +11,13 @@ import com.ashvehicles.aircraft.Attitude;
 import org.joml.Matrix3f;
 import com.ashvehicles.aircraft.AircraftManager;
 import com.ashvehicles.aircraft.AircraftShape;
+import com.ashvehicles.client.model.AircraftAnimations;
+import com.ashvehicles.particle.TintedParticleOption;
+import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.item.WeaponItem;
+import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.weapon.WeaponMounts;
 
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.FloatTag;
 import net.minecraft.nbt.ListTag;
@@ -35,14 +41,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.VehicleEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.gameevent.GameEvent;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import software.bernie.geckolib.animatable.GeoEntity;
+import software.bernie.geckolib.animation.AnimatableManager;
+import software.bernie.geckolib.animation.AnimationController;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
@@ -82,6 +88,15 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      */
     private static final EntityDataAccessor<CompoundTag> DATA_WEAPONS =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.COMPOUND_TAG);
+    /**
+     * What the airframe has left, in hit points.
+     *
+     * <p>Synched because it is not only the server's business: the pilot's instruments show it, and
+     * an aircraft that has been shot at is the same aircraft to everybody looking at it. The server
+     * owns the figure; a client reads whatever it was last told.
+     */
+    private static final EntityDataAccessor<Float> DATA_HEALTH =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.FLOAT);
 
     /**
      * Downward acceleration, in blocks/tick^2. A block is a metre and a tick is a twentieth of a
@@ -93,8 +108,12 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private static final float OVER_G_DAMAGE = 4.0F;
     /** Load factor above which the wingtips start trailing vapour. */
     private static final float VORTEX_LOAD = 2.5F;
+    /** Blend into the gear cycle, for a pilot who changes their mind partway through one. */
+    private static final int GEAR_TRANSITION_TICKS = 4;
     /** Height above the aircraft's origin that the wings sit at, near enough for particles. */
     private static final double WING_HEIGHT = 1.5;
+    /** Condensation is water and light, so it is the same pale puff wherever on the wing it forms. */
+    private static final int VAPOUR_COLOUR = 0xF2F5F7;
     /** Fraction of top speed at which the cone forms. */
     private static final double VAPOUR_SPEED = 0.88;
     private static final double VAPOUR_RADIUS = 3.0;
@@ -114,6 +133,10 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private static final double MAX_PILOT_SPEED = 40.0;
     /** How big a pylon's box is, in blocks. Big enough to aim at, small enough to tell from its neighbour. */
     public static final double PYLON_BOX = 1.2;
+    /** And how small it is allowed to shrink for an aircraft whose stations are close together. */
+    private static final double SMALLEST_PYLON_BOX = 0.5;
+    /** Speed, squared, below which an aircraft counts as standing still. */
+    private static final double PARKED_SPEED = 1.0E-4;
 
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
     /** What the aircraft is carrying. Authoritative on the server; a copy of the tag on a client. */
@@ -144,8 +167,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private long lastHurtTime = Long.MIN_VALUE;
     // Client side only: the last answer to whether the world stands in the way, and when it was
     // worked out. Tracing the line costs something and the answer barely changes within a tick.
-    private boolean sightBlocked;
-    private long sightCheckedAt = Long.MIN_VALUE;
     /** How far the undercarriage has swung out: 0 is up and locked, 1 is down and locked. */
     private float gearProgress = 1.0F;
     private float gearProgressO = 1.0F;
@@ -163,10 +184,17 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
     public AircraftEntity(EntityType<? extends AircraftEntity> type, Level level) {
         super(type, level);
+        // Culled against the view frustum like anything else. Beyond the ghost start distance the
+        // game's entity loop stands down altogether and the ghost pass draws the aircraft from a
+        // snapshot, so there is no longer anything for the frustum's far plane to throw away.
+        // See com.ashvehicles.client.ghost.GhostRenderDispatcher.
         this.blocksBuilding = true;
         // Built here rather than on the first tick: the level records an entity's parts when it is
         // added, and an entity that has none yet is remembered as having none.
         this.buildParts();
+        // A new airframe is a whole one. An aircraft read back out of the world overwrites this from
+        // its tag, and a client is told the real figure with the rest of the synched data.
+        this.setHealth(this.getMaxHealth());
         // We integrate our own gravity in flightTick(). Telling the server that also stops it
         // counting a flying aircraft as a floating vehicle, which is otherwise a kick for
         // "flying is not enabled on this server" after four seconds airborne.
@@ -236,9 +264,37 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         return this.getStats().handling().yawRate();
     }
 
-    /** Damage the airframe absorbs before it breaks up. Incoming damage is scaled by 10, as for boats. */
-    public float getDurability() {
-        return this.getStats().airframe().durability();
+    /**
+     * What a whole airframe of this sort is worth, in hit points.
+     *
+     * <p>Never nothing, whatever the file says. An aeroplane worth zero points is destroyed by the
+     * first scratch it takes, which is not a thing anybody means to write down, and it would be very
+     * hard to work out from the aeroplane vanishing.
+     */
+    public float getMaxHealth() {
+        return Math.max(this.getStats().airframe().health(), 1.0F);
+    }
+
+    /** What this airframe has left, in hit points. Zero is a smoking hole. */
+    public float getHealth() {
+        return this.entityData.get(DATA_HEALTH);
+    }
+
+    /**
+     * Sets what is left, never below nothing and never above what the airframe is worth.
+     *
+     * <p>The ceiling matters as much as the floor: an aircraft whose file has been edited down since
+     * it was parked would otherwise come back out of the world with more than it can have.
+     */
+    public void setHealth(float health) {
+        this.entityData.set(DATA_HEALTH, Mth.clamp(health, 0.0F, this.getMaxHealth()));
+    }
+
+    /** What is left as a fraction of a whole airframe, in [0, 1]. */
+    public float getHealthFraction() {
+        float max = this.getMaxHealth();
+
+        return max <= 0.0F ? 0.0F : Mth.clamp(this.getHealth() / max, 0.0F, 1.0F);
     }
 
     /** Impact speed, in blocks/tick, above which hitting something writes the aircraft off. */
@@ -265,7 +321,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     /** Ticks the undercarriage takes to travel from up and locked to down and locked. */
-    protected int getGearCycleTicks() {
+    public int getGearCycleTicks() {
         return this.getStats().landingGear().cycleTicks();
     }
 
@@ -299,6 +355,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         builder.define(DATA_GEAR_DOWN, true);
         builder.define(DATA_FLAPS_DOWN, false);
         builder.define(DATA_WEAPONS, new CompoundTag());
+        // A figure rather than this aircraft's own maximum, because this runs from inside the entity
+        // constructor, before there is an aircraft to ask. The constructor fills in the real one.
+        builder.define(DATA_HEALTH, AircraftDefinition.Airframe.DEFAULT_HEALTH);
     }
 
     /**
@@ -425,6 +484,15 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.entityData.set(DATA_GEAR_DOWN, !this.isGearDown());
     }
 
+    /**
+     * Whether the undercarriage has finished going wherever it was going. The cycle animation is
+     * held at its last frame while this is true rather than played, so an aircraft already sitting
+     * on its wheels is not seen to lower them again.
+     */
+    public boolean isGearSettled() {
+        return this.gearProgress == (this.isGearDown() ? 1.0F : 0.0F);
+    }
+
     /** Undercarriage travel for rendering: 0 fully retracted, 1 fully extended. */
     public float getGearProgress(float partialTick) {
         return Mth.lerp(partialTick, this.gearProgressO, this.gearProgress);
@@ -451,6 +519,20 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
     public void setInput(AircraftInput input) {
         this.input = input;
+    }
+
+    /**
+     * Whether the aeroplane is standing still enough for ground crew to work on it.
+     *
+     * <p>Wheels on the ground is the rule. "Not moving at all" is there beside it because that test
+     * is not always awake: an aircraft settling onto its undercarriage, or one whose movement is
+     * being run by a pilot's client rather than by the server, can report itself airborne for a tick
+     * or two while plainly sitting on the apron. Arming a station is a single click, and a click
+     * that lands in one of those ticks would silently do nothing at all, which is indistinguishable
+     * from the aeroplane refusing the weapon.
+     */
+    public boolean isParked() {
+        return this.onGround() || this.getVelocity().lengthSqr() < PARKED_SPEED;
     }
 
     /** True once the airframe has hit something hard enough to write it off. */
@@ -727,8 +809,10 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
         float load = this.getLoadFactor(velocity);
 
-        if (load > limit) {
-            this.setDamage(this.getDamage() + (load - limit) * OVER_G_DAMAGE);
+        // Pulled hard enough for long enough, the wings come off in the air rather than waiting for
+        // something to shoot them off.
+        if (load > limit && this.wound((load - limit) * OVER_G_DAMAGE)) {
+            this.crash();
         }
     }
 
@@ -965,8 +1049,31 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return;
         }
 
-        Vec3 centre = this.position().add(Attitude.toWorld(this.attitude, hardpoints.get(slot).pos()));
-        part.place(centre, PYLON_BOX, PYLON_BOX, PYLON_BOX);
+        Vec3 where = hardpoints.get(slot).pos();
+        Vec3 centre = this.position().add(Attitude.toWorld(this.attitude, where));
+        double size = pylonBox(where, hardpoints, slot);
+        part.place(centre, size, size, size);
+    }
+
+    /**
+     * How big to make a pylon's box: comfortably reachable, but never so big that it reaches past
+     * the pylon next door.
+     *
+     * <p>A wing with five stations a metre apart would otherwise have five overlapping boxes across
+     * it, and a click meant for one of them could land on any of the three around it. Which pylon a
+     * player is pointing at is the whole meaning of the click, so where the stations are close
+     * together the boxes shrink to match and each one stands over its own store.
+     */
+    private static double pylonBox(Vec3 where, List<AircraftDefinition.Hardpoint> hardpoints, int slot) {
+        double room = PYLON_BOX;
+
+        for (int i = 0; i < hardpoints.size(); i++) {
+            if (i != slot) {
+                room = Math.min(room, where.distanceTo(hardpoints.get(i).pos()));
+            }
+        }
+
+        return Math.max(room, SMALLEST_PYLON_BOX);
     }
 
     /**
@@ -977,6 +1084,11 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * aeroplane drops in pressure, and with it in temperature, until the moisture in it condenses.
      * So the wingtip vapour is tied to how hard the aircraft is pulling rather than to its speed,
      * which is why it appears in a hard turn and vanishes when the pilot unloads.
+     *
+     * <p>Drawn with the mod's own particle rather than vanilla's cloud, for the same two reasons the
+     * weapons are: vanilla throws a particle away at thirty-two blocks, and draws whatever is left
+     * in flat black once there is no chunk under it to read a light level from. A hard turn is the
+     * most visible thing an aeroplane does and it is worth seeing from further off than that.
      */
     private void spawnFlightEffects() {
         Vec3 velocity = this.getVelocity();
@@ -992,6 +1104,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         Vec3 nose = this.getNoseVector();
         Vec3 drift = velocity.scale(0.5);
         RandomSource random = this.level().random;
+        // Worked out here rather than held as a constant: this class is loaded while the registries
+        // are still being built, so there is no particle type to ask for yet at that point.
+        TintedParticleOption vapour = ModParticles.VAPOUR.get().of(VAPOUR_COLOUR, 1.0F);
 
         // Wingtips: the harder the wing is pulling, the more of it there is to see.
         float load = this.getLoadFactor(velocity);
@@ -1004,7 +1119,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 Vec3 tip = position.add(right.scale(span * side)).add(up.scale(WING_HEIGHT));
 
                 for (int i = 0; i < puffs; i++) {
-                    this.level().addParticle(ParticleTypes.CLOUD,
+                    this.level().addParticle(vapour,
                             tip.x + random.nextGaussian() * 0.2,
                             tip.y + random.nextGaussian() * 0.2,
                             tip.z + random.nextGaussian() * 0.2,
@@ -1028,8 +1143,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 Vec3 rim = centre.add(right.scale(Math.cos(angle) * radius))
                         .add(up.scale(Math.sin(angle) * radius));
 
-                this.level().addParticle(ParticleTypes.CLOUD, rim.x, rim.y, rim.z,
-                        drift.x, drift.y, drift.z);
+                this.level().addParticle(vapour, rim.x, rim.y, rim.z, drift.x, drift.y, drift.z);
             }
         }
     }
@@ -1200,16 +1314,38 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.setHurtDir(-this.getHurtDir());
         this.setHurtTime(10);
         this.markHurt();
-        this.setDamage(this.getDamage() + amount * 10.0F);
         this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
 
-        if (source.getEntity() instanceof Player player && player.getAbilities().instabuild) {
-            this.discard();
-        } else if (this.getDamage() > this.getDurability()) {
+        // Everything that hurts an aeroplane goes through its health and nothing else takes it out
+        // early. A boat is removed outright by one punch from anyone in creative, and an aircraft
+        // inherited that: an arrow, a stray swing, a test shot, and a whole airframe was gone with
+        // three hundred points still on the gauge. Whoever wants rid of one sneaks and clicks it,
+        // which puts it back in their pocket rather than scattering it over the runway.
+        if (this.wound(amount)) {
             this.destroy(source);
         }
 
         return true;
+    }
+
+    /**
+     * Takes points off the airframe, wherever they came from.
+     *
+     * <p>Point for point: what a weapon's file says it does is what it does here, with none of the
+     * scaling a boat applies. An aeroplane is worth a few hundred of these and a player is worth
+     * twenty, so the same round that costs a man two hearts costs an aeroplane four points of a
+     * three-hundred-point airframe, which is the whole of what the two numbers mean.
+     *
+     * @return true if that was the last of it
+     */
+    protected boolean wound(float amount) {
+        if (amount <= 0.0F) {
+            return false;
+        }
+
+        this.setHealth(this.getHealth() - amount);
+
+        return this.getHealth() <= 0.0F;
     }
 
     /** A shot-down aircraft comes apart rather than dropping a serviceable one. */
@@ -1237,6 +1373,27 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return InteractionResult.SUCCESS;
         }
 
+        // A click whose line passed through a pylon was a click on that pylon, whichever box the
+        // game happened to hand it to.
+        //
+        // It has to be settled here rather than left to the pick, because a pylon's box is usually
+        // inside a wing's: the game gives the click to whichever box the line enters first, and from
+        // most angles that is the wing. Left alone, reaching for a pylon under a wing climbs into
+        // the cockpit instead, which is the opposite of what was meant and hard to argue with once
+        // it has happened.
+        //
+        // A pylon that has nothing to offer -- bare, with an empty hand -- answers PASS, and the
+        // click carries on down and means what it usually means.
+        AircraftPart pylon = this.pylonInSight(player);
+
+        if (pylon != null) {
+            InteractionResult reached = this.interactPylon(player, hand, pylon.getPylon());
+
+            if (reached.consumesAction()) {
+                return reached;
+            }
+        }
+
         ItemStack held = player.getItemInHand(hand);
 
         // Anything that can go on a pylon goes on a pylon, ahead of everything else the click might
@@ -1256,40 +1413,67 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return InteractionResult.CONSUME;
         }
 
+        if (held.getItem() instanceof WrenchItem) {
+            return this.dismantle(player);
+        }
+
+        // Crouching is how somebody walks along a wing without stepping off it, so it cannot also
+        // mean "take this aeroplane to pieces" -- that is what the wrench is for. It still means
+        // "not now" rather than falling through to the cockpit: a player holding something and
+        // crouching by an aircraft is doing something else with it.
         if (player.isSecondaryUseActive()) {
-            if (!this.getPassengers().isEmpty() || !this.onGround()) {
-                return InteractionResult.PASS;
-            }
-
-            // Sneak-interact takes the weapons off first, one at a time, and only packs the aircraft
-            // itself away once its pylons are bare. Otherwise a loaded aircraft would go back into
-            // its item and quietly take everything hanging on it with it.
-            if (this.weapons.hasRemovable()) {
-                ItemStack removed = this.weapons.unmount();
-                this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
-
-                if (!player.addItem(removed)) {
-                    player.drop(removed, false);
-                }
-
-                return InteractionResult.CONSUME;
-            }
-
-            this.destroy(this.getDropItem());
-
-            return InteractionResult.CONSUME;
+            return InteractionResult.PASS;
         }
 
         return player.startRiding(this) ? InteractionResult.CONSUME : InteractionResult.PASS;
     }
 
     /**
+     * Takes the aeroplane apart with a wrench: the stores first, one at a time, and only then the
+     * aeroplane itself.
+     *
+     * <p>That order is the whole point of doing it in one place. A loaded aircraft packed away would
+     * go back into its item and quietly take everything hanging on it with it, so the pylons have to
+     * be bare before the airframe will fold.
+     *
+     * <p>Which store comes off is usually settled before this is reached: a wrench pointed at a
+     * particular pylon is handled as a click on that pylon. This is what answers a wrench pointed at
+     * the aeroplane in general, and it works from the last station loaded backwards.
+     */
+    private InteractionResult dismantle(Player player) {
+        // Ground work, and not while anybody is sitting in it.
+        if (!this.getPassengers().isEmpty() || !this.isParked()) {
+            return InteractionResult.PASS;
+        }
+
+        if (this.weapons.hasRemovable()) {
+            ItemStack removed = this.weapons.unmount();
+            this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+
+            if (!player.addItem(removed)) {
+                player.drop(removed, false);
+            }
+
+            return InteractionResult.CONSUME;
+        }
+
+        this.destroy(this.getDropItem());
+
+        return InteractionResult.CONSUME;
+    }
+
+    /**
      * A click on one particular pylon, which means that pylon and nothing else.
      *
-     * <p>Offer it a weapon and it takes it; offer it nothing and it hands back what it is holding.
+     * <p>Offer it a weapon and it takes it; offer it a wrench and it hands back what it is holding.
      * Neither falls through to climbing aboard: someone who reached for a pylon was not reaching for
      * the cockpit, and treating a full pylon as an invitation to get in would be a poor answer to a
      * deliberate aim.
+     *
+     * <p>Anything else -- an empty hand above all -- passes straight through to the aeroplane behind.
+     * A pylon's box sits inside the wing's, so the whole underside of a wing is pylon as far as a
+     * click is concerned; if a bare hand stripped a station, walking up to an armed aircraft and
+     * climbing in would scatter its stores across the apron on the way past.
      */
     public InteractionResult interactPylon(Player player, InteractionHand hand, int slot) {
         if (this.level().isClientSide) {
@@ -1300,7 +1484,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // and it will not fold the aeroplane away: a pylon is for hanging weapons on, and a click
         // that cannot hang or take one simply does nothing. Anyone who meant to get in has the whole
         // rest of the aeroplane to click on.
-        if (!this.onGround()) {
+        if (!this.isParked()) {
             return InteractionResult.PASS;
         }
 
@@ -1315,7 +1499,10 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return InteractionResult.CONSUME;
         }
 
-        if (this.weapons.canUnmountAt(slot)) {
+        // Taking one off asks for the tool, the same as taking the aeroplane itself apart does. A
+        // second click while still holding a store is somebody trying to load the next one, not
+        // somebody undoing the last one.
+        if (held.getItem() instanceof WrenchItem && this.weapons.canUnmountAt(slot)) {
             ItemStack removed = this.weapons.unmountAt(slot);
             this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
 
@@ -1327,6 +1514,47 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         }
 
         return InteractionResult.PASS;
+    }
+
+    /**
+     * The nearest pylon the player is looking through, or null if their line misses every one.
+     *
+     * <p>Asked because a pylon's box and a wing's box occupy the same air. The game hands a click to
+     * whichever box the line of sight enters first, which under a wing is the wing, so a pylon that
+     * is not the nearest thing along the line would never be reached for at all. Running the line
+     * against the pylons alone answers the question the player was actually asking.
+     *
+     * <p>Nearest along the line rather than nearest to the aeroplane: an aircraft carrying stores
+     * outboard and inboard on the same wing has both in view at once, and the one in front is the
+     * one being pointed at.
+     */
+    @Nullable
+    private AircraftPart pylonInSight(Player player) {
+        Vec3 eye = player.getEyePosition();
+        Vec3 reach = eye.add(player.getViewVector(1.0F).scale(player.entityInteractionRange()));
+        AircraftPart nearest = null;
+        double closest = Double.MAX_VALUE;
+
+        for (AircraftPart part : this.parts) {
+            if (!part.isPylon() || !part.isPickable()) {
+                continue;
+            }
+
+            Optional<Vec3> hit = part.getBoundingBox().clip(eye, reach);
+
+            if (hit.isEmpty()) {
+                continue;
+            }
+
+            double distance = eye.distanceToSqr(hit.get());
+
+            if (distance < closest) {
+                closest = distance;
+                nearest = part;
+            }
+        }
+
+        return nearest;
     }
 
     /**
@@ -1349,7 +1577,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * server agree on what a click meant without having to be told.
      */
     private boolean canBeArmedWith(ItemStack held) {
-        return held.getItem() instanceof WeaponItem && this.onGround() && this.weapons.hasFreePylon();
+        return held.getItem() instanceof WeaponItem && this.isParked() && this.weapons.hasFreePylon();
     }
 
     @Override
@@ -1469,64 +1697,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     /**
-     * Whether the world stands between the given eye and this aircraft.
-     *
-     * <p>For the ghost an aircraft becomes at long range, which is drawn without fog and lit by
-     * nothing so that it can be picked out against the sky. That treatment would also let it be
-     * picked out through a mountain, so the line is traced and a ghost behind anything solid is not
-     * drawn at all.
-     *
-     * <p><b>Only against ground this client actually has.</b> Blocks in chunks that were never
-     * loaded do not exist as far as anything here can tell, so the line is only followed as far as
-     * the loaded world reaches — following it further would cost a great deal and find nothing. An
-     * aircraft hidden behind a ridge far out of range is therefore still drawn; there is no way for
-     * the client to know the ridge is there.
-     *
-     * <p>Worked out at most once a tick. The eye moves within a tick, but not far enough to change
-     * the answer, and the line is not free to trace.
-     *
-     * @param eye where the viewer is
-     * @param reach how far out the world is worth asking about, in blocks
-     */
-    public boolean isHiddenFrom(Vec3 eye, double reach) {
-        long now = this.level().getGameTime();
-
-        if (now != this.sightCheckedAt) {
-            this.sightCheckedAt = now;
-            this.sightBlocked = this.traceSight(eye, reach);
-        }
-
-        return this.sightBlocked;
-    }
-
-    private boolean traceSight(Vec3 eye, double reach) {
-        // Aimed at the middle of the airframe rather than its origin, which sits down at the wheels
-        // and would count an aircraft as hidden while most of it was still in plain view.
-        Vec3 middle = this.position().add(0.0, this.getBbHeight() * 0.5, 0.0);
-        Vec3 gap = middle.subtract(eye);
-        double distance = gap.length();
-
-        if (distance < 1.0E-4) {
-            return false;
-        }
-
-        Vec3 target = distance > reach ? eye.add(gap.scale(reach / distance)) : middle;
-        // What the eye can see, so glass and foliage are not walls.
-        HitResult hit = this.level().clip(new ClipContext(eye, target,
-                ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, this));
-
-        return hit.getType() != HitResult.Type.MISS;
-    }
-
-    /**
-     * An aircraft is drawn as far away as it is sent.
-     *
-     * <p>Minecraft works out how far an entity is worth drawing from how big it is, which comes to
-     * a few hundred blocks for an aeroplane and is nowhere near far enough: the server is now
-     * reporting aircraft out to their {@code ghost_range}, and something reported and not drawn is
-     * just a hole in the sky. The distance the server chose is the distance to use.
-     */
-    /**
      * Moves the aircraft, stopped by the shape it actually has rather than by the box Minecraft
      * gives it.
      *
@@ -1554,11 +1724,11 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
         if (allowed.y != movement.y) {
             this.verticalCollision = true;
-
-            if (movement.y < 0.0) {
-                this.setOnGround(true);
-            }
         }
+
+        // Deliberately not setOnGround. Being on the ground is a question about the wheels, and the
+        // plain box sits on them; a wingtip brushing a hillside in flight would otherwise have the
+        // aeroplane decide it had landed, level itself out and lose its speed in mid-air.
     }
 
     /**
@@ -1591,6 +1761,35 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         }
 
         return allowed;
+    }
+
+    /**
+     * Whether the aircraft's real shape has room where it is standing, give or take a margin.
+     *
+     * <p>Used when one is put down. Now that the wings stop against the world, an aeroplane set down
+     * with a wing inside a hillside would be wedged there and unable to move, so the whole shape has
+     * to be clear rather than just the middle of it.
+     *
+     * @param margin how much each box may overlap the world and still count as clear, which keeps a
+     *               wingtip resting a hair inside a slope from making the aircraft unplaceable
+     */
+    public boolean hasRoomHere(double margin) {
+        List<AircraftShape.Box> shape = AircraftManager.shape(this.getAircraftId()).boxes();
+
+        if (shape.isEmpty()) {
+            return this.level().noCollision(this, this.getBoundingBox().deflate(margin));
+        }
+
+        for (AircraftShape.Box box : shape) {
+            AABB room = this.worldBox(box).deflate(margin);
+
+            if (room.getXsize() > 0.0 && room.getYsize() > 0.0 && room.getZsize() > 0.0
+                    && !this.level().noCollision(this, room)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** One of the aircraft's boxes as an upright box in the world, where it is standing right now. */
@@ -1638,6 +1837,34 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         return axis == 0 ? v.x : axis == 1 ? v.y : v.z;
     }
 
+    /**
+     * Ticks wherever it is, but only on a client.
+     *
+     * <p>An aircraft beyond the world the player has loaded is still being sent, and is still drawn
+     * as a ghost, but the client stops ticking anything whose chunk it does not have — and an
+     * aircraft that is not ticked never runs the interpolation that the position packets feed, so
+     * what is drawn out there is a contact frozen at the moment it crossed the edge. Saying it
+     * always ticks is what keeps it flying.
+     *
+     * <p>Emphatically not on the server. Out there the aircraft holds its own chunk open and ticks
+     * because of that; if the ticket is ever let go — a parked one lets go — then ticking anyway
+     * would run the flight model over ground the server has not loaded, and every block it asked
+     * about would be generated on the spot to answer.
+     */
+    @Override
+    public boolean isAlwaysTicking() {
+        return this.level().isClientSide;
+    }
+
+    /**
+     * An aircraft is worth drawing as far away as it is sent.
+     *
+     * <p>Minecraft works out how far an entity is worth drawing from how big it is, which comes to
+     * a few hundred blocks for an aeroplane and is nowhere near far enough: the server reports
+     * aircraft out to their {@code ghost_range}, and something reported and not drawn is just a
+     * hole in the sky. This is the outer limit only; where the game's own renderer stops and the
+     * ghost pass takes over is decided on the client, in {@code AircraftRenderer.shouldRender}.
+     */
     @Override
     public boolean shouldRenderAtSqrDistance(double distance) {
         AircraftDefinition.Hitbox hitbox = this.getStats().hitbox();
@@ -1661,11 +1888,25 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     /**
-     * No controllers: there is no animation JSON to play from, so the aircraft is posed entirely in
-     * code by {@link com.ashvehicles.client.model.AircraftModel#setCustomAnimations}.
+     * One controller, for the undercarriage. Everything else the aircraft does with itself follows
+     * the flight from moment to moment and is posed in code by
+     * {@link com.ashvehicles.client.model.AircraftModel#setCustomAnimations}; the gear is a sequence
+     * and is played from the aircraft's animation file instead.
+     *
+     * <p>Both halves of it are worked out in
+     * {@link com.ashvehicles.client.model.AircraftAnimations}, which is client code. Nothing here
+     * reaches it: a controller is only ever processed while something is being drawn, so a server
+     * registers this and then never looks at it again.
+     *
+     * <p>The transition covers a pilot who changes their mind halfway through a cycle. GeckoLib
+     * cannot run an animation backwards, so what it does instead is blend from wherever the legs
+     * have got to into the start of the other animation, and a few ticks of that reads as the gear
+     * hesitating rather than as it teleporting.
      */
     @Override
-    public void registerControllers(software.bernie.geckolib.animation.AnimatableManager.ControllerRegistrar controllers) {
+    public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+        controllers.add(new AnimationController<>(this, "gear", GEAR_TRANSITION_TICKS,
+                AircraftAnimations::gearCycle).setAnimationSpeedHandler(AircraftAnimations::gearSpeed));
     }
 
     @Override
@@ -1679,7 +1920,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         } else {
             this.snapAttitude(Attitude.of(this.getYRot(), this.getXRot()));
         }
-        this.setDamage(tag.getFloat("Damage"));
+        // An aircraft written to the world before this was a health system has no figure to read,
+        // and comes back whole rather than coming back with nothing left.
+        this.setHealth(tag.contains("Health") ? tag.getFloat("Health") : this.getMaxHealth());
         this.entityData.set(DATA_GEAR_DOWN, !tag.contains("GearDown") || tag.getBoolean("GearDown"));
         this.gearProgress = this.isGearDown() ? 1.0F : 0.0F;
         this.gearProgressO = this.gearProgress;
@@ -1700,7 +1943,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         stored.add(FloatTag.valueOf(this.attitude.z));
         stored.add(FloatTag.valueOf(this.attitude.w));
         tag.put("Attitude", stored);
-        tag.putFloat("Damage", this.getDamage());
+        tag.putFloat("Health", this.getHealth());
         tag.putBoolean("GearDown", this.isGearDown());
         tag.putBoolean("FlapsDown", this.isFlapsDown());
         tag.put("Weapons", this.weapons.save());
