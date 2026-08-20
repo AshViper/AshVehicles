@@ -58,7 +58,7 @@
   },
   "vtol": {
     "max_angle": 90.0,
-    "rate": 1.5,
+    "rate": 1.0,
     "lift_thrust": 0.03,
     "authority": 0.9,
     "hover_drag": 0.06,

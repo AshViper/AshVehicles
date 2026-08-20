@@ -401,12 +401,11 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *                  aeroplane has no control at all, the air not moving over anything
      * @param hoverDrag how quickly a hover bleeds off sideways drift, per tick. Nothing to do with
      *                  the aerodynamic drag above, which does nothing at all at a walking pace
-     * @param conversionSpeed the speed the conversion is finished at, in blocks per tick, and the
-     *                        two things that follow from it. The nozzle will not swing <em>down</em>
-     *                        above it, which stops it being used as an air brake at full speed; and
-     *                        coming back up it is scheduled against the airspeed rather than swung on
-     *                        a stopwatch, reaching fully aft here. Wants to be comfortably above the
-     *                        wing's stalling speed, since that is what the lift is being handed to
+     * @param conversionSpeed the fastest the nozzle will swing <em>down</em>, in blocks per tick,
+     *                        which stops it being used as an air brake at speed. Coming back up is
+     *                        never refused: the lever has to be an answer to trouble, and a nozzle
+     *                        that can only be stowed once the aeroplane is already going fast is one
+     *                        that cannot be stowed by an aeroplane that is not
      */
     public record Vtol(float maxAngle, float rate, float liftThrust, float authority, float hoverDrag,
             float conversionSpeed) {
@@ -414,7 +413,7 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
         /** Quoted in the docs above so the figure to beat is written down beside what beats it. */
         static final String GRAVITY_NOTE = "0.02453 blocks per tick squared";
 
-        public static final Vtol DEFAULT = new Vtol(90.0F, 1.5F, 0.030F, 0.9F, 0.06F, 2.2F);
+        public static final Vtol DEFAULT = new Vtol(90.0F, 1.0F, 0.030F, 0.9F, 0.06F, 2.2F);
 
         public static final Codec<Vtol> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("max_angle", DEFAULT.maxAngle()).forGetter(Vtol::maxAngle),

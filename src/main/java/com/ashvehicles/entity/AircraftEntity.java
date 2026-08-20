@@ -131,6 +131,8 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * a deliberate acceleration is untouched by the time it is a walking pace.
      */
     private static final double HOVER_BAND = 0.25;
+    /** Nozzle angle past which the wing is no longer what is holding the aircraft up, in degrees. */
+    private static final float HOVERING_ANGLE = 30.0F;
 
     /** Airframe damage per tick for each G pulled beyond what the aircraft is stressed for. */
     private static final float OVER_G_DAMAGE = 4.0F;
@@ -656,7 +658,20 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
     /** True once the wing has stopped flying, which is a matter of angle rather than speed. */
     public boolean isStalled() {
-        return !this.onGround() && Math.abs(this.angleOfAttack) > this.getStats().wing().stallAngle();
+        return !this.onGround() && !this.isHovering()
+                && Math.abs(this.angleOfAttack) > this.getStats().wing().stallAngle();
+    }
+
+    /**
+     * Whether the lift system is carrying enough of the aircraft for the wing not to matter.
+     *
+     * <p>Asked wherever something would otherwise be alarmed by a wing that has stopped flying. It
+     * has stopped flying; that is what the nozzle is for.
+     */
+    public boolean isHovering() {
+        return this.getStats().vtol()
+                .map(vtol -> this.vtolProgress * vtol.maxAngle() > HOVERING_ANGLE)
+                .orElse(false);
     }
 
     // ------------------------------------------------------------------
@@ -814,7 +829,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // the world's: the elevator swings the nose towards the top of the canopy wherever that is
         // pointing, which is why a banked aircraft pulls round into a turn instead of climbing.
         float lag = Mth.clamp(handling.controlLag(), 0.02F, 1.0F);
-        float commandedPitch = this.limitToWing(this.input.pitch() * handling.pitchRate() * authority);
+        float commandedPitch = this.limitToWing(this.input.pitch() * handling.pitchRate() * authority, lifting);
         this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
         this.rollVelocity += (this.input.roll() * handling.rollRate() * authority - this.rollVelocity) * lag;
         this.yawVelocity += (this.input.yaw() * handling.yawRate() * authority - this.yawVelocity) * lag;
@@ -930,7 +945,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      *
      * <p>The result settles just under the limit, which is exactly where the tightest turn is.
      */
-    private float limitToWing(float commanded) {
+    private float limitToWing(float commanded, double lifting) {
         AircraftDefinition.Handling handling = this.getStats().handling();
         float limit = this.getStats().wing().stallAngle() * handling.alphaLimit();
 
@@ -940,8 +955,15 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
         float bite = limit * ALPHA_LIMITER_BITE;
         float over = (Math.abs(this.angleOfAttack) - bite) / Math.max(limit - bite, 1.0E-3F);
+        float limited = commanded * Mth.clamp(1.0F - over, 0.0F, 1.0F);
 
-        return commanded * Mth.clamp(1.0F - over, 0.0F, 1.0F);
+        // And the limiter stands aside for the lift system, in proportion to how much of the weight
+        // it has taken. An aeroplane going straight up meets its own airflow from directly above, so
+        // the wing reads ninety degrees of angle of attack and the limiter -- which exists to stop a
+        // pilot stalling that wing -- refuses to let the nose come down at all. Which is the one
+        // control input a vertical climb is entirely about: nothing about a hover is being flown by
+        // the wing, and there is nothing there to protect.
+        return (float) Mth.lerp(lifting, limited, commanded);
     }
 
     /**
@@ -1086,36 +1108,8 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return;
         }
 
-        this.vtolProgress = approach(this.vtolProgress, this.nozzleWanted(vtol),
+        this.vtolProgress = approach(this.vtolProgress, this.isVtolSelected() ? 1.0F : 0.0F,
                 1.0F / Math.max(vtol.cycleTicks(), 1));
-    }
-
-    /**
-     * Where the nozzle should be, which on the way back up is decided by the airspeed rather than by
-     * the pilot.
-     *
-     * <p>Selecting conventional flight does not swing the nozzle up; it asks for it to be swung up as
-     * fast as the aeroplane can afford, which is exactly as fast as it is going. At a standstill the
-     * nozzle stays down whatever the lever says, and it comes up in step with the speed until, at the
-     * conversion speed, it is fully aft and the wing has taken the weight.
-     *
-     * <p>Scheduled rather than timed because the alternative does not work and cannot be made to. A
-     * nozzle that swings up on a stopwatch takes the lift away before there is any wing lift to
-     * replace it — the aeroplane is left below its stalling speed with the engine pointing the wrong
-     * way, and it comes down. Tying the two together means the lift is only ever given up in exchange
-     * for the speed that replaces it, which is what a conversion is.
-     *
-     * <p>So the technique is the real one: hover, ease the nose down, let it accelerate, and the
-     * nozzle follows the airspeed round without being touched again.
-     */
-    private float nozzleWanted(AircraftDefinition.Vtol vtol) {
-        if (this.isVtolSelected()) {
-            return 1.0F;
-        }
-
-        double speed = this.getVelocity().length();
-
-        return (float) Mth.clamp(1.0 - speed / Math.max(vtol.conversionSpeed(), 1.0E-3F), 0.0, 1.0);
     }
 
     private void tickGear() {

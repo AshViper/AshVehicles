@@ -444,7 +444,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         float stallAngle = aircraft.getStats().wing().stallAngle();
         float angleOfAttack = angleOfAttack(attitude, velocity, speed);
-        boolean stalled = speed > 0.05 && !aircraft.onGround() && Math.abs(angleOfAttack) > stallAngle;
+        boolean stalled = speed > 0.05 && !aircraft.onGround() && !aircraft.isHovering()
+                && Math.abs(angleOfAttack) > stallAngle;
 
         value(graphics, font, String.format("AOA %+.0f", angleOfAttack), left, bottom - 12);
         value(graphics, font, String.format("%.1f G", aircraft.getLoadFactor(velocity)), left, bottom - 2);
