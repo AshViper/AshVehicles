@@ -102,86 +102,20 @@
     "sweep_ticks": 12,
     "warning_range": 3000.0
   },
+  "signature": {
+    "radar": 1.0,
+    "store": 0.2
+  },
   "hardpoints": [
-    {
-      "name": "pylon1",
-      "pos": [
-        -1.924,
-        2.0,
-        0.202
-      ]
-    },
-    {
-      "name": "pylon1_copy",
-      "pos": [
-        -2.75,
-        2.0,
-        -0.104
-      ]
-    },
-    {
-      "name": "pylon1_copy_copy",
-      "pos": [
-        -3.555,
-        1.9,
-        -0.364
-      ]
-    },
-    {
-      "name": "pylon1_copy_copy_copy",
-      "pos": [
-        -4.381,
-        1.9,
-        -0.65
-      ]
-    },
-    {
-      "name": "pylon5",
-      "pos": [
-        -5.187,
-        1.8,
-        -0.975
-      ]
-    },
-    {
-      "name": "pylon1_copy",
-      "pos": [
-        1.924,
-        2.0,
-        0.202
-      ]
-    },
-    {
-      "name": "pylon1_copy_copy",
-      "pos": [
-        2.75,
-        2.0,
-        -0.104
-      ]
-    },
-    {
-      "name": "pylon1_copy_copy_copy",
-      "pos": [
-        3.555,
-        1.9,
-        -0.364
-      ]
-    },
-    {
-      "name": "pylon1_copy_copy_copy_copy",
-      "pos": [
-        4.381,
-        1.9,
-        -0.65
-      ]
-    },
-    {
-      "name": "pylon5_copy",
-      "pos": [
-        5.187,
-        1.8,
-        -0.975
-      ]
-    }
+    { "name": "pylon1", "pos": [-1.924, 2.0, 0.202] },
+    { "name": "pylon1_copy", "pos": [-2.75, 2.0, -0.104] },
+    { "name": "pylon1_copy_copy", "pos": [-3.555, 1.9, -0.364] },
+    { "name": "pylon1_copy_copy_copy", "pos": [-4.381, 1.9, -0.65] },
+    { "name": "pylon5", "pos": [-5.187, 1.8, -0.975] },
+    { "name": "pylon1_copy", "pos": [1.924, 2.0, 0.202] },
+    { "name": "pylon1_copy_copy", "pos": [2.75, 2.0, -0.104] },
+    { "name": "pylon1_copy_copy_copy", "pos": [3.555, 1.9, -0.364] },
+    { "name": "pylon1_copy_copy_copy_copy", "pos": [4.381, 1.9, -0.65] },
+    { "name": "pylon5_copy", "pos": [5.187, 1.8, -0.975] }
   ]
 }

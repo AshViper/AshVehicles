@@ -29,6 +29,7 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
         CameraMount camera, SoundSetup sound, Radar radar, Countermeasures countermeasures,
         Optional<Vtol> vtol, List<Hardpoint> hardpoints, Sync sync) {
 
+
     public static final Codec<AircraftDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Hitbox.CODEC.optionalFieldOf("hitbox", Hitbox.DEFAULT).forGetter(AircraftDefinition::hitbox),
             ModelSetup.CODEC.optionalFieldOf("model", ModelSetup.DEFAULT).forGetter(AircraftDefinition::model),
@@ -41,6 +42,7 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
             CameraMount.CODEC.optionalFieldOf("camera", CameraMount.DEFAULT).forGetter(AircraftDefinition::camera),
             SoundSetup.CODEC.optionalFieldOf("sound", SoundSetup.DEFAULT).forGetter(AircraftDefinition::sound),
             Radar.CODEC.optionalFieldOf("radar", Radar.DEFAULT).forGetter(AircraftDefinition::radar),
+            Signature.CODEC.optionalFieldOf("signature", Signature.DEFAULT).forGetter(AircraftDefinition::signature),
             Countermeasures.CODEC.optionalFieldOf("countermeasures", Countermeasures.DEFAULT)
                     .forGetter(AircraftDefinition::countermeasures),
             Vtol.CODEC.optionalFieldOf("vtol").forGetter(AircraftDefinition::vtol),
@@ -65,6 +67,7 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
             CameraMount.DEFAULT,
             SoundSetup.DEFAULT,
             Radar.DEFAULT,
+            Signature.DEFAULT,
             Countermeasures.DEFAULT,
             Optional.empty(),
             List.of(),
@@ -449,6 +452,48 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
     }
 
     /**
+     * How big the aircraft looks to somebody else's radar.
+     *
+     * <p>Not how big it <em>is</em>. A radar return depends on shape and on what the surface is made
+     * of far more than on size: an aeroplane built to scatter what it is painted with can be the size
+     * of a fighter and return what a bird does, and one hung about with pylons and missiles returns
+     * far more than its own airframe would. Which is the whole of this: a number for the clean
+     * airframe, and what each thing bolted to the outside adds to it.
+     *
+     * <p><b>The relationship to range is not linear.</b> A radar's reach against a target goes as the
+     * fourth root of its cross-section, because the return falls off with the fourth power of
+     * distance — so a target that returns a sixteenth as much is seen at half the distance, not a
+     * sixteenth of it. Stealth is worth a great deal and is not worth everything; the arithmetic is
+     * the same one aircraft designers are stuck with.
+     *
+     * @param radar cross-section of the clean airframe, against an ordinary fighter's 1.0. A tenth is
+     *              hard to find, a hundredth is very hard. Zero would be invisible, which nothing is
+     * @param store what each store carried <em>externally</em> adds. Stores in a bay add nothing,
+     *              which is what bays are for; see {@link Hardpoint#internal()}
+     */
+    public record Signature(float radar, float store) {
+        public static final Signature DEFAULT = new Signature(1.0F, 0.2F);
+
+        public static final Codec<Signature> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("radar", DEFAULT.radar()).forGetter(Signature::radar),
+                Codec.FLOAT.optionalFieldOf("store", DEFAULT.store()).forGetter(Signature::store)
+        ).apply(instance, Signature::new));
+
+        /**
+         * How far a radar sees this, as a fraction of what it manages against an ordinary fighter.
+         *
+         * @param cross the cross-section being looked for, airframe and stores together
+         */
+        public static float reach(float cross) {
+            // Never past the radar's own reach. A larger return than an ordinary fighter's would
+            // otherwise be found beyond the range the radar's file gives it, which would make that
+            // figure mean nothing in particular; a small return is found closer in, and that is all
+            // this is for.
+            return (float) Math.min(Math.pow(Math.max(cross, 0.0F), 0.25), 1.0);
+        }
+    }
+
+    /**
      * A thrust-vectoring lift system: the nozzle that swings down and everything that follows from
      * it. Absent for an aeroplane that has to use a runway like everybody else.
      *
@@ -470,12 +515,11 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *                  aeroplane has no control at all, the air not moving over anything
      * @param hoverDrag how quickly a hover bleeds off sideways drift, per tick. Nothing to do with
      *                  the aerodynamic drag above, which does nothing at all at a walking pace
-     * @param conversionSpeed the speed the conversion is finished at, in blocks per tick, and the
-     *                        two things that follow from it. The nozzle will not swing <em>down</em>
-     *                        above it, which stops it being used as an air brake at full speed; and
-     *                        coming back up it is scheduled against the airspeed rather than swung on
-     *                        a stopwatch, reaching fully aft here. Wants to be comfortably above the
-     *                        wing's stalling speed, since that is what the lift is being handed to
+     * @param conversionSpeed the fastest the nozzle will swing <em>down</em>, in blocks per tick,
+     *                        which stops it being used as an air brake at speed. Coming back up is
+     *                        never refused: the lever has to be an answer to trouble, and a nozzle
+     *                        that can only be stowed once the aeroplane is already going fast is one
+     *                        that cannot be stowed by an aeroplane that is not
      */
     public record Vtol(float maxAngle, float rate, float liftThrust, float authority, float hoverDrag,
             float conversionSpeed) {
@@ -483,7 +527,7 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
         /** Quoted in the docs above so the figure to beat is written down beside what beats it. */
         static final String GRAVITY_NOTE = "0.02453 blocks per tick squared";
 
-        public static final Vtol DEFAULT = new Vtol(90.0F, 1.5F, 0.030F, 0.9F, 0.06F, 2.2F);
+        public static final Vtol DEFAULT = new Vtol(90.0F, 1.0F, 0.030F, 0.9F, 0.06F, 2.2F);
 
         public static final Codec<Vtol> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("max_angle", DEFAULT.maxAngle()).forGetter(Vtol::maxAngle),
@@ -548,15 +592,28 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *            put it at the muzzle
      * @param fixed the weapon built in here, or empty for a pylon
      */
-    public record Hardpoint(String name, Vec3 pos, Optional<ResourceLocation> fixed) {
+    public record Hardpoint(String name, Vec3 pos, Optional<ResourceLocation> fixed, boolean internal) {
         public static final Codec<Hardpoint> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.optionalFieldOf("name", "").forGetter(Hardpoint::name),
                 Vec3.CODEC.fieldOf("pos").forGetter(Hardpoint::pos),
-                ResourceLocation.CODEC.optionalFieldOf("fixed").forGetter(Hardpoint::fixed)
+                ResourceLocation.CODEC.optionalFieldOf("fixed").forGetter(Hardpoint::fixed),
+                Codec.BOOL.optionalFieldOf("internal", false).forGetter(Hardpoint::internal)
         ).apply(instance, Hardpoint::new));
 
         public boolean isFixed() {
             return this.fixed.isPresent();
+        }
+
+        /**
+         * Whether what hangs here hangs inside the aeroplane.
+         *
+         * <p>Only the radar cares. A store in a bay is carried where nothing can see it and adds
+         * nothing to what the aircraft returns; the same store on a rail under the wing is a corner
+         * reflector bolted to a stealth aeroplane, and undoes a good deal of what the shape bought.
+         * See {@link Signature}.
+         */
+        public boolean internal() {
+            return this.internal;
         }
     }
 

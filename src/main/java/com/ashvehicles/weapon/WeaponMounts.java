@@ -175,6 +175,30 @@ public final class WeaponMounts {
         return false;
     }
 
+    /**
+     * How many stores are carried where a radar can see them.
+     *
+     * <p>Counted rather than weighed: what a radar objects to is the corner an external store makes
+     * with the wing it is hanging under, and a small missile makes very nearly as bad a one as a
+     * large bomb. A gun built into the airframe is part of the shape and is not a store at all.
+     */
+    public int externalStores() {
+        this.ensureLayout();
+
+        int outside = 0;
+
+        for (int slot = 0; slot < this.mounts.length; slot++) {
+            AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
+
+            if (hardpoint != null && !hardpoint.isFixed() && !hardpoint.internal()
+                    && !this.mounts[slot].isEmpty()) {
+                outside++;
+            }
+        }
+
+        return outside;
+    }
+
     /** Every distinct weapon aboard, in hardpoint order. */
     public List<ResourceLocation> carried() {
         List<ResourceLocation> weapons = new ArrayList<>();
