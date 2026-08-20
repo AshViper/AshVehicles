@@ -43,6 +43,17 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * {@link com.ashvehicles.client.sound.BlastSounds}.
  */
 public final class WeaponEffects {
+    /**
+     * Nothing the mod sets off leaves anything burning.
+     *
+     * <p>An explosion in Minecraft can scatter fire over everything it did not destroy, and half a
+     * tonne of high explosive scatters it a long way. What that gives is not a battlefield but a
+     * forest fire that spreads for the rest of the evening across ground nobody is looking at any
+     * more — every bomb quietly setting light to a landscape the pilot has already flown away from.
+     * The blast, the crater and the wave are the weapon; the fire afterwards is somebody else's mod.
+     */
+    private static final boolean NO_FIRE = false;
+
     /** Soot: the colour of the cloud a blast leaves, whatever the weapon's own colour is. */
     private static final int SOOT = 0x3A3631;
     /** And of what it throws off, which is burning rather than glowing. */
@@ -52,14 +63,17 @@ public final class WeaponEffects {
     private static final float BIGGEST = 12.0F;
 
     /**
-     * The smallest blast that throws a wave worth drawing. Below it there is nothing to see: a
-     * warhead the size of a missile's does its work in a few blocks, and a ring racing out of one
-     * would be an aeroplane's worth of effect for a hand grenade's worth of explosive. Bombs are
-     * comfortably over it; a rocket is comfortably under.
+     * How far the wave runs, in blocks, for every point of blast.
+     *
+     * <p>This is the whole of what decides its size, so a warhead twice the size throws a ring twice
+     * as wide and everything that goes off throws one of some size: a rocket's is a few blocks
+     * across, a heavy bomb's covers a hundred feet of ground. Turn this one figure up and every
+     * weapon's wave grows with it, in proportion.
+     *
+     * <p>Further than the blast itself reaches, deliberately. What is drawn here is the dust an
+     * explosion throws outwards, which in life runs well beyond anything it actually damages.
      */
-    private static final float WAVE = 4.0F;
-    /** How far the wave runs, per point of blast. */
-    private static final float WAVE_REACH = 2.2F;
+    private static final float WAVE_REACH = 2.8F;
     /** Held clear of the ground it is running over, so the ring does not fight it for the pixels. */
     private static final double WAVE_LIFT = 0.35;
     /**
@@ -98,10 +112,7 @@ public final class WeaponEffects {
         if (power > 0.0F) {
             fireball(level, at, power, round.tracer());
             boom(level, at, power);
-
-            if (power >= WAVE) {
-                wave(level, at, power);
-            }
+            wave(level, at, power);
         } else {
             sparks(level, at, round.tracer(), 1.0F);
         }
@@ -125,7 +136,9 @@ public final class WeaponEffects {
      * {@link com.ashvehicles.client.particle.ShockwaveParticle}.
      *
      * <p>The colour it carries is the dust's; the ring whitens itself against it, being squeezed air
-     * rather than ground.
+     * rather than ground. The size it carries is how far the front is to run, which is the blast's
+     * own size and nothing else — see {@link #WAVE_REACH} — so every warhead throws a wave in
+     * proportion to itself rather than only the ones over some threshold.
      */
     private static void wave(ServerLevel level, Vec3 at, float power) {
         send(level, at.add(0.0, WAVE_LIFT, 0.0),
@@ -162,7 +175,7 @@ public final class WeaponEffects {
         ParticleOptions fireball = ModParticles.BLAST.get().of(round.tracer(), power * 0.3F);
 
         level.explode(source, Explosion.getDefaultDamageSource(level, source), null,
-                at.x, at.y, at.z, round.explosion(), round.fire(), Level.ExplosionInteraction.MOB,
+                at.x, at.y, at.z, round.explosion(), NO_FIRE, Level.ExplosionInteraction.MOB,
                 fireball, fireball, SILENCE);
     }
 

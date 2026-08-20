@@ -25,10 +25,12 @@ import net.minecraft.sounds.SoundEvent;
  */
 public final class ProjectileSounds {
     /**
-     * How often a round with no live sound is looked at again. Short, because these do not live long,
-     * and because one fired well out of earshot can be on top of the listener a second later.
+     * How often a round with no live sound is looked at again. Every tick, because a round at thirty
+     * blocks a tick is a hundred and fifty blocks away five ticks after it left the rail — most of
+     * the way to the edge of earshot before anything had started, which was heard as a rocket that
+     * makes no noise at all. There are never many of these in the air, and the check is a map lookup.
      */
-    private static final int RETRY_TICKS = 5;
+    private static final int RETRY_TICKS = 1;
 
     /** Every round in the air this client can see, and the noise it is making. */
     public static final LiveSounds<RocketEntity> SOUNDS =
@@ -38,12 +40,9 @@ public final class ProjectileSounds {
     private static ProjectileSoundInstance start(RocketEntity projectile) {
         ProjectileSoundInstance.Kind kind = ProjectileSoundInstance.Kind.of(projectile.getWeapon());
 
-        // A motor that has already burnt out is not going to start making a noise again. Being out of
-        // earshot is worth asking about again, on the other hand, since these move faster than
-        // anything else in the sky.
-        if (kind == null
-                || (kind == ProjectileSoundInstance.Kind.MOTOR && !projectile.isBurning())
-                || EntitySoundInstance.falloff(projectile, kind.range) <= 0.0F) {
+        // Out of earshot is worth asking about again, since these move faster than anything else in
+        // the sky and one fired from a long way off can be overhead a second later.
+        if (kind == null || EntitySoundInstance.falloff(projectile, kind.range) <= 0.0F) {
             return null;
         }
 

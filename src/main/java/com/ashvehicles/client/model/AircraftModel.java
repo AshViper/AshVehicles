@@ -26,6 +26,16 @@ import software.bernie.geckolib.model.GeoModel;
 public class AircraftModel extends GeoModel<AircraftEntity> {
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
 
+    /**
+     * How far the nozzle swings on the model, in degrees.
+     *
+     * <p>Kept here rather than read from the aircraft's {@code vtol.max_angle}, which is a figure
+     * about thrust rather than about geometry. What the physics does with ninety degrees is fixed;
+     * what the model has to do to look like ninety degrees depends on how the nozzle was built, and
+     * flipping the sign here is how a nozzle that swings the wrong way is fixed.
+     */
+    private static final float NOZZLE_TRAVEL = 90.0F;
+
     // Travel of each moving part, in degrees. Flip a sign here if a part swings the wrong way.
     private static final float ELEVATOR_TRAVEL = 20.0F;
     private static final float AILERON_TRAVEL = 20.0F;
@@ -105,7 +115,8 @@ public class AircraftModel extends GeoModel<AircraftEntity> {
      * @param sweepGear whether to swing the gear from here, for an aircraft with no gear cycle in
      *        its animation file to play it from
      */
-    public record Pose(float elevator, float aileron, float rudder, float gear, float flaps, boolean sweepGear) {
+    public record Pose(float elevator, float aileron, float rudder, float gear, float flaps, float nozzle,
+            boolean sweepGear) {
         /** What the aircraft's surfaces are doing now. */
         public static Pose of(AircraftEntity aircraft, float partialTick) {
             // Pulling the nose up drops the tailplane's trailing edge, hence the negated pitch delta.
@@ -115,6 +126,7 @@ public class AircraftModel extends GeoModel<AircraftEntity> {
                     deflection(aircraft.getYawDelta(), aircraft.getYawRate(), RUDDER_TRAVEL),
                     aircraft.getGearProgress(partialTick),
                     aircraft.getFlapsProgress(partialTick),
+                    aircraft.getVtolProgress(partialTick),
                     !AircraftAnimations.hasGearCycle(aircraft));
         }
     }
@@ -149,6 +161,12 @@ public class AircraftModel extends GeoModel<AircraftEntity> {
 
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_LEFT, pose.flaps() * FLAP_TRAVEL);
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_RIGHT, pose.flaps() * FLAP_TRAVEL);
+
+        // The nozzle swings the whole way down rather than a few degrees like a control surface, and
+        // it is posed from here rather than animated because it is one angle rather than a sequence:
+        // the aircraft already knows how far through the conversion it is, and the doors that open
+        // with it are the animation file's business. See AircraftAnimations.
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE, pose.nozzle() * NOZZLE_TRAVEL);
     }
 
     /** Maps a rotation rate onto a control surface: full travel once the aircraft turns at its limit. */

@@ -153,7 +153,8 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      * standing start still gets going and why the aircraft can outrun its own rockets for a moment
      * after launch.
      *
-     * @param damage dealt to whatever it hits directly. Aircraft take it ten times over, like boats
+     * @param damage dealt to whatever it hits directly, in the same points a player is worth twenty
+     *               of. An airframe is worth a few hundred and takes it point for point
      * @param speed the speed it leaves at, in blocks per tick. The aircraft's own speed is added on
      * @param thrust acceleration from the motor, in blocks per tick squared, while it is burning
      * @param burnTicks how long the motor burns. Zero for something with no motor at all
@@ -162,16 +163,17 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      * @param range how far it flies before it is given up on, in blocks
      * @param explosion blast made where it lands, in the same units as TNT's four. Zero for
      *                  something that simply hits
-     * @param fire whether the blast sets light to what it lands on
      * @param tracer colour it is drawn in, as {@code RRGGBB}
      * @param trail the smoke it leaves behind it, if it leaves any
+     * @param chunkLoading whether it holds the ground under it open, or empty to decide from whether
+     *                     it carries a warhead. See {@link #loadsChunks()}
      */
     public record Projectile(float damage, float speed, float thrust, int burnTicks, float topSpeed,
-            float gravity, float range, float explosion, boolean fire, int tracer,
+            float gravity, float range, float explosion, int tracer,
             Optional<Trail> trail, Optional<Boolean> chunkLoading) {
 
         public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0.0F, 0.02F,
-                200.0F, 0.0F, false, 0xFFC864, Optional.empty(), Optional.empty());
+                200.0F, 0.0F, 0xFFC864, Optional.empty(), Optional.empty());
 
         /**
          * Reads the whole description of a trail, or the plain {@code true} that used to be all
@@ -195,7 +197,6 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
                 Codec.FLOAT.optionalFieldOf("gravity", 0.02F).forGetter(Projectile::gravity),
                 Codec.FLOAT.optionalFieldOf("range", 300.0F).forGetter(Projectile::range),
                 Codec.FLOAT.optionalFieldOf("explosion", 0.0F).forGetter(Projectile::explosion),
-                Codec.BOOL.optionalFieldOf("fire", false).forGetter(Projectile::fire),
                 COLOUR.optionalFieldOf("tracer", 0xFFC864).forGetter(Projectile::tracer),
                 TRAIL.optionalFieldOf("trail", Optional.empty()).forGetter(Projectile::trail),
                 Codec.BOOL.optionalFieldOf("chunk_loading").forGetter(Projectile::chunkLoading)
@@ -282,7 +283,39 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      * @param proximity how close it must get before it goes off, in blocks. A missile need not hit
      */
     public record Guidance(float turnRate, float lockAngle, float lockRange, int lockTicks,
-            float trackAngle, float proximity) {
+            float trackAngle, float proximity, Seeker seeker) {
+
+        /**
+         * What the seeker is looking at, and so what will fool it.
+         *
+         * <p>The whole of the point of having two sorts of countermeasure. A pilot who has been told
+         * they are locked has a second or two to decide which handle to pull, and pulling the wrong
+         * one leaves the missile exactly where it was.
+         */
+        public enum Seeker implements StringRepresentable {
+            /** Homes on heat, and follows a flare instead. */
+            HEAT("heat"),
+            /** Homes on a radar return, and follows a cloud of chaff instead. */
+            RADAR("radar");
+
+            public static final Codec<Seeker> CODEC = StringRepresentable.fromEnum(Seeker::values);
+
+            private final String name;
+
+            Seeker(String name) {
+                this.name = name;
+            }
+
+            @Override
+            public String getSerializedName() {
+                return this.name;
+            }
+
+            /** Whether a flare is what fools this one; chaff is what fools the other. */
+            public boolean foolLetsGoOfFlares() {
+                return this == HEAT;
+            }
+        }
 
         public static final Codec<Guidance> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("turn_rate", 6.0F).forGetter(Guidance::turnRate),
@@ -290,7 +323,8 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
                 Codec.FLOAT.optionalFieldOf("lock_range", 220.0F).forGetter(Guidance::lockRange),
                 Codec.INT.optionalFieldOf("lock_ticks", 20).forGetter(Guidance::lockTicks),
                 Codec.FLOAT.optionalFieldOf("track_angle", 75.0F).forGetter(Guidance::trackAngle),
-                Codec.FLOAT.optionalFieldOf("proximity", 2.5F).forGetter(Guidance::proximity)
+                Codec.FLOAT.optionalFieldOf("proximity", 2.5F).forGetter(Guidance::proximity),
+                Seeker.CODEC.optionalFieldOf("seeker", Seeker.HEAT).forGetter(Guidance::seeker)
         ).apply(instance, Guidance::new));
     }
 
@@ -305,6 +339,34 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      */
     public record SoundSetup(Optional<ResourceLocation> fire, float volume, float pitch) {
         public static final SoundSetup DEFAULT = new SoundSetup(Optional.empty(), 2.0F, 1.0F);
+
+        /**
+         * How far a weapon this loud is heard, in blocks, per point of volume.
+         *
+         * <p>Nothing to do with how loud it is next to the aeroplane, which is {@link #volume()}.
+         * A cannon in life is heard across a valley and an aeroplane fights across several of them,
+         * so a figure of a few hundred blocks is the one that matters and the loudness at the far end
+         * is worked out from it. See {@link com.ashvehicles.client.sound.WeaponSounds}.
+         */
+        private static final float CARRY_PER_VOLUME = 160.0F;
+
+        /** How far this weapon is heard, in blocks. */
+        public float carry() {
+            return Math.max(this.volume, 0.0F) * CARRY_PER_VOLUME;
+        }
+
+        /**
+         * The loudness to hand the game when asking it to send the sound.
+         *
+         * <p>A fiction, and the only one available. The server sends a sound to everyone within
+         * {@code max(volume, 1) * 16} blocks and to nobody else, so the volume is not really a
+         * loudness at all — it is the only way to say how far a sound should travel. What arrives
+         * would be deafening if it were played as sent, so the client throws the figure away and
+         * works out the real loudness from the distance instead.
+         */
+        public float packetVolume() {
+            return Math.max(this.carry() / 16.0F, 1.0F);
+        }
 
         public static final Codec<SoundSetup> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("fire").forGetter(SoundSetup::fire),

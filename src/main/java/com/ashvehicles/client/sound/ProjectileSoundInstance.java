@@ -13,10 +13,10 @@ import net.minecraft.util.Mth;
 /**
  * What a weapon sounds like on its way to where it is going.
  *
- * <p>Two things it can be, and which one is decided by the weapon rather than by the entity: a motor
- * burning, which is a rocket or a missile for the few seconds its charge lasts, or the air past
- * something falling, which is a bomb for the whole of the way down. A gun's round makes neither; it
- * is already there.
+ * <p>Two things it can be, and which one is decided by the weapon rather than by the entity: the
+ * noise a rocket or a missile makes for the whole of its flight, loudest while the motor is still
+ * pushing, or the air past something falling, which is a bomb for the whole of the way down. A gun's
+ * round makes neither; it is already there.
  *
  * <p>Both are loops that follow the round, and both are worth having only because the sound engine's
  * own sixty-four blocks are useless here. A missile crosses that in two seconds and a bomb is
@@ -34,6 +34,11 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
     public ProjectileSoundInstance(RocketEntity projectile, SoundEvent sound, Kind kind) {
         super(projectile, sound, SoundSource.NEUTRAL, SILENT_TICKS_BEFORE_STOP);
         this.kind = kind;
+        // At its full loudness from the first tick rather than swelling into it. A motor is already
+        // burning when it leaves the rail, and a round that has to fade up over a quarter of a second
+        // has spent that quarter of a second travelling eight blocks a tick away from the listener:
+        // by the time it was loud it was too far off to hear.
+        this.gain = kind.targetGain(projectile);
     }
 
     @Override
@@ -58,14 +63,18 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
      */
     public enum Kind {
         /**
-         * A motor: on while it burns, and gone shortly after it stops. It is not carried on into the
-         * coast, because what a missile is doing after burnout is falling quietly and the loop would
-         * be the only thing saying otherwise.
+         * A motor while it burns, and the air past the thing afterwards.
+         *
+         * <p>It does not stop at burnout. A rocket motor burns for a second, and a missile is in the
+         * air for ten or twenty — cutting the sound with the motor left the whole interesting part of
+         * the flight silent, which is not what anybody means by a flight sound. So the note drops
+         * back at burnout, to what something crossing thirty blocks a tick sounds like when nothing
+         * is pushing it, and stays there until it hits.
          */
-        MOTOR(ModSounds.FLIGHT_ROLE, ModSounds.FLIGHT, 160.0, 0.9F, 0.25F) {
+        MOTOR(ModSounds.FLIGHT_ROLE, ModSounds.FLIGHT, 480.0, 0.9F, 0.25F) {
             @Override
             float targetGain(RocketEntity projectile) {
-                return projectile.isBurning() ? 1.0F : 0.0F;
+                return projectile.isBurning() ? 1.0F : COASTING;
             }
 
             @Override
@@ -79,7 +88,7 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
          * going down rather than how fast it is going, because a bomb leaves with the whole of the
          * aeroplane's speed and none of that is the sound of it falling.
          */
-        FALL(ModSounds.FALL_ROLE, ModSounds.FALL, 192.0, 1.0F, 0.15F) {
+        FALL(ModSounds.FALL_ROLE, ModSounds.FALL, 400.0, 1.0F, 0.15F) {
             @Override
             float targetGain(RocketEntity projectile) {
                 return Mth.clamp((float) -projectile.getDeltaMovement().y / FULL_FALL, 0.0F, 1.0F);
@@ -91,6 +100,8 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
             }
         };
 
+        /** How much of the motor's own note is left once it has burnt out and is merely travelling. */
+        private static final float COASTING = 0.55F;
         /** Falling this fast, in blocks a tick, is as loud and as high as the whistle gets. */
         private static final float FULL_FALL = 2.0F;
         private static final float LOW_PITCH = 0.75F;

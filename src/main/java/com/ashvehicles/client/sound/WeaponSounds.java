@@ -10,6 +10,7 @@ import javax.annotation.Nullable;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftManager;
+import com.ashvehicles.weapon.Dispenser;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 
@@ -19,6 +20,8 @@ import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -69,6 +72,13 @@ public final class WeaponSounds {
             ResourceLocation.withDefaultNamespace("block.iron_trapdoor.close");
 
     /**
+     * And what the countermeasure dispenser falls back on: the game's own firework, which is the
+     * nearest thing it has to something being thrown out of an aeroplane and set alight.
+     */
+    private static final ResourceLocation DECOY_FALLBACK =
+            ResourceLocation.withDefaultNamespace("entity.firework_rocket.launch");
+
+    /**
      * How loud the ground crew are. The same figures the server asked for, taken from the one place
      * that owns them, because they cannot be read back off the sound at this point. The pitch is the
      * one used for hanging a store: a stand-in for a sound the pack does not have is not worth
@@ -76,6 +86,19 @@ public final class WeaponSounds {
      */
     private static final WeaponDefinition.SoundSetup LOAD_SETUP = new WeaponDefinition.SoundSetup(
             Optional.empty(), WeaponMounts.LOAD_VOLUME, WeaponMounts.LOAD_PITCH);
+
+    /** The same, for the dispenser, whose figures live with the dispenser. */
+    private static final WeaponDefinition.SoundSetup DECOY_SETUP = new WeaponDefinition.SoundSetup(
+            Optional.empty(), Dispenser.RELEASE_VOLUME, Dispenser.RELEASE_PITCH);
+
+    /**
+     * How a report quietens with distance. Under one, so it drops away sharply at first and then
+     * hangs on a long way out, which is both what loudness does to the ear and what makes the far
+     * end of the carry worth having.
+     */
+    private static final float FALLOFF = 0.85F;
+    /** And how much of its edge it loses over the whole carry: a crack up close is a thud a mile off. */
+    private static final float DULLING = 0.45F;
 
     private static final Set<ResourceLocation> WARNED = new HashSet<>();
     /** Whether the log already carries one report of this going wrong. */
@@ -114,12 +137,19 @@ public final class WeaponSounds {
         }
 
         SoundManager sounds = Minecraft.getInstance().getSoundManager();
+        WeaponDefinition firing = weaponFor(id);
 
         if (ModSounds.exists(sounds, id)) {
+            // The recording is there; only how loud it should be at this distance is wrong, and only
+            // for a weapon's report, which is the only thing sent further than the game would send it.
+            if (firing != null) {
+                event.setSound(instance(SoundEvent.createVariableRangeEvent(id), sound, firing.sound(), firing));
+            }
+
             return;
         }
 
-        WeaponDefinition weapon = weaponFor(id);
+        WeaponDefinition weapon = firing;
         ResourceLocation fallback = fallbackFor(sounds, id, weapon);
 
         if (fallback == null) {
@@ -131,10 +161,44 @@ public final class WeaponSounds {
         }
 
         // Same place and the same figures whatever asked for it wanted: only the recording changes.
-        WeaponDefinition.SoundSetup setup = setupFor(id, weapon);
-        event.setSound(new SimpleSoundInstance(SoundEvent.createVariableRangeEvent(fallback),
-                sound.getSource(), setup.volume(), setup.pitch(), SoundInstance.createUnseededRandom(),
-                sound.getX(), sound.getY(), sound.getZ()));
+        event.setSound(instance(SoundEvent.createVariableRangeEvent(fallback), sound, setupFor(id, weapon), weapon));
+    }
+
+    /**
+     * Puts a weapon's report where it belongs at the distance it is being heard from.
+     *
+     * <p>The sound arrived carrying a volume that is not a volume: the server had to put the reach in
+     * that slot, because the reach is all that slot decides — see
+     * {@link WeaponDefinition.SoundSetup#packetVolume()}. Played as sent, a cannon three hundred
+     * blocks away would be as loud as one in the cockpit.
+     *
+     * <p>So the figure is thrown away and the real one worked out here, from the one thing only this
+     * side knows: how far the listener is standing from where it went off. The shape is the one the
+     * blast uses, for the same reasons — it quietens sharply at first and then carries a long way,
+     * and it loses its edge as it goes, because air swallows the high frequencies first and a crack
+     * across a valley is a thud. See {@link BlastSounds}.
+     *
+     * <p>Attenuation is switched off, since the distance is already in the volume, but the sound is
+     * still placed where it happened so it comes from the right direction.
+     */
+    private static SimpleSoundInstance instance(SoundEvent recording, SoundInstance sound,
+            WeaponDefinition.SoundSetup setup, @Nullable WeaponDefinition weapon) {
+        if (weapon == null) {
+            // Not a weapon firing: ground crew and the like, which are heard where they happen and
+            // were never sent any further than that.
+            return new SimpleSoundInstance(recording, sound.getSource(), setup.volume(), setup.pitch(),
+                    SoundInstance.createUnseededRandom(), sound.getX(), sound.getY(), sound.getZ());
+        }
+
+        Vec3 at = new Vec3(sound.getX(), sound.getY(), sound.getZ());
+        double away = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition().distanceTo(at);
+        float fade = (float) Mth.clamp(away / Math.max(setup.carry(), 1.0F), 0.0, 1.0);
+
+        return new SimpleSoundInstance(recording.getLocation(), sound.getSource(),
+                setup.volume() * (float) Math.pow(1.0F - fade, FALLOFF),
+                setup.pitch() * (1.0F - fade * DULLING),
+                SoundInstance.createUnseededRandom(), false, 0, SoundInstance.Attenuation.NONE,
+                at.x, at.y, at.z, false);
     }
 
     /**
@@ -146,6 +210,10 @@ public final class WeaponSounds {
             @Nullable WeaponDefinition weapon) {
         if (id.equals(ModSounds.LOAD)) {
             return LOAD_FALLBACK;
+        }
+
+        if (id.equals(ModSounds.DECOY)) {
+            return DECOY_FALLBACK;
         }
 
         if (id.equals(ModSounds.RELEASE)) {
@@ -172,7 +240,11 @@ public final class WeaponSounds {
             return weapon.sound();
         }
 
-        return id.equals(ModSounds.LOAD) ? LOAD_SETUP : WeaponDefinition.SoundSetup.DEFAULT;
+        if (id.equals(ModSounds.LOAD)) {
+            return LOAD_SETUP;
+        }
+
+        return id.equals(ModSounds.DECOY) ? DECOY_SETUP : WeaponDefinition.SoundSetup.DEFAULT;
     }
 
     /**

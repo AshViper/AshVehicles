@@ -86,7 +86,13 @@
     "idle_volume": 0.35,
     "pitch_min": 0.7,
     "pitch_max": 1.25,
-    "range": 128
+    "range": 512
+  },
+  "radar": {
+    "range": 2000.0,
+    "arc": 45.0,
+    "sweep_ticks": 12,
+    "warning_range": 3000.0
   },
   "hardpoints": [
     {

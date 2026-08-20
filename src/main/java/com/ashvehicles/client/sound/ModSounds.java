@@ -3,6 +3,7 @@ package com.ashvehicles.client.sound;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.weapon.Dispenser;
 import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.client.sounds.SoundManager;
@@ -43,6 +44,8 @@ public final class ModSounds {
     public static final String GEAR_PREFIX = "gear.";
     /** {@code weapon.<weapon>}, and {@code weapon.<weapon>.<role>} for everything but the report. */
     public static final String WEAPON_PREFIX = WeaponMounts.SOUND_PREFIX;
+    /** {@code rwr.<role>}: the warning receiver, which belongs to no particular weapon. */
+    public static final String RWR_PREFIX = "rwr.";
 
     /** The role of a sound a weapon makes other than firing, as the tail of its name. */
     public static final String FLIGHT_ROLE = "flight";
@@ -68,6 +71,8 @@ public final class ModSounds {
     public static final ResourceLocation RELEASE = id(WEAPON_PREFIX + "release");
     /** Ground crew hanging a store on a pylon, or taking one back off. Named by the server. */
     public static final ResourceLocation LOAD = WeaponMounts.LOAD_SOUND;
+    /** The countermeasure dispenser letting one go. Named by the server. */
+    public static final ResourceLocation DECOY = Dispenser.RELEASE_SOUND;
 
     /** A motor burning, heard from outside, for as long as it burns. Looped, and not shipped. */
     public static final ResourceLocation FLIGHT = id(WEAPON_PREFIX + FLIGHT_ROLE);
@@ -76,6 +81,28 @@ public final class ModSounds {
 
     /** The mod's own bang. See {@link BlastSounds}, which times and shapes it for the distance. */
     public static final ResourceLocation BLAST = id(WEAPON_PREFIX + "blast");
+
+    /**
+     * The warning receiver's tone: one short beep, repeated as fast as the trouble deserves.
+     *
+     * <p>A beep rather than a loop, deliberately. What tells a pilot how much trouble they are in is
+     * the <em>rate</em> — the same note coming twice a second means something is looking at you and
+     * five times a second means it is on its way — so what has to be recorded is one short sound and
+     * nothing else. It also means there is something sensible to fall back on until one is: see
+     * {@link com.ashvehicles.client.sound.WarningSounds}.
+     *
+     * <p>One name per thing the receiver has to say, so that a pack can give each its own note. Any
+     * of them left unrecorded borrows from the ones that are, and a receiver with nothing recorded at
+     * all still beeps — the game's own note block, pitched by how much trouble the pilot is in.
+     *
+     * <p>This one is somebody's radar finding you: one chirp, and then silence until it turns into
+     * something worse.
+     */
+    public static final ResourceLocation RWR_CONTACT = id(RWR_PREFIX + "contact");
+    /** Somebody's seeker has taken you. Beeped twice a second. */
+    public static final ResourceLocation RWR_LOCK = id(RWR_PREFIX + "lock");
+    /** Something has left their rail and is coming for you. Beeped five times a second. */
+    public static final ResourceLocation RWR_MISSILE = id(RWR_PREFIX + "missile");
 
     /** The event named after one aircraft or one weapon: {@code <namespace>:<prefix><name>}. */
     public static ResourceLocation named(ResourceLocation subject, String prefix) {

@@ -8,7 +8,7 @@
     "salvo": 1
   },
   "projectile": {
-    "damage": 30.0,
+    "damage": 80.0,
     "speed": 4.0,
     "thrust": 1.4,
     "burn_ticks": 60,
@@ -27,7 +27,7 @@
   "guidance": {
     "turn_rate": 7.0,
     "lock_angle": 20.0,
-    "lock_range": 250.0,
+    "lock_range": 4500.0,
     "lock_ticks": 20,
     "track_angle": 80.0,
     "proximity": 3.0

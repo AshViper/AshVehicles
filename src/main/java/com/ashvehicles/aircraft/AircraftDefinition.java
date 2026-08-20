@@ -26,7 +26,8 @@ import net.minecraft.world.phys.Vec3;
  */
 public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine, Wing wing,
         Handling handling, Airframe airframe, Undercarriage landingGear, Surface flaps,
-        CameraMount camera, SoundSetup sound, List<Hardpoint> hardpoints) {
+        CameraMount camera, SoundSetup sound, Radar radar, Countermeasures countermeasures,
+        Optional<Vtol> vtol, List<Hardpoint> hardpoints) {
 
     public static final Codec<AircraftDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Hitbox.CODEC.optionalFieldOf("hitbox", Hitbox.DEFAULT).forGetter(AircraftDefinition::hitbox),
@@ -39,6 +40,10 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
             Surface.CODEC.fieldOf("flaps").forGetter(AircraftDefinition::flaps),
             CameraMount.CODEC.optionalFieldOf("camera", CameraMount.DEFAULT).forGetter(AircraftDefinition::camera),
             SoundSetup.CODEC.optionalFieldOf("sound", SoundSetup.DEFAULT).forGetter(AircraftDefinition::sound),
+            Radar.CODEC.optionalFieldOf("radar", Radar.DEFAULT).forGetter(AircraftDefinition::radar),
+            Countermeasures.CODEC.optionalFieldOf("countermeasures", Countermeasures.DEFAULT)
+                    .forGetter(AircraftDefinition::countermeasures),
+            Vtol.CODEC.optionalFieldOf("vtol").forGetter(AircraftDefinition::vtol),
             Hardpoint.CODEC.listOf().optionalFieldOf("hardpoints", List.of()).forGetter(AircraftDefinition::hardpoints)
     ).apply(instance, AircraftDefinition::new));
 
@@ -58,6 +63,9 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
             new Surface(20, 0.5F, 0.4F),
             CameraMount.DEFAULT,
             SoundSetup.DEFAULT,
+            Radar.DEFAULT,
+            Countermeasures.DEFAULT,
+            Optional.empty(),
             List.of());
 
     /**
@@ -131,6 +139,14 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
         public static final String NOSE_GEAR_DOOR = "nose_gear_door";
         public static final String LEFT_GEAR_DOOR = "left_gear_door";
         public static final String RIGHT_GEAR_DOOR = "right_gear_door";
+        /**
+         * The engine nozzle of a lift-capable aircraft, which swings down as the aircraft converts to
+         * the hover. Everything else that opens for a lift system — fan doors, roll posts, auxiliary
+         * intakes — is a sequence rather than one angle, and belongs in the aircraft's animation file
+         * as {@code vtol_open} and {@code vtol_closed}; see
+         * {@link com.ashvehicles.client.model.AircraftAnimations}.
+         */
+        public static final String NOZZLE = "nozzle";
 
         private Bone() {
         }
@@ -300,12 +316,14 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * @param pitchMin playback speed at zero throttle
      * @param pitchMax playback speed at full throttle
      * @param range distance, in blocks, beyond which the engine cannot be heard at all. It fades
-     *              steadily out to there
+     *              steadily out to there. Measured in hundreds of blocks rather than tens: a jet is
+     *              heard long before it is seen, and an aeroplane that goes silent at the edge of the
+     *              render distance is an aeroplane nobody can be sneaked up on by
      */
     public record SoundSetup(Optional<ResourceLocation> engine, Optional<ResourceLocation> gear,
             float volume, float idleVolume, float pitchMin, float pitchMax, float range) {
         public static final SoundSetup DEFAULT =
-                new SoundSetup(Optional.empty(), Optional.empty(), 1.0F, 0.35F, 0.7F, 1.25F, 128.0F);
+                new SoundSetup(Optional.empty(), Optional.empty(), 1.0F, 0.35F, 0.7F, 1.25F, 512.0F);
 
         public static final Codec<SoundSetup> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("engine").forGetter(SoundSetup::engine),
@@ -316,6 +334,135 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
                 Codec.FLOAT.optionalFieldOf("pitch_max", DEFAULT.pitchMax()).forGetter(SoundSetup::pitchMax),
                 Codec.FLOAT.optionalFieldOf("range", DEFAULT.range()).forGetter(SoundSetup::range)
         ).apply(instance, SoundSetup::new));
+    }
+
+    /**
+     * The aircraft's radar, and how far its warning receiver can hear.
+     *
+     * <p>The radar looks forward and nowhere else: it sweeps a cone about the nose, so finding
+     * somebody is a matter of pointing the aeroplane at where they might be, and turning away from a
+     * contact loses it. That is what makes a radar worth having rather than a map of the sky.
+     *
+     * <p>The warning receiver is the other way round and has no cone at all. It hears somebody
+     * else's radar wherever it is coming from, which is the whole point of one: what it is for is
+     * the thing you did not see, and that is behind you.
+     *
+     * @param range how far the radar sees, in blocks — kilometres rather than hundreds of blocks,
+     *              because that is the distance at which one aeroplane finds another and there is
+     *              nothing else out there to find. Zero or less means the aircraft has none, and a
+     *              pilot with no radar has no scope and can lock only what their seeker reaches
+     * @param arc half-angle of the sweep, in degrees off the nose
+     * @param sweepTicks how often the picture is redrawn. A radar does not see continuously; it
+     *                   sweeps, and what is on the scope is where things were when it last passed
+     * @param warningRange how far off somebody can be and still set off the warning receiver, in
+     *                     blocks. Generous next to the radar's own reach: being painted from further
+     *                     away than you can see is exactly the situation worth being told about
+     */
+    public record Radar(float range, float arc, int sweepTicks, float warningRange) {
+        public static final Radar DEFAULT = new Radar(3000.0F, 55.0F, 10, 4000.0F);
+
+        public static final Codec<Radar> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("range", DEFAULT.range()).forGetter(Radar::range),
+                Codec.FLOAT.optionalFieldOf("arc", DEFAULT.arc()).forGetter(Radar::arc),
+                Codec.INT.optionalFieldOf("sweep_ticks", DEFAULT.sweepTicks()).forGetter(Radar::sweepTicks),
+                Codec.FLOAT.optionalFieldOf("warning_range", DEFAULT.warningRange()).forGetter(Radar::warningRange)
+        ).apply(instance, Radar::new));
+
+        /** Whether there is a radar aboard at all. */
+        public boolean fitted() {
+            return this.range > 0.0F;
+        }
+
+        /** The furthest anything is worth looking for: the radar's reach or the receiver's. */
+        public double reach() {
+            return Math.max(this.range, this.warningRange);
+        }
+    }
+
+    /**
+     * A thrust-vectoring lift system: the nozzle that swings down and everything that follows from
+     * it. Absent for an aeroplane that has to use a runway like everybody else.
+     *
+     * <p>What a nozzle at ninety degrees does is turn the engine from something that pushes the
+     * aircraft along into something that holds it up, and the flight model needs nothing else told to
+     * it — the wing stops making lift on its own once the aircraft has stopped moving, and gravity
+     * was always there. The three figures below are what the engine has to be worth for that to work,
+     * what flies the aeroplane once the wing has given up, and what stops a hover being a slide.
+     *
+     * @param maxAngle how far the nozzle swings, in degrees. Ninety is straight down
+     * @param rate how fast it swings, in degrees per tick. The whole conversion at ninety degrees
+     *             therefore takes {@code maxAngle / rate} ticks
+     * @param liftThrust acceleration the engine manages with the nozzle fully down, in blocks per
+     *                   tick squared. <b>It has to beat gravity</b> — {@value #GRAVITY_NOTE} — or the
+     *                   aeroplane cannot hover, only fall slowly. Between the two ends it is blended
+     *                   with the ordinary {@code engine.max_thrust}, so cruise thrust is unaffected
+     * @param authority how much control the reaction jets give with the nozzle fully down, as a
+     *                  fraction of what a wing at flying speed gives. Without this a hovering
+     *                  aeroplane has no control at all, the air not moving over anything
+     * @param hoverDrag how quickly a hover bleeds off sideways drift, per tick. Nothing to do with
+     *                  the aerodynamic drag above, which does nothing at all at a walking pace
+     * @param conversionSpeed the speed the conversion is finished at, in blocks per tick, and the
+     *                        two things that follow from it. The nozzle will not swing <em>down</em>
+     *                        above it, which stops it being used as an air brake at full speed; and
+     *                        coming back up it is scheduled against the airspeed rather than swung on
+     *                        a stopwatch, reaching fully aft here. Wants to be comfortably above the
+     *                        wing's stalling speed, since that is what the lift is being handed to
+     */
+    public record Vtol(float maxAngle, float rate, float liftThrust, float authority, float hoverDrag,
+            float conversionSpeed) {
+
+        /** Quoted in the docs above so the figure to beat is written down beside what beats it. */
+        static final String GRAVITY_NOTE = "0.02453 blocks per tick squared";
+
+        public static final Vtol DEFAULT = new Vtol(90.0F, 1.5F, 0.030F, 0.9F, 0.06F, 2.2F);
+
+        public static final Codec<Vtol> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("max_angle", DEFAULT.maxAngle()).forGetter(Vtol::maxAngle),
+                Codec.FLOAT.optionalFieldOf("rate", DEFAULT.rate()).forGetter(Vtol::rate),
+                Codec.FLOAT.optionalFieldOf("lift_thrust", DEFAULT.liftThrust()).forGetter(Vtol::liftThrust),
+                Codec.FLOAT.optionalFieldOf("authority", DEFAULT.authority()).forGetter(Vtol::authority),
+                Codec.FLOAT.optionalFieldOf("hover_drag", DEFAULT.hoverDrag()).forGetter(Vtol::hoverDrag),
+                Codec.FLOAT.optionalFieldOf("conversion_speed", DEFAULT.conversionSpeed())
+                        .forGetter(Vtol::conversionSpeed)
+        ).apply(instance, Vtol::new));
+
+        /** Ticks the nozzle takes to travel from stowed to fully down. */
+        public int cycleTicks() {
+            return (int) Math.max(this.maxAngle / Math.max(this.rate, 1.0E-3F), 1.0F);
+        }
+    }
+
+    /**
+     * What the aircraft can throw out behind it to spoil somebody's aim.
+     *
+     * <p>Two sorts, and which one to reach for is the question the warning receiver has just
+     * answered. A flare is a fire hotter than an engine and fools anything homing on heat; chaff is
+     * a cloud of foil that fools anything homing on a radar return. Firing the wrong one is firing
+     * nothing at all, which is what makes the receiver worth reading rather than worth ignoring.
+     *
+     * @param flares how many are carried, or zero for an aircraft that carries none
+     * @param chaff the same, for the other sort
+     * @param intervalTicks how quickly the dispenser will let go of the next one. Held down, this is
+     *                      the rate at which the load is spent
+     * @param reloadTicks how long the ground crew take to refill a whole load, with the aircraft
+     *                    parked. Counted for the full load however much of it is missing
+     * @param speed how hard they are thrown clear of the aircraft, in blocks per tick
+     */
+    public record Countermeasures(int flares, int chaff, int intervalTicks, int reloadTicks, float speed) {
+        public static final Countermeasures DEFAULT = new Countermeasures(30, 30, 6, 300, 0.35F);
+
+        public static final Codec<Countermeasures> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.INT.optionalFieldOf("flares", DEFAULT.flares()).forGetter(Countermeasures::flares),
+                Codec.INT.optionalFieldOf("chaff", DEFAULT.chaff()).forGetter(Countermeasures::chaff),
+                Codec.INT.optionalFieldOf("interval_ticks", DEFAULT.intervalTicks()).forGetter(Countermeasures::intervalTicks),
+                Codec.INT.optionalFieldOf("reload_ticks", DEFAULT.reloadTicks()).forGetter(Countermeasures::reloadTicks),
+                Codec.FLOAT.optionalFieldOf("speed", DEFAULT.speed()).forGetter(Countermeasures::speed)
+        ).apply(instance, Countermeasures::new));
+
+        /** How many of the given sort are carried when full. */
+        public int capacity(boolean flare) {
+            return flare ? this.flares : this.chaff;
+        }
     }
 
     /**

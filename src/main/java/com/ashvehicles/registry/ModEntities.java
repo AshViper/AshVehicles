@@ -9,6 +9,7 @@ import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.aircraft.AircraftLoader;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.BulletEntity;
+import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.entity.RocketEntity;
 
 import net.minecraft.core.registries.Registries;
@@ -65,6 +66,24 @@ public final class ModEntities {
                             .updateInterval(5)
                             .setShouldReceiveVelocityUpdates(false)
                             .build("rocket"));
+
+    /**
+     * A flare or a cloud of chaff. Small, short-lived, and worth seeing from as far off as the
+     * missile chasing it, which is the whole spectacle.
+     */
+    public static final DeferredHolder<EntityType<?>, EntityType<CountermeasureEntity>> COUNTERMEASURE =
+            ENTITY_TYPES.register("countermeasure",
+                    () -> EntityType.Builder.<CountermeasureEntity>of(CountermeasureEntity::new, MobCategory.MISC)
+                            .sized(0.3F, 0.3F)
+                            .clientTrackingRange(32)
+                            // Thrown once and then left to fall. Corrected often, because it is
+                            // thrown with a share of the aeroplane's speed and the packet that
+                            // spawns it cannot carry more than 3.9 blocks a tick of that -- but
+                            // slowly enough that the corrections are ordinary relative moves rather
+                            // than the teleports a fast round needs.
+                            .updateInterval(2)
+                            .setShouldReceiveVelocityUpdates(false)
+                            .build("countermeasure"));
 
     private static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> registerAll() {
         Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> types = new LinkedHashMap<>();

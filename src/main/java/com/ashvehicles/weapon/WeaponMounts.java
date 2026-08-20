@@ -538,9 +538,14 @@ public final class WeaponMounts {
         ResourceLocation event = weapon.sound().fire()
                 .orElseGet(() -> weaponId.withPath(SOUND_PREFIX + weaponId.getPath()));
 
+        // Sent with the reach in the volume slot rather than the loudness: that slot is the only
+        // thing deciding who is told about the sound at all, and at the weapon's own loudness the
+        // answer is "everyone within thirty-two blocks", which in an air battle is nobody. What it
+        // should actually sound like where it arrives is settled on the client, which is the only
+        // side that knows how far away it is standing. See WeaponSounds.
         this.aircraft.level().playSound(null, this.aircraft.getX(), this.aircraft.getY(), this.aircraft.getZ(),
                 SoundEvent.createVariableRangeEvent(event), SoundSource.NEUTRAL,
-                weapon.sound().volume(), weapon.sound().pitch());
+                weapon.sound().packetVolume(), weapon.sound().pitch());
     }
 
     /**

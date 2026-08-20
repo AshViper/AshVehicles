@@ -41,6 +41,7 @@ public final class AircraftInputHandler {
         // and fire the moment the player climbs in.
         boolean toggleGear = ModKeyMappings.TOGGLE_GEAR.consumeClick();
         boolean toggleFlaps = ModKeyMappings.TOGGLE_FLAPS.consumeClick();
+        boolean toggleVtol = ModKeyMappings.TOGGLE_VTOL.consumeClick();
         boolean cycleWeapon = ModKeyMappings.CYCLE_WEAPON.consumeClick();
         AircraftEntity aircraft = pilotedAircraft(player);
 
@@ -73,7 +74,11 @@ public final class AircraftInputHandler {
                 axis(ModKeyMappings.YAW_RIGHT, ModKeyMappings.YAW_LEFT),
                 axis(ModKeyMappings.THROTTLE_UP, ModKeyMappings.THROTTLE_DOWN),
                 ModKeyMappings.AIR_BRAKE.isDown(),
-                minecraft.options.keyAttack.isDown());
+                minecraft.options.keyAttack.isDown(),
+                // Held rather than clicked: a dispenser lets go of one at a time for as long as the
+                // handle is pulled, and its own interval decides how fast that is.
+                ModKeyMappings.RELEASE_FLARE.isDown(),
+                ModKeyMappings.RELEASE_CHAFF.isDown());
 
         aircraft.setInput(input);
         // The velocity goes with it because the server cannot see it: an aircraft flown from here is
@@ -82,7 +87,7 @@ public final class AircraftInputHandler {
         // own. See AircraftEntity.getVelocity.
         PacketDistributor.sendToServer(new AircraftInputPayload(
                 input, aircraft.getThrottle(), aircraft.getAttitude(), aircraft.getVelocity(),
-                aircraft.isCrashing(), toggleGear, toggleFlaps, cycleWeapon));
+                aircraft.isCrashing(), toggleGear, toggleFlaps, toggleVtol, cycleWeapon));
     }
 
     /**

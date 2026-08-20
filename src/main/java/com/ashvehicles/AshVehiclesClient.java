@@ -12,6 +12,7 @@ import com.ashvehicles.client.particle.ShockwaveParticle;
 import com.ashvehicles.client.particle.SparkParticle;
 import com.ashvehicles.client.renderer.AircraftRenderer;
 import com.ashvehicles.client.renderer.BulletRenderer;
+import com.ashvehicles.client.renderer.CountermeasureRenderer;
 import com.ashvehicles.client.renderer.RocketRenderer;
 import com.ashvehicles.registry.ModEntities;
 import com.ashvehicles.registry.ModParticles;
@@ -82,6 +83,7 @@ public class AshVehiclesClient {
                 .forEach(type -> event.registerEntityRenderer(type.get(), AircraftRenderer::new));
         event.registerEntityRenderer(ModEntities.BULLET.get(), BulletRenderer::new);
         event.registerEntityRenderer(ModEntities.ROCKET.get(), RocketRenderer::new);
+        event.registerEntityRenderer(ModEntities.COUNTERMEASURE.get(), CountermeasureRenderer::new);
     }
 
     /**

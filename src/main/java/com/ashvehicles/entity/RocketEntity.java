@@ -12,6 +12,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
@@ -41,6 +42,11 @@ public class RocketEntity extends AircraftProjectile implements GeoEntity {
      * Who it is chasing. Synced so a client can draw the missile pointing where it is really going
      * rather than where it was when it launched.
      */
+    /** How far off a decoy can be and still tempt the missile, in blocks. */
+    private static final double DECOY_REACH = 40.0;
+    /** And the chance, each tick, that one of them in reach takes it. */
+    private static final float DECOY_CHANCE = 0.2F;
+
     private static final EntityDataAccessor<Integer> DATA_TARGET =
             SynchedEntityData.defineId(RocketEntity.class, EntityDataSerializers.INT);
 
@@ -108,12 +114,47 @@ public class RocketEntity extends AircraftProjectile implements GeoEntity {
     }
 
     /**
+     * Whether anything the target has thrown out is more interesting than the target.
+     *
+     * <p>Checked every tick while the missile is guiding, and settled by chance rather than by
+     * rules: each decoy in reach has its own small chance of taking the missile, so one flare is a
+     * gamble, a burst of them is a fair bet, and none at all is certain death. That is what makes
+     * the timing of pulling the handle worth anything.
+     *
+     * <p>Only the sort that fools <em>this</em> seeker counts, and once it has been taken it is not
+     * given back: a missile that has gone for a flare has gone for the flare, and what it does after
+     * that is fly into it and go off in empty air.
+     */
+    private void checkDecoys(WeaponDefinition.Guidance guidance) {
+        if (this.getTarget() instanceof CountermeasureEntity) {
+            return;
+        }
+
+        AABB box = this.getBoundingBox().inflate(DECOY_REACH);
+
+        for (CountermeasureEntity decoy : this.level().getEntitiesOfClass(CountermeasureEntity.class, box,
+                candidate -> candidate.fools(guidance.seeker()))) {
+            if (this.random.nextFloat() < DECOY_CHANCE) {
+                this.setTarget(decoy);
+                this.lost = false;
+
+                return;
+            }
+        }
+    }
+
+    /**
      * Where the missile should be pointing this tick: at most {@code turn_rate} degrees off where it
      * is pointing now, bent towards the target. An unguided rocket, or one that has lost what it was
      * chasing, simply keeps its heading.
      */
     private Vec3 guidedHeading(Vec3 heading) {
         WeaponDefinition.Guidance guidance = this.getWeapon().guidance().orElse(null);
+
+        if (guidance != null && !this.level().isClientSide) {
+            this.checkDecoys(guidance);
+        }
+
         Entity chasing = this.lost ? null : this.getTarget();
 
         if (guidance == null || chasing == null || !chasing.isAlive()) {

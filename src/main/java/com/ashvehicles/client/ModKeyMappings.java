@@ -26,11 +26,20 @@ public final class ModKeyMappings {
     public static final KeyMapping AIR_BRAKE = create("air_brake", GLFW.GLFW_KEY_B);
     public static final KeyMapping TOGGLE_GEAR = create("toggle_gear", GLFW.GLFW_KEY_G);
     public static final KeyMapping TOGGLE_FLAPS = create("toggle_flaps", GLFW.GLFW_KEY_F);
+    /** Swings the nozzle of a lift-capable aircraft down, and back up again. Nothing on the rest. */
+    public static final KeyMapping TOGGLE_VTOL = create("toggle_vtol", GLFW.GLFW_KEY_R);
     /** Steps through whatever is on the pylons. The trigger itself is the vanilla attack button. */
     public static final KeyMapping CYCLE_WEAPON = create("cycle_weapon", GLFW.GLFW_KEY_X);
+    /**
+     * The two countermeasure handles. Separate keys rather than one, because which of them is the
+     * right one is the question the warning receiver has just answered: a flare for a seeker homing
+     * on heat, chaff for one homing on a radar return. Held down, they keep dispensing.
+     */
+    public static final KeyMapping RELEASE_FLARE = create("release_flare", GLFW.GLFW_KEY_C);
+    public static final KeyMapping RELEASE_CHAFF = create("release_chaff", GLFW.GLFW_KEY_V);
 
     public static final KeyMapping[] ALL = {THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT, DISMOUNT,
-            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, CYCLE_WEAPON};
+            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_VTOL, CYCLE_WEAPON, RELEASE_FLARE, RELEASE_CHAFF};
 
     private static KeyMapping create(String name, int key) {
         return new KeyMapping("key.ashvehicles." + name, KeyConflictContext.IN_GAME, InputConstants.Type.KEYSYM, key, CATEGORY);

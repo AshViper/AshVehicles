@@ -37,8 +37,8 @@ public record BlastSoundPayload(double x, double y, double z, float power) imple
             buf -> new BlastSoundPayload(buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readFloat()));
 
     /** How far the blast is worth sending, in blocks. Nobody further off is told about it at all. */
-    private static final double CARRY = 128.0;
-    private static final double CARRY_PER_POWER = 56.0;
+    private static final double CARRY = 220.0;
+    private static final double CARRY_PER_POWER = 80.0;
 
     /**
      * How far a blast of this size is heard, in blocks.

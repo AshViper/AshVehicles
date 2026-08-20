@@ -72,10 +72,46 @@ neoForge {
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
 
+            // Named, rather than left to the game's "Player" plus three random digits. A pilot whose
+            // name changes every launch is a different person to the world every launch, and arrives
+            // with an empty inventory in the middle of the spawn point each time.
+            programArguments.addAll '--username', 'Dev1'
+
             // `gradlew runClient -PquickPlayWorld=<save name>` goes straight into a world, which is
             // what an unattended test run wants.
             if (project.hasProperty('quickPlayWorld')) {
                 programArguments.addAll '--quickPlaySingleplayer', project.property('quickPlayWorld').toString()
+            }
+
+            // `-PquickPlayServer=localhost` joins a server instead, which is how the second client
+            // is usually wanted. See below.
+            if (project.hasProperty('quickPlayServer')) {
+                programArguments.addAll '--quickPlayMultiplayer', project.property('quickPlayServer').toString()
+            }
+        }
+
+        // A second client, for everything that only happens when there are two aeroplanes in the
+        // same sky: the radar, the warning receiver, one aircraft locking another, and every case
+        // where the question is what the *other* client sees.
+        //
+        // Run it from the IDE ("Client 2" in the run configuration list) or from a second terminal
+        // with `gradlew runClient2`. Either way it wants something to connect to: `gradlew runServer`
+        // in a third, or the first client hosting a single-player world over LAN.
+        client2 {
+            client()
+
+            ideName = 'Client 2'
+            // Its own everything. Two clients sharing one folder overwrite each other's options and
+            // fight over the lock on any world one of them opens, and the loser is whichever started
+            // second.
+            gameDirectory = project.file('run-client2')
+            // Without this both are called the same thing, and a server keeps only the first of them.
+            programArguments.addAll '--username', 'Dev2'
+
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+
+            if (project.hasProperty('quickPlayServer')) {
+                programArguments.addAll '--quickPlayMultiplayer', project.property('quickPlayServer').toString()
             }
         }
 

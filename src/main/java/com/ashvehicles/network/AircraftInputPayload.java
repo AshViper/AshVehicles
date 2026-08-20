@@ -21,7 +21,7 @@ import org.joml.Quaternionf;
  * aircraft.
  */
 public record AircraftInputPayload(AircraftInput input, float throttle, Quaternionf attitude, Vec3 velocity,
-        boolean crashed, boolean toggleGear, boolean toggleFlaps, boolean cycleWeapon)
+        boolean crashed, boolean toggleGear, boolean toggleFlaps, boolean toggleVtol, boolean cycleWeapon)
         implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<AircraftInputPayload> TYPE =
@@ -43,12 +43,14 @@ public record AircraftInputPayload(AircraftInput input, float throttle, Quaterni
                 buf.writeBoolean(payload.crashed());
                 buf.writeBoolean(payload.toggleGear());
                 buf.writeBoolean(payload.toggleFlaps());
+                buf.writeBoolean(payload.toggleVtol());
                 buf.writeBoolean(payload.cycleWeapon());
             },
             buf -> new AircraftInputPayload(AircraftInput.read(buf), buf.readFloat(),
                     new Quaternionf(buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat()),
                     new Vec3(buf.readFloat(), buf.readFloat(), buf.readFloat()),
-                    buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean()));
+                    buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
+                    buf.readBoolean()));
 
     @Override
     public CustomPacketPayload.Type<AircraftInputPayload> type() {
@@ -76,6 +78,10 @@ public record AircraftInputPayload(AircraftInput input, float throttle, Quaterni
 
             if (payload.toggleGear()) {
                 aircraft.toggleGear();
+            }
+
+            if (payload.toggleVtol()) {
+                aircraft.toggleVtol();
             }
 
             if (payload.toggleFlaps()) {

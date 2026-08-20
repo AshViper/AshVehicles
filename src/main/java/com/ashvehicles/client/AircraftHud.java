@@ -42,10 +42,10 @@ import org.joml.Quaternionf;
 public final class AircraftHud implements LayeredDraw.Layer {
     private static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "aircraft_hud");
 
-    private static final int GREEN = 0xFF3BE86A;
-    private static final int DIM = 0xB03BE86A;
-    private static final int WARNING = 0xFFFF5A3B;
-    private static final int SHADOW = 0x90000000;
+    static final int GREEN = 0xFF3BE86A;
+    static final int DIM = 0xB03BE86A;
+    static final int WARNING = 0xFFFF5A3B;
+    static final int SHADOW = 0x90000000;
 
     /** Fraction of the airframe left below which the readout goes amber. */
     private static final float LOW_HEALTH = 0.3F;
@@ -96,6 +96,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
         drawLock(graphics, minecraft, aircraft, centreX, centreY);
         drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
         drawCrew(graphics, minecraft.font, aircraft);
+        RadarDisplay.draw(graphics, minecraft.font, aircraft);
     }
 
     /**
@@ -217,7 +218,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * eighth of the circle and mirrors it into the other seven, which is exact and needs no
      * trigonometry per pixel.
      */
-    private static void circle(GuiGraphics graphics, int centreX, int centreY, int radius, int colour) {
+    static void circle(GuiGraphics graphics, int centreX, int centreY, int radius, int colour) {
         if (radius < 1) {
             return;
         }
@@ -416,12 +417,30 @@ public final class AircraftHud implements LayeredDraw.Layer {
         float health = aircraft.getHealth();
         int colour = aircraft.getHealthFraction() <= LOW_HEALTH ? WARNING : GREEN;
         value(graphics, font, String.format("HP %d/%d", Math.round(health), Math.round(aircraft.getMaxHealth())),
-                left, bottom - 52, colour);
+                left, bottom - 62, colour);
+
+        // What is left to throw out. Both counts on one line, and amber once either magazine is
+        // empty: which of the two is gone is exactly what decides whether the next lock is survivable.
+        int flares = aircraft.getCountermeasures(true);
+        int chaff = aircraft.getCountermeasures(false);
+        value(graphics, font, String.format("CM  FL %d  CH %d", flares, chaff), left, bottom - 52,
+                flares > 0 && chaff > 0 ? GREEN : WARNING);
 
         int throttle = Math.round(aircraft.getThrottle() * 100.0F);
         value(graphics, font, "THR " + throttle + "%", left, bottom - 42);
         value(graphics, font, "GEAR " + (aircraft.isGearDown() ? "DOWN" : "UP"), left, bottom - 32);
         value(graphics, font, "FLAP " + (aircraft.isFlapsDown() ? "DOWN" : "UP"), left, bottom - 22);
+
+        // Only for an aeroplane that can do it, and amber while the nozzle is on its way: a
+        // conversion is the one part of flying this thing where where the engine is pointing is the
+        // most important number on the panel.
+        if (aircraft.isVtolCapable()) {
+            int nozzle = Math.round(aircraft.getNozzleAngle());
+            boolean settled = nozzle == 0 || nozzle == Math.round(aircraft.getStats().vtol().get().maxAngle());
+
+            value(graphics, font, "VTOL " + nozzle + "°", left + 84, bottom - 22,
+                    settled ? GREEN : WARNING);
+        }
 
         float stallAngle = aircraft.getStats().wing().stallAngle();
         float angleOfAttack = angleOfAttack(attitude, velocity, speed);
@@ -554,16 +573,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
         return points[Math.floorMod((int) Math.round(heading / 45.0), 8)];
     }
 
-    private static void label(GuiGraphics graphics, Font font, String text, int x, int y) {
+    static void label(GuiGraphics graphics, Font font, String text, int x, int y) {
         graphics.drawString(font, text, x, y, DIM, true);
     }
 
-    private static void value(GuiGraphics graphics, Font font, String text, int x, int y) {
+    static void value(GuiGraphics graphics, Font font, String text, int x, int y) {
         value(graphics, font, text, x, y, GREEN);
     }
 
     /** The same, in a colour of its own, for a reading that is worth noticing. */
-    private static void value(GuiGraphics graphics, Font font, String text, int x, int y, int colour) {
+    static void value(GuiGraphics graphics, Font font, String text, int x, int y, int colour) {
         graphics.fill(x - 2, y - 2, x + font.width(text) + 2, y + 10, SHADOW);
         graphics.drawString(font, text, x, y, colour, true);
     }

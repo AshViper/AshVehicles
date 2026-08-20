@@ -13,9 +13,11 @@ import com.ashvehicles.aircraft.AircraftManager;
 import com.ashvehicles.aircraft.AircraftShape;
 import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.particle.TintedParticleOption;
+import com.ashvehicles.sensor.Sensors;
 import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.item.WeaponItem;
 import com.ashvehicles.item.WrenchItem;
+import com.ashvehicles.weapon.Dispenser;
 import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.nbt.CompoundTag;
@@ -78,6 +80,12 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     /** Undercarriage selector. The legs swing to match over {@link #getGearCycleTicks()} ticks. */
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
+    /**
+     * Lift-system selector, for an aircraft that has one. The nozzle swings to match over the time
+     * its file says a conversion takes.
+     */
+    private static final EntityDataAccessor<Boolean> DATA_VTOL =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /** Flap selector. Lowered flaps buy lift at low speed and cost drag at any speed. */
     private static final EntityDataAccessor<Boolean> DATA_FLAPS_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
@@ -95,6 +103,14 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * an aircraft that has been shot at is the same aircraft to everybody looking at it. The server
      * owns the figure; a client reads whatever it was last told.
      */
+    /**
+     * Flares and chaff left aboard. Synched so the instruments can read them without a packet of
+     * their own; the server is the only thing that ever changes them. See {@link Dispenser}.
+     */
+    private static final EntityDataAccessor<Integer> DATA_FLARES =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> DATA_CHAFF =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Float> DATA_HEALTH =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.FLOAT);
 
@@ -104,6 +120,18 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * built to their real figures and those figures assume the real thing.
      */
     protected static final double GRAVITY = 0.02453;
+    /**
+     * How much of the stalling speed the hover damping is spread over.
+     *
+     * <p>A quarter of it, which is a walking pace, and the figure matters more than it looks. The
+     * damping is there to stop a hovering aeroplane drifting away from where it was put; it is not
+     * there to stop it going anywhere. Spread over the whole stalling speed it does both, and an
+     * aeroplane that cannot reach its stalling speed can never hand the weight to its wing — it
+     * hovers until it runs out of fuel, or in this case forever. Kept down here, a drift settles and
+     * a deliberate acceleration is untouched by the time it is a walking pace.
+     */
+    private static final double HOVER_BAND = 0.25;
+
     /** Airframe damage per tick for each G pulled beyond what the aircraft is stressed for. */
     private static final float OVER_G_DAMAGE = 4.0F;
     /** Load factor above which the wingtips start trailing vapour. */
@@ -141,6 +169,10 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
     /** What the aircraft is carrying. Authoritative on the server; a copy of the tag on a client. */
     private final WeaponMounts weapons = new WeaponMounts(this);
+    /** The radar and the warning receiver. Server side; the pilot is sent what they find. */
+    private final Sensors sensors = new Sensors(this);
+    /** Flares and chaff, and when the dispenser will part with the next one. */
+    private final Dispenser dispenser = new Dispenser(this);
 
     private AircraftInput input = AircraftInput.NONE;
     private float throttle;
@@ -170,6 +202,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     /** How far the undercarriage has swung out: 0 is up and locked, 1 is down and locked. */
     private float gearProgress = 1.0F;
     private float gearProgressO = 1.0F;
+    /** How far the nozzle has swung, 0 stowed to 1 fully down. */
+    private float vtolProgress;
+    private float vtolProgressO;
     /** How far the flaps have travelled: 0 is retracted, 1 is fully down. */
     private float flapsProgress;
     private float flapsProgressO;
@@ -195,6 +230,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // A new airframe is a whole one. An aircraft read back out of the world overwrites this from
         // its tag, and a client is told the real figure with the rest of the synched data.
         this.setHealth(this.getMaxHealth());
+        // A new aeroplane comes with full magazines, the same as it comes with a whole airframe.
+        this.setCountermeasures(true, this.getStats().countermeasures().flares());
+        this.setCountermeasures(false, this.getStats().countermeasures().chaff());
         // We integrate our own gravity in flightTick(). Telling the server that also stops it
         // counting a flying aircraft as a floating vehicle, which is otherwise a kick for
         // "flying is not enabled on this server" after four seconds airborne.
@@ -354,16 +392,46 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         builder.define(DATA_ATTITUDE, new Quaternionf());
         builder.define(DATA_GEAR_DOWN, true);
         builder.define(DATA_FLAPS_DOWN, false);
+        builder.define(DATA_VTOL, false);
         builder.define(DATA_WEAPONS, new CompoundTag());
         // A figure rather than this aircraft's own maximum, because this runs from inside the entity
         // constructor, before there is an aircraft to ask. The constructor fills in the real one.
         builder.define(DATA_HEALTH, AircraftDefinition.Airframe.DEFAULT_HEALTH);
+        builder.define(DATA_FLARES, 0);
+        builder.define(DATA_CHAFF, 0);
     }
 
     /**
      * What is on the hardpoints. The server's copy is the real one; a client reads whatever the
      * server last sent, which is enough for the instruments and for drawing the pods.
      */
+    /**
+     * The radar and the warning receiver.
+     *
+     * <p>Only ever asked on the server: by this aircraft's own tick, and by another aircraft's
+     * receiver wanting to know whether this one's radar is holding it. A client is sent the picture
+     * rather than allowed to work one out.
+     */
+    /**
+     * How many flares, or how much chaff, is left aboard.
+     *
+     * @param flare true for flares, false for chaff
+     */
+    public int getCountermeasures(boolean flare) {
+        return this.entityData.get(flare ? DATA_FLARES : DATA_CHAFF);
+    }
+
+    /** Never below nothing, and never above what the airframe holds. */
+    public void setCountermeasures(boolean flare, int left) {
+        int held = Mth.clamp(left, 0, this.getStats().countermeasures().capacity(flare));
+
+        this.entityData.set(flare ? DATA_FLARES : DATA_CHAFF, held);
+    }
+
+    public Sensors getSensors() {
+        return this.sensors;
+    }
+
     public WeaponMounts getWeapons() {
         return this.weapons;
     }
@@ -468,6 +536,47 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         return (float) Math.toDegrees(angle * component / sine);
     }
 
+    /** Whether this airframe has a lift system at all. */
+    public boolean isVtolCapable() {
+        return this.getStats().vtol().isPresent();
+    }
+
+    /** Whether the pilot has asked for the nozzle to be down. */
+    public boolean isVtolSelected() {
+        return this.entityData.get(DATA_VTOL);
+    }
+
+    /** How far the nozzle has actually swung, 0 to 1, interpolated for drawing. */
+    public float getVtolProgress(float partialTick) {
+        return Mth.lerp(partialTick, this.vtolProgressO, this.vtolProgress);
+    }
+
+    /** The same as an angle, in degrees off the tail. What the instruments show. */
+    public float getNozzleAngle() {
+        return this.vtolProgress * this.getStats().vtol().map(AircraftDefinition.Vtol::maxAngle).orElse(0.0F);
+    }
+
+    /**
+     * Swings the nozzle the other way.
+     *
+     * <p>Refused above the aircraft's conversion speed, in the direction that puts it down: an engine
+     * turned across the airflow at five hundred knots is not a lift system, it is an accident. Coming
+     * back up is always allowed, which is what makes the conversion recoverable.
+     */
+    public void toggleVtol() {
+        if (this.level().isClientSide || !this.isVtolCapable()) {
+            return;
+        }
+
+        AircraftDefinition.Vtol vtol = this.getStats().vtol().get();
+
+        if (!this.isVtolSelected() && this.getVelocity().length() > vtol.conversionSpeed()) {
+            return;
+        }
+
+        this.entityData.set(DATA_VTOL, !this.isVtolSelected());
+    }
+
     public boolean isGearDown() {
         return this.entityData.get(DATA_GEAR_DOWN);
     }
@@ -563,6 +672,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         super.tick();
         this.attitudeO = new Quaternionf(this.attitude);
         this.tickGear();
+        this.tickVtol();
         this.tickLerp();
 
         if (this.isControlledByLocalInstance()) {
@@ -612,6 +722,8 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             this.spawnFlightEffects();
         } else {
             this.tickWeapons();
+            this.sensors.tick();
+            this.dispenser.tick(this.input.flare(), this.input.chaff());
         }
 
         // Hold the chunk under us open, so flying beyond everyone's render distance does not simply
@@ -679,8 +791,21 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
         this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
 
-        // Control surfaces only bite while air is flowing over them.
+        // How far the nozzle has swung, as the fraction of the engine that is now holding the
+        // aeroplane up rather than pushing it along. Zero for everything that cannot do it at all.
+        AircraftDefinition.Vtol vtol = definition.vtol().orElse(null);
+        double lifting = vtol == null
+                ? 0.0
+                : Math.sin(Math.toRadians(this.vtolProgress * vtol.maxAngle()));
+
+        // Control surfaces only bite while air is flowing over them. A lift system does not care:
+        // what flies a hovering aeroplane is jets of its own, and without them the pilot would have
+        // the controls of a brick from the moment the wing stopped working.
         float authority = (float) Mth.clamp(speed / Math.max(wing.stallSpeed(), 1.0E-4F), 0.0, 1.5);
+
+        if (vtol != null) {
+            authority = Math.max(authority, (float) (lifting * vtol.authority()));
+        }
         float previousYRot = this.getYRot();
         float weathervaneYaw = 0.0F;
 
@@ -698,7 +823,32 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         Vec3 up = this.getLiftVector();
         Vec3 right = Attitude.right(this.attitude);
 
-        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(nose.scale(definition.engine().maxThrust() * this.throttle));
+        // Thrust along the nose, or under the aeroplane, or anywhere between the two. Turning the
+        // nozzle down does not merely point the same push somewhere else: a lift system is worth more
+        // than the cruise engine it is bolted to, and has to be, since nothing holds an aeroplane up
+        // at a standstill but the engine and the engine has to beat gravity to do it.
+        Vec3 thrustAxis = lifting <= 0.0 ? nose : nose.scale(Math.cos(Math.asin(lifting))).add(up.scale(lifting));
+        double thrust = vtol == null
+                ? definition.engine().maxThrust()
+                : Mth.lerp(lifting, definition.engine().maxThrust(), vtol.liftThrust());
+
+        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(thrustAxis.scale(thrust * this.throttle));
+
+        // And a hover is not a slide. Nothing aerodynamic bites at a walking pace -- drag is a square
+        // law and squares of small numbers are nothing -- so an aeroplane nudged sideways in the
+        // hover would keep going sideways until it hit something. This is the lift system holding
+        // station, and it is the difference between hovering and merely falling slowly.
+        //
+        // It lets go as the wing takes over, and that matters more than the holding does. Left on at
+        // all speeds it is not station-keeping but a parking brake: an aeroplane trying to accelerate
+        // out of the hover reached a fraction of its stalling speed and stayed there, so the wing
+        // never started flying and the conversion could not be made at all.
+        if (lifting > 0.0 && speed > 1.0E-4) {
+            double band = Math.max(wing.stallSpeed() * HOVER_BAND, 1.0E-4);
+            double slow = Mth.clamp(1.0 - speed / band, 0.0, 1.0);
+
+            forces = forces.add(motion.scale(-vtol.hoverDrag() * lifting * slow));
+        }
 
         if (speed > 1.0E-4) {
             Vec3 flow = motion.scale(1.0 / speed);
@@ -921,6 +1071,53 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         return current > target ? Math.max(current - step, target) : Math.min(current + step, target);
     }
 
+    /**
+     * One tick of the nozzle travelling. Nothing is animated from this beyond the nozzle itself; what
+     * the doors do is the animation file's business.
+     */
+    private void tickVtol() {
+        this.vtolProgressO = this.vtolProgress;
+
+        AircraftDefinition.Vtol vtol = this.getStats().vtol().orElse(null);
+
+        if (vtol == null) {
+            this.vtolProgress = 0.0F;
+
+            return;
+        }
+
+        this.vtolProgress = approach(this.vtolProgress, this.nozzleWanted(vtol),
+                1.0F / Math.max(vtol.cycleTicks(), 1));
+    }
+
+    /**
+     * Where the nozzle should be, which on the way back up is decided by the airspeed rather than by
+     * the pilot.
+     *
+     * <p>Selecting conventional flight does not swing the nozzle up; it asks for it to be swung up as
+     * fast as the aeroplane can afford, which is exactly as fast as it is going. At a standstill the
+     * nozzle stays down whatever the lever says, and it comes up in step with the speed until, at the
+     * conversion speed, it is fully aft and the wing has taken the weight.
+     *
+     * <p>Scheduled rather than timed because the alternative does not work and cannot be made to. A
+     * nozzle that swings up on a stopwatch takes the lift away before there is any wing lift to
+     * replace it — the aeroplane is left below its stalling speed with the engine pointing the wrong
+     * way, and it comes down. Tying the two together means the lift is only ever given up in exchange
+     * for the speed that replaces it, which is what a conversion is.
+     *
+     * <p>So the technique is the real one: hover, ease the nose down, let it accelerate, and the
+     * nozzle follows the airspeed round without being touched again.
+     */
+    private float nozzleWanted(AircraftDefinition.Vtol vtol) {
+        if (this.isVtolSelected()) {
+            return 1.0F;
+        }
+
+        double speed = this.getVelocity().length();
+
+        return (float) Mth.clamp(1.0 - speed / Math.max(vtol.conversionSpeed(), 1.0E-3F), 0.0, 1.0);
+    }
+
     private void tickGear() {
         this.gearProgressO = this.gearProgress;
         this.gearProgress = approach(this.gearProgress, this.isGearDown() ? 1.0F : 0.0F,
@@ -940,6 +1137,31 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             this.lerpPositionAndRotationStep(this.lerpSteps, this.lerpX, this.lerpY, this.lerpZ, this.lerpYRot, this.lerpXRot);
             this.lerpSteps--;
         }
+    }
+
+    /**
+     * The server's idea of how fast this aircraft is going, which the side flying it must ignore.
+     *
+     * <p>A piloted aircraft is flown by its pilot's client, and the server deliberately keeps a delta
+     * movement of zero for it — see the note in {@link #tick()}. That zero is normally never sent,
+     * because the game only broadcasts a velocity that has changed and this one never does. There is
+     * one exception, and it is a bad one: an entity that has been hurt has its velocity
+     * <em>force</em>-broadcast at the end of that tick, so that everyone watching sees the knockback.
+     * An aeroplane has no knockback, so what went out was the zero — to every client tracking it, the
+     * pilot's included, whose own flight model was then overwritten with a dead stop.
+     *
+     * <p>The effect was an aeroplane at three hundred knots stopping in mid-air the instant anything
+     * touched it: one cannon round, one splinter of a blast, and the speed read zero. Nothing about
+     * how fast it is going is worth hearing from the server; the side at the controls is the side
+     * that knows.
+     */
+    @Override
+    public void lerpMotion(double x, double y, double z) {
+        if (this.isControlledByLocalInstance()) {
+            return;
+        }
+
+        super.lerpMotion(x, y, z);
     }
 
     @Override
@@ -1311,9 +1533,11 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.lastHurtSource = source;
         this.lastHurtTime = now;
 
+        // Deliberately not markHurt(). All that does is ask the server to broadcast this aircraft's
+        // velocity at the end of the tick, which for a boat is its knockback and for an aeroplane is
+        // the flat zero the server keeps for a piloted one. See lerpMotion.
         this.setHurtDir(-this.getHurtDir());
         this.setHurtTime(10);
-        this.markHurt();
         this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
 
         // Everything that hurts an aeroplane goes through its health and nothing else takes it out
@@ -1923,9 +2147,16 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // An aircraft written to the world before this was a health system has no figure to read,
         // and comes back whole rather than coming back with nothing left.
         this.setHealth(tag.contains("Health") ? tag.getFloat("Health") : this.getMaxHealth());
+        this.setCountermeasures(true, tag.contains("Flares")
+                ? tag.getInt("Flares") : this.getStats().countermeasures().flares());
+        this.setCountermeasures(false, tag.contains("Chaff")
+                ? tag.getInt("Chaff") : this.getStats().countermeasures().chaff());
         this.entityData.set(DATA_GEAR_DOWN, !tag.contains("GearDown") || tag.getBoolean("GearDown"));
         this.gearProgress = this.isGearDown() ? 1.0F : 0.0F;
         this.gearProgressO = this.gearProgress;
+        this.entityData.set(DATA_VTOL, tag.getBoolean("Vtol"));
+        this.vtolProgress = this.isVtolSelected() ? 1.0F : 0.0F;
+        this.vtolProgressO = this.vtolProgress;
         this.entityData.set(DATA_FLAPS_DOWN, tag.getBoolean("FlapsDown"));
         this.flapsProgress = this.isFlapsDown() ? 1.0F : 0.0F;
         this.flapsProgressO = this.flapsProgress;
@@ -1944,8 +2175,11 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         stored.add(FloatTag.valueOf(this.attitude.w));
         tag.put("Attitude", stored);
         tag.putFloat("Health", this.getHealth());
+        tag.putInt("Flares", this.getCountermeasures(true));
+        tag.putInt("Chaff", this.getCountermeasures(false));
         tag.putBoolean("GearDown", this.isGearDown());
         tag.putBoolean("FlapsDown", this.isFlapsDown());
+        tag.putBoolean("Vtol", this.isVtolSelected());
         tag.put("Weapons", this.weapons.save());
     }
 
