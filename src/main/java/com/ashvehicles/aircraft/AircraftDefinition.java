@@ -26,8 +26,9 @@ import net.minecraft.world.phys.Vec3;
  */
 public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine, Wing wing,
         Handling handling, Airframe airframe, Undercarriage landingGear, Surface flaps,
-        CameraMount camera, SoundSetup sound, Radar radar, Signature signature,
-        Countermeasures countermeasures, Optional<Vtol> vtol, List<Hardpoint> hardpoints) {
+        CameraMount camera, SoundSetup sound, Radar radar, Countermeasures countermeasures,
+        Optional<Vtol> vtol, List<Hardpoint> hardpoints, Sync sync) {
+
 
     public static final Codec<AircraftDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Hitbox.CODEC.optionalFieldOf("hitbox", Hitbox.DEFAULT).forGetter(AircraftDefinition::hitbox),
@@ -45,7 +46,8 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
             Countermeasures.CODEC.optionalFieldOf("countermeasures", Countermeasures.DEFAULT)
                     .forGetter(AircraftDefinition::countermeasures),
             Vtol.CODEC.optionalFieldOf("vtol").forGetter(AircraftDefinition::vtol),
-            Hardpoint.CODEC.listOf().optionalFieldOf("hardpoints", List.of()).forGetter(AircraftDefinition::hardpoints)
+            Hardpoint.CODEC.listOf().optionalFieldOf("hardpoints", List.of()).forGetter(AircraftDefinition::hardpoints),
+            Sync.CODEC.optionalFieldOf("sync", Sync.DEFAULT).forGetter(AircraftDefinition::sync)
     ).apply(instance, AircraftDefinition::new));
 
     /**
@@ -56,11 +58,11 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
     public static final AircraftDefinition FALLBACK = new AircraftDefinition(
             Hitbox.DEFAULT,
             ModelSetup.DEFAULT,
-            new Engine(0.02F, 0.02F),
-            new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 0.02F, 0.15F),
-            new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F),
-            new Airframe(Airframe.DEFAULT_HEALTH, 0.9F, 3.0F, 0.0F, List.of(new Vec3(0.0, 0.5, 0.0))),
-            new Undercarriage(40, 0.6F, 0.995F, 0.85F),
+            new Engine(0.02F, 0.02F, 0.06F, 1.0F),
+            new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 0.02F, 0.15F, 0.28F, 6.0F, 0.0F),
+            new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F),
+            new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, List.of(new Vec3(0.0, 0.5, 0.0))),
+            new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F),
             new Surface(20, 0.5F, 0.4F),
             CameraMount.DEFAULT,
             SoundSetup.DEFAULT,
@@ -68,7 +70,8 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
             Signature.DEFAULT,
             Countermeasures.DEFAULT,
             Optional.empty(),
-            List.of());
+            List.of(),
+            Sync.DEFAULT);
 
     /**
      * The collision box, which Minecraft can only describe as a box with a square footprint, and
@@ -154,12 +157,44 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
         }
     }
 
+    /**
+     * How this aircraft is drawn on a client that is not flying it — see
+     * {@code AircraftInterpolation}, which is where all three of these are spent and where the
+     * reasoning behind them is written down.
+     *
+     * @param correctionTicks ticks over which all but a sliver of a correction is absorbed. Short
+     *                        enough that the drawn aircraft is honest, long enough that a correction
+     *                        is not a step. A couple of server ticks suits anything
+     * @param snapDistance blocks of error past which the aircraft is simply put where it belongs
+     *                     instead of sliding there. Should be larger than any error ordinary flight
+     *                     can produce and smaller than a teleport
+     * @param maxPredictionTicks ticks of dead reckoning trusted after the last correction. Past it
+     *                           the aircraft is handed back rather than coasting on a stale velocity
+     */
+    public record Sync(int correctionTicks, double snapDistance, int maxPredictionTicks) {
+        public static final Sync DEFAULT = new Sync(3, 8.0, 10);
+
+        public static final Codec<Sync> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.INT.optionalFieldOf("correction_ticks", 3).forGetter(Sync::correctionTicks),
+                Codec.DOUBLE.optionalFieldOf("snap_distance", 8.0).forGetter(Sync::snapDistance),
+                Codec.INT.optionalFieldOf("max_prediction_ticks", 10).forGetter(Sync::maxPredictionTicks)
+        ).apply(instance, Sync::new));
+    }
+
     /** @param maxThrust acceleration along the nose at full throttle
-     *  @param throttleRate throttle travel per tick while a throttle key is held */
-    public record Engine(float maxThrust, float throttleRate) {
+     *  @param throttleRate throttle travel per tick while a throttle key is held
+     *  @param spoolRate fraction of the gap between delivered and commanded thrust closed each tick.
+     *                   The lever is not the engine: a turbofan asked for full power takes several
+     *                   seconds to give it, and that wait is most of what a takeoff roll feels like.
+     *                   1 hands back the old behaviour, where the thrust followed the lever exactly
+     *  @param seaLevelDensity air density at sea level, as a multiplier on thrust and lift. Thrust
+     *                         falls off with it, which is what puts a ceiling on the aircraft */
+    public record Engine(float maxThrust, float throttleRate, float spoolRate, float seaLevelDensity) {
         public static final Codec<Engine> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.fieldOf("max_thrust").forGetter(Engine::maxThrust),
-                Codec.FLOAT.fieldOf("throttle_rate").forGetter(Engine::throttleRate)
+                Codec.FLOAT.fieldOf("throttle_rate").forGetter(Engine::throttleRate),
+                Codec.FLOAT.optionalFieldOf("spool_rate", 0.06F).forGetter(Engine::spoolRate),
+                Codec.FLOAT.optionalFieldOf("sea_level_density", 1.0F).forGetter(Engine::seaLevelDensity)
         ).apply(instance, Engine::new));
     }
 
@@ -181,9 +216,35 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * @param inducedDrag drag that comes with lift, against the square of the lift coefficient. This
      *                    is what makes a hard turn bleed speed
      * @param lateralDrag how quickly a sideways slip is killed. A fuselage does not fly sideways
+     * @param groundEffect extra lift close to the ground, as a fraction of the free-air figure, dying
+     *                     away over a wingspan's height. The cushion an aircraft rides off the runway
+     *                     on and floats down the last few feet of a landing on
+     * @param span the wingspan, in blocks, which is the height the ground effect reaches to
+     * @param rotateSpeed the speed the elevator can first lift the nose off the runway at. Below it
+     *                    the aircraft simply rolls, however hard the stick is pulled: there is not
+     *                    enough air over the tailplane to raise anything, which is why a takeoff is
+     *                    a run first and a rotation second rather than a nose-up wait for the wing to
+     *                    catch up. Zero derives it from the stalling speed
      */
     public record Wing(float maxSpeed, float stallSpeed, float lift, float liftSlope, float stallAngle,
-            float drag, float inducedDrag, float lateralDrag) {
+            float drag, float inducedDrag, float lateralDrag, float groundEffect, float span,
+            float rotateSpeed) {
+
+        /**
+         * Fraction of the stalling speed the nose comes up at, for a file that names no figure.
+         *
+         * <p>Above it, not below, and that is the whole point of the number. An aeroplane rotated
+         * below its stalling speed is flying on nothing but the cushion of air under it: it leaves
+         * the runway, climbs out of that cushion, finds it has no wing left and settles back on —
+         * over and over, porpoising down the runway instead of departing. Real practice is to rotate
+         * a little above the stall and climb away at a little above that, which is what this is.
+         */
+        private static final float DEFAULT_ROTATE_FRACTION = 1.05F;
+
+        /** The speed the nose can first be raised at, derived from the stalling speed if unset. */
+        public float effectiveRotateSpeed() {
+            return this.rotateSpeed > 0.0F ? this.rotateSpeed : this.stallSpeed * DEFAULT_ROTATE_FRACTION;
+        }
 
         public static final Codec<Wing> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("max_speed", 0.0F).forGetter(Wing::maxSpeed),
@@ -193,7 +254,10 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
                 Codec.FLOAT.optionalFieldOf("stall_angle", 15.0F).forGetter(Wing::stallAngle),
                 Codec.FLOAT.fieldOf("drag").forGetter(Wing::drag),
                 Codec.FLOAT.optionalFieldOf("induced_drag", 0.02F).forGetter(Wing::inducedDrag),
-                Codec.FLOAT.optionalFieldOf("lateral_drag", 0.15F).forGetter(Wing::lateralDrag)
+                Codec.FLOAT.optionalFieldOf("lateral_drag", 0.15F).forGetter(Wing::lateralDrag),
+                Codec.FLOAT.optionalFieldOf("ground_effect", 0.28F).forGetter(Wing::groundEffect),
+                Codec.FLOAT.optionalFieldOf("span", 10.0F).forGetter(Wing::span),
+                Codec.FLOAT.optionalFieldOf("rotate_speed", 0.0F).forGetter(Wing::rotateSpeed)
         ).apply(instance, Wing::new));
 
         /**
@@ -231,9 +295,14 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *                   a second and stops turning altogether. This holds the aircraft at the angle
      *                   where the wing pulls hardest, which is the tightest turn available to it.
      *                   Set it to 1 or more to hand the stall back to the pilot
+     * @param aeroDamping how much the airflow resists the aircraft being rotated, against the square
+     *                    of the airspeed. The same surfaces that give the pilot authority also damp
+     *                    the rotation they cause, which is why a fast aircraft is stiff rather than
+     *                    twitchy. Without it, control authority rises with speed and nothing rises
+     *                    with it to settle the result, and the aircraft wallows. Zero removes it
      */
     public record Handling(float pitchRate, float rollRate, float yawRate, float controlLag,
-            float weathervane, float alphaLimit) {
+            float weathervane, float alphaLimit, float aeroDamping) {
 
         public static final Codec<Handling> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.fieldOf("pitch_rate").forGetter(Handling::pitchRate),
@@ -241,7 +310,8 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
                 Codec.FLOAT.fieldOf("yaw_rate").forGetter(Handling::yawRate),
                 Codec.FLOAT.optionalFieldOf("control_lag", 0.25F).forGetter(Handling::controlLag),
                 Codec.FLOAT.optionalFieldOf("weathervane", 3.0F).forGetter(Handling::weathervane),
-                Codec.FLOAT.optionalFieldOf("alpha_limit", 0.85F).forGetter(Handling::alphaLimit)
+                Codec.FLOAT.optionalFieldOf("alpha_limit", 0.85F).forGetter(Handling::alphaLimit),
+                Codec.FLOAT.optionalFieldOf("aero_damping", 0.06F).forGetter(Handling::aeroDamping)
         ).apply(instance, Handling::new));
     }
 
@@ -557,13 +627,35 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *                        wheels. Wheels roll; anything much below 1 here and the aircraft can
      *                        never reach flying speed along the runway
      * @param brakeFriction the same while the brakes are on
+     * @param lateralFriction the fraction of <em>sideways</em> speed left after a tick. A wheel rolls
+     *                        one way and scrubs the other, and that difference is the whole of why an
+     *                        aircraft tracks down a runway instead of sliding about on it. Much
+     *                        nearer zero than the rolling figure
+     * @param steerRate degrees per tick the nosewheel can swing the aircraft round at taxiing pace.
+     *                  Nothing to do with the rudder: a wheel on the ground does not care how fast
+     *                  the air is going past the fin, which is why an aircraft can be steered off a
+     *                  stand at walking pace and the aerodynamic controls cannot do it
+     * @param steerFade speed, in blocks per tick, by which nosewheel steering has faded out. Beyond
+     *                  it the rudder is doing the work, and a nosewheel that still bit at speed would
+     *                  simply throw the aircraft off the runway
+     * @param climbHeight how big a step the undercarriage rolls over, in blocks, rather than running
+     *                    into. An aircraft with none cannot cross the lip of a single block: the
+     *                    collision box catches it, and since the aircraft has to be travelling faster
+     *                    than its own crash speed to fly at all, every takeoff from anything but a
+     *                    dead-flat runway ended in an explosion. This is the undercarriage doing what
+     *                    an undercarriage does, and it applies only while it is down and on the ground
      */
-    public record Undercarriage(int cycleTicks, float dragPenalty, float rollingFriction, float brakeFriction) {
+    public record Undercarriage(int cycleTicks, float dragPenalty, float rollingFriction, float brakeFriction,
+            float lateralFriction, float steerRate, float steerFade, float climbHeight) {
         public static final Codec<Undercarriage> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.INT.fieldOf("cycle_ticks").forGetter(Undercarriage::cycleTicks),
                 Codec.FLOAT.fieldOf("drag_penalty").forGetter(Undercarriage::dragPenalty),
                 Codec.FLOAT.optionalFieldOf("rolling_friction", 0.995F).forGetter(Undercarriage::rollingFriction),
-                Codec.FLOAT.optionalFieldOf("brake_friction", 0.85F).forGetter(Undercarriage::brakeFriction)
+                Codec.FLOAT.optionalFieldOf("brake_friction", 0.85F).forGetter(Undercarriage::brakeFriction),
+                Codec.FLOAT.optionalFieldOf("lateral_friction", 0.55F).forGetter(Undercarriage::lateralFriction),
+                Codec.FLOAT.optionalFieldOf("steer_rate", 1.1F).forGetter(Undercarriage::steerRate),
+                Codec.FLOAT.optionalFieldOf("steer_fade", 1.2F).forGetter(Undercarriage::steerFade),
+                Codec.FLOAT.optionalFieldOf("climb_height", 1.05F).forGetter(Undercarriage::climbHeight)
         ).apply(instance, Undercarriage::new));
     }
 

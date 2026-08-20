@@ -42,9 +42,12 @@ import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.VehicleEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
@@ -151,10 +154,52 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
     /** Where the angle of attack limiter starts to bite, as a fraction of the limit it holds. */
     private static final float ALPHA_LIMITER_BITE = 0.6F;
+    /**
+     * Fraction of the rotation speed over which the elevator's hold on the nose fades in, so the
+     * aircraft goes light towards the end of its run rather than the stick coming alive at a step.
+     */
+    private static final double ROTATION_FADE = 0.25;
+    /**
+     * How near upright the aircraft has to be for its wheels to be underneath it. This is the
+     * vertical part of the direction lift acts in, so one is dead level and zero is on its side.
+     */
+    private static final double UPRIGHT = 0.5;
+    /**
+     * Rate of descent an undercarriage absorbs, as a fraction of the speed that writes the airframe
+     * off. Above it the gear being down makes no difference: the aircraft is not landing, it is
+     * hitting the ground with the wheels out.
+     */
+    private static final double TOUCHDOWN_SINK = 0.25;
     /** Nose-up attitude the wheels allow before the tail would strike the runway. */
     private static final float GROUND_PITCH_LIMIT = 15.0F;
     /** How firmly the undercarriage pulls the aircraft back to sitting flat, per tick. */
     private static final float GROUND_LEVELLING = 0.25F;
+    /**
+     * Most control authority the airflow will ever hand the pilot, as a multiple of what it gives at
+     * the stalling speed. Authority now follows the dynamic pressure rather than the speed — which is
+     * what a control surface actually works against — so this is the square of the old ceiling and
+     * the two agree exactly at one and a half times the stalling speed.
+     */
+    private static final double AUTHORITY_CEILING = 2.25;
+    /**
+     * Height, as a multiple of the sea-level figure, that the air is never thinner than however high
+     * the aircraft is taken. Thrust and lift both follow the air, so without a floor an aeroplane
+     * taken high enough has neither, and what should be a ceiling becomes a trapdoor.
+     */
+    private static final double THINNEST_AIR = 0.35;
+    /** Height the air is measured from, and the height the files' figures are quoted at. */
+    private static final double DENSITY_DATUM = 64.0;
+    /**
+     * Height over which the air halves in density.
+     *
+     * <p>Deliberately gentler than the real atmosphere scaled to a Minecraft world would be. The
+     * point of thinning air is that an aircraft has a ceiling rather than climbing for ever; making
+     * that ceiling low enough to meet in ordinary flying costs more than it buys, and it is felt
+     * worst by the one aircraft least able to argue — a lift system holding a hover has no speed to
+     * make up the difference with, so a steep gradient simply forbids the F-35B to hover anywhere
+     * above the treetops.
+     */
+    private static final double DENSITY_SCALE = 512.0;
     /**
      * Fastest a pilot's client is believed when it reports its own speed, in blocks per tick. Well
      * clear of anything an aircraft can reach, and there so that the figure cannot be used to hurl
@@ -178,6 +223,18 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
     private AircraftInput input = AircraftInput.NONE;
     private float throttle;
+    /**
+     * What the engine is actually delivering, as against what the lever is asking for. Chases the
+     * throttle rather than matching it, because an engine spools: a takeoff roll begun by slamming
+     * the lever forward should start slowly and build, not leap.
+     */
+    private float thrustLevel;
+    /**
+     * How much of the aircraft's weight the wheels are still carrying, 1 sitting on them and 0 with
+     * the wing holding everything. Ground friction is scaled by it, so the last of a takeoff roll
+     * goes light as the wing takes over instead of gripping right up to the instant of lift-off.
+     */
+    private float weightOnWheels = 1.0F;
     private Quaternionf attitude = new Quaternionf();
     private Quaternionf attitudeO = new Quaternionf();
     /** Heading change over the last tick, handed to the pilot so their view turns with the aircraft. */
@@ -194,6 +251,8 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private AircraftPart[] parts = new AircraftPart[0];
     /** The chunk this aircraft is holding open while it flies, if any. */
     private ChunkPos heldChunk;
+    /** How this aircraft is drawn on a client that is not flying it. */
+    private final AircraftInterpolation interpolation = new AircraftInterpolation();
     /** How fast the pilot's client says it is going. The server's only honest answer while flown. */
     private Vec3 pilotVelocity = Vec3.ZERO;
     /** The last blow taken, so one that arrives through several boxes at once only lands once. */
@@ -745,7 +804,27 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             Vec3 travelled = this.travelled();
             this.setDeltaMovement(travelled);
             this.throttle = this.entityData.get(DATA_THROTTLE);
-            this.attitude = new Quaternionf(this.entityData.get(DATA_ATTITUDE));
+            // Nothing here spools an engine, but this side may be handed the aircraft at any moment
+            // — a pilot climbing out, or a client taking over the controls — and starting from a cold
+            // engine on an aeroplane that is already flying would drop it out of the sky.
+            this.thrustLevel = this.throttle;
+
+            Quaternionf reported = this.entityData.get(DATA_ATTITUDE);
+
+            if (this.level().isClientSide) {
+                // Drawn, so it is worth keeping the aircraft turning between the attitudes that
+                // arrive rather than letting it sit still and then snap. See AircraftInterpolation.
+                if (this.interpolation.isNewAttitude(reported)) {
+                    this.interpolation.receiveAttitude(reported);
+                }
+                this.interpolation.advanceAttitude(this.attitude);
+                this.setYRot(Attitude.heading(this.attitude));
+                this.setXRot(Attitude.elevation(this.attitude));
+            } else {
+                // The server draws nothing and is the one place this value is authoritative.
+                // Extrapolating here would only feed a guess back into what it broadcasts.
+                this.attitude = new Quaternionf(reported);
+            }
 
             if (!this.level().isClientSide) {
                 this.checkStructuralLoad(travelled);
@@ -799,14 +878,43 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * there is nothing left to measure.
      */
     private void detectCrash(Vec3 impactVelocity) {
-        if (this.horizontalCollision
-                && Math.sqrt(impactVelocity.x * impactVelocity.x + impactVelocity.z * impactVelocity.z) > this.getCrashSpeed()) {
-            this.crashing = true;
+        if (!this.horizontalCollision && !this.verticalCollision) {
+            return;
         }
 
-        // A heavy landing counts too, but only a genuine descent: an aircraft parked on the ground
-        // collides vertically every tick under gravity alone.
-        if (this.verticalCollision && impactVelocity.y < -this.getCrashSpeed()) {
+        float limit = this.getCrashSpeed();
+
+        // Whether what just happened was a landing rather than an arrival. It takes all three: the
+        // undercarriage out, the aircraft the right way up on it, and a rate of descent an
+        // undercarriage can absorb. Flying into the ground fails the last of those however level the
+        // wings are and however far down the gear is, which is the point — a shallow dive into a
+        // field blocks only the vertical axis and lets the aircraft slide, so nothing about the
+        // horizontal speed alone can tell a crash from a rollout.
+        boolean landing = this.gearProgress > 0.5F
+                && this.getLiftVector().y > UPRIGHT
+                && impactVelocity.y > -limit * TOUCHDOWN_SINK;
+
+        if (landing) {
+            // Down safely, but there is still such a thing as running into something afterwards.
+            // Measured as the speed the impact actually took away — move() has already zeroed
+            // whichever axes were blocked — so that a wingtip brushing a runway light, or the corner
+            // of a six-block-wide box catching a block edge, is the nothing it ought to be.
+            Vec3 surviving = this.getDeltaMovement();
+            double before = Math.sqrt(impactVelocity.x * impactVelocity.x + impactVelocity.z * impactVelocity.z);
+            double after = Math.sqrt(surviving.x * surviving.x + surviving.z * surviving.z);
+
+            if (this.horizontalCollision && before - after > limit) {
+                this.crashing = true;
+            }
+
+            return;
+        }
+
+        // Anything else that has just met the world: how fast it was going into it, in all three
+        // axes together. Sliding along the ground after the vertical axis was blocked does not make
+        // the impact survivable, and reading only the axis that happened to be stopped is what let
+        // a dive into terrain be walked away from.
+        if (impactVelocity.length() > limit) {
             this.crashing = true;
         }
     }
@@ -825,11 +933,23 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         AircraftDefinition definition = this.getStats();
         AircraftDefinition.Wing wing = definition.wing();
         AircraftDefinition.Handling handling = definition.handling();
+        AircraftDefinition.Undercarriage gear = definition.landingGear();
+        boolean rolling = this.onGround();
 
         Vec3 motion = this.getDeltaMovement();
         double speed = motion.length();
 
         this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
+
+        // The lever moves at once and the engine does not. A turbofan asked for full power takes
+        // several seconds to give it, and most of what a takeoff roll feels like is that wait.
+        float spool = Mth.clamp(definition.engine().spoolRate(), 0.01F, 1.0F);
+        this.thrustLevel += (this.throttle - this.thrustLevel) * spool;
+
+        // The air thins with height, and both the engine and the wing are working it. That is the
+        // whole of why an aircraft has a ceiling: climb far enough and there is no longer enough air
+        // to make the lift the weight needs, whatever the pilot does with the nose.
+        double density = this.airDensity();
 
         // How far the nozzle has swung, as the fraction of the engine that is now holding the
         // aeroplane up rather than pushing it along. Zero for everything that cannot do it at all.
@@ -838,11 +958,23 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 ? 0.0
                 : Math.sin(Math.toRadians(this.vtolProgress * vtol.maxAngle()));
 
-        // Control surfaces only bite while air is flowing over them. A lift system does not care:
-        // what flies a hovering aeroplane is jets of its own, and without them the pilot would have
-        // the controls of a brick from the moment the wing stopped working.
-        float authority = (float) Mth.clamp(speed / Math.max(wing.stallSpeed(), 1.0E-4F), 0.0, 1.5);
+        // Control surfaces only bite while air is flowing over them, and what they have to work with
+        // is the dynamic pressure — the air's density against the square of the speed — rather than
+        // the speed itself. One at the stalling speed at sea level, so the files' rates still mean
+        // what they meant; less than the old figure below that and more above it, which is the
+        // difference between an aeroplane that is soft near the stall and one that merely feels slow.
+        double reference = Math.max(wing.stallSpeed(), 1.0E-4F);
+        double pressure = density * speed * speed / (reference * reference);
+        float authority = (float) Math.min(pressure, AUTHORITY_CEILING);
 
+        // And the same surfaces that give the pilot authority damp the rotation they cause. Without
+        // this the authority climbs with speed and nothing climbs with it to settle the result, so a
+        // fast aircraft wallows instead of stiffening up the way a real one does.
+        float damping = 1.0F + handling.aeroDamping() * (float) pressure;
+
+        // A lift system does not care about any of that: what flies a hovering aeroplane is jets of
+        // its own, and without them the pilot would have the controls of a brick from the moment the
+        // wing stopped working.
         if (vtol != null) {
             authority = Math.max(authority, (float) (lifting * vtol.authority()));
         }
@@ -854,10 +986,49 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // the world's: the elevator swings the nose towards the top of the canopy wherever that is
         // pointing, which is why a banked aircraft pulls round into a turn instead of climbing.
         float lag = Mth.clamp(handling.controlLag(), 0.02F, 1.0F);
-        float commandedPitch = this.limitToWing(this.input.pitch() * handling.pitchRate() * authority, lifting);
+
+        float commandedPitch = this.limitToWing(this.input.pitch() * handling.pitchRate() * authority / damping);
+
+        // On the wheels, the nose does not come up until there is enough air over the tailplane to
+        // lift it. That speed is what makes a takeoff a takeoff: the aircraft runs, the stick does
+        // nothing however hard it is pulled, and then within a few knots the nose becomes light and
+        // comes up — after which the wing is already close to flying and the aircraft leaves the
+        // ground on its own. Without the gate the pilot simply rotates on the spot and sits there
+        // nose-high waiting for the wing to catch up, dragging the tail along the runway.
+        float wheels = rolling ? this.rotationAuthority(wing, speed) : 1.0F;
+
+        if (rolling && commandedPitch > 0.0F) {
+            commandedPitch *= wheels;
+        }
+
+        float commandedRoll = this.input.roll() * handling.rollRate() * authority / damping;
+
+        // And the same for the ailerons, for the same reason: what holds an aeroplane's wings level
+        // on the runway is its undercarriage, not its controls. Left ungated they win the argument
+        // slowly — the wheels level the aircraft a quarter of the way each tick, the ailerons keep
+        // adding to it, and full deflection settles at several degrees of bank while the wheels are
+        // still firmly on the ground. They come alive as the wing takes the weight, which is the
+        // point at which they really would.
+        if (rolling) {
+            commandedRoll *= wheels;
+        }
+
         this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
-        this.rollVelocity += (this.input.roll() * handling.rollRate() * authority - this.rollVelocity) * lag;
-        this.yawVelocity += (this.input.yaw() * handling.yawRate() * authority - this.yawVelocity) * lag;
+        this.rollVelocity += (commandedRoll - this.rollVelocity) * lag;
+        this.yawVelocity += (this.input.yaw() * handling.yawRate() * authority / damping - this.yawVelocity) * lag;
+
+        // The nosewheel, which is a different thing entirely and the reason an aeroplane can be
+        // steered off a stand. A wheel on the ground does not care how fast the air is going past the
+        // fin, so this bypasses the authority the airflow grants and answers at once rather than
+        // through the control lag. It lets go as the rudder takes over, because a nosewheel that
+        // still bit at speed would throw the aircraft off the runway rather than track it down one.
+        float nosewheel = 0.0F;
+
+        if (rolling) {
+            float grip = (float) Mth.clamp(1.0 - speed / Math.max(gear.steerFade(), 1.0E-3F), 0.0, 1.0);
+
+            nosewheel = this.input.yaw() * gear.steerRate() * grip;
+        }
 
         Vec3 nose = this.getNoseVector();
         Vec3 up = this.getLiftVector();
@@ -872,7 +1043,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 ? definition.engine().maxThrust()
                 : Mth.lerp(lifting, definition.engine().maxThrust(), vtol.liftThrust());
 
-        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(thrustAxis.scale(thrust * this.throttle));
+        // Against the air it is breathing, and against what the engine is actually delivering rather
+        // than what the lever is asking for.
+        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(thrustAxis.scale(thrust * this.thrustLevel * density));
 
         // And a hover is not a slide. Nothing aerodynamic bites at a walking pace -- drag is a square
         // law and squares of small numbers are nothing -- so an aeroplane nudged sideways in the
@@ -890,20 +1063,25 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             forces = forces.add(motion.scale(-vtol.hoverDrag() * lifting * slow));
         }
 
+        double lift = 0.0;
+
         if (speed > 1.0E-4) {
             Vec3 flow = motion.scale(1.0 / speed);
 
             // Angle of attack: how far below the wing the air is coming from.
             this.angleOfAttack = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(up), -1.0, 1.0)));
             double liftCoefficient = wing.liftCoefficient(this.angleOfAttack)
-                    * (1.0 + this.flapsProgress * this.getFlapsLiftBonus());
+                    * (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
+                    * this.groundEffect();
 
             // Lift acts square to the airflow, tilted with the wings. That tilt is what turns the
             // aircraft: bank, and the same force that was holding it up starts pulling it round.
             Vec3 liftAxis = up.subtract(flow.scale(up.dot(flow)));
 
+            lift = wing.lift() * liftCoefficient * speed * speed * density;
+
             if (liftAxis.lengthSqr() > 1.0E-8) {
-                forces = forces.add(liftAxis.normalize().scale(wing.lift() * liftCoefficient * speed * speed));
+                forces = forces.add(liftAxis.normalize().scale(lift));
             }
 
             // Drag: what the shape costs, plus what the lift costs. The second is why a hard turn
@@ -913,25 +1091,33 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                     + this.flapsProgress * this.getFlapsDragPenalty())
                     * (this.input.brake() ? 4.0 : 1.0);
             double drag = parasitic + wing.inducedDrag() * liftCoefficient * liftCoefficient;
-            forces = forces.add(flow.scale(-drag * speed * speed));
+            forces = forces.add(flow.scale(-drag * speed * speed * density));
             this.checkStructuralLoad(motion);
 
             // The fin drags the nose round onto the flight path. Like the rudder, it acts about the
             // aircraft's own vertical axis, so upside down it pulls the same way relative to the
-            // aircraft and the opposite way relative to the world, exactly as a fin does.
-            weathervaneYaw = (float) (flow.dot(right) * handling.weathervane() * authority);
+            // aircraft and the opposite way relative to the world, exactly as a fin does. Not while
+            // the wheels are down: on the runway it is the undercarriage that decides where the nose
+            // points, and a fin arguing with it is how an aircraft ends up weaving down the centreline.
+            if (!rolling) {
+                weathervaneYaw = (float) (flow.dot(right) * handling.weathervane() * authority / damping);
 
-            // And the fuselage refuses to fly sideways.
-            motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()));
+                // And the fuselage refuses to fly sideways.
+                motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()));
+            }
         } else {
             this.angleOfAttack = 0.0F;
         }
 
-        this.applyBodyRotation(this.rollVelocity, this.pitchVelocity, this.yawVelocity + weathervaneYaw);
+        // How much of the weight is still on the tyres. Kept for the ground handling below, and it
+        // is what makes the end of a takeoff roll go light instead of gripping to the last instant.
+        this.weightOnWheels = (float) Mth.clamp(1.0 - lift / GRAVITY, 0.0, 1.0);
+
+        this.applyBodyRotation(this.rollVelocity, this.pitchVelocity, this.yawVelocity + weathervaneYaw + nosewheel);
         this.deltaRotation = Mth.wrapDegrees(this.getYRot() - previousYRot);
         motion = motion.add(forces);
 
-        if (this.onGround()) {
+        if (rolling) {
             motion = this.groundTick(motion);
         }
 
@@ -942,6 +1128,43 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         }
 
         this.setDeltaMovement(motion);
+    }
+
+    /**
+     * How much of a nose-up command the elevator can actually deliver while the wheels are down.
+     *
+     * <p>Nothing at all until shortly before the rotation speed, then fading in over the last of the
+     * run so the nose becomes light rather than snapping up the instant a threshold is passed. The
+     * result is the takeoff a pilot expects: accelerate, feel the aircraft go light, ease the nose
+     * up, and fly off — instead of standing the aeroplane on its tail at walking pace.
+     */
+    private float rotationAuthority(AircraftDefinition.Wing wing, double speed) {
+        float rotate = wing.effectiveRotateSpeed();
+
+        if (rotate <= 0.0F) {
+            return 1.0F;
+        }
+
+        double band = rotate * ROTATION_FADE;
+
+        return (float) Mth.clamp((speed - (rotate - band)) / band, 0.0, 1.0);
+    }
+
+    /**
+     * How big a step the aircraft rolls over instead of running into.
+     *
+     * <p>Only with the undercarriage down and the wheels on the ground: in the air an aeroplane does
+     * not step over anything, and a belly landing has no wheels to do it with. On the ground it is
+     * the difference between an undercarriage and a wall — the collision box is a single square box
+     * six blocks across, so without this the lip of one block anywhere under it is a head-on impact,
+     * and since the aircraft must pass its own crash speed to fly at all, that impact was fatal on
+     * every takeoff from ground that was not perfectly flat.
+     */
+    @Override
+    public float maxUpStep() {
+        return this.onGround() && this.gearProgress > 0.5F
+                ? this.getStats().landingGear().climbHeight()
+                : 0.0F;
     }
 
     /**
@@ -973,6 +1196,15 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private float limitToWing(float commanded, double lifting) {
         AircraftDefinition.Handling handling = this.getStats().handling();
         float limit = this.getStats().wing().stallAngle() * handling.alphaLimit();
+
+        // Not on the runway. Rolling along the ground the angle of attack is simply the angle the
+        // aircraft is sitting at, and the rotation needed to leave the ground is most of the stalling
+        // angle: a limiter that reads that as an impending stall fades the stick out exactly when the
+        // pilot is asking for the one thing the aircraft has to do, and the takeoff turns into a long
+        // wait for the wing to catch up with a nose it was never allowed to raise.
+        if (this.onGround()) {
+            return commanded;
+        }
 
         if (limit <= 0.0F || handling.alphaLimit() >= 1.0F || commanded * this.angleOfAttack <= 0.0F) {
             return commanded;
@@ -1013,7 +1245,28 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         }
     }
 
-    /** Wheels on the ground: rolling friction, brakes, and an attitude the undercarriage allows. */
+    /**
+     * Wheels on the ground: rolling friction along the aircraft, scrub across it, brakes, and an
+     * attitude the undercarriage allows.
+     *
+     * <p>A tyre rolls one way and scrubs the other, and that difference is the whole of why an
+     * aircraft tracks down a runway rather than sliding about on it. Damping the ground speed evenly
+     * in both directions, which is what this used to do, gives an aeroplane on wheels the manners of
+     * one on ice.
+     *
+     * <p>Both figures are scaled by how much weight is left on the tyres. Friction acts through the
+     * load carrying it, so as the wing takes the aircraft's weight the wheels stop gripping, and a
+     * takeoff roll goes light towards the end instead of holding on until it steps into the air.
+     *
+     * <p>What is deliberately <em>not</em> here is a pivot about the main wheels. A real aeroplane
+     * rotates about them and its centre rises as the nose comes up; an entity's box is axis-aligned
+     * and does not tilt, so there is nothing that rotation would push into the runway and nothing to
+     * compensate for. Adding the rise anyway is worse than leaving it out — it is vertical speed the
+     * wing did not make, so the aircraft is lifted off the ground by the act of rotating and then
+     * dropped back on it by gravity, which reads as a bounce rather than a rotation. The nose coming
+     * up over a second or so, and the wing taking the weight as it does, is the whole of the effect
+     * worth having, and both of those are real here.
+     */
     private Vec3 groundTick(Vec3 motion) {
         // The wheels decide the attitude, not the pilot: wings level, and the nose somewhere between
         // sitting on the nosewheel and rotated as far as the tail will allow.
@@ -1027,9 +1280,108 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 .slerp(Attitude.of(this.getYRot(), rotation), GROUND_LEVELLING));
 
         AircraftDefinition.Undercarriage gear = this.getStats().landingGear();
-        double friction = this.input.brake() ? gear.brakeFriction() : gear.rollingFriction();
 
-        return new Vec3(motion.x * friction, Math.max(motion.y, 0.0), motion.z * friction);
+        double along = this.input.brake() ? gear.brakeFriction() : gear.rollingFriction();
+        double across = gear.lateralFriction();
+
+        // Only through the weight the tyres are still carrying. Nothing on the wheels, nothing to
+        // rub: a wing holding the whole aircraft up leaves the ground no say in where it goes.
+        along = Mth.lerp(this.weightOnWheels, 1.0, along);
+        across = Mth.lerp(this.weightOnWheels, 1.0, across);
+
+        Vec3 heading = this.getNoseVector();
+        Vec3 forwards = new Vec3(heading.x, 0.0, heading.z);
+        Vec3 ground = new Vec3(motion.x, 0.0, motion.z);
+
+        if (forwards.lengthSqr() > 1.0E-8) {
+            forwards = forwards.normalize();
+
+            Vec3 sideways = new Vec3(-forwards.z, 0.0, forwards.x);
+
+            ground = forwards.scale(ground.dot(forwards) * along)
+                    .add(sideways.scale(ground.dot(sideways) * across));
+        } else {
+            // Pointing straight up or straight down, which is not a thing wheels have an opinion
+            // about. Fall back to slowing it evenly rather than dividing by nothing.
+            ground = ground.scale(along);
+        }
+
+        return new Vec3(ground.x, Math.max(motion.y, 0.0), ground.z);
+    }
+
+    /**
+     * How much lift the wing is making compared with what it would make at the same speed and angle
+     * in free air.
+     *
+     * <p>Close to the ground the wing works against its own reflection and makes more lift for the
+     * same angle. It is what an aircraft rides off the runway on, and what makes it float down the
+     * last few feet of a landing instead of arriving. Fully gone by a wingspan's height.
+     */
+    private double groundEffect() {
+        AircraftDefinition.Wing wing = this.getStats().wing();
+
+        if (wing.groundEffect() <= 0.0F) {
+            return 1.0;
+        }
+
+        double reach = Math.max(wing.span(), 1.0);
+        double height = this.heightAboveGround();
+
+        if (height >= reach) {
+            return 1.0;
+        }
+
+        return 1.0 + wing.groundEffect() * Mth.clamp(1.0 - height / reach, 0.0, 1.0);
+    }
+
+    /**
+     * Height above whatever is underneath, in blocks.
+     *
+     * <p>Read off the heightmap rather than traced: this is wanted every tick, it only has to be
+     * right to within a block for the ground effect to look after itself, and tracing a line down
+     * from an aircraft over unloaded ground would generate the terrain to trace it against.
+     *
+     * <p>The chunk is asked for without being allowed to load or generate — that is what the
+     * {@code false} means, and it also means a chunk short of fully generated comes back as nothing
+     * — and the height is read off the chunk itself. Asking the level instead is the trap:
+     * {@code Level#getHeight} fetches the chunk with loading allowed, so it quietly generates
+     * whatever is not there yet, on the tick thread, stalling the whole server while it happens.
+     * {@code hasChunkAt} does not guard against it either, since it answers for a chunk that merely
+     * exists at some earlier stage. This aircraft is always ticking by design, so one flying itself
+     * over ground nobody has visited would carve out a corridor of new terrain purely to ask how
+     * high it was above it. Out there the answer does not matter anyway: no chunk, no ground effect,
+     * which is the truth at altitude.
+     */
+    private double heightAboveGround() {
+        if (this.onGround()) {
+            return 0.0;
+        }
+
+        BlockPos at = this.blockPosition();
+        ChunkAccess chunk = this.level().getChunkSource().getChunk(at.getX() >> 4, at.getZ() >> 4, false);
+
+        if (chunk == null) {
+            return Double.MAX_VALUE;
+        }
+
+        return Math.max(0.0,
+                this.getY() - chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, at.getX(), at.getZ()));
+    }
+
+    /**
+     * How thick the air is here, as a multiple of what the files' figures assume.
+     *
+     * <p>Thrust and lift are both worked against it, so an aircraft climbing runs out of engine and
+     * wing together and settles at a ceiling rather than climbing for ever. Floored, because air that
+     * reaches nothing turns a ceiling into a trapdoor.
+     */
+    private double airDensity() {
+        double sea = this.getStats().engine().seaLevelDensity();
+        double thinning = Math.pow(2.0, -(this.getY() - DENSITY_DATUM) / DENSITY_SCALE);
+        // The floor cannot be above the ceiling, however odd a figure the file names for its air.
+        double floor = Math.min(THINNEST_AIR, sea);
+
+        return Mth.clamp(sea * thinning, floor, sea);
     }
 
     /**
@@ -1146,10 +1498,38 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 1.0F / Math.max(this.getFlapsCycleTicks(), 1));
     }
 
+    /**
+     * Puts the aircraft where a client that is not flying it should draw it.
+     *
+     * <p>Vanilla's own vehicle interpolation is deliberately not used here — see
+     * {@link AircraftInterpolation} for what it does to an aeroplane at speed, which is to draw it
+     * most of a chunk behind where it really is. The fallback below is only reached before the
+     * prediction has a position to work from, or once it has given up waiting for one.
+     */
     private void tickLerp() {
         if (this.isControlledByLocalInstance()) {
             this.lerpSteps = 0;
+            this.interpolation.release();
             this.syncPacketPositionCodec(this.getX(), this.getY(), this.getZ());
+
+            return;
+        }
+
+        if (!this.level().isClientSide) {
+            // The server is not drawing anything, and for a piloted aircraft its position arrives
+            // whole in the pilot's movement packets. Predicting on top of that would only fight it.
+            return;
+        }
+
+        AircraftDefinition.Sync sync = this.getStats().sync();
+
+        this.interpolation.tune(sync.correctionTicks(), sync.snapDistance(), sync.maxPredictionTicks());
+
+        if (this.interpolation.advance()) {
+            this.lerpSteps = 0;
+            this.setPos(this.interpolation.renderX(), this.interpolation.renderY(), this.interpolation.renderZ());
+
+            return;
         }
 
         if (this.lerpSteps > 0) {
@@ -1191,21 +1571,37 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.lerpYRot = yRot;
         this.lerpXRot = xRot;
         this.lerpSteps = 10;
+
+        // The prediction is what actually draws this aircraft; the fields above are only the
+        // fallback for before it is running. Note it is told where the aircraft is drawn as well as
+        // where it belongs, so a first correction can start from the former rather than jumping.
+        if (this.level().isClientSide && !this.isControlledByLocalInstance()) {
+            this.interpolation.receivePosition(x, y, z, this.getX(), this.getY(), this.getZ());
+
+            if (this.interpolation.consumeSnap()) {
+                this.lerpSteps = 0;
+                this.setPos(this.interpolation.renderX(), this.interpolation.renderY(),
+                        this.interpolation.renderZ());
+            }
+        }
     }
 
     @Override
     public double lerpTargetX() {
-        return this.lerpSteps > 0 ? this.lerpX : this.getX();
+        return this.interpolation.isSeeded() ? this.interpolation.targetX()
+                : (this.lerpSteps > 0 ? this.lerpX : this.getX());
     }
 
     @Override
     public double lerpTargetY() {
-        return this.lerpSteps > 0 ? this.lerpY : this.getY();
+        return this.interpolation.isSeeded() ? this.interpolation.targetY()
+                : (this.lerpSteps > 0 ? this.lerpY : this.getY());
     }
 
     @Override
     public double lerpTargetZ() {
-        return this.lerpSteps > 0 ? this.lerpZ : this.getZ();
+        return this.interpolation.isSeeded() ? this.interpolation.targetZ()
+                : (this.lerpSteps > 0 ? this.lerpZ : this.getZ());
     }
 
     @Override

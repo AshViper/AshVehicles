@@ -531,9 +531,19 @@ public final class WeaponMounts {
             // A bomb is let go rather than fired: it leaves with the aircraft's speed and nothing
             // else, and its own figure is how hard it is pushed off the rack, downwards, which is
             // what stops it scraping along the belly it just left.
+            //
+            // Anything on a rail is a different matter. Adding the aircraft's velocity whole to a
+            // rail launch is what sent rounds off at an angle to the nose: an aircraft is never
+            // travelling the way it is pointing — the wing needs an angle to the airflow to make any
+            // lift at all — so the aircraft's velocity has a component across the nose, and adding it
+            // bends every shot off-axis by the angle of attack, worse in a turn and worse again the
+            // slower the round leaves. What a rail actually does is hold the round to itself until it
+            // is clear, so only the speed already along the rail is carried out of it. Rounds now go
+            // where the nose is pointing, which is where the sight says they will.
+            Vec3 carried = direction.scale(Math.max(0.0, this.aircraft.getVelocity().dot(direction)));
             Vec3 velocity = weapon.isDropped()
                     ? this.aircraft.getVelocity().add(up.scale(-weapon.projectile().speed()))
-                    : direction.scale(weapon.projectile().speed()).add(this.aircraft.getVelocity());
+                    : direction.scale(weapon.projectile().speed()).add(carried);
 
             AircraftProjectile shot = weapon.type() == WeaponDefinition.Type.GUN
                     ? new BulletEntity(ModEntities.BULLET.get(), level)
