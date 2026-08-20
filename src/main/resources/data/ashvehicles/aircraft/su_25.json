@@ -24,18 +24,22 @@
     }
   },
   "engine": {
-    "max_thrust": 0.01386,
-    "throttle_rate": 0.012
+    "max_thrust": 0.01153,
+    "throttle_rate": 0.012,
+    "spool_rate": 0.05,
+    "sea_level_density": 1.0
   },
   "wing": {
-    "max_speed": 8.0,
+    "max_speed": 14.0,
     "stall_speed": 1.73,
     "lift": 0.005696,
     "lift_slope": 5.5,
     "stall_angle": 15.0,
-    "drag": 0.00032,
+    "drag": 0.0000629,
     "induced_drag": 0.000368,
-    "lateral_drag": 0.15
+    "lateral_drag": 0.15,
+    "ground_effect": 0.3,
+    "span": 9.0
   },
   "handling": {
     "pitch_rate": 1.5,
@@ -43,11 +47,12 @@
     "yaw_rate": 1.0,
     "control_lag": 0.18,
     "weathervane": 3.0,
-    "alpha_limit": 0.88
+    "alpha_limit": 0.88,
+    "aero_damping": 0.07
   },
   "airframe": {
     "health": 300.0,
-    "crash_speed": 1.2,
+    "crash_speed": 2.6,
     "explosion_power": 3.0,
     "seats": [
       [
@@ -62,7 +67,10 @@
     "cycle_ticks": 40,
     "drag_penalty": 0.6,
     "rolling_friction": 0.999,
-    "brake_friction": 0.94
+    "brake_friction": 0.94,
+    "lateral_friction": 0.5,
+    "steer_rate": 1.2,
+    "steer_fade": 1.3
   },
   "flaps": {
     "cycle_ticks": 20,
