@@ -426,6 +426,18 @@ public final class AircraftHud implements LayeredDraw.Layer {
         value(graphics, font, String.format("CM  FL %d  CH %d", flares, chaff), left, bottom - 52,
                 flares > 0 && chaff > 0 ? GREEN : WARNING);
 
+        // What the aeroplane is returning to anyone looking for it, and what that has cost so far.
+        // Only worth a line on an airframe that was built to be hard to find: on anything else the
+        // figure never moves and never mattered.
+        float clean = aircraft.getStats().signature().radar();
+
+        if (clean < 1.0F) {
+            float cross = aircraft.radarCrossSection();
+
+            value(graphics, font, String.format("RCS %.2f", cross), left + 84, bottom - 52,
+                    cross > clean ? WARNING : GREEN);
+        }
+
         int throttle = Math.round(aircraft.getThrottle() * 100.0F);
         value(graphics, font, "THR " + throttle + "%", left, bottom - 42);
         value(graphics, font, "GEAR " + (aircraft.isGearDown() ? "DOWN" : "UP"), left, bottom - 32);

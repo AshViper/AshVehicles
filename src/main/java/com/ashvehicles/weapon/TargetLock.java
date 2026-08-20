@@ -173,7 +173,7 @@ public final class TargetLock {
         AABB box = this.aircraft.getBoundingBox().inflate(seeker);
 
         for (Entity candidate : this.aircraft.level().getEntities(this.aircraft, box, this::couldTarget)) {
-            aim.consider(candidate, seeker);
+            aim.consider(candidate, reachAgainst(guidance, candidate, seeker));
         }
 
         // Further out it takes what the radar hands it, and only that. Asked as a list of contacts
@@ -189,6 +189,21 @@ public final class TargetLock {
         }
 
         return aim.best;
+    }
+
+    /**
+     * How far this seeker manages against that particular target.
+     *
+     * <p>A seeker homing on a radar return has the target's cross-section against it, the same as the
+     * radar that found it does. One homing on heat does not: an engine is an engine, and shaping an
+     * aeroplane to scatter radar does nothing whatever about how hot its exhaust is. Which is the
+     * trade a stealth aeroplane makes — very hard to find at range, no harder to hit once something
+     * with a heat-seeking head is close enough to look at it.
+     */
+    private static double reachAgainst(WeaponDefinition.Guidance guidance, Entity candidate, double seeker) {
+        return guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR
+                ? seeker * AircraftEntity.visibility(candidate)
+                : seeker;
     }
 
     /** Keeps whichever candidate is nearest the boresight as they are offered one at a time. */

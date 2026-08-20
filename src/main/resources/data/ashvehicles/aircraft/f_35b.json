@@ -100,6 +100,10 @@
     "sweep_ticks": 8,
     "warning_range": 5000.0
   },
+  "signature": {
+    "radar": 0.05,
+    "store": 0.08
+  },
   "countermeasures": {
     "flares": 24,
     "chaff": 24,
@@ -108,37 +112,9 @@
     "speed": 0.35
   },
   "hardpoints": [
-    {
-      "name": "pylon1",
-      "pos": [
-        0.39,
-        1.51,
-        -1.36
-      ]
-    },
-    {
-      "name": "pylon1_copy",
-      "pos": [
-        -0.39,
-        1.51,
-        -1.36
-      ]
-    },
-    {
-      "name": "pylon1_copy_copy",
-      "pos": [
-        -0.88,
-        1.51,
-        -1.72
-      ]
-    },
-    {
-      "name": "pylon1_copy_copy_copy",
-      "pos": [
-        0.88,
-        1.51,
-        -1.72
-      ]
-    }
+    { "name": "pylon1", "pos": [0.39, 1.51, -1.36] },
+    { "name": "pylon1_copy", "pos": [-0.39, 1.51, -1.36] },
+    { "name": "pylon1_copy_copy", "pos": [-0.88, 1.51, -1.72] },
+    { "name": "pylon1_copy_copy_copy", "pos": [0.88, 1.51, -1.72] }
   ]
 }

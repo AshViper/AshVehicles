@@ -167,7 +167,10 @@ public final class Sensors {
                 }
             }
 
-            if (radar.fitted() && distance <= radar.range()
+            // How far this radar reaches against this particular thing, which is not how far it
+            // reaches. A shape built to return nothing is found close in or not at all, and a stealth
+            // aeroplane carrying its missiles on the outside is not one.
+            if (radar.fitted() && distance <= radar.range() * AircraftEntity.visibility(other)
                     && gap.scale(1.0 / distance).dot(nose) > widest) {
                 found.add(new Contact(other.getId(), bearing, (float) distance,
                         (float) (other.getY() - this.aircraft.getY()),

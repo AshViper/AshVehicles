@@ -430,6 +430,31 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.entityData.set(flare ? DATA_FLARES : DATA_CHAFF, held);
     }
 
+    /**
+     * How big this aircraft looks to a radar: its clean airframe plus whatever is bolted to the
+     * outside of it.
+     *
+     * <p>Stores in a bay are not counted. That is the whole argument for a bay, and it is the one
+     * decision a pilot of a stealth aeroplane actually gets to make about their own signature —
+     * everything else about it was settled by whoever drew the shape.
+     */
+    public float radarCrossSection() {
+        AircraftDefinition.Signature signature = this.getStats().signature();
+
+        return signature.radar() + signature.store() * this.weapons.externalStores();
+    }
+
+    /**
+     * How far a radar sees that entity, as a fraction of what the same radar manages against an
+     * ordinary fighter. Anything that is not an aeroplane is an ordinary fighter as far as this is
+     * concerned, which is a way of saying nothing has been decided about it.
+     */
+    public static float visibility(Entity entity) {
+        return entity instanceof AircraftEntity aircraft
+                ? AircraftDefinition.Signature.reach(aircraft.radarCrossSection())
+                : 1.0F;
+    }
+
     public Sensors getSensors() {
         return this.sensors;
     }

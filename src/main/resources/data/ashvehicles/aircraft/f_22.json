@@ -95,6 +95,10 @@
     "sweep_ticks": 8,
     "warning_range": 6000.0
   },
+  "signature": {
+    "radar": 0.02,
+    "store": 0.08
+  },
   "hardpoints": [
     {
       "name": "pylon1",
