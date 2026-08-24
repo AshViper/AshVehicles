@@ -1,0 +1,159 @@
+{
+  "hitbox": {
+    "width": 16,
+    "height": 24,
+    "tracking_range": 20,
+    "boxes": [
+      {
+        "name": "hull",
+        "offset": [0.0, -0.95, -56.15],
+        "size": [22.0, 12.05, 37.5]
+      },
+      {
+        "name": "superstructure",
+        "offset": [0.0, 15.35, -21.5],
+        "size": [11.0, 10.55, 3.0],
+        "rotation": [-21.0, 0.0, 0.0]
+      },
+      {
+        "name": "turret_fwd",
+        "offset": [0.0, 7.7, 42.4],
+        "size": [5.4, 3.6, 10.0],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_aft",
+        "offset": [0.0, 7.7, 22.7],
+        "size": [5.4, 3.6, 10.0]
+      },
+      {
+        "name": "hull_copy",
+        "offset": [-4.1, 0.15, 42.35],
+        "size": [2.0, 14.75, 53.4],
+        "rotation": [0.0, 9.0, 0.0]
+      },
+      {
+        "name": "superstructure_copy",
+        "offset": [0.0, 9.15, -11.95],
+        "size": [11.0, 3.15, 49.6]
+      },
+      {
+        "name": "superstructure_copy",
+        "offset": [0.0, 16.05, -6.75],
+        "size": [11.0, 10.55, 28.15]
+      },
+      {
+        "name": "superstructure_copy",
+        "offset": [0.0, 15.05, 8.4],
+        "size": [11.0, 12.0, 3.0],
+        "rotation": [24.0, 0.0, 0.0]
+      },
+      {
+        "name": "hull_copy_copy",
+        "offset": [-0.05, -0.1, 50.0],
+        "size": [5.9, 14.75, 13.65]
+      },
+      {
+        "name": "hull_copy_copy",
+        "offset": [4.1, 0.15, 42.35],
+        "size": [2.0, 14.75, 53.4],
+        "rotation": [0.0, -9.0, 0.0]
+      },
+      {
+        "name": "hull_copy_copy_copy",
+        "offset": [0.0, 0.15, -10.6],
+        "size": [22.0, 14.75, 53.4]
+      },
+      {
+        "name": "hull_copy_copy_copy",
+        "offset": [-0.1, -0.1, 22.75],
+        "size": [14.2, 14.75, 13.65]
+      },
+      {
+        "name": "hull_copy_copy_copy",
+        "offset": [0.05, -0.1, 36.4],
+        "size": [10.05, 14.75, 13.65]
+      }
+    ]
+  },
+  "model": {
+    "scale": 1,
+    "bones": {
+      "turret": "turret1",
+      "gun": "turret1"
+    },
+    "slaved_turrets": ["turret2"]
+  },
+  "powertrain": {
+    "max_speed": 0.6,
+    "reverse_speed": 0.2,
+    "acceleration": 0.0015,
+    "braking": 0.004,
+    "rolling_resistance": 0.002,
+    "steer_rate": 0.5,
+    "pivot_rate": 0
+  },
+  "suspension": {
+    "climb_height": 0.8,
+    "grip": 0.45,
+    "contact_length": 60,
+    "contact_width": 22
+  },
+  "turret": {
+    "traverse_rate": 0.9,
+    "elevation_rate": 0.9,
+    "depression": 5,
+    "elevation": 45,
+    "ring": [0.0, 7.81, 41.58]
+  },
+  "armament": {
+    "main": "ashvehicles:125mm_cannon",
+    "trunnion": [0.0, 8.3, 41.58],
+    "barrel_length": 5.8,
+    "recoil": 0,
+    "recoil_ticks": 12,
+    "kick": 0
+  },
+  "launcher": {
+    "missile": "ashvehicles:57e6",
+    "rail": [0.0, 9.5, 30.0]
+  },
+  "hull": {
+    "health": 2500,
+    "explosion_power": 8,
+    "armour": 4,
+    "seats": [
+      [0.0, 16.0, -28.0],
+      [4.0, 8.0, 40.0],
+      [-4.0, 8.0, 40.0],
+      [4.0, 8.0, -6.0],
+      [-4.0, 8.0, -6.0]
+    ]
+  },
+  "camera": {
+    "pos": [0.0, 20.0, -30.0],
+    "tilt": 12,
+    "cockpit": [0.0, 17.0, -26.0]
+  },
+  "sound": {
+    "engine": "ashvehicles:engine.tank",
+    "volume": 0.8,
+    "idle_volume": 0.5,
+    "pitch_min": 0.7,
+    "pitch_max": 0.95,
+    "range": 260
+  },
+  "radar": {
+    "range": 4000,
+    "arc": 180,
+    "sweep_ticks": 20,
+    "warning_range": 5000
+  },
+  "type": "ship",
+  "buoyancy": {
+    "draught": 0,
+    "buoyancy": 0.05,
+    "damping": 0.4,
+    "trim_rate": 0.08
+  }
+}

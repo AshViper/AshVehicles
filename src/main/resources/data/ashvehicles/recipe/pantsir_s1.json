@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "N": {
+      "tag": "c:ingots/netherite"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "R": {
+      "item": "minecraft:redstone_block"
+    },
+    "H": {
+      "item": "minecraft:chain"
+    }
+  },
+  "pattern": ["#R#", "NQN", "H#H"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:pantsir_s1"
+  }
+}

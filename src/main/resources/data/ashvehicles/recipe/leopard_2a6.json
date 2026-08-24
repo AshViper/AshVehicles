@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "N": {
+      "tag": "c:ingots/netherite"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "H": {
+      "item": "minecraft:chain"
+    }
+  },
+  "pattern": ["###", "NQN", "HHH"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:leopard_2a6"
+  }
+}

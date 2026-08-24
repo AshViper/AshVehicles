@@ -4,11 +4,15 @@
   "package": "com.ashvehicles.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "EntityTrackingMixin"
+    "EntityCollisionMixin",
+    "EntityTrackingMixin",
+    "HitScanMixin",
+    "VehicleMoveCheckMixin"
   ],
   "client": [
     "CameraMixin",
     "HitboxMixin",
+    "MountHintMixin",
     "MouseLookMixin"
   ],
   "injectors": {

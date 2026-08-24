@@ -2,8 +2,8 @@ package com.ashvehicles.client.renderer;
 
 import java.util.List;
 
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.aircraft.AircraftManager;
 import com.ashvehicles.client.ghost.GhostRenderContext;
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
@@ -40,7 +40,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
  * front of you. Over terrain the player can still see, which for anyone running Distant Horizons is
  * most of what is out there, an aeroplane stays an aeroplane.
  */
-public class AircraftRenderer extends GeoEntityRenderer<AircraftEntity> {
+public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
     /** How solid a ghost is. Enough to read against the sky, far too little to mistake for near. */
     private static final float GHOST_ALPHA = GhostGeoRenderer.GHOST_ALPHA;
 
@@ -49,20 +49,6 @@ public class AircraftRenderer extends GeoEntityRenderer<AircraftEntity> {
 
     public AircraftRenderer(EntityRendererProvider.Context context) {
         super(context, new AircraftModel());
-    }
-
-    /**
-     * Stands down beyond the ghost start distance, where the ghost pass takes over. The test is the
-     * same one the pass makes, from the same camera, so an aircraft is always one or the other's
-     * and never both.
-     */
-    @Override
-    public boolean shouldRender(AircraftEntity aircraft, Frustum frustum, double camX, double camY, double camZ) {
-        if (GhostRenderDispatcher.claims(aircraft, camX, camY, camZ)) {
-            return false;
-        }
-
-        return super.shouldRender(aircraft, frustum, camX, camY, camZ);
     }
 
     /**
@@ -160,45 +146,12 @@ public class AircraftRenderer extends GeoEntityRenderer<AircraftEntity> {
      * to the pylon, and it stays there whether or not there is anything left inside it.
      */
     private static boolean isExpended(WeaponMounts.Mount mount) {
-        return mount.ammo() <= 0 && AircraftManager.weapon(mount.weapon()).leavesRail();
+        return mount.ammo() <= 0 && Definitions.weapon(mount.weapon()).leavesRail();
     }
 
-    /**
-     * Models are rarely built at Minecraft's scale, so each aircraft's file says what to draw it at.
-     * The figure is not known when the renderer is built, only when there is an aircraft to draw.
-     */
     @Override
-    public void preRender(PoseStack poseStack, AircraftEntity animatable, BakedGeoModel model,
-            MultiBufferSource bufferSource, VertexConsumer buffer, boolean isReRender, float partialTick,
-            int packedLight, int packedOverlay, int colour) {
-        float scale = animatable.getStats().model().scale();
-        this.scaleWidth = scale;
-        this.scaleHeight = scale;
-        this.shadowRadius = animatable.getBbWidth() * 0.5F;
-
-        super.preRender(poseStack, animatable, model, bufferSource, buffer, isReRender, partialTick,
-                packedLight, packedOverlay, colour);
+    protected float scaleOf(AircraftEntity animatable) {
+        return animatable.getStats().model().scale();
     }
 
-    /**
-     * Turns the model to match the aircraft's attitude, which is a rotation and so needs no angles
-     * pulling out of it. The base implementation is deliberately not called: it would apply a
-     * heading of its own, and it reads that heading off the body rotation of a living entity, which
-     * an aircraft is not.
-     *
-     * <p>The half turn afterwards is the model's own: geometry is authored facing north, which is
-     * the entity's -Z, and the aircraft's rotation is described from the nose down +Z.
-     */
-    @Override
-    protected void applyRotations(AircraftEntity animatable, PoseStack poseStack, float ageInTicks,
-            float rotationYaw, float partialTick, float nativeScale) {
-        poseStack.mulPose(animatable.getAttitude(partialTick));
-        poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
-    }
-
-    /** A name tag floating over a moving aircraft is more distracting than useful. */
-    @Override
-    public boolean shouldShowName(AircraftEntity animatable) {
-        return false;
-    }
 }

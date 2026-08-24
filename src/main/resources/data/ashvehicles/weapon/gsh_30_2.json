@@ -8,9 +8,10 @@
   },
   "projectile": {
     "damage": 9.0,
-    "speed": 44.0,
-    "gravity": 0.02,
+    "speed": 22.0,
+    "gravity": 0.00125,
     "range": 900.0,
+    "ricochet": 55.0,
     "tracer": "FFD27A"
   }
 }

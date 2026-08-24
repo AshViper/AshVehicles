@@ -2,9 +2,10 @@ package com.ashvehicles.mixin;
 
 import java.util.Set;
 
+import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.entity.AircraftEntity;
-import com.ashvehicles.entity.AircraftProjectile;
+import com.ashvehicles.entity.VehicleEntityBase;
+import com.ashvehicles.entity.VehicleProjectile;
 
 import net.minecraft.server.level.ServerEntity;
 import net.minecraft.server.level.ServerPlayer;
@@ -62,10 +63,10 @@ public abstract class EntityTrackingMixin {
             return;
         }
 
-        if (this.entity instanceof AircraftEntity aircraft) {
+        if (this.entity instanceof VehicleEntityBase machine) {
             callback.cancel();
-            this.ashvehicles$report(player, withinGhostRange(aircraft, player));
-        } else if (this.entity instanceof AircraftProjectile) {
+            this.ashvehicles$report(player, withinGhostRange(machine, player));
+        } else if (this.entity instanceof VehicleProjectile) {
             callback.cancel();
             // The range its entity type was registered with, in blocks, and nothing else: it is
             // the capping against the player's view distance that has to go, not the range itself.
@@ -86,15 +87,20 @@ public abstract class EntityTrackingMixin {
     }
 
     /**
-     * Whether this player is near enough to go on hearing about the aircraft.
+     * Whether this player is near enough to go on hearing about the machine.
      *
-     * <p>An aircraft whose file sets no limit is always near enough: it is reported wherever it is,
-     * for as long as both are in the same world. That is a decision about one entity type rather
-     * than about the world, and there are never many aircraft, so the cost is a position packet a
+     * <p>One whose file sets no limit is always near enough: it is reported wherever it is, for as
+     * long as both are in the same world. That is a decision about a handful of entity types rather
+     * than about the world, and there are never many machines, so the cost is a position packet a
      * tick each rather than anything that scales with how big the world is.
+     *
+     * <p>Tanks are here for the same reason aircraft are, if not quite so obviously. A tank does not
+     * fly, but the ground it sits on is visible from as far away as any of it, and a column crossing
+     * a valley two kilometres off is exactly the thing somebody with Distant Horizons running is
+     * looking out at. Left to vanilla it would vanish at the edge of the loaded chunks.
      */
-    private boolean withinGhostRange(AircraftEntity aircraft, ServerPlayer player) {
-        AircraftDefinition.Hitbox hitbox = aircraft.getStats().hitbox();
+    private boolean withinGhostRange(VehicleEntityBase machine, ServerPlayer player) {
+        VehicleChassis.Hitbox hitbox = machine.hitbox();
 
         return !hitbox.hasGhostLimit() || this.ashvehicles$within(player, hitbox.ghostRange());
     }

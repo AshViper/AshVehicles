@@ -1,0 +1,92 @@
+{
+  "type": "ship",
+  "buoyancy": {
+    "draught": 0.8,
+    "buoyancy": 0.08,
+    "damping": 0.35,
+    "trim_rate": 0.1
+  },
+  "hitbox": {
+    "width": 3.0,
+    "height": 2.5,
+    "tracking_range": 10,
+    "boxes": [
+      {
+        "name": "hull",
+        "offset": [0.0, 0.625, 0.0],
+        "size": [2.5, 1.25, 8.0]
+      },
+      {
+        "name": "turret",
+        "offset": [0.0, 1.6, -2.0],
+        "size": [1.75, 0.9, 1.6],
+        "mount": "turret"
+      },
+      {
+        "name": "barrel",
+        "offset": [0.0, 1.9, 0.6],
+        "size": [0.4, 0.4, 2.6],
+        "mount": "turret"
+      }
+    ]
+  },
+  "model": {
+    "scale": 1,
+    "bones": {
+      "turret": "turret",
+      "gun": "gun"
+    }
+  },
+  "powertrain": {
+    "max_speed": 0.45,
+    "reverse_speed": 0.18,
+    "acceleration": 0.0025,
+    "braking": 0.006,
+    "rolling_resistance": 0.003,
+    "steer_rate": 1.1,
+    "pivot_rate": 0.0
+  },
+  "suspension": {
+    "climb_height": 0.6,
+    "grip": 0.55,
+    "contact_length": 8.0,
+    "contact_width": 2.5
+  },
+  "turret": {
+    "traverse_rate": 1.6,
+    "elevation_rate": 1.4,
+    "depression": 5.0,
+    "elevation": 40.0,
+    "ring": [0.0, 1.25, -2.0]
+  },
+  "armament": {
+    "main": "ashvehicles:bofors_40",
+    "trunnion": [0.0, 1.9, -1.0],
+    "barrel_length": 2.7,
+    "recoil": 0.12,
+    "recoil_ticks": 6,
+    "kick": 0.0
+  },
+  "hull": {
+    "health": 260.0,
+    "explosion_power": 4.0,
+    "seats": [
+      [0.0, 1.4, -1.4],
+      [0.7, 1.4, -2.6],
+      [-0.7, 1.4, -2.6]
+    ]
+  },
+  "camera": {
+    "pos": [0.0, 3.0, -13.0],
+    "tilt": 6.0,
+    "cockpit": [0.0, 2.2, -1.4]
+  },
+  "sound": {
+    "engine": "ashvehicles:engine.tank",
+    "volume": 0.7,
+    "idle_volume": 0.4,
+    "pitch_min": 0.85,
+    "pitch_max": 1.1,
+    "range": 160.0
+  }
+}

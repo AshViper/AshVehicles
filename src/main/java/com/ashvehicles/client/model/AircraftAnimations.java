@@ -4,6 +4,7 @@ import javax.annotation.Nullable;
 
 import com.ashvehicles.entity.AircraftEntity;
 
+import net.minecraft.resources.ResourceLocation;
 import software.bernie.geckolib.animation.Animation;
 import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.animation.PlayState;
@@ -29,6 +30,9 @@ public final class AircraftAnimations {
     public static final String GEAR_DOWN = "gear_down";
     public static final String GEAR_UP = "gear_up";
 
+    /** Blend into the gear cycle, for a pilot who changes their mind partway through one. */
+    public static final int TRANSITION_TICKS = 4;
+
     private static final RawAnimation LOWERING = RawAnimation.begin().thenPlayAndHold(GEAR_DOWN);
     private static final RawAnimation RAISING = RawAnimation.begin().thenPlayAndHold(GEAR_UP);
 
@@ -46,7 +50,15 @@ public final class AircraftAnimations {
             return PlayState.STOP;
         }
 
-        return state.setAndContinue(aircraft.isGearDown() ? LOWERING : RAISING);
+        return state.setAndContinue(cycleFor(aircraft.isGearDown()));
+    }
+
+    /**
+     * The half of the cycle that ends with the gear where it is wanted, for a caller with no
+     * aircraft to ask — a ghost, drawn from a snapshot of one.
+     */
+    public static RawAnimation cycleFor(boolean gearDown) {
+        return gearDown ? LOWERING : RAISING;
     }
 
     /**
@@ -66,18 +78,31 @@ public final class AircraftAnimations {
      * settled and the cycle plays at its proper speed.
      */
     public static double gearSpeed(AircraftEntity aircraft) {
-        if (aircraft.isGearSettled()) {
+        return gearSpeed(AircraftModel.animationFile(aircraft), aircraft.isGearDown(),
+                aircraft.getGearCycleTicks(), aircraft.isGearSettled());
+    }
+
+    /** The same, from the four things it depends on, for a ghost drawn without its aircraft. */
+    public static double gearSpeed(@Nullable ResourceLocation animationFile, boolean gearDown, int cycleTicks,
+            boolean settled) {
+        if (settled) {
             return SETTLED;
         }
 
-        Animation animation = gearAnimation(aircraft, aircraft.isGearDown() ? GEAR_DOWN : GEAR_UP);
+        Animation animation = gearAnimation(animationFile, gearDown ? GEAR_DOWN : GEAR_UP);
 
-        return animation == null ? 1.0 : animation.length() / Math.max(aircraft.getGearCycleTicks(), 1);
+        return animation == null ? 1.0 : animation.length() / Math.max(cycleTicks, 1);
     }
 
     /** Whether this aircraft's animation file has both halves of the cycle in it. */
     public static boolean hasGearCycle(AircraftEntity aircraft) {
-        return gearAnimation(aircraft, GEAR_DOWN) != null && gearAnimation(aircraft, GEAR_UP) != null;
+        return hasGearCycle(AircraftModel.animationFile(aircraft));
+    }
+
+    /** The same, by file: what a ghost knows about the aircraft it stands for. */
+    public static boolean hasGearCycle(@Nullable ResourceLocation animationFile) {
+        return gearAnimation(animationFile, GEAR_DOWN) != null
+                && gearAnimation(animationFile, GEAR_UP) != null;
     }
 
     /**
@@ -87,8 +112,12 @@ public final class AircraftAnimations {
     private static final double SETTLED = 1.0E4;
 
     @Nullable
-    private static Animation gearAnimation(AircraftEntity aircraft, String name) {
-        BakedAnimations file = GeckoLibCache.getBakedAnimations().get(AircraftModel.animationFile(aircraft));
+    private static Animation gearAnimation(@Nullable ResourceLocation animationFile, String name) {
+        if (animationFile == null) {
+            return null;
+        }
+
+        BakedAnimations file = GeckoLibCache.getBakedAnimations().get(animationFile);
 
         return file == null ? null : file.getAnimation(name);
     }

@@ -4,13 +4,16 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.ashvehicles.vehicle.VehicleChassis;
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.aircraft.AircraftLoader;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.entity.CountermeasureEntity;
+import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.entity.RocketEntity;
+import com.ashvehicles.vehicle.GroundVehicleDefinition;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -21,7 +24,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
  * One entity type per aircraft file. Nothing here names an aircraft: the list comes from whatever
- * {@link AircraftLoader} found in the mod's resources.
+ * {@link Definitions} found in the mod's resources.
  */
 public final class ModEntities {
     public static final DeferredRegister<EntityType<?>> ENTITY_TYPES =
@@ -29,6 +32,9 @@ public final class ModEntities {
 
     private static final Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> AIRCRAFT =
             registerAll();
+
+    private static final Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<GroundVehicleEntity>>>
+            VEHICLES = registerVehicles();
 
     /**
      * One round from a gun. Small, fast and short-lived, so it is tracked far out and updated every
@@ -45,7 +51,7 @@ public final class ModEntities {
                             // one tick stale is a forty-block jump. The client is told the real speed
                             // once, in synched data, and flies the round itself from there; the
                             // occasional position is a check rather than a correction. See
-                            // AircraftProjectile.
+                            // VehicleProjectile.
                             .updateInterval(20)
                             .setShouldReceiveVelocityUpdates(false)
                             .build("bullet"));
@@ -88,14 +94,14 @@ public final class ModEntities {
     private static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> registerAll() {
         Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> types = new LinkedHashMap<>();
 
-        AircraftLoader.builtIn().forEach((id, definition) -> types.put(id, register(id, definition)));
+        Definitions.AIRCRAFT.builtIn().forEach((id, definition) -> types.put(id, register(id, definition)));
 
         return Collections.unmodifiableMap(types);
     }
 
     private static DeferredHolder<EntityType<?>, EntityType<AircraftEntity>> register(
             ResourceLocation id, AircraftDefinition definition) {
-        AircraftDefinition.Hitbox hitbox = definition.hitbox();
+        VehicleChassis.Hitbox hitbox = definition.hitbox();
 
         // Minecraft hitboxes are boxes with a square footprint, so they can never match the
         // silhouette of an aeroplane; the file gives a figure that covers the fuselage and wing
@@ -110,9 +116,54 @@ public final class ModEntities {
                         .build(id.getPath()));
     }
 
+    private static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<GroundVehicleEntity>>>
+            registerVehicles() {
+        Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<GroundVehicleEntity>>> types =
+                new LinkedHashMap<>();
+
+        Definitions.VEHICLES.builtIn().forEach((id, definition) -> {
+            if (AIRCRAFT.containsKey(id)) {
+                AshVehicles.LOGGER.error("Ground vehicle {} shares its name with an aircraft; it is skipped", id);
+
+                return;
+            }
+
+            types.put(id, registerVehicle(id, definition));
+        });
+
+        return Collections.unmodifiableMap(types);
+    }
+
+    /**
+     * One entity type per ground vehicle file, on the same terms as an aircraft: the size is fixed
+     * here and cannot be changed by a data pack, because an entity type carries it from the moment
+     * it is registered.
+     *
+     * <p>Updated every tick and told to carry its velocity, both for the reason an aircraft is: the
+     * hull is simulated by whoever is driving, and everyone else has to be able to draw it moving
+     * rather than stepping.
+     */
+    private static DeferredHolder<EntityType<?>, EntityType<GroundVehicleEntity>> registerVehicle(
+            ResourceLocation id, GroundVehicleDefinition definition) {
+        VehicleChassis.Hitbox hitbox = definition.hitbox();
+
+        return ModEntities.ENTITY_TYPES.register(id.getPath(),
+                () -> EntityType.Builder.<GroundVehicleEntity>of(GroundVehicleEntity::new, MobCategory.MISC)
+                        .sized(hitbox.width(), hitbox.height())
+                        .clientTrackingRange(hitbox.trackingRange())
+                        .updateInterval(1)
+                        .setShouldReceiveVelocityUpdates(true)
+                        .build(id.getPath()));
+    }
+
     /** Every registered aircraft, by id. */
     public static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> aircraft() {
         return AIRCRAFT;
+    }
+
+    /** Every registered ground vehicle, by id. */
+    public static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<GroundVehicleEntity>>> vehicles() {
+        return VEHICLES;
     }
 
     private ModEntities() {

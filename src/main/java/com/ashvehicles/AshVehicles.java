@@ -39,7 +39,8 @@ public class AshVehicles {
      * The mod's tab: the aeroplanes, the stores that go on them, and the tool for taking them apart.
      *
      * <p>Ordered as a hangar would be rather than as the registry happens to be: the wrench first,
-     * because everything else needs it eventually, then the airframes, then what hangs on them.
+     * because everything else needs it eventually, then the airframes, then what hangs on them, and
+     * last what goes inside them.
      */
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> TAB = CREATIVE_MODE_TABS.register("vehicles",
             () -> CreativeModeTab.builder()
@@ -49,7 +50,9 @@ public class AshVehicles {
                     .displayItems((parameters, output) -> {
                         output.accept(ModItems.WRENCH.get());
                         ModItems.aircraft().values().forEach(item -> output.accept(item.get()));
+                        ModItems.vehicles().values().forEach(item -> output.accept(item.get()));
                         ModItems.weapons().values().forEach(item -> output.accept(item.get()));
+                        ModItems.ammo().values().forEach(item -> output.accept(item.get()));
                     }).build());
 
     /**

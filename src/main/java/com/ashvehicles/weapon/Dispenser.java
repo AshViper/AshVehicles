@@ -2,7 +2,7 @@ package com.ashvehicles.weapon;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.aircraft.Attitude;
+import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.registry.ModEntities;

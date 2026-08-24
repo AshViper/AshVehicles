@@ -1,0 +1,40 @@
+{
+  "type": "missile",
+  "item": false,
+  "ammo": 12,
+  "firing": {
+    "rounds_per_second": 0.5,
+    "spread": 0.2
+  },
+  "projectile": {
+    "damage": 100.0,
+    "speed": 4.0,
+    "thrust": 0.34,
+    "burn_ticks": 70,
+    "spool_ticks": 12,
+    "top_speed": 18.0,
+    "gravity": 0.0005,
+    "range": 4000.0,
+    "explosion": 3.5,
+    "tracer": "FFE0A0",
+    "trail": {
+      "colour": "DEDBD3",
+      "exhaust": "8A857A",
+      "density": 1.5,
+      "size": 0.9
+    }
+  },
+  "guidance": {
+    "turn_rate": 5.0,
+    "lock_angle": 30.0,
+    "lock_range": 2400.0,
+    "lock_ticks": 30,
+    "track_angle": 85.0,
+    "proximity": 6.0,
+    "seeker": "radar"
+  },
+  "sound": {
+    "volume": 2.2,
+    "pitch": 0.95
+  }
+}

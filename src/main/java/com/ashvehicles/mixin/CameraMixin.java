@@ -1,6 +1,7 @@
 package com.ashvehicles.mixin;
 
 import com.ashvehicles.client.AircraftCameraHandler;
+import com.ashvehicles.client.GroundVehicleCameraHandler;
 
 import net.minecraft.client.Camera;
 import net.minecraft.world.entity.Entity;
@@ -11,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Lets an aircraft say where the camera goes.
+ * Lets a vehicle say where the camera goes.
  *
  * <p>NeoForge's only camera event, ViewportEvent.ComputeCameraAngles, fires at the top of
  * {@link Camera#setup} and the position is written further down, so anything the event moves is
@@ -22,8 +23,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class CameraMixin {
     @Inject(method = "setup(Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/world/entity/Entity;ZZF)V",
             at = @At("TAIL"))
-    private void ashvehicles$placeAircraftCamera(BlockGetter level, Entity entity, boolean detached, boolean flipped,
+    private void ashvehicles$placeVehicleCamera(BlockGetter level, Entity entity, boolean detached, boolean flipped,
             float partialTick, CallbackInfo callback) {
+        // One of the two at most: the rider is in an aircraft or in a ground vehicle or in neither,
+        // and each handler stands down for anything that is not its own.
         AircraftCameraHandler.placeCamera((Camera) (Object) this, entity, detached, partialTick);
+        GroundVehicleCameraHandler.placeCamera((Camera) (Object) this, entity, detached, partialTick);
     }
 }

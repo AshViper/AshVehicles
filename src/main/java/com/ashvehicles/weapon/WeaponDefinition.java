@@ -24,13 +24,15 @@ import net.minecraft.util.StringRepresentable;
  * @param item whether the mod should register an item for it. A gun built into an airframe has no
  *             business being carried about; a pod does
  * @param ammo rounds carried by one mount, when full
+ * @param ammoItem which ammunition item feeds it, or empty to read it off how it fires. See
+ *                 {@link #ammoKind()}
  * @param firing how it is fired
  * @param projectile what it fires
  * @param guidance how it steers, for a weapon that does. Absent means it does not
  * @param sound what it sounds like
  */
-public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing, Projectile projectile,
-        Optional<Guidance> guidance, SoundSetup sound) {
+public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
+        Firing firing, Projectile projectile, Optional<Guidance> guidance, SoundSetup sound) {
 
     /** {@code RRGGBB}, with or without a leading hash, as everything in these files writes colour. */
     static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
@@ -47,6 +49,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
             Type.CODEC.optionalFieldOf("type", Type.GUN).forGetter(WeaponDefinition::type),
             Codec.BOOL.optionalFieldOf("item", true).forGetter(WeaponDefinition::item),
             Codec.INT.fieldOf("ammo").forGetter(WeaponDefinition::ammo),
+            AmmoKind.CODEC.optionalFieldOf("ammo_item").forGetter(WeaponDefinition::ammoItem),
             Firing.CODEC.fieldOf("firing").forGetter(WeaponDefinition::firing),
             Projectile.CODEC.fieldOf("projectile").forGetter(WeaponDefinition::projectile),
             Guidance.CODEC.optionalFieldOf("guidance").forGetter(WeaponDefinition::guidance),
@@ -57,8 +60,46 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      * Used when a weapon has no file the game can read at all: something that shoots, so the game
      * keeps running, but nothing anyone would mistake for a real weapon.
      */
-    public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100,
-            new Firing(5.0F, 1.0F, 1, 0.0F), Projectile.DEFAULT, Optional.empty(), SoundSetup.DEFAULT);
+    public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
+            new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(), SoundSetup.DEFAULT);
+
+    /**
+     * Whether holding the trigger keeps it firing, rather than sending one for each press.
+     *
+     * <p>The difference is not really about the weapon's kind, which is why it is a field rather
+     * than a rule. What decides it is the rate: a cannon at fifty rounds a second is a thing you
+     * hold down, and a hundred and twenty millimetres at one round every seven seconds is a thing
+     * you press — and both of those are guns. Left out, a gun is automatic and everything else goes
+     * one press at a time, which is what every weapon in the mod meant before the field existed.
+     *
+     * <p>Read by both the aircraft's pylons and a vehicle's built-in gun, so that a weapon behaves
+     * the same way whichever machine it is bolted to.
+     */
+    public boolean isAutomatic() {
+        return this.firing.automatic().orElse(this.type == Type.GUN);
+    }
+
+    /**
+     * Which ammunition item this gun is loaded out of.
+     *
+     * <p>Named outright by a file that wants to, and otherwise read off what the weapon is and how
+     * it fires. Anything that is not a gun goes in a tube one at a time; a gun you hold down is
+     * belt-fed and one you press is loaded by hand, which is the same distinction
+     * {@link #isAutomatic()} already draws. Between them they sort every weapon in the mod without a
+     * line being added to any of their files. Say {@code ammo_item} to overrule it — a revolver
+     * cannon loaded from a drum a shell at a time would want to, and so would anyone who wanted a
+     * guided missile to cost something an unguided rocket does not.
+     *
+     * <p>This is what a machine's <em>built-in</em> armament is resupplied out of. A store hung on
+     * an aircraft's pylon is resupplied out of the store itself, which is an item already; see
+     * {@code WeaponMounts.draw}.
+     */
+    public AmmoKind ammoKind() {
+        return this.ammoItem.orElseGet(() -> switch (this.type) {
+            case GUN -> this.isAutomatic() ? AmmoKind.AUTOCANNON : AmmoKind.CANNON;
+            default -> AmmoKind.ROCKET;
+        });
+    }
 
     /** True if this weapon steers towards something, and so needs something to steer towards. */
     public boolean isGuided() {
@@ -83,6 +124,33 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      */
     public boolean isDropped() {
         return this.type == Type.BOMB;
+    }
+
+    /**
+     * Whether what this fires holds open the ground it is flying over.
+     *
+     * <p>Something has to, or a weapon aimed past the edge of the loaded world lands on nothing.
+     * Chunks exist around players and nowhere else, an aircraft holds open the corridor it is flying
+     * down and no more, and a bomb released from three thousand feet is a long way from either by the
+     * time it arrives. Blocks out there are not asked about at all — asking would generate the
+     * terrain on the spot and on the main thread — so without a claim of its own a round passes
+     * through the hillside it was aimed at and is given up on in the empty air behind it. See
+     * {@link com.ashvehicles.entity.WeaponChunkLoader}.
+     *
+     * <p>Left out, everything claims ground, because everything is aimed at something. It used to be
+     * only what was <em>dropped</em>, and that was a limit of the machinery rather than a decision
+     * about weapons: a claim was one ticket per round, moved every tick, and a bomb spends ten
+     * seconds coming down through the same two chunks while a gun crosses a chunk boundary twenty
+     * times a second from thirty rounds at once. What made that affordable was making the claims
+     * shared, unticked and rationed rather than making the guns shorter-ranged; the loader has the
+     * detail.
+     *
+     * <p>Say {@code chunk_loading} outright to overrule it either way — {@code false} for something
+     * that is only ever fired at aircraft, since an aeroplane is loaded wherever it is and the ground
+     * under a missile chasing one is nobody's business.
+     */
+    public boolean loadsChunks() {
+        return this.projectile.chunkLoading().orElse(true);
     }
 
     /**
@@ -130,16 +198,27 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      *              at once; a missile rail lets go of one
      * @param salvoSpread extra scatter across a salvo, in degrees, on top of {@code spread}. What
      *                    makes a rocket salvo cover ground rather than land in one hole
+     * @param automatic whether the trigger fires for as long as it is held, or empty for the
+     *                  default. See {@link WeaponDefinition#isAutomatic()}
      */
-    public record Firing(float roundsPerSecond, float spread, int salvo, float salvoSpread) {
+    public record Firing(float roundsPerSecond, float spread, int salvo, float salvoSpread,
+            Optional<Boolean> automatic) {
         public static final Codec<Firing> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.fieldOf("rounds_per_second").forGetter(Firing::roundsPerSecond),
                 Codec.FLOAT.optionalFieldOf("spread", 0.5F).forGetter(Firing::spread),
                 Codec.INT.optionalFieldOf("salvo", 1).forGetter(Firing::salvo),
-                Codec.FLOAT.optionalFieldOf("salvo_spread", 0.0F).forGetter(Firing::salvoSpread)
+                Codec.FLOAT.optionalFieldOf("salvo_spread", 0.0F).forGetter(Firing::salvoSpread),
+                Codec.BOOL.optionalFieldOf("automatic").forGetter(Firing::automatic)
         ).apply(instance, Firing::new));
 
-        /** Ticks between rounds. */
+        /**
+         * Ticks between rounds.
+         *
+         * <p>Need not be a whole number: a mount counts the fraction, so a rate that does not divide
+         * into twenty still averages out to the figure in the file. A weapon faster than one round a
+         * tick is written as a {@code salvo} instead, which is what a twin mounting physically is —
+         * two barrels letting go together rather than one barrel going twice as fast.
+         */
         public float ticksPerRound() {
             return 20.0F / Math.max(this.roundsPerSecond, 1.0E-3F);
         }
@@ -153,27 +232,41 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
      * standing start still gets going and why the aircraft can outrun its own rockets for a moment
      * after launch.
      *
+     * <p>A motor need not arrive at its whole thrust the moment it lights. {@code spool_ticks} works
+     * it up from nothing rather than handing it over whole, so the missile gathers speed instead of
+     * jumping to it. Leave it out and the motor is at full power off the rail, as it always was.
+     *
      * @param damage dealt to whatever it hits directly, in the same points a player is worth twenty
      *               of. An airframe is worth a few hundred and takes it point for point
      * @param speed the speed it leaves at, in blocks per tick. The aircraft's own speed is added on
-     * @param thrust acceleration from the motor, in blocks per tick squared, while it is burning
+     * @param thrust acceleration from the motor, in blocks per tick squared, once it is at full power
      * @param burnTicks how long the motor burns. Zero for something with no motor at all
+     * @param spoolTicks how long the motor takes to work up to {@code thrust} once it has lit. Zero
+     *                   gives the whole of it from the first tick
      * @param topSpeed the fastest the motor will drive it, in blocks per tick
      * @param gravity how fast it drops, in blocks per tick squared
      * @param range how far it flies before it is given up on, in blocks
      * @param explosion blast made where it lands, in the same units as TNT's four. Zero for
      *                  something that simply hits
      * @param tracer colour it is drawn in, as {@code RRGGBB}
+     * @param ricochet how obliquely this round has to strike armour before the armour throws it off
+     *                 instead of biting, in degrees from the plate's own normal: nought is a square
+     *                 hit and ninety is a graze along the surface. A long rod bites almost to the
+     *                 grazing angle and wants a high figure; a small round rolls off a slope and
+     *                 wants a low one. Zero, which is what anything without the field gets, means it
+     *                 is never thrown off — right for a shaped charge and for anything that goes off
+     *                 on contact rather than going through. See {@link com.ashvehicles.weapon.Ricochet}
      * @param trail the smoke it leaves behind it, if it leaves any
-     * @param chunkLoading whether it holds the ground under it open, or empty to decide from whether
-     *                     it carries a warhead. See {@link #loadsChunks()}
+     * @param chunkLoading whether it holds the ground under it open, or empty for the default, which
+     *                     is that it does. See {@link WeaponDefinition#loadsChunks()}
      */
-    public record Projectile(float damage, float speed, float thrust, int burnTicks, float topSpeed,
-            float gravity, float range, float explosion, int tracer,
+    public record Projectile(float damage, float speed, float thrust, int burnTicks,
+            int spoolTicks, float topSpeed,
+            float gravity, float range, float explosion, int tracer, float ricochet,
             Optional<Trail> trail, Optional<Boolean> chunkLoading) {
 
-        public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0.0F, 0.02F,
-                200.0F, 0.0F, 0xFFC864, Optional.empty(), Optional.empty());
+        public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0,
+                0.0F, 0.02F, 200.0F, 0.0F, 0xFFC864, 0.0F, Optional.empty(), Optional.empty());
 
         /**
          * Reads the whole description of a trail, or the plain {@code true} that used to be all
@@ -193,38 +286,25 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Firing firing,
                 Codec.FLOAT.fieldOf("speed").forGetter(Projectile::speed),
                 Codec.FLOAT.optionalFieldOf("thrust", 0.0F).forGetter(Projectile::thrust),
                 Codec.INT.optionalFieldOf("burn_ticks", 0).forGetter(Projectile::burnTicks),
+                Codec.INT.optionalFieldOf("spool_ticks", 0).forGetter(Projectile::spoolTicks),
                 Codec.FLOAT.optionalFieldOf("top_speed", 0.0F).forGetter(Projectile::topSpeed),
                 Codec.FLOAT.optionalFieldOf("gravity", 0.02F).forGetter(Projectile::gravity),
                 Codec.FLOAT.optionalFieldOf("range", 300.0F).forGetter(Projectile::range),
                 Codec.FLOAT.optionalFieldOf("explosion", 0.0F).forGetter(Projectile::explosion),
                 COLOUR.optionalFieldOf("tracer", 0xFFC864).forGetter(Projectile::tracer),
+                Codec.FLOAT.optionalFieldOf("ricochet", 0.0F).forGetter(Projectile::ricochet),
                 TRAIL.optionalFieldOf("trail", Optional.empty()).forGetter(Projectile::trail),
                 Codec.BOOL.optionalFieldOf("chunk_loading").forGetter(Projectile::chunkLoading)
         ).apply(instance, Projectile::new));
 
+        /** Whether armour can throw this round off at all, or whether it always bites. */
+        public boolean canRicochet() {
+            return this.ricochet > 0.0F;
+        }
+
         /** Whether a motor pushes this along after it has left. */
         public boolean hasMotor() {
             return this.burnTicks > 0 && this.thrust > 0.0F;
-        }
-
-        /**
-         * Whether a round of this sort holds open the ground it is flying over.
-         *
-         * <p>It has to, or a weapon aimed past the edge of the loaded world lands on nothing. Chunks
-         * exist around players and nowhere else, an aircraft holds open only the one it is over, and
-         * a bomb released from three thousand feet is a long way from either by the time it arrives.
-         * Blocks out there are not asked about at all — asking would generate the terrain on the spot
-         * and on the main thread — so without a claim of its own the bomb falls through ground nobody
-         * has loaded and is given up on in mid-air. See {@link
-         * com.ashvehicles.entity.WeaponChunkLoader}.
-         *
-         * <p>Left out, a round claims ground if it carries a warhead, which is the same question
-         * asked twice: something that will crater the ground has business loading it, and something
-         * that will not has none. Say it outright either way to overrule that — {@code false} on a
-         * rocket pod that fires eight at once, {@code true} on a heavy cannon meant for hard targets.
-         */
-        public boolean loadsChunks() {
-            return this.chunkLoading.orElse(this.explosion > 0.0F);
         }
 
         /**

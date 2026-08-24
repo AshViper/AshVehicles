@@ -1,0 +1,37 @@
+{
+  "type": "missile",
+  "item": true,
+  "ammo": 1,
+  "firing": {
+    "rounds_per_second": 1.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 200.0,
+    "speed": 1.75,
+    "thrust": 0.15,
+    "burn_ticks": 480,
+    "spool_ticks": 80,
+    "top_speed": 34.0,
+    "gravity": 0.000188,
+    "range": 3000.0,
+    "explosion": 5.0,
+    "tracer": "FFEFC0",
+    "trail": {
+      "colour": "DCDAD4",
+      "exhaust": "8E887E",
+      "density": 0.8,
+      "size": 0.9
+    }
+  },
+  "guidance": {
+    "turn_rate": 5.5,
+    "lock_angle": 14.0,
+    "lock_range": 5000.0,
+    "lock_ticks": 40,
+    "track_angle": 65.0,
+    "proximity": 4.0,
+    "seeker": "radar"
+  }
+}

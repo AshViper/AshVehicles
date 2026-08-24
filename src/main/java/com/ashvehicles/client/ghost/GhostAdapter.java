@@ -1,12 +1,12 @@
 package com.ashvehicles.client.ghost;
 
-import java.util.List;
-
 import javax.annotation.Nullable;
+
+import com.ashvehicles.client.ghost.geo.GhostAnimatable;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.phys.AABB;
+import software.bernie.geckolib.animation.AnimatableManager;
 
 /**
  * How one kind of entity becomes a ghost and how that ghost is drawn.
@@ -16,9 +16,8 @@ import net.minecraft.world.phys.AABB;
  * {@link EntityGhostRegistry}; it is asked to photograph the entity once a tick, and to draw the
  * photograph at whichever {@link GhostLOD} the camera distance calls for.
  *
- * <p>Adapters draw from the snapshot, not from the entity. By the time the simplified tier is
- * reached the entity may already be gone from the client, and a ghost that needed it would go with
- * it.
+ * <p>Adapters draw from the snapshot, not from the entity. A ghost may outlive the entity on the
+ * client that had it, and one that needed the entity would go with it.
  *
  * @param <T> the entity this adapter handles
  */
@@ -71,22 +70,18 @@ public interface GhostAdapter<T extends Entity> {
         return true;
     }
 
-    /** Whether this adapter's ghosts can be drawn as Distant Horizons box groups in the simplified tier. */
-    default boolean supportsDhBoxes() {
-        return false;
-    }
-
     /**
-     * The boxes a simplified ghost is drawn as inside Distant Horizons' pass, in world coordinates.
-     * Only asked when {@link #supportsDhBoxes()} is true. The default is the entity's bounding box.
+     * Registers the animation controllers a ghost of this kind plays, in the same way the entity
+     * itself registers its own. GeckoLib asks once per ghost, the first time it is drawn, and what
+     * it is given belongs to that ghost alone; a controller reads which ghost it is playing for out
+     * of the animatable it is handed, since one animatable serves them all.
+     *
+     * <p>Most things have nothing to play — a missile is a missile all the way to the target — and
+     * the default registers nothing. An aircraft has its undercarriage, and registering the same
+     * controller here as the aircraft registers for itself is what keeps a ghost's legs doing what
+     * the aeroplane's are doing.
      */
-    default List<AABB> dhBoxes(EntityGhost ghost) {
-        return List.of(ghost.current().worldBounds());
+    default void registerGhostControllers(AnimatableManager.ControllerRegistrar controllers,
+            GhostAnimatable animatable) {
     }
-
-    /** The colour of those boxes, as ARGB. */
-    default int dhBoxColour(EntityGhost ghost) {
-        return 0xFF46464B;
-    }
-
 }

@@ -4,8 +4,8 @@ import java.util.List;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.aircraft.AircraftManager;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
@@ -98,7 +98,7 @@ public final class BombSight {
         for (int slot = 0; slot < Math.min(hardpoints.size(), mounts.size()); slot++) {
             WeaponMounts.Mount mount = mounts.get(slot);
 
-            if (!mount.isEmpty() && mount.ammo() > 0 && weapon.equals(AircraftManager.weapon(mount.weapon()))) {
+            if (!mount.isEmpty() && mount.ammo() > 0 && weapon.equals(Definitions.weapon(mount.weapon()))) {
                 return hardpoints.get(slot).pos();
             }
         }

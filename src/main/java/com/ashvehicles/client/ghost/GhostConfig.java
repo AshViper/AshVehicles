@@ -28,16 +28,12 @@ public final class GhostConfig {
                     "so handing over early costs nothing in appearance.")
             .defineInRange("ghostStartDistance", 128.0, 16.0, 8192.0);
 
-    public static final ModConfigSpec.DoubleValue GHOST_SIMPLIFIED_DISTANCE = BUILDER
-            .comment("Distance in blocks beyond which a ghost is drawn simplified: a static model with no animation.")
-            .defineInRange("ghostSimplifiedDistance", 512.0, 16.0, 16384.0);
-
     public static final ModConfigSpec.DoubleValue GHOST_END_DISTANCE = BUILDER
             .comment("Distance in blocks beyond which nothing is drawn at all.")
             .defineInRange("ghostEndDistance", 2048.0, 16.0, 65536.0);
 
     public static final ModConfigSpec.DoubleValue BILLBOARD_DISTANCE = BUILDER
-            .comment("Distance in blocks beyond which a simplified ghost becomes a flat billboard (only if enableBillboardLOD is on).")
+            .comment("Distance in blocks beyond which a ghost becomes a flat billboard (only if enableBillboardLOD is on).")
             .defineInRange("billboardDistance", 1024.0, 16.0, 65536.0);
 
     public static final ModConfigSpec.IntValue MAX_GHOST_ENTITIES = BUILDER
@@ -49,18 +45,15 @@ public final class GhostConfig {
             .define("enableGeckoLibGhost", true);
 
     public static final ModConfigSpec.BooleanValue ENABLE_ANIMATION = BUILDER
-            .comment("Whether ghosts between ghostStartDistance and ghostSimplifiedDistance carry a simplified pose",
-                    "(undercarriage, flaps, control surfaces taken from the last snapshot). No animation controllers run either way.")
+            .comment("Whether ghosts move as the aircraft they stand for does: control surfaces, flaps, nozzle and",
+                    "rotors posed from the last snapshot, and the undercarriage cycle played from the animation file",
+                    "exactly as the aircraft's own renderer plays it. Off, the model is drawn in the pose it was",
+                    "authored in.")
             .define("enableAnimation", true);
 
     public static final ModConfigSpec.BooleanValue ENABLE_BILLBOARD_LOD = BUILDER
             .comment("Whether the furthest tier is drawn as a flat camera-facing icon instead of a model.")
             .define("enableBillboardLOD", false);
-
-    public static final ModConfigSpec.BooleanValue USE_DH_BOX_LOD = BUILDER
-            .comment("With Distant Horizons present: draw simplified ghosts as box groups inside Distant Horizons' own",
-                    "render pass, so they are depth-tested, fogged and lit against its terrain rather than ours.")
-            .define("useDistantHorizonsBoxLod", true);
 
     public static final ModConfigSpec.IntValue GHOST_TIMEOUT_TICKS = BUILDER
             .comment("How long, in ticks, a ghost outlives an entity the client stopped receiving without it having died.")
@@ -69,6 +62,14 @@ public final class GhostConfig {
     public static final ModConfigSpec.IntValue OCCLUSION_INTERVAL_TICKS = BUILDER
             .comment("How often, in ticks, each ghost re-checks whether terrain stands between it and the camera.")
             .defineInRange("occlusionIntervalTicks", 10, 1, 200);
+
+    public static final ModConfigSpec.BooleanValue OCCLUDE_BEHIND_DH = BUILDER
+            .comment("Whether Distant Horizons' terrain hides a ghost standing behind it.",
+                    "Its terrain leaves no depth for the game to test against, so the line has to be traced through",
+                    "its data instead — and that data is an average of the real ground which gets coarser the further",
+                    "out it is drawn. Where that matters more than a hill drawn through, turn this off: ghosts are",
+                    "then hidden only by ground the client itself has.")
+            .define("occludeBehindDistantHorizons", true);
 
     public static final ModConfigSpec.IntValue MAX_OCCLUSION_RAYS_PER_TICK = BUILDER
             .comment("Most occlusion checks run in one tick. Checks beyond this wait for the next tick.")
@@ -86,7 +87,6 @@ public final class GhostConfig {
 
     // Cached squared distances, refreshed by refresh() whenever the config is (re)loaded.
     private static double startSq = 128.0 * 128.0;
-    private static double simplifiedSq = 512.0 * 512.0;
     private static double endSq = 2048.0 * 2048.0;
     private static double billboardSq = 1024.0 * 1024.0;
     private static boolean loaded;
@@ -97,14 +97,12 @@ public final class GhostConfig {
     /** Re-reads the distances. Called from the config load and reload events. */
     public static void refresh() {
         double start = GHOST_START_DISTANCE.get();
-        // Tiers must nest: a simplified distance inside the start distance is a configuration
-        // mistake, and the tidy answer is to push it out rather than to hide a tier entirely.
-        double simplified = Math.max(start, GHOST_SIMPLIFIED_DISTANCE.get());
-        double end = Math.max(simplified, GHOST_END_DISTANCE.get());
-        double billboard = Math.max(simplified, BILLBOARD_DISTANCE.get());
+        // Tiers must nest: an end distance inside the start distance is a configuration mistake,
+        // and the tidy answer is to push it out rather than to hide a tier entirely.
+        double end = Math.max(start, GHOST_END_DISTANCE.get());
+        double billboard = Math.max(start, BILLBOARD_DISTANCE.get());
 
         startSq = start * start;
-        simplifiedSq = simplified * simplified;
         endSq = end * end;
         billboardSq = billboard * billboard;
         loaded = true;
@@ -124,10 +122,6 @@ public final class GhostConfig {
 
     public static double startSq() {
         return startSq;
-    }
-
-    public static double simplifiedSq() {
-        return simplifiedSq;
     }
 
     public static double endSq() {
@@ -154,16 +148,16 @@ public final class GhostConfig {
         return loaded && ENABLE_BILLBOARD_LOD.get();
     }
 
-    public static boolean dhBoxLod() {
-        return loaded && USE_DH_BOX_LOD.get();
-    }
-
     public static int timeoutTicks() {
         return loaded ? GHOST_TIMEOUT_TICKS.get() : 200;
     }
 
     public static int occlusionInterval() {
         return loaded ? OCCLUSION_INTERVAL_TICKS.get() : 10;
+    }
+
+    public static boolean occludeBehindDh() {
+        return loaded && OCCLUDE_BEHIND_DH.get();
     }
 
     public static int maxOcclusionRays() {

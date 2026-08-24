@@ -100,8 +100,23 @@ public final class GhostRenderDispatcher {
     /** How much further, as a fraction of that, the furthest possible ghost is put. Keeps the order. */
     private static final double PULL_SPREAD = 0.15;
 
+    /** Nearest first. Held rather than built, since it is wanted once a frame and never changes. */
+    private static final Comparator<EntityGhost> NEAREST_FIRST =
+            Comparator.comparingDouble(EntityGhost::distanceSq);
+
+    /**
+     * The two working lists, kept between frames rather than made fresh each time.
+     *
+     * <p>The pass runs once a frame and only ever on the render thread, so there is no one to share
+     * them with; and at a few hundred ghosts a frame the two lists were the only rubbish this whole
+     * system made. Both are emptied at the head of the pass and hold nothing between frames.
+     */
+    private static final List<EntityGhost> GATHERED = new ArrayList<>();
+    private static final List<Draw> DRAWS = new ArrayList<>();
+
     private static int drawnLastFrame;
     private static int culledLastFrame;
+    private static double farPlaneLastFrame;
 
     private GhostRenderDispatcher() {
     }
@@ -116,13 +131,21 @@ public final class GhostRenderDispatcher {
      *
      * <p>Measured from the entity's tick position, which is also what its snapshot holds, so the
      * renderer and the pass reach the same answer for the same frame.
+     *
+     * <p>What is asked for is a <em>ghost</em>, not a type that has ghosts. The two are the same
+     * thing very nearly always, and the case where they are not is the one failure this hand-over
+     * must never have: a machine standing in plain sight with nothing drawing it at all. The
+     * manager learns about entities from the join event and never scans the level, so a machine it
+     * has no ghost of has none for the rest of its life, and standing the game's renderer down for
+     * it would leave it invisible at a hundred and thirty blocks. Asking after the ghost itself
+     * costs one lookup by UUID and cannot get that wrong.
      */
     public static boolean claims(Entity entity, double camX, double camY, double camZ) {
         if (!GhostConfig.enabled()) {
             return false;
         }
 
-        if (!EntityGhostRegistry.isRegistered(entity)) {
+        if (EntityGhostManager.ghostOf(entity) == null) {
             return false;
         }
 
@@ -157,13 +180,10 @@ public final class GhostRenderDispatcher {
         double ghostBeyond = ghostStyleRadius();
 
         // Gathered first, so the fog is only moved when there is something to draw with it.
-        List<EntityGhost> ghosts = new ArrayList<>();
-
-        for (EntityGhost ghost : EntityGhostManager.ghosts()) {
-            ghosts.add(ghost);
-        }
-
-        ghosts.sort(Comparator.comparingDouble(EntityGhost::distanceSq));
+        List<EntityGhost> ghosts = GATHERED;
+        ghosts.clear();
+        ghosts.addAll(EntityGhostManager.ghosts());
+        ghosts.sort(NEAREST_FIRST);
 
         if (ghosts.isEmpty()) {
             drawnLastFrame = culledLastFrame = 0;
@@ -175,11 +195,12 @@ public final class GhostRenderDispatcher {
 
         // Worked out first and drawn afterwards, because the two phases want the fog set
         // differently and nothing can be sorted into its phase until its position is known.
-        List<Draw> draws = new ArrayList<>();
+        List<Draw> draws = DRAWS;
+        draws.clear();
 
         for (EntityGhost ghost : ghosts) {
             if (draws.size() >= budget) {
-                ghost.record(ghost.lod(), ghost.distanceSq(), false);
+                ghost.record(ghost.lod(), ghost.distanceSq(), GhostVerdict.BUDGET);
                 continue;
             }
 
@@ -188,30 +209,45 @@ public final class GhostRenderDispatcher {
             double distanceSq = ghost.current().position().distanceToSqr(eye);
             GhostLOD lod = GhostLOD.of(distanceSq);
             Vec3 position = ghost.position(partialTick);
-            boolean drewIt = false;
+            GhostVerdict verdict;
 
             if (lod == GhostLOD.FULL) {
                 // The game's tier. It draws the entity itself unless its own loop declined to, in
                 // which case the entity is drawn here with the game's own renderer.
                 Entity entity = ghost.entity();
 
-                if (entity != null && !gameDraws(entity, minecraft, eye, farPlane) && !ghost.isOccluded()) {
+                if (entity == null || gameDraws(entity, minecraft, eye, farPlane)) {
+                    verdict = GhostVerdict.GAME;
+                } else if (ghost.isOccluded()) {
+                    verdict = GhostVerdict.OCCLUDED;
+                } else {
                     draws.add(Draw.ofEntity(entity, minecraft, distanceSq, ghostBeyond, partialTick, dispatcher));
-                    drewIt = true;
+                    verdict = GhostVerdict.DRAWN;
                 }
-            } else if (lod.isGhost() && !ghost.isOccluded() && !ghost.isDhDrawn()) {
+            } else if (lod.isGhost()) {
                 GhostSnapshot snapshot = ghost.current();
                 double pull = pull(Math.sqrt(distanceSq), farPlane);
 
-                if (inView(frustum, snapshot, position, eye, pull)) {
-                    draws.add(Draw.ofGhost(ghost, lod, position, minecraft, distanceSq, ghostBeyond, pull));
-                    drewIt = true;
-                } else {
+                // Inside the built world the depth buffer settles what is hidden — per pixel, by
+                // the ground actually in the way — and no line is traced at all (see
+                // GhostOcclusion). The flag can still be holding the answer given while the machine
+                // was out past the world, and it is only re-asked every few ticks: taken as read
+                // here, a machine coming in over the edge of the loaded world blinks out for as
+                // long as that takes.
+                if (ghost.isOccluded() && !isBuilt(BlockPos.containing(position))) {
+                    verdict = GhostVerdict.OCCLUDED;
+                } else if (!inView(frustum, snapshot, position, eye, pull)) {
                     culled++;
+                    verdict = GhostVerdict.CULLED;
+                } else {
+                    draws.add(Draw.ofGhost(ghost, lod, position, minecraft, distanceSq, ghostBeyond, pull));
+                    verdict = GhostVerdict.DRAWN;
                 }
+            } else {
+                verdict = GhostVerdict.HIDDEN;
             }
 
-            ghost.record(lod, distanceSq, drewIt);
+            ghost.record(lod, distanceSq, verdict);
         }
 
         int drawn = draws.size();
@@ -250,10 +286,15 @@ public final class GhostRenderDispatcher {
 
         drawnLastFrame = drawn;
         culledLastFrame = culled;
+        farPlaneLastFrame = farPlane;
 
         if (GhostConfig.debugBoxes()) {
             GhostDebug.drawBoxes(ghosts, eye, partialTick, poseStack, buffers, farPlane);
         }
+
+        // Nothing is held on to between frames: a ghost kept alive here would outlive its entity.
+        draws.clear();
+        ghosts.clear();
     }
 
     // ------------------------------------------------------------------
@@ -275,7 +316,7 @@ public final class GhostRenderDispatcher {
 
         static Draw ofGhost(EntityGhost ghost, GhostLOD lod, Vec3 position, Minecraft minecraft,
                 double distanceSq, double ghostBeyond, double pull) {
-            boolean inWorld = isBuilt(minecraft, BlockPos.containing(position));
+            boolean inWorld = isBuilt(BlockPos.containing(position));
             // Lit where it stands, but only where there is somewhere for it to stand: outside the
             // built world the level answers "no light" rather than "I do not know".
             int light = inWorld
@@ -291,7 +332,7 @@ public final class GhostRenderDispatcher {
 
         static Draw ofEntity(Entity entity, Minecraft minecraft, double distanceSq, double ghostBeyond,
                 float partialTick, EntityRenderDispatcher dispatcher) {
-            boolean inWorld = isBuilt(minecraft, entity.blockPosition());
+            boolean inWorld = isBuilt(entity.blockPosition());
             // The renderer's own answer, which is the one the game's loop would have used.
             int light = inWorld
                     ? dispatcher.getPackedLightCoords(entity, partialTick)
@@ -299,11 +340,6 @@ public final class GhostRenderDispatcher {
 
             return new Draw(null, entity, GhostLOD.FULL, null, distanceSq, 0.0, light,
                     distanceSq >= ghostBeyond * ghostBeyond, inWorld);
-        }
-
-        private static boolean isBuilt(Minecraft minecraft, BlockPos pos) {
-            return minecraft.level != null && !minecraft.level.isOutsideBuildHeight(pos.getY())
-                    && minecraft.levelRenderer.isSectionCompiled(pos);
         }
 
         void render(Vec3 eye, float partialTick, PoseStack poseStack, MultiBufferSource buffers,
@@ -368,6 +404,22 @@ public final class GhostRenderDispatcher {
             GhostRenderContext.exit();
             poseStack.popPose();
         }
+    }
+
+    /**
+     * Whether the client has built the world at a point, and so whether the game has drawn terrain
+     * around it this frame.
+     *
+     * <p>Asked for two things that sound different and are one question. What light something
+     * standing there takes: inside the built world the level knows, outside it answers zero rather
+     * than "I do not know". And whether the depth buffer can be trusted to hide it, which is
+     * {@link GhostOcclusion}'s whole reason for existing or not.
+     */
+    static boolean isBuilt(BlockPos pos) {
+        Minecraft minecraft = Minecraft.getInstance();
+
+        return minecraft.level != null && !minecraft.level.isOutsideBuildHeight(pos.getY())
+                && minecraft.levelRenderer.isSectionCompiled(pos);
     }
 
     /**
@@ -447,5 +499,10 @@ public final class GhostRenderDispatcher {
 
     public static int culledLastFrame() {
         return culledLastFrame;
+    }
+
+    /** Where the projection stopped last frame, which is what the pull is measured against. */
+    public static double farPlaneLastFrame() {
+        return farPlaneLastFrame;
     }
 }

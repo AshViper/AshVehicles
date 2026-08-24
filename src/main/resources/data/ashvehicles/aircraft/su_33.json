@@ -1,0 +1,427 @@
+{
+  "hitbox": {
+    "width": 7,
+    "height": 3.5,
+    "tracking_range": 12,
+    "boxes": [
+      {
+        "name": "main",
+        "offset": [-1.006, 2.63, 1.296],
+        "size": [1.599, 1.152, 6.214]
+      },
+      {
+        "name": "hull_right",
+        "offset": [-1.267, 1.965, -6.868],
+        "size": [1.544, 1.589, 4.4]
+      },
+      {
+        "name": "hull_left",
+        "offset": [1.267, 1.965, -6.868],
+        "size": [1.544, 1.589, 4.4]
+      },
+      {
+        "name": "main_2",
+        "offset": [0.0, 2.898, 5.256],
+        "size": [1.444, 1.921, 3.247],
+        "rotation": [-4.0, 0.0, 0.0]
+      },
+      {
+        "name": "main_3",
+        "offset": [0.0, 2.392, -6.661],
+        "size": [2.369, 0.733, 5.07]
+      },
+      {
+        "name": "main_4",
+        "offset": [0.0, 2.593, -0.77],
+        "size": [1.414, 1.282, 4.518],
+        "rotation": [6.0, 0.0, 0.0]
+      },
+      {
+        "name": "main_5",
+        "offset": [1.006, 2.694, 0.3],
+        "size": [1.599, 1.025, 4.222]
+      },
+      {
+        "name": "main_right",
+        "offset": [-3.677, 2.561, -4.171],
+        "size": [8.168, 0.172, 4.17],
+        "rotation": [0.0, -42.0, 0.0]
+      },
+      {
+        "name": "main_left",
+        "offset": [3.677, 2.561, -4.171],
+        "size": [8.168, 0.172, 4.17],
+        "rotation": [0.0, 42.0, 0.0]
+      },
+      {
+        "name": "main_6",
+        "offset": [0.0, 2.419, 7.91],
+        "size": [1.344, 1.315, 2.892],
+        "rotation": [-4.0, 0.0, 0.0]
+      },
+      {
+        "name": "hull_right_2",
+        "offset": [-1.603, 2.146, -3.319],
+        "size": [0.872, 1.23, 4.534]
+      },
+      {
+        "name": "hull_left_2",
+        "offset": [1.603, 2.146, -3.319],
+        "size": [0.872, 1.23, 4.534]
+      },
+      {
+        "name": "main_7",
+        "offset": [1.016, 2.613, 3.278],
+        "size": [1.579, 1.116, 2.249]
+      },
+      {
+        "name": "hull_right_3",
+        "offset": [-0.829, 1.934, -3.317],
+        "size": [0.736, 1.481, 2.973],
+        "rotation": [-3.5, 0.0, 0.0]
+      },
+      {
+        "name": "hull_left_3",
+        "offset": [0.829, 1.934, -3.317],
+        "size": [0.736, 1.481, 2.973],
+        "rotation": [-3.5, 0.0, 0.0]
+      },
+      {
+        "name": "main_right_2",
+        "offset": [-0.665, 1.948, -0.114],
+        "size": [0.428, 1.709, 4.325]
+      },
+      {
+        "name": "main_left_2",
+        "offset": [0.665, 1.948, -0.114],
+        "size": [0.428, 1.709, 4.325]
+      },
+      {
+        "name": "main_8",
+        "offset": [0.0, 2.817, 2.171],
+        "size": [1.376, 1.429, 1.568]
+      },
+      {
+        "name": "main_right_3",
+        "offset": [-1.011, 2.559, -2.714],
+        "size": [2.054, 0.225, 5.649]
+      },
+      {
+        "name": "main_left_3",
+        "offset": [1.011, 2.559, -2.714],
+        "size": [2.054, 0.225, 5.649]
+      },
+      {
+        "name": "main_left_4",
+        "offset": [1.282, 1.435, -3.306],
+        "size": [1.146, 0.719, 2.937],
+        "rotation": [-3.5, -2.5, -1.5]
+      },
+      {
+        "name": "main_right_4",
+        "offset": [-1.282, 1.435, -3.306],
+        "size": [1.146, 0.719, 2.937],
+        "rotation": [-3.5, 2.5, 1.5]
+      },
+      {
+        "name": "main_right_5",
+        "offset": [-1.96, 3.536, -6.525],
+        "size": [0.16, 4.567, 2.672],
+        "rotation": [36.0, 0.0, 0.0]
+      },
+      {
+        "name": "main_left_5",
+        "offset": [1.96, 3.536, -6.525],
+        "size": [0.16, 4.567, 2.672],
+        "rotation": [36.0, 0.0, 0.0]
+      },
+      {
+        "name": "main_9",
+        "offset": [0.0, 2.559, 5.353],
+        "size": [2.171, 0.225, 3.338]
+      },
+      {
+        "name": "main_10",
+        "offset": [1.415, 1.967, 0.073],
+        "size": [0.269, 1.449, 3.99],
+        "rotation": [1.5, -4.5, -5.0]
+      },
+      {
+        "name": "blflap",
+        "offset": [-2.662, 1.933, -8.053],
+        "size": [4.263, 0.146, 2.381],
+        "rotation": [0.0, -45.0, 0.0]
+      },
+      {
+        "name": "brflap",
+        "offset": [2.662, 1.933, -8.053],
+        "size": [2.381, 0.146, 4.263],
+        "rotation": [0.0, -45.0, 0.0]
+      },
+      {
+        "name": "main_11",
+        "offset": [0.0, 2.378, -3.283],
+        "size": [0.814, 0.804, 1.848],
+        "rotation": [8.0, 0.0, -44.0]
+      },
+      {
+        "name": "main_12",
+        "offset": [0.0, 3.335, 3.368],
+        "size": [1.429, 0.648, 1.204],
+        "rotation": [13.0, 0.0, 0.0]
+      },
+      {
+        "name": "main_13",
+        "offset": [0.0, 2.393, -9.625],
+        "size": [0.795, 0.695, 1.468]
+      },
+      {
+        "name": "hull",
+        "offset": [0.0, 2.07, -8.956],
+        "size": [3.418, 1.035, 0.225]
+      },
+      {
+        "name": "main_14",
+        "offset": [-1.425, 1.931, -0.824],
+        "size": [0.241, 1.318, 2.119],
+        "rotation": [-2.0, 3.5, 11.5]
+      },
+      {
+        "name": "main_15",
+        "offset": [0.0, 2.147, 10.067],
+        "size": [0.573, 0.625, 1.636]
+      },
+      {
+        "name": "main_left_6",
+        "offset": [0.912, 2.559, 0.251],
+        "size": [2.054, 0.227, 0.963],
+        "rotation": [0.0, -18.0, 0.0]
+      },
+      {
+        "name": "main_right_6",
+        "offset": [-0.912, 2.559, 0.251],
+        "size": [2.054, 0.227, 0.963],
+        "rotation": [0.0, 18.0, 0.0]
+      },
+      {
+        "name": "frflap_left",
+        "offset": [2.179, 2.575, 1.076],
+        "size": [1.028, 0.143, 2.695],
+        "rotation": [0.0, -37.0, 0.0]
+      },
+      {
+        "name": "flflap_right",
+        "offset": [-2.179, 2.575, 1.076],
+        "size": [1.028, 0.143, 2.695],
+        "rotation": [0.0, 37.0, 0.0]
+      },
+      {
+        "name": "main_16",
+        "offset": [0.0, 2.189, 2.519],
+        "size": [0.787, 0.139, 2.272],
+        "rotation": [-3.5, 0.0, 0.0]
+      },
+      {
+        "name": "hull_right_4",
+        "offset": [-2.072, 1.44, -6.195],
+        "size": [0.109, 1.184, 1.8],
+        "rotation": [2.0, 1.5, 36.0]
+      },
+      {
+        "name": "hull_left_4",
+        "offset": [2.072, 1.44, -6.195],
+        "size": [0.109, 1.184, 1.8],
+        "rotation": [2.0, -1.5, -36.0]
+      },
+      {
+        "name": "main_17",
+        "offset": [-1.301, 2.46, 0.927],
+        "size": [0.1, 0.991, 2.023],
+        "rotation": [24.0, 5.5, 13.0]
+      },
+      {
+        "name": "main_right_7",
+        "offset": [-1.162, 1.269, -0.836],
+        "size": [0.681, 0.137, 2.089],
+        "rotation": [-1.5, 0.0, 12.0]
+      },
+      {
+        "name": "main_left_7",
+        "offset": [1.162, 1.269, -0.836],
+        "size": [0.681, 0.137, 2.089],
+        "rotation": [-1.5, 0.0, -12.0]
+      },
+      {
+        "name": "main_right_8",
+        "offset": [-7.07, 2.495, -4.806],
+        "size": [0.128, 0.353, 3.402]
+      },
+      {
+        "name": "main_left_8",
+        "offset": [7.07, 2.495, -4.806],
+        "size": [0.128, 0.353, 3.402]
+      },
+      {
+        "name": "main_right_9",
+        "offset": [-1.034, 1.946, -0.066],
+        "size": [0.708, 1.349, 0.136],
+        "rotation": [-1.0, 0.0, 12.0]
+      },
+      {
+        "name": "main_left_9",
+        "offset": [1.034, 1.946, -0.066],
+        "size": [0.708, 1.349, 0.136],
+        "rotation": [-1.0, 0.0, -12.0]
+      },
+      {
+        "name": "main_right_10",
+        "offset": [-1.011, 2.399, -5.249],
+        "size": [2.054, 0.096, 0.578]
+      },
+      {
+        "name": "main_left_10",
+        "offset": [1.011, 2.399, -5.249],
+        "size": [2.054, 0.096, 0.578]
+      }
+    ]
+  },
+  "model": {
+    "scale": 0.79,
+    "bones": {
+      "elevator_left": "BLFlap",
+      "elevator_right": "BRFlap",
+      "aileron_left": "LFlap",
+      "aileron_right": "RFlap",
+      "rudder_left": "VBLFlap",
+      "rudder_right": "VBRFlap",
+      "nose_gear": "FGear",
+      "left_gear": "LGear",
+      "right_gear": "RGear",
+      "nose_gear_door": "FRGearHatch",
+      "left_gear_door": "LGearHatch",
+      "right_gear_door": "LGearHatch2"
+    }
+  },
+  "engine": {
+    "max_thrust": 0.0235,
+    "throttle_rate": 0.012,
+    "spool_rate": 0.08,
+    "sea_level_density": 1,
+    "afterburner": {
+      "thrust": 1.45,
+      "light_rate": 0.22,
+      "heat": 5,
+      "nozzles": [
+        [1.19, 2.1, -9.3],
+        [-1.19, 2.1, -9.3]
+      ]
+    }
+  },
+  "wing": {
+    "max_speed": 16,
+    "stall_speed": 1.55,
+    "lift": 0.0056,
+    "lift_slope": 5.5,
+    "stall_angle": 17,
+    "drag": 0.000155,
+    "induced_drag": 0.00036,
+    "lateral_drag": 0.15,
+    "ground_effect": 0.3,
+    "span": 14.3
+  },
+  "handling": {
+    "pitch_rate": 2.2,
+    "roll_rate": 2.2,
+    "yaw_rate": 1.2,
+    "control_lag": 0.18,
+    "weathervane": 3,
+    "alpha_limit": 1,
+    "aero_damping": 0.06
+  },
+  "airframe": {
+    "health": 340,
+    "crash_speed": 2.4,
+    "explosion_power": 3.5,
+    "seats": [
+      [0.0, 2.0, 5.6]
+    ],
+    "max_g": 8
+  },
+  "landing_gear": {
+    "cycle_ticks": 40,
+    "drag_penalty": 0.6,
+    "rolling_friction": 0.999,
+    "brake_friction": 0.94,
+    "lateral_friction": 0.5,
+    "steer_rate": 1,
+    "steer_fade": 1.3
+  },
+  "flaps": {
+    "cycle_ticks": 20,
+    "drag_penalty": 0.5,
+    "lift_bonus": 0.4
+  },
+  "camera": {
+    "pos": [0.0, 4.0, -14.0],
+    "cockpit": [0.0, 3.15, 5.6]
+  },
+  "sound": {
+    "volume": 1,
+    "idle_volume": 0.35,
+    "pitch_min": 0.7,
+    "pitch_max": 1.25,
+    "range": 512
+  },
+  "radar": {
+    "range": 3000,
+    "arc": 55,
+    "sweep_ticks": 10,
+    "warning_range": 4000
+  },
+  "signature": {
+    "radar": 1.3,
+    "store": 0.3
+  },
+  "hardpoints": [
+    {
+      "name": "pylon1_left",
+      "pos": [2.4, 2.2, -1.4]
+    },
+    {
+      "name": "pylon1_right",
+      "pos": [-2.4, 2.2, -1.4]
+    },
+    {
+      "name": "pylon2_left",
+      "pos": [3.6, 2.25, -2.0]
+    },
+    {
+      "name": "pylon2_right",
+      "pos": [-3.6, 2.25, -2.0]
+    },
+    {
+      "name": "pylon3_left",
+      "pos": [4.8, 2.3, -2.6]
+    },
+    {
+      "name": "pylon3_right",
+      "pos": [-4.8, 2.3, -2.6]
+    },
+    {
+      "name": "pylon4_left",
+      "pos": [6.9, 2.45, -3.2]
+    },
+    {
+      "name": "pylon4_right",
+      "pos": [-6.9, 2.45, -3.2]
+    },
+    {
+      "name": "pylon5_left",
+      "pos": [1.2, 1.15, -1.5]
+    },
+    {
+      "name": "pylon5_right",
+      "pos": [-1.2, 1.15, -1.5]
+    }
+  ]
+}

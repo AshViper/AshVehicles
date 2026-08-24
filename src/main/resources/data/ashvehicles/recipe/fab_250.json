@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_bomb",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "X": {
+      "item": "minecraft:tnt"
+    }
+  },
+  "pattern": [" # ", "#X#", " # "],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:fab_250"
+  }
+}

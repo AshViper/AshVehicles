@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_pod",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "R": {
+      "tag": "c:dusts/redstone"
+    },
+    "G": {
+      "item": "minecraft:gunpowder"
+    }
+  },
+  "pattern": ["###", "#R#", "#G#"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:sppu_22"
+  }
+}

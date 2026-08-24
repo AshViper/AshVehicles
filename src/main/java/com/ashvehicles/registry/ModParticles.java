@@ -32,6 +32,12 @@ public final class ModParticles {
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> BLAST_SMOKE = register("blast_smoke");
     /** The front of a big one, running out across the ground. */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> SHOCKWAVE = register("shockwave");
+    /**
+     * A steady flame, for something that is on fire rather than something that has just gone off:
+     * the wreck of a machine, burning where it came down. The same texture as the fireball and quite
+     * a different thing — see {@link com.ashvehicles.client.particle.FlameParticle}.
+     */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> FIRE = register("fire");
     /** Fragments thrown out of a hit, bright enough to read against anything. */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> SPARK = register("spark");
     /** Chips off whatever was struck, in the colour of the block they came off. */
