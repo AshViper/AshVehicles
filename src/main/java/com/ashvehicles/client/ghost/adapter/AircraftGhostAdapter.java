@@ -1,17 +1,13 @@
 package com.ashvehicles.client.ghost.adapter;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import javax.annotation.Nullable;
 
-import com.ashvehicles.AshVehicles;
+import com.ashvehicles.vehicle.VehicleChassis;
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.aircraft.AircraftManager;
-import com.ashvehicles.aircraft.AircraftShape;
-import com.ashvehicles.aircraft.Attitude;
 import com.ashvehicles.client.ghost.EntityGhost;
 import com.ashvehicles.client.ghost.EntityGhostRenderer;
 import com.ashvehicles.client.ghost.GhostAdapter;
@@ -21,52 +17,47 @@ import com.ashvehicles.client.ghost.GhostRenderContext;
 import com.ashvehicles.client.ghost.GhostSnapshot;
 import com.ashvehicles.client.ghost.geo.GhostAnimatable;
 import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
+import com.ashvehicles.client.item.VehicleIcons;
+import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.client.model.AircraftModel;
 import com.ashvehicles.client.renderer.MountedStore;
+import com.ashvehicles.client.renderer.VehicleRenderer;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.weapon.WeaponMounts;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import software.bernie.geckolib.animation.AnimatableManager;
+import software.bernie.geckolib.animation.AnimationController;
+import software.bernie.geckolib.animation.AnimationState;
+import software.bernie.geckolib.animation.PlayState;
 import software.bernie.geckolib.renderer.GeoObjectRenderer;
 
-import org.joml.Matrix3f;
 import org.joml.Quaternionf;
 
 /**
  * Aircraft as ghosts.
  *
- * <p>The snapshot carries the aircraft's attitude, its model files, the pose of its moving parts
- * and what is hanging under its wings; the ghost is drawn from those and nothing else. In the
- * ghost tier that is the model, posed and armed — a simplified animation, a handful of bone
- * rotations read from the snapshot, with no controllers behind it. In the simplified tier it is
- * the model as authored, or a few boxes in Distant Horizons' pass. Beyond that, when enabled, it
- * is the aircraft's item icon as a billboard.
+ * <p>The snapshot carries the aircraft's attitude, its model and animation files, the pose of its
+ * moving parts and what is hanging under its wings; the ghost is drawn from those and nothing
+ * else. What that comes to is the aeroplane as it is: the model, armed, with its surfaces at the
+ * rates it last turned at, its rotors wound on to this moment of this tick, and its undercarriage
+ * playing the cycle out of its own animation file — the same controller the aircraft registers for
+ * itself, given the same two figures. Only at the billboard distance, when that is switched on, is
+ * it something else: the aircraft's item icon, flat and facing the camera.
  *
  * <p>Aircraft are sent to every client wherever they are (see {@code EntityTrackingMixin}), so one
  * the client stops receiving is one that is gone; its ghost goes with it rather than lingering.
  */
 public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> {
-    /** The boxes a simplified ghost is drawn as by Distant Horizons: a dark airframe grey. */
-    private static final int DH_BOX_COLOUR = 0xFF3C3C42;
-
-    /** Whether each aircraft has an item icon to use as a billboard. Asked once per aircraft. */
-    private final Map<ResourceLocation, ResourceLocation> billboards = new HashMap<>();
-
     @Override
     public boolean keepAfterLeave(AircraftEntity entity) {
         return false;
-    }
-
-    @Override
-    public boolean supportsDhBoxes() {
-        return true;
     }
 
     // ------------------------------------------------------------------
@@ -77,13 +68,16 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
     public GhostSnapshot snapshot(AircraftEntity aircraft, @Nullable GhostSnapshot previous, long gameTime) {
         ResourceLocation id = aircraft.getAircraftId();
         AircraftDefinition stats = aircraft.getStats();
-        AircraftDefinition.ModelSetup setup = stats.model();
+        VehicleChassis.Model setup = stats.model();
         Vec3 position = aircraft.position();
-        AABB bounds = aircraft.getBoundingBox().move(position.reverse());
-        float animationTime = previous == null ? 0.0F : previous.animationTime() + 0.05F;
-
+        // The box the aircraft is drawn within, not the one it collides with: the plain box covers
+        // the fuselage and nothing else, and a ghost culled against it is a fifteen-metre aeroplane
+        // blinking out while most of it is still on the screen. It is the box the game's own
+        // renderer culls the aircraft against on the near side of the hand-over, so nothing about
+        // when a machine leaves the screen changes as it crosses.
+        AABB bounds = aircraft.getBoundingBoxForCulling().move(position.reverse());
         Payload payload = new Payload(id, setup, AircraftModel.Pose.of(aircraft, 1.0F), stores(aircraft, stats),
-                AircraftManager.shape(id).boxes());
+                aircraft.isGearDown(), aircraft.getGearCycleTicks());
 
         return new GhostSnapshot(
                 aircraft.getUUID(),
@@ -96,12 +90,13 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
                 aircraft.getYRot(),
                 new Quaternionf(aircraft.getAttitude()),
                 setup.scale(),
+                aircraft.isWrecked() ? VehicleRenderer.CHARRED : 1.0F,
                 AircraftModel.geometryFile(id),
                 AircraftModel.textureFile(id),
+                AircraftModel.animationFile(id),
                 this.billboard(id),
                 bounds,
                 true,
-                animationTime,
                 gameTime,
                 payload);
     }
@@ -126,7 +121,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
             }
 
             // A missile that has been launched is somewhere else now; an empty pod stays bolted on.
-            if (mount.ammo() <= 0 && AircraftManager.weapon(mount.weapon()).leavesRail()) {
+            if (mount.ammo() <= 0 && Definitions.weapon(mount.weapon()).leavesRail()) {
                 continue;
             }
 
@@ -136,15 +131,18 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         return stores;
     }
 
-    /** The aircraft's item icon, if it has one, as its billboard. */
+    /**
+     * The picture the aircraft's own item is drawn as, which is a picture of the aircraft: the right thing
+     * to stand in for it at the range where a model is not worth drawing.
+     *
+     * <p>Not remembered here. It is taken once from the machine's own geometry and kept by
+     * {@link VehicleIcons}, which also answers with nothing for the frame or two before the
+     * first one has been taken — a snapshot without a billboard just draws its model until the
+     * next one is taken.
+     */
     @Nullable
     private ResourceLocation billboard(ResourceLocation id) {
-        return this.billboards.computeIfAbsent(id, key -> {
-            ResourceLocation icon = ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID,
-                    "textures/item/" + key.getPath() + "_item.png");
-
-            return Minecraft.getInstance().getResourceManager().getResource(icon).isPresent() ? icon : null;
-        });
+        return VehicleIcons.of(id);
     }
 
     // ------------------------------------------------------------------
@@ -159,7 +157,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
             if (EntityGhostRenderer.drawBillboard(snapshot, context) || !GhostConfig.geckoLibGhosts()) {
                 return;
             }
-            // No icon: the static model will do.
+            // No icon: the model itself will do.
         }
 
         PoseStack poseStack = context.poseStack();
@@ -169,13 +167,8 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         poseStack.mulPose(attitude(ghost, context.partialTick()));
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
 
-        if (lod == GhostLOD.GHOST) {
-            EntityGhostRenderer.drawModel(ghost, snapshot, context, GhostConfig.animation() ? POSER : null);
-            drawStores(snapshot, context);
-        } else {
-            EntityGhostRenderer.drawModel(ghost, snapshot, context, null);
-        }
-
+        EntityGhostRenderer.drawModel(ghost, snapshot, context, GhostConfig.animation() ? POSER : null);
+        drawStores(snapshot, context);
         poseStack.popPose();
     }
 
@@ -197,7 +190,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
 
     /** What was hanging under the wings when the snapshot was taken. */
     private static void drawStores(GhostSnapshot snapshot, GhostRenderContext context) {
-        Payload payload = (Payload) snapshot.payload();
+        Payload payload = payload(snapshot);
 
         if (payload == null || payload.stores().isEmpty()) {
             return;
@@ -222,72 +215,104 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         }
     }
 
-    /** The simplified animation: the aircraft's surfaces and undercarriage as last seen. */
-    private static final GhostAnimatable.GhostPoser POSER = (model, snapshot) -> {
-        Payload payload = (Payload) snapshot.payload();
-
-        if (payload != null) {
-            AircraftModel.applyPose(model, payload.setup(), payload.pose());
-        }
-    };
-
     // ------------------------------------------------------------------
-    // Distant Horizons boxes
+    // Moving as the aeroplane moves
     // ------------------------------------------------------------------
 
     /**
-     * The aircraft's collision boxes, turned to its attitude and squared off: each part's box
-     * rotated and then re-boxed along the world's axes. At the distance these are drawn at, that
-     * is a silhouette, which is all that is wanted. An aircraft with no shape file is its bounding
-     * box.
+     * Everything about an aircraft that follows the flight from moment to moment, set from the
+     * last two snapshots the way the aircraft's own model sets it from the aircraft: the surfaces
+     * at the rates it turned at, the gear and flaps and nozzle part way to wherever they are going,
+     * the rotors wound on from the end of the last tick to this moment of this one.
+     *
+     * <p>Between two snapshots rather than from the newest, because that is what the game draws for
+     * the aeroplane standing next to this ghost: what is on the screen at any moment is the tick
+     * before last blended into the last one. A ghost posed from the newest snapshot alone would run
+     * a tick ahead of it and jump once a tick besides.
+     */
+    private static final GhostAnimatable.GhostPoser POSER = (model, ghost, partialTick) -> {
+        Payload now = payload(ghost.current());
+
+        if (now == null) {
+            return;
+        }
+
+        Payload then = payload(ghost.previous());
+        AircraftModel.Pose pose = then == null
+                ? now.pose()
+                : AircraftModel.Pose.between(then.pose(), now.pose(), partialTick);
+
+        AircraftModel.applyPose(model, now.setup(), pose);
+    };
+
+    // ------------------------------------------------------------------
+    // The undercarriage
+    // ------------------------------------------------------------------
+
+    /**
+     * The gear cycle, registered for a ghost exactly as {@code AircraftEntity} registers it for
+     * itself: the same two halves out of the same animation file, the same blend between them, and
+     * the same figure deciding how fast they play. A ghost's legs therefore come out in the order
+     * the file says they come out in, doors and all, rather than being swung approximately from
+     * code — which is what an aircraft with no cycle in its file gets, from the poser above.
      */
     @Override
-    public List<AABB> dhBoxes(EntityGhost ghost) {
-        GhostSnapshot snapshot = ghost.current();
-        Payload payload = (Payload) snapshot.payload();
-        Quaternionf attitude = snapshot.attitude();
-
-        if (payload == null || payload.shape().isEmpty() || attitude == null) {
-            return List.of(snapshot.worldBounds());
-        }
-
-        List<AABB> boxes = new ArrayList<>(payload.shape().size());
-        Vec3 origin = snapshot.position();
-
-        for (AircraftShape.Box box : payload.shape()) {
-            Vec3 centre = origin.add(Attitude.toWorld(attitude, box.offset()));
-            Quaternionf turn = new Quaternionf(attitude).mul(box.orientation());
-            Matrix3f rotation = new Matrix3f().rotation(turn);
-            double hx = box.size().x * 0.5;
-            double hy = box.size().y * 0.5;
-            double hz = box.size().z * 0.5;
-            // The axis-aligned extent of a turned box is the absolute rotation times its half-size.
-            double ex = Math.abs(rotation.m00) * hx + Math.abs(rotation.m10) * hy + Math.abs(rotation.m20) * hz;
-            double ey = Math.abs(rotation.m01) * hx + Math.abs(rotation.m11) * hy + Math.abs(rotation.m21) * hz;
-            double ez = Math.abs(rotation.m02) * hx + Math.abs(rotation.m12) * hy + Math.abs(rotation.m22) * hz;
-
-            boxes.add(new AABB(centre.x - ex, centre.y - ey, centre.z - ez,
-                    centre.x + ex, centre.y + ey, centre.z + ez));
-        }
-
-        return boxes;
+    public void registerGhostControllers(AnimatableManager.ControllerRegistrar controllers,
+            GhostAnimatable animatable) {
+        controllers.add(new AnimationController<>(animatable, "gear", AircraftAnimations.TRANSITION_TICKS,
+                AircraftGhostAdapter::gearCycle).setAnimationSpeedHandler(AircraftGhostAdapter::gearSpeed));
     }
 
-    @Override
-    public int dhBoxColour(EntityGhost ghost) {
-        return DH_BOX_COLOUR;
+    /** Which half is playing: the one that ends with the gear where the pilot has asked for it. */
+    private static PlayState gearCycle(AnimationState<GhostAnimatable> state) {
+        Payload payload = payload(state.getAnimatable().snapshot());
+
+        if (payload == null || payload.pose().sweepGear() || !GhostConfig.animation()) {
+            return PlayState.STOP;
+        }
+
+        return state.setAndContinue(AircraftAnimations.cycleFor(payload.gearDown()));
+    }
+
+    /**
+     * How fast, from the aircraft's own cycle time, and held at the end of the cycle when the gear
+     * is already where it belongs — so a ghost that comes into view with its wheels down is sitting
+     * on them rather than lowering them again for the benefit of whoever just looked.
+     */
+    private static double gearSpeed(GhostAnimatable animatable) {
+        Payload payload = payload(animatable.snapshot());
+
+        if (payload == null) {
+            return 1.0;
+        }
+
+        boolean settled = payload.pose().gear() == (payload.gearDown() ? 1.0F : 0.0F);
+
+        return AircraftAnimations.gearSpeed(animatable.snapshot().animation(), payload.gearDown(),
+                payload.gearCycleTicks(), settled);
     }
 
     // ------------------------------------------------------------------
     // What the snapshot carries
     // ------------------------------------------------------------------
 
+    @Nullable
+    private static Payload payload(GhostSnapshot snapshot) {
+        return (Payload) snapshot.payload();
+    }
+
     /** A store on a pylon: where, in the aircraft's frame, and what. */
     record Store(Vec3 pos, ResourceLocation weapon) {
     }
 
-    /** Everything aircraft-specific a snapshot carries. */
-    record Payload(ResourceLocation aircraftId, AircraftDefinition.ModelSetup setup, AircraftModel.Pose pose,
-            List<Store> stores, List<AircraftShape.Box> shape) {
+    /**
+     * Everything aircraft-specific a snapshot carries.
+     *
+     * @param gearDown where the pilot has asked for the undercarriage to be, which is what decides
+     *        the half of the cycle a ghost plays
+     * @param gearCycleTicks how long this aircraft takes to raise or lower it
+     */
+    record Payload(ResourceLocation aircraftId, VehicleChassis.Model setup, AircraftModel.Pose pose,
+            List<Store> stores, boolean gearDown, int gearCycleTicks) {
     }
 }

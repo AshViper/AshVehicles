@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "N": {
+      "tag": "c:storage_blocks/netherite"
+    },
+    "H": {
+      "item": "minecraft:chain"
+    }
+  },
+  "pattern": ["#N#", "#Q#", "H#H"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:zumwalt"
+  }
+}

@@ -1,6 +1,11 @@
 package com.ashvehicles.client.ghost;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.client.ghost.dh.DHIntegration;
@@ -31,6 +36,9 @@ public final class GhostDebug {
     /** At most this many ghosts are listed one by one in the log each time. */
     private static final int LOG_DETAIL_LIMIT = 8;
 
+    /** What each ghost's verdict was when it was last reported, so that only changes are logged. */
+    private static final Map<UUID, GhostVerdict> REPORTED = new HashMap<>();
+
     private GhostDebug() {
     }
 
@@ -39,18 +47,27 @@ public final class GhostDebug {
     static void onClientTick(ClientTickEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
 
-        if (!GhostConfig.debugOverlay() || minecraft.level == null
-                || minecraft.level.getGameTime() % LOG_INTERVAL != 0) {
+        if (!GhostConfig.debugOverlay() || minecraft.level == null) {
+            if (!REPORTED.isEmpty()) {
+                REPORTED.clear();
+            }
+
             return;
         }
 
-        AshVehicles.LOGGER.info("[ghosts] tracked={} drawn={} culled={} GHOST={} SIMPLIFIED={} BILLBOARD={} "
-                + "occluded={} orphaned={} dhDrawn={} dh={} ({}) dhRadius={}",
+        reportChanges();
+
+        if (minecraft.level.getGameTime() % LOG_INTERVAL != 0) {
+            return;
+        }
+
+        AshVehicles.LOGGER.info("[ghosts] tracked={} drawn={} culled={} GHOST={} BILLBOARD={} "
+                + "occluded={} orphaned={} far={} dh={} ({}) dhRadius={}",
                 EntityGhostManager.size(), GhostRenderDispatcher.drawnLastFrame(),
                 GhostRenderDispatcher.culledLastFrame(),
-                EntityGhostManager.countGhost(), EntityGhostManager.countSimplified(),
+                EntityGhostManager.countGhost(),
                 EntityGhostManager.countBillboard(), EntityGhostManager.countOccluded(),
-                EntityGhostManager.countOrphaned(), EntityGhostManager.countDhDrawn(),
+                EntityGhostManager.countOrphaned(), (int) GhostRenderDispatcher.farPlaneLastFrame(),
                 DHIntegration.status(), DHIntegration.detail(minecraft.level), DHIntegration.drawnRadius());
 
         int listed = 0;
@@ -60,13 +77,41 @@ public final class GhostDebug {
                 break;
             }
 
-            AshVehicles.LOGGER.info("[ghost] {} {} at {} distance={} lod={} occluded={} dhDrawn={} orphaned={} "
-                    + "drawn={} inWorld={} light=sky{}/block{}",
+            AshVehicles.LOGGER.info("[ghost] {} {} at {} distance={} lod={} why={} occluded={} orphaned={} "
+                    + "inWorld={} light=sky{}/block{}",
                     ghost.uuid().toString().substring(0, 8), ghost.current().type().toShortString(),
                     ghost.current().position(), (int) Math.sqrt(ghost.distanceSq()), ghost.lod(),
-                    ghost.isOccluded(), ghost.isDhDrawn(), ghost.isOrphaned(), ghost.wasDrawnLastFrame(),
+                    ghost.verdict(), ghost.isOccluded(), ghost.isOrphaned(),
                     ghost.wasInWorld(), LightTexture.sky(ghost.lastLight()), LightTexture.block(ghost.lastLight()));
         }
+    }
+
+    /**
+     * A line the moment a ghost starts or stops being drawn, and why.
+     *
+     * <p>The periodic dump above catches whatever happens to be true every ten seconds, which is
+     * no use at all for "it was there and then it was not": by the time the next dump comes round
+     * the aeroplane has moved and so has the player. This is the timeline instead — one line per
+     * change, nothing while nothing changes.
+     */
+    private static void reportChanges() {
+        Set<UUID> present = new HashSet<>();
+
+        for (EntityGhost ghost : EntityGhostManager.ghosts()) {
+            present.add(ghost.uuid());
+
+            GhostVerdict now = ghost.verdict();
+            GhostVerdict before = REPORTED.put(ghost.uuid(), now);
+
+            if (before != now) {
+                AshVehicles.LOGGER.info("[ghost] {} {} at {} blocks, {}: {} -> {}",
+                        ghost.uuid().toString().substring(0, 8), ghost.current().type().toShortString(),
+                        (int) Math.sqrt(ghost.distanceSq()), ghost.lod(),
+                        before == null ? "new" : before, now);
+            }
+        }
+
+        REPORTED.keySet().retainAll(present);
     }
 
     @SubscribeEvent
@@ -80,16 +125,15 @@ public final class GhostDebug {
         left.add(String.format("[AshVehicles ghosts] %d tracked, %d drawn, %d culled",
                 EntityGhostManager.size(), GhostRenderDispatcher.drawnLastFrame(),
                 GhostRenderDispatcher.culledLastFrame()));
-        left.add(String.format("GHOST: %d  SIMPLIFIED: %d  BILLBOARD: %d  occluded: %d  orphaned: %d",
-                EntityGhostManager.countGhost(), EntityGhostManager.countSimplified(),
-                EntityGhostManager.countBillboard(), EntityGhostManager.countOccluded(),
-                EntityGhostManager.countOrphaned()));
-        left.add(String.format("Distances: %.0f / %.0f / %.0f  ghost style beyond %.0f",
-                Math.sqrt(GhostConfig.startSq()), Math.sqrt(GhostConfig.simplifiedSq()),
-                Math.sqrt(GhostConfig.endSq()), GhostRenderDispatcher.ghostStyleRadius()));
-        left.add(String.format("DH Integration: %s (%s)  drawn radius: %.0f  DH-drawn ghosts: %d",
+        left.add(String.format("GHOST: %d  BILLBOARD: %d  occluded: %d  orphaned: %d",
+                EntityGhostManager.countGhost(), EntityGhostManager.countBillboard(),
+                EntityGhostManager.countOccluded(), EntityGhostManager.countOrphaned()));
+        left.add(String.format("Distances: %.0f / %.0f  far plane %.0f  ghost style beyond %.0f",
+                Math.sqrt(GhostConfig.startSq()), Math.sqrt(GhostConfig.endSq()),
+                GhostRenderDispatcher.farPlaneLastFrame(), GhostRenderDispatcher.ghostStyleRadius()));
+        left.add(String.format("DH Integration: %s (%s)  drawn radius: %.0f",
                 DHIntegration.status(), DHIntegration.detail(Minecraft.getInstance().level),
-                DHIntegration.drawnRadius(), EntityGhostManager.countDhDrawn()));
+                DHIntegration.drawnRadius()));
     }
 
     /**
@@ -114,9 +158,9 @@ public final class GhostDebug {
                     bounds.minX * pull, bounds.minY * pull, bounds.minZ * pull,
                     bounds.maxX * pull, bounds.maxY * pull, bounds.maxZ * pull).move(drawnAt.subtract(eye));
 
-            // Red for a drawn ghost, dimmer for one that is occluded, blue for one Distant Horizons draws.
-            float green = ghost.isOccluded() ? 0.4F : 0.0F;
-            float blue = ghost.isDhDrawn() ? 1.0F : 0.0F;
+            // Red for a drawn ghost, amber for one that is occluded, blue for one nothing drew.
+            float green = ghost.isOccluded() ? 0.6F : 0.0F;
+            float blue = ghost.verdict() == GhostVerdict.DRAWN || ghost.isOccluded() ? 0.0F : 1.0F;
             LevelRenderer.renderLineBox(poseStack, lines, box, 1.0F, green, blue, 1.0F);
         }
 

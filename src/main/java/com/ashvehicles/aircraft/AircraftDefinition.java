@@ -1,13 +1,18 @@
 package com.ashvehicles.aircraft;
 
+import com.ashvehicles.vehicle.VehicleChassis;
+import com.ashvehicles.vehicle.VehicleType;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -15,7 +20,7 @@ import net.minecraft.world.phys.Vec3;
  * {@code data/ashvehicles/ashvehicles/aircraft/} and the mod registers an entity type and an item
  * for it at start-up; no Java needed.
  *
- * <p>The file is read twice, for two different jobs. At start-up {@link AircraftLoader} reads the
+ * <p>The file is read twice, for two different jobs. At start-up {@link DefinitionRegistry} reads the
  * copy inside the mod so that {@link Hitbox} is known while the registries are still open, since an
  * entity type's size is fixed the moment it is registered. At world load the same file goes through
  * the {@code ashvehicles:aircraft} data pack registry, and everything below the hitbox is read from
@@ -24,31 +29,62 @@ import net.minecraft.world.phys.Vec3;
  * <p>Speeds and accelerations are in blocks per tick and blocks per tick squared; at twenty ticks a
  * second, a speed of 1.0 is twenty blocks a second. Rates are degrees per tick.
  */
-public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine, Wing wing,
+public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Model model, Engine engine, Wing wing,
         Handling handling, Airframe airframe, Undercarriage landingGear, Surface flaps,
-        CameraMount camera, SoundSetup sound, Radar radar, Countermeasures countermeasures,
-        Optional<Vtol> vtol, List<Hardpoint> hardpoints, Sync sync) {
+        VehicleChassis.CameraMount camera, VehicleChassis.Sound sound, VehicleChassis.Radar radar, Signature signature,
+        Countermeasures countermeasures, VehicleType type, Optional<Vtol> vtol, Optional<Rotor> rotor,
+        List<Hardpoint> hardpoints, Sync sync) {
 
+
+    /**
+     * The two ways an aircraft can be held up by something other than a wing, read as one field.
+     *
+     * <p>Only because a codec group cannot be longer than sixteen entries, and this pair is the one
+     * worth spending the seam on: an aeroplane borrowing its engine for a minute and a helicopter
+     * that has no other way of flying are alternatives, and nothing sensible has both. The two
+     * {@code vtol} and {@code rotor} blocks are read and written exactly as if they were separate,
+     * because as far as a file is concerned they are.
+     */
+    private static final MapCodec<Pair<Optional<Vtol>, Optional<Rotor>>> LIFT_SYSTEM =
+            Codec.mapPair(Vtol.CODEC.optionalFieldOf("vtol"), Rotor.CODEC.optionalFieldOf("rotor"));
+
+    /**
+     * The kind of aircraft, read alongside the lift system as one field for the same reason the two
+     * halves of that system are — a codec group cannot be longer than sixteen entries, and the kind
+     * is small enough to ride along with the pair it is about. An aeroplane and a helicopter differ
+     * in exactly what {@code vtol} and {@code rotor} describe, so the type belongs with them; it is
+     * read and written as a plain {@code "type"} field beside {@code "vtol"} and {@code "rotor"}, as
+     * if it were its own entry.
+     */
+    private static final MapCodec<Pair<VehicleType, Pair<Optional<Vtol>, Optional<Rotor>>>> KIND_AND_LIFT =
+            Codec.mapPair(VehicleType.CODEC.optionalFieldOf("type", VehicleType.AIRCRAFT), LIFT_SYSTEM);
 
     public static final Codec<AircraftDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-            Hitbox.CODEC.optionalFieldOf("hitbox", Hitbox.DEFAULT).forGetter(AircraftDefinition::hitbox),
-            ModelSetup.CODEC.optionalFieldOf("model", ModelSetup.DEFAULT).forGetter(AircraftDefinition::model),
+            VehicleChassis.Hitbox.CODEC.optionalFieldOf("hitbox", VehicleChassis.Hitbox.DEFAULT).forGetter(AircraftDefinition::hitbox),
+            VehicleChassis.Model.CODEC.optionalFieldOf("model", VehicleChassis.Model.DEFAULT).forGetter(AircraftDefinition::model),
             Engine.CODEC.fieldOf("engine").forGetter(AircraftDefinition::engine),
             Wing.CODEC.fieldOf("wing").forGetter(AircraftDefinition::wing),
             Handling.CODEC.fieldOf("handling").forGetter(AircraftDefinition::handling),
             Airframe.CODEC.fieldOf("airframe").forGetter(AircraftDefinition::airframe),
             Undercarriage.CODEC.fieldOf("landing_gear").forGetter(AircraftDefinition::landingGear),
             Surface.CODEC.fieldOf("flaps").forGetter(AircraftDefinition::flaps),
-            CameraMount.CODEC.optionalFieldOf("camera", CameraMount.DEFAULT).forGetter(AircraftDefinition::camera),
-            SoundSetup.CODEC.optionalFieldOf("sound", SoundSetup.DEFAULT).forGetter(AircraftDefinition::sound),
-            Radar.CODEC.optionalFieldOf("radar", Radar.DEFAULT).forGetter(AircraftDefinition::radar),
+            VehicleChassis.CameraMount.CODEC.optionalFieldOf("camera", VehicleChassis.CameraMount.DEFAULT).forGetter(AircraftDefinition::camera),
+            VehicleChassis.Sound.CODEC.optionalFieldOf("sound", VehicleChassis.Sound.DEFAULT).forGetter(AircraftDefinition::sound),
+            VehicleChassis.Radar.CODEC.optionalFieldOf("radar", VehicleChassis.Radar.DEFAULT)
+                    .forGetter(AircraftDefinition::radar),
             Signature.CODEC.optionalFieldOf("signature", Signature.DEFAULT).forGetter(AircraftDefinition::signature),
             Countermeasures.CODEC.optionalFieldOf("countermeasures", Countermeasures.DEFAULT)
                     .forGetter(AircraftDefinition::countermeasures),
-            Vtol.CODEC.optionalFieldOf("vtol").forGetter(AircraftDefinition::vtol),
+            KIND_AND_LIFT.forGetter(definition ->
+                    Pair.of(definition.type(), Pair.of(definition.vtol(), definition.rotor()))),
             Hardpoint.CODEC.listOf().optionalFieldOf("hardpoints", List.of()).forGetter(AircraftDefinition::hardpoints),
             Sync.CODEC.optionalFieldOf("sync", Sync.DEFAULT).forGetter(AircraftDefinition::sync)
-    ).apply(instance, AircraftDefinition::new));
+    ).apply(instance, (hitbox, model, engine, wing, handling, airframe, landingGear, flaps, camera,
+            sound, radar, signature, countermeasures, kindLift, hardpoints, sync) ->
+            new AircraftDefinition(hitbox, model, engine, wing, handling, airframe, landingGear, flaps,
+                    camera, sound, radar, signature, countermeasures, kindLift.getFirst(),
+                    kindLift.getSecond().getFirst(), kindLift.getSecond().getSecond(),
+                    hardpoints, sync)));
 
     /**
      * Used when an aircraft has no file the game can read at all. Deliberately docile: it flies, so
@@ -56,76 +92,37 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * real numbers.
      */
     public static final AircraftDefinition FALLBACK = new AircraftDefinition(
-            Hitbox.DEFAULT,
-            ModelSetup.DEFAULT,
-            new Engine(0.02F, 0.02F, 0.06F, 1.0F),
+            VehicleChassis.Hitbox.DEFAULT,
+            VehicleChassis.Model.DEFAULT,
+            new Engine(0.02F, 0.02F, 0.06F, 1.0F, Optional.empty()),
             new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 0.02F, 0.15F, 0.28F, 6.0F, 0.0F),
             new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F),
-            new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, List.of(new Vec3(0.0, 0.5, 0.0))),
-            new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F),
+            new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0,
+                    List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0)))),
+            new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true),
             new Surface(20, 0.5F, 0.4F),
-            CameraMount.DEFAULT,
-            SoundSetup.DEFAULT,
-            Radar.DEFAULT,
+            VehicleChassis.CameraMount.DEFAULT,
+            VehicleChassis.Sound.DEFAULT,
+            VehicleChassis.Radar.DEFAULT,
             Signature.DEFAULT,
             Countermeasures.DEFAULT,
+            VehicleType.AIRCRAFT,
+            Optional.empty(),
             Optional.empty(),
             List.of(),
             Sync.DEFAULT);
 
     /**
-     * The collision box, which Minecraft can only describe as a box with a square footprint, and
-     * which is fixed when the entity type is registered. Read from the mod's own copy of the file at
-     * start-up, so unlike everything else here a data pack cannot change it.
-     *
-     * @param trackingRange how far away, in chunks, other players are sent the aircraft in full
-     * @param ghostRange how far away, in blocks, the aircraft keeps being sent at all. Past the
-     *                   tracking range, and past the edge of the chunks a player has loaded, it goes
-     *                   on being reported and is drawn as a ghost: an aeroplane at altitude is
-     *                   visible from much further away than the ground beneath it, and stopping it
-     *                   at the edge of the loaded world would have aircraft blinking out of the sky.
-     *                   Zero or less removes the limit entirely, so an aircraft is reported wherever
-     *                   it is in the same world, however far that is
+     * Whether this is a helicopter: one that says so, or one that has a rotor and lets the rotor
+     * say it. A file made before the type was a field names no type and is read as an aeroplane,
+     * but a rotor block has always been the thing that makes it fly like a helicopter, so either is
+     * taken as the answer and the older files keep working with nothing changed in them.
      */
-    public record Hitbox(float width, float height, int trackingRange, int ghostRange) {
-        public static final Hitbox DEFAULT = new Hitbox(4.0F, 2.0F, 12, 0);
-
-        public static final Codec<Hitbox> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Codec.FLOAT.fieldOf("width").forGetter(Hitbox::width),
-                Codec.FLOAT.fieldOf("height").forGetter(Hitbox::height),
-                Codec.INT.optionalFieldOf("tracking_range", 12).forGetter(Hitbox::trackingRange),
-                Codec.INT.optionalFieldOf("ghost_range", 0).forGetter(Hitbox::ghostRange)
-        ).apply(instance, Hitbox::new));
-
-        /** Whether the aircraft stops being reported at some distance at all. */
-        public boolean hasGhostLimit() {
-            return this.ghostRange > 0;
-        }
+    public boolean isHelicopter() {
+        return this.type == VehicleType.HELICOPTER || this.rotor.isPresent();
     }
 
-    /**
-     * How to draw the aircraft. The geometry, texture and animation files are found by name, so an
-     * aircraft called {@code su_25} is drawn from {@code geo/entity/su_25.geo.json} and
-     * {@code textures/entity/su_25.png} without being told where they are.
-     *
-     * @param scale uniform scale applied to the model, for models not built at Minecraft's scale
-     * @param bones which bone in the geometry plays which part, keyed by the roles listed in
-     *              {@link Bone}. Anything left out simply does not move.
-     */
-    public record ModelSetup(float scale, Map<String, String> bones) {
-        public static final ModelSetup DEFAULT = new ModelSetup(1.0F, Map.of());
 
-        public static final Codec<ModelSetup> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Codec.FLOAT.optionalFieldOf("scale", 1.0F).forGetter(ModelSetup::scale),
-                Codec.unboundedMap(Codec.STRING, Codec.STRING).optionalFieldOf("bones", Map.of())
-                        .forGetter(ModelSetup::bones)
-        ).apply(instance, ModelSetup::new));
-
-        /** The bone named for a role, or empty if this aircraft has no such part. */
-        public String bone(String role) {
-            return this.bones.getOrDefault(role, "");
-        }
-    }
 
     /** The roles a bone can be given in {@link ModelSetup#bones}. */
     public static final class Bone {
@@ -152,6 +149,15 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
          * {@link com.ashvehicles.client.model.AircraftAnimations}.
          */
         public static final String NOZZLE = "nozzle";
+        /**
+         * The main rotor of a helicopter, which turns about its own mast — so about the model's
+         * vertical, whatever the aircraft is doing. Named here rather than animated because it is one
+         * angle rather than a sequence: how fast it is turning is something the aircraft already
+         * knows, and an animation file would have to be retimed every time that changed.
+         */
+        public static final String ROTOR = "rotor";
+        /** The tail rotor, which turns about the model's lateral axis, its disc facing sideways. */
+        public static final String TAIL_ROTOR = "tail_rotor";
 
         private Bone() {
         }
@@ -162,9 +168,9 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * {@code AircraftInterpolation}, which is where all three of these are spent and where the
      * reasoning behind them is written down.
      *
-     * @param correctionTicks ticks over which all but a sliver of a correction is absorbed. Short
-     *                        enough that the drawn aircraft is honest, long enough that a correction
-     *                        is not a step. A couple of server ticks suits anything
+     * @param correctionTicks ticks a correction is flown out over. Short enough that the drawn
+     *                        aircraft is honest, long enough that no correction is ever a step in the
+     *                        speed it appears to be doing. A few server ticks suits anything
      * @param snapDistance blocks of error past which the aircraft is simply put where it belongs
      *                     instead of sliding there. Should be larger than any error ordinary flight
      *                     can produce and smaller than a teleport
@@ -172,10 +178,10 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *                           the aircraft is handed back rather than coasting on a stale velocity
      */
     public record Sync(int correctionTicks, double snapDistance, int maxPredictionTicks) {
-        public static final Sync DEFAULT = new Sync(3, 8.0, 10);
+        public static final Sync DEFAULT = new Sync(5, 8.0, 10);
 
         public static final Codec<Sync> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Codec.INT.optionalFieldOf("correction_ticks", 3).forGetter(Sync::correctionTicks),
+                Codec.INT.optionalFieldOf("correction_ticks", 5).forGetter(Sync::correctionTicks),
                 Codec.DOUBLE.optionalFieldOf("snap_distance", 8.0).forGetter(Sync::snapDistance),
                 Codec.INT.optionalFieldOf("max_prediction_ticks", 10).forGetter(Sync::maxPredictionTicks)
         ).apply(instance, Sync::new));
@@ -189,13 +195,65 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *                   1 hands back the old behaviour, where the thrust followed the lever exactly
      *  @param seaLevelDensity air density at sea level, as a multiplier on thrust and lift. Thrust
      *                         falls off with it, which is what puts a ceiling on the aircraft */
-    public record Engine(float maxThrust, float throttleRate, float spoolRate, float seaLevelDensity) {
+    public record Engine(float maxThrust, float throttleRate, float spoolRate, float seaLevelDensity,
+            Optional<Afterburner> afterburner) {
         public static final Codec<Engine> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.fieldOf("max_thrust").forGetter(Engine::maxThrust),
                 Codec.FLOAT.fieldOf("throttle_rate").forGetter(Engine::throttleRate),
                 Codec.FLOAT.optionalFieldOf("spool_rate", 0.06F).forGetter(Engine::spoolRate),
-                Codec.FLOAT.optionalFieldOf("sea_level_density", 1.0F).forGetter(Engine::seaLevelDensity)
+                Codec.FLOAT.optionalFieldOf("sea_level_density", 1.0F).forGetter(Engine::seaLevelDensity),
+                Afterburner.CODEC.optionalFieldOf("afterburner").forGetter(Engine::afterburner)
         ).apply(instance, Engine::new));
+    }
+
+    /**
+     * Reheat: fuel sprayed into the jet pipe behind the turbine and lit there.
+     *
+     * <p>Not simply more throttle, and a file that tunes it as if it were has missed the point. At
+     * the top of the military range the engine is already delivering everything it has; what the
+     * afterburner does is burn fuel that has been through the engine once, in the only part of it
+     * with any oxygen left, for a large gain in thrust and a larger one in everything a fighter
+     * spends its time trying not to be. It is loud, it is visible, and it is hot -- and the last of
+     * those is the one that matters, because anything homing on heat sees it from much further off.
+     * Which is why the interesting decision is not whether to fit one but when to light it.
+     *
+     * <p><b>The gate.</b> There is no key for this. A throttle lever has a stop at full military
+     * power and a detent past it, and the pilot has to push through the stop deliberately to reach
+     * the reheat range; here, holding the throttle open with the lever already against its stop is
+     * that push. See {@code AircraftEntity}, which owns the latch.
+     *
+     * @param thrust multiplier on {@code max_thrust} in full reheat. Half again is about right for
+     *               a fighter; anything past double is a rocket rather than an aeroplane
+     * @param lightRate fraction of the gap between commanded and delivered reheat closed each tick.
+     *                  Quicker than the engine spools, because lighting the burner is a match rather
+     *                  than a turbine coming up to speed. One lights it in a single tick
+     * @param heat multiplier on the aircraft's infrared signature while fully lit. This is what it
+     *             costs, and the reason a pilot who knows they are being hunted stays out of reheat.
+     *             It counts against {@link Signature#heat}, which is the airframe cold: the product
+     *             of the two is what a seeker is looking for, and one is as hot as anything gets
+     * @param nozzles where the plume leaves the aircraft, in the aircraft's own axes -- {@code +Z}
+     *                along the nose, {@code +Y} up through the canopy -- one entry per jet pipe. An
+     *                empty list puts a single one out of the tail, worked out from the collision
+     *                shape, which is right for one engine buried in the fuselage and wrong for a
+     *                pair of them set apart
+     */
+    public record Afterburner(float thrust, float lightRate, float heat, List<Vec3> nozzles) {
+        public static final Codec<Afterburner> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("thrust", 1.5F).forGetter(Afterburner::thrust),
+                Codec.FLOAT.optionalFieldOf("light_rate", 0.2F).forGetter(Afterburner::lightRate),
+                Codec.FLOAT.optionalFieldOf("heat", 3.0F).forGetter(Afterburner::heat),
+                Vec3.CODEC.listOf().optionalFieldOf("nozzles", List.of()).forGetter(Afterburner::nozzles)
+        ).apply(instance, Afterburner::new));
+
+        /** The multiplier on thrust at this much reheat: one at nothing, {@code thrust} at full. */
+        public double thrustFactor(float reheat) {
+            return 1.0 + Math.max(this.thrust - 1.0F, 0.0F) * Mth.clamp(reheat, 0.0F, 1.0F);
+        }
+
+        /** The same for the infrared signature, which is what the thrust above is paid for with. */
+        public float heatFactor(float reheat) {
+            return 1.0F + Math.max(this.heat - 1.0F, 0.0F) * Mth.clamp(reheat, 0.0F, 1.0F);
+        }
     }
 
     /**
@@ -322,11 +380,16 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * @param crashSpeed impact speed above which hitting something writes the aircraft off
      * @param maxG how many times its own weight the airframe is stressed for. Pull harder than this
      *             and it starts to come apart. Zero or less means it never will
+     * @param salvage how much metal is left in a wreck of one, in iron ingots, once it has been
+     *                destroyed and somebody comes along with a wrench. Left out, it is worked out
+     *                from the health instead
      * @param seats one entry per seat, along the aircraft's own axes: x right, y up, z towards the
-     *              nose. The number of entries is the number of people who can climb aboard.
+     *              nose. The number of entries is the number of people who can climb aboard. Each
+     *              is a bare point or a block that also says where that crew member looks out from,
+     *              which is what a two-seater wants: see {@link VehicleChassis.Seat}
      */
     public record Airframe(float health, float crashSpeed, float explosionPower, float maxG,
-            List<Vec3> seats) {
+            int salvage, List<VehicleChassis.Seat> seats) {
 
         /** What an aeroplane is worth in hit points if its file does not say. */
         public static final float DEFAULT_HEALTH = 300.0F;
@@ -336,120 +399,12 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
                 Codec.FLOAT.fieldOf("crash_speed").forGetter(Airframe::crashSpeed),
                 Codec.FLOAT.fieldOf("explosion_power").forGetter(Airframe::explosionPower),
                 Codec.FLOAT.optionalFieldOf("max_g", 0.0F).forGetter(Airframe::maxG),
-                Vec3.CODEC.listOf().fieldOf("seats").forGetter(Airframe::seats)
+                Codec.INT.optionalFieldOf("salvage", 0).forGetter(Airframe::salvage),
+                VehicleChassis.Seat.CODEC.listOf().fieldOf("seats").forGetter(Airframe::seats)
         ).apply(instance, Airframe::new));
     }
 
-    /**
-     * Where the camera sits while flying this aircraft. Minecraft's four blocks behind the pilot's
-     * head puts the viewer inside the fuselage of anything bigger than a horse.
-     *
-     * @param pos third-person offset from the middle of the aircraft, measured along the viewing
-     *            axes: x to the right of the view, y straight up, z along the line of sight, so a
-     *            camera behind and above has a negative z and a positive y. Measuring along the view
-     *            rather than the aircraft's heading is what keeps the whole aeroplane in frame while
-     *            it climbs and rolls. Terrain between the aircraft and the camera still pulls it in,
-     *            so the distance is a maximum rather than a promise.
-     * @param cockpit first-person eye position, in the aircraft's own axes like {@link
-     *                Airframe#seats}: x right, y up, z towards the nose. This one is bolted to the
-     *                airframe, pitch and bank included, so the view rolls with the wings.
-     */
-    public record CameraMount(Vec3 pos, Vec3 cockpit) {
-        public static final CameraMount DEFAULT =
-                new CameraMount(new Vec3(0.0, 2.5, -24.0), new Vec3(0.0, 2.5, 3.4));
 
-        public static final Codec<CameraMount> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Vec3.CODEC.fieldOf("pos").forGetter(CameraMount::pos),
-                Vec3.CODEC.fieldOf("cockpit").forGetter(CameraMount::cockpit)
-        ).apply(instance, CameraMount::new));
-    }
-
-    /**
-     * What the engine sounds like. The recording itself lives in the resource pack, in
-     * {@code sounds.json} and an {@code .ogg} like any other Minecraft sound; this only says which
-     * one to use and how to play it.
-     *
-     * <p>The recording is found in this order: the {@code engine} event named here if there is one;
-     * failing that, an event named after the aircraft, so {@code su_25} looks for
-     * {@code ashvehicles:engine.su_25}; and failing that the mod's default,
-     * {@code ashvehicles:engine.default}, which is {@code sounds/enginesound.ogg}. So an aircraft
-     * with no recording of its own still sounds like something, and giving it one is a matter of
-     * dropping in the file and listing it in {@code sounds.json}, with nothing to change here.
-     *
-     * <p>The recording should be a steady loop of the engine at a constant setting: throttle is
-     * expressed by playing it louder and faster, not by switching recordings.
-     *
-     * @param engine sound event to use, or empty to look one up by the aircraft's name
-     * @param gear sound event for the undercarriage travelling, or empty to look one up by the
-     *             aircraft's name. Also a loop, played only while the legs are on their way, and
-     *             played at one volume and one pitch: the figures below are the engine's alone
-     * @param volume how loud at full throttle, next to the aircraft; 1 is the recording as made
-     * @param idleVolume fraction of that at zero throttle while the engine is still turning
-     * @param pitchMin playback speed at zero throttle
-     * @param pitchMax playback speed at full throttle
-     * @param range distance, in blocks, beyond which the engine cannot be heard at all. It fades
-     *              steadily out to there. Measured in hundreds of blocks rather than tens: a jet is
-     *              heard long before it is seen, and an aeroplane that goes silent at the edge of the
-     *              render distance is an aeroplane nobody can be sneaked up on by
-     */
-    public record SoundSetup(Optional<ResourceLocation> engine, Optional<ResourceLocation> gear,
-            float volume, float idleVolume, float pitchMin, float pitchMax, float range) {
-        public static final SoundSetup DEFAULT =
-                new SoundSetup(Optional.empty(), Optional.empty(), 1.0F, 0.35F, 0.7F, 1.25F, 512.0F);
-
-        public static final Codec<SoundSetup> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                ResourceLocation.CODEC.optionalFieldOf("engine").forGetter(SoundSetup::engine),
-                ResourceLocation.CODEC.optionalFieldOf("gear").forGetter(SoundSetup::gear),
-                Codec.FLOAT.optionalFieldOf("volume", DEFAULT.volume()).forGetter(SoundSetup::volume),
-                Codec.FLOAT.optionalFieldOf("idle_volume", DEFAULT.idleVolume()).forGetter(SoundSetup::idleVolume),
-                Codec.FLOAT.optionalFieldOf("pitch_min", DEFAULT.pitchMin()).forGetter(SoundSetup::pitchMin),
-                Codec.FLOAT.optionalFieldOf("pitch_max", DEFAULT.pitchMax()).forGetter(SoundSetup::pitchMax),
-                Codec.FLOAT.optionalFieldOf("range", DEFAULT.range()).forGetter(SoundSetup::range)
-        ).apply(instance, SoundSetup::new));
-    }
-
-    /**
-     * The aircraft's radar, and how far its warning receiver can hear.
-     *
-     * <p>The radar looks forward and nowhere else: it sweeps a cone about the nose, so finding
-     * somebody is a matter of pointing the aeroplane at where they might be, and turning away from a
-     * contact loses it. That is what makes a radar worth having rather than a map of the sky.
-     *
-     * <p>The warning receiver is the other way round and has no cone at all. It hears somebody
-     * else's radar wherever it is coming from, which is the whole point of one: what it is for is
-     * the thing you did not see, and that is behind you.
-     *
-     * @param range how far the radar sees, in blocks — kilometres rather than hundreds of blocks,
-     *              because that is the distance at which one aeroplane finds another and there is
-     *              nothing else out there to find. Zero or less means the aircraft has none, and a
-     *              pilot with no radar has no scope and can lock only what their seeker reaches
-     * @param arc half-angle of the sweep, in degrees off the nose
-     * @param sweepTicks how often the picture is redrawn. A radar does not see continuously; it
-     *                   sweeps, and what is on the scope is where things were when it last passed
-     * @param warningRange how far off somebody can be and still set off the warning receiver, in
-     *                     blocks. Generous next to the radar's own reach: being painted from further
-     *                     away than you can see is exactly the situation worth being told about
-     */
-    public record Radar(float range, float arc, int sweepTicks, float warningRange) {
-        public static final Radar DEFAULT = new Radar(3000.0F, 55.0F, 10, 4000.0F);
-
-        public static final Codec<Radar> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                Codec.FLOAT.optionalFieldOf("range", DEFAULT.range()).forGetter(Radar::range),
-                Codec.FLOAT.optionalFieldOf("arc", DEFAULT.arc()).forGetter(Radar::arc),
-                Codec.INT.optionalFieldOf("sweep_ticks", DEFAULT.sweepTicks()).forGetter(Radar::sweepTicks),
-                Codec.FLOAT.optionalFieldOf("warning_range", DEFAULT.warningRange()).forGetter(Radar::warningRange)
-        ).apply(instance, Radar::new));
-
-        /** Whether there is a radar aboard at all. */
-        public boolean fitted() {
-            return this.range > 0.0F;
-        }
-
-        /** The furthest anything is worth looking for: the radar's reach or the receiver's. */
-        public double reach() {
-            return Math.max(this.range, this.warningRange);
-        }
-    }
 
     /**
      * How big the aircraft looks to somebody else's radar.
@@ -471,13 +426,42 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * @param store what each store carried <em>externally</em> adds. Stores in a bay add nothing,
      *              which is what bays are for; see {@link Hardpoint#internal()}
      */
-    public record Signature(float radar, float store) {
-        public static final Signature DEFAULT = new Signature(1.0F, 0.2F);
+    public record Signature(float radar, float store, float heat) {
+        public static final Signature DEFAULT = new Signature(1.0F, 0.2F, 1.0F);
 
         public static final Codec<Signature> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("radar", DEFAULT.radar()).forGetter(Signature::radar),
-                Codec.FLOAT.optionalFieldOf("store", DEFAULT.store()).forGetter(Signature::store)
+                Codec.FLOAT.optionalFieldOf("store", DEFAULT.store()).forGetter(Signature::store),
+                Codec.FLOAT.optionalFieldOf("heat", DEFAULT.heat()).forGetter(Signature::heat)
         ).apply(instance, Signature::new));
+
+        /**
+         * How far a heat-seeking head sees this, as a fraction of the range its file gives it.
+         *
+         * <p>A square root, where the radar above takes a fourth root, and the difference is the
+         * physics rather than a taste in numbers. A radar has to light the target and then catch
+         * what comes back, so its reach goes as the fourth root of the return; a seeker homing on
+         * heat is only listening, and what it hears falls away with the square of the distance
+         * alone. Which is why a burner that trebles the heat is worth nearly twice the range, where
+         * trebling a radar return would barely move it.
+         *
+         * <p>Capped at one, and for the same reason the radar's is with rather more force behind
+         * it. A seeker only ever considers what the sweep has already found, and that sweep is a
+         * box the size of the seeker's own range — the single most expensive question the server
+         * asks, and one that cannot be widened for the sake of a hot target without paying for the
+         * whole cube of it. So {@code lock_range} is the range against the hottest thing the seeker
+         * will ever look at: an ordinary fighter in full reheat. Everything colder than that is
+         * found closer in, which is the whole of what this figure does.
+         *
+         * <p>Hence the shape a file wants. An airframe that has a burner sets {@code heat} to what
+         * it is worth on <em>military power</em> — a good deal under one — and lets
+         * {@code afterburner.heat} carry it back up towards the cap when the pilot lights it. Left
+         * at one it is always as visible as it can be, which is the right answer for anything with
+         * no burner to give away.
+         */
+        public static float heatReach(float heat) {
+            return (float) Math.min(Math.sqrt(Math.max(heat, 0.0F)), 1.0);
+        }
 
         /**
          * How far a radar sees this, as a fraction of what it manages against an ordinary fighter.
@@ -546,6 +530,134 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
     }
 
     /**
+     * A lifting rotor, and with it a completely different aircraft. Present makes the machine a
+     * helicopter and hands it {@code AircraftEntity}'s rotor flight model instead of the wing one;
+     * absent leaves it an aeroplane.
+     *
+     * <p><b>What a helicopter is.</b> An aeroplane is thrown forward and holds itself up with the
+     * air it is passing through, so it has to keep moving and it goes where its nose is pointing. A
+     * helicopter carries its own airflow. The rotor makes a single force square to its own disc, and
+     * that force is the whole aircraft: tilt the disc forward and the machine goes forward, tilt it
+     * sideways and it goes sideways, leave it level and the machine hangs there. Nothing else pushes
+     * it anywhere, which is why every helicopter is nose-down in the cruise and why one can stop dead
+     * in the air without falling — the two things an aeroplane can never do.
+     *
+     * <p><b>What the pilot has.</b> The collective, which is the throttle lever and sets how hard the
+     * rotor pulls; the cyclic, which is the pitch and roll stick and points the disc; and the pedals,
+     * which are the tail rotor and swing the nose without moving the machine. All three work at a
+     * standstill, because the rotor is turning whether or not the aircraft is going anywhere. That is
+     * the whole difference from {@link Vtol}, which is an aeroplane borrowing its engine for a minute.
+     *
+     * <p><b>What is read from elsewhere.</b> The wing block still applies and still means what it
+     * says: {@code drag} is what the fuselage costs and is what settles the top speed, {@code
+     * lateral_drag} is the fin, {@code max_speed} is the never-exceed speed. Three of its figures
+     * want reading again before they are set. {@code span} is the height the ground cushion reaches
+     * to, which for a helicopter is the rotor's <em>diameter</em> rather than any wingspan. {@code
+     * stall_speed} is only the reference the fin comes alive against, since nothing here stalls. And
+     * {@code lift} is for a machine whose wings genuinely fly — a compound helicopter, or an
+     * autogyro — and is best left at zero for an ordinary gunship: the angle of attack is measured
+     * against the fuselage, an ordinary helicopter cruises well nose-down, and stub wings told to
+     * read that as a negative angle would push the machine into the ground rather than help hold it
+     * up. What they really contribute is small and this models it worse than not at all.
+     *
+     * @param lift acceleration the rotor makes at full collective and full speed, in blocks per tick
+     *             squared. <b>It has to beat gravity</b> — {@value Vtol#GRAVITY_NOTE} — and by a
+     *             margin, since the difference is everything the machine has left for climbing,
+     *             turning and being loaded
+     * @param spoolTicks how long the rotor takes to wind up to speed from a standstill. There is no
+     *                   starter switch: climbing into the seat is the switch and this is the wait
+     *                   afterwards, which is the same wait a real crew has and the reason a
+     *                   helicopter cannot be jumped into and flown away from
+     * @param translationalLift extra lift once the machine is moving, as a fraction. A rotor in a
+     *                          hover is beating air it has already used; move it, and every blade
+     *                          reaches undisturbed air. This is why a helicopter that cannot lift
+     *                          itself vertically can often still fly away along the ground
+     * @param translationalSpeed speed, in blocks per tick, by which that is fully in. Also the
+     *                           reference the hover damping is spread over
+     * @param authority how much control the rotor gives at full speed, against what an aeroplane's
+     *                  surfaces have at their stalling speed. This is what makes a helicopter as
+     *                  controllable standing still as it is at speed
+     * @param maxTilt how far the disc can be tilted from level, in degrees, and therefore how hard
+     *                the machine can be made to accelerate. <b>The cyclic walks the disc round and
+     *                then leaves it there</b>, rather than springing back the moment the key comes
+     *                up: that is what the attitude-hold system every modern helicopter carries does,
+     *                and on a keyboard it is the only way to ask for a cruise at all. A key is all
+     *                the way down or not down, so a stick that returned to level would leave the
+     *                machine with two settings — hovering and charging — and nothing between them.
+     *                Past this angle it is walked back, so a helicopter cannot be tipped over, by the
+     *                pilot or by anything else
+     * @param trim how fast the cyclic walks the disc, as a fraction of the rates in
+     *             {@link Handling}. One hands the whole rate to the stick, which on a keyboard is a
+     *             machine that snaps to full tilt the instant a key is touched; a half gives a second
+     *             or so of travel, which is enough to stop anywhere along it
+     * @param stability how hard the disc is walked back once it is past {@code max_tilt}, in degrees
+     *                  per tick of rotation for each degree it is out. Nothing at all while the
+     *                  machine is inside its limits, which is where it spends its life
+     * @param hoverDrag how quickly a hover bleeds off drift, per tick, dying away as the machine
+     *                  picks up speed. Without it a helicopter nudged sideways keeps going sideways;
+     *                  left on at all speeds it is a parking brake rather than a hover
+     * @param discDrag how hard it is to move the machine straight up or straight down, against the
+     *                 square of the rate of climb. The rotor and everything slung under it present a
+     *                 great flat area to air coming from below and next to none to air coming from
+     *                 ahead, and the fuselage's own drag does not come close to explaining either
+     *                 figure: this is what makes a rate of climb something quoted in feet per minute
+     *                 while the speed beside it is in knots. It is also what a helicopter falls
+     *                 against with the collective down, and it scales with the rotor, so one whose
+     *                 rotor has stopped falls like the lump of metal it now is
+     * @param bluffDrag how many times the fuselage's own drag it costs to fly the machine straight
+     *                  backwards, blended round to one flying straight ahead. A fuselage is a shape
+     *                  for going forwards; turned round it presents its whole side to the air, and
+     *                  that difference is the only thing standing between a helicopter and reaching
+     *                  its forward top speed in reverse. Real rearward and sideways limits are a
+     *                  fraction of the forward one and this is why. One leaves the machine as happy
+     *                  going backwards as forwards
+     * @param torque yaw, in degrees per tick at full collective, that the fuselage is pushed round by
+     *               the rotor it is hanging from. Positive swings the nose right, which is what a
+     *               rotor turning anticlockwise seen from above does; a machine built the other way
+     *               round takes a negative figure, and zero leaves the pedals to the pilot alone.
+     *               Since it follows the collective, it is felt as the nose walking round whenever the
+     *               machine is asked to climb — which is most of what flying one by hand consists of
+     * @param rpm how fast the main rotor turns, in revolutions per minute. Drawing only
+     * @param tailRpm the same for the tail rotor, which turns several times faster. Drawing only
+     */
+    public record Rotor(float lift, int spoolTicks, float translationalLift, float translationalSpeed,
+            float authority, float maxTilt, float trim, float stability, float hoverDrag,
+            float discDrag, float bluffDrag, float torque, float rpm, float tailRpm) {
+
+        public static final Rotor DEFAULT = new Rotor(0.034F, 90, 0.15F, 0.8F, 1.0F, 22.0F, 0.5F,
+                0.15F, 0.02F, 0.025F, 10.0F, 0.0F, 300.0F, 1500.0F);
+
+        public static final Codec<Rotor> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("lift", DEFAULT.lift()).forGetter(Rotor::lift),
+                Codec.INT.optionalFieldOf("spool_ticks", DEFAULT.spoolTicks()).forGetter(Rotor::spoolTicks),
+                Codec.FLOAT.optionalFieldOf("translational_lift", DEFAULT.translationalLift())
+                        .forGetter(Rotor::translationalLift),
+                Codec.FLOAT.optionalFieldOf("translational_speed", DEFAULT.translationalSpeed())
+                        .forGetter(Rotor::translationalSpeed),
+                Codec.FLOAT.optionalFieldOf("authority", DEFAULT.authority()).forGetter(Rotor::authority),
+                Codec.FLOAT.optionalFieldOf("max_tilt", DEFAULT.maxTilt()).forGetter(Rotor::maxTilt),
+                Codec.FLOAT.optionalFieldOf("trim", DEFAULT.trim()).forGetter(Rotor::trim),
+                Codec.FLOAT.optionalFieldOf("stability", DEFAULT.stability()).forGetter(Rotor::stability),
+                Codec.FLOAT.optionalFieldOf("hover_drag", DEFAULT.hoverDrag()).forGetter(Rotor::hoverDrag),
+                Codec.FLOAT.optionalFieldOf("disc_drag", DEFAULT.discDrag()).forGetter(Rotor::discDrag),
+                Codec.FLOAT.optionalFieldOf("bluff_drag", DEFAULT.bluffDrag()).forGetter(Rotor::bluffDrag),
+                Codec.FLOAT.optionalFieldOf("torque", DEFAULT.torque()).forGetter(Rotor::torque),
+                Codec.FLOAT.optionalFieldOf("rpm", DEFAULT.rpm()).forGetter(Rotor::rpm),
+                Codec.FLOAT.optionalFieldOf("tail_rpm", DEFAULT.tailRpm()).forGetter(Rotor::tailRpm)
+        ).apply(instance, Rotor::new));
+
+        /** How far the main rotor turns in a tick, in degrees. Twenty ticks a second, sixty a minute. */
+        public float degreesPerTick() {
+            return this.rpm * 360.0F / (60.0F * 20.0F);
+        }
+
+        /** The same for the tail rotor. */
+        public float tailDegreesPerTick() {
+            return this.tailRpm * 360.0F / (60.0F * 20.0F);
+        }
+    }
+
+    /**
      * What the aircraft can throw out behind it to spoil somebody's aim.
      *
      * <p>Two sorts, and which one to reach for is the question the warning receiver has just
@@ -587,21 +699,57 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      * model already shows it. A hardpoint without one is a bare pylon, and takes whatever weapon
      * item the player offers it.
      *
+     * <p><b>Racks.</b> A station holds one store unless the file gives it a {@code rack}, which is
+     * where each store on it hangs relative to the station itself. That is what a multiple ejector
+     * rack is: one place on the wing carrying four missiles rather than one, all of them the same
+     * weapon, hung and taken off one at a time. Their order is the order they are filled in, and the
+     * last one on is the first one off -- so list them the way they should empty.
+     *
      * @param name a label for the log and for telling pylons apart; not shown to the player
      * @param pos position in the aircraft's own axes: x right, y up, z towards the nose. For a gun,
      *            put it at the muzzle
      * @param fixed the weapon built in here, or empty for a pylon
+     * @param rack where each store on this station hangs, as an offset from {@link #pos}. Empty for
+     *             a plain station, which is the same thing as a rack of one at no offset
      */
-    public record Hardpoint(String name, Vec3 pos, Optional<ResourceLocation> fixed, boolean internal) {
+    public record Hardpoint(String name, Vec3 pos, Optional<ResourceLocation> fixed, boolean internal,
+            List<Vec3> rack) {
+        /** A station with no rack: one store, hanging where the station is. */
+        private static final List<Vec3> SINGLE = List.of(Vec3.ZERO);
+
         public static final Codec<Hardpoint> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.optionalFieldOf("name", "").forGetter(Hardpoint::name),
                 Vec3.CODEC.fieldOf("pos").forGetter(Hardpoint::pos),
                 ResourceLocation.CODEC.optionalFieldOf("fixed").forGetter(Hardpoint::fixed),
-                Codec.BOOL.optionalFieldOf("internal", false).forGetter(Hardpoint::internal)
+                Codec.BOOL.optionalFieldOf("internal", false).forGetter(Hardpoint::internal),
+                Vec3.CODEC.listOf().optionalFieldOf("rack", List.of()).forGetter(Hardpoint::rack)
         ).apply(instance, Hardpoint::new));
 
         public boolean isFixed() {
             return this.fixed.isPresent();
+        }
+
+        /** Where every store on this station hangs, as offsets from it. Never empty. */
+        public List<Vec3> stations() {
+            return this.rack.isEmpty() ? SINGLE : this.rack;
+        }
+
+        /** How many stores this station takes: one, or as many places as its rack has. */
+        public int capacity() {
+            return this.stations().size();
+        }
+
+        /**
+         * Where one store on this station hangs, in the aircraft's own axes.
+         *
+         * <p>Out-of-range places answer with the nearest real one rather than throwing. What is
+         * being asked is where to draw something, and a rack that lost a place in a {@code /reload}
+         * while four missiles were hanging on it is not worth a crash.
+         */
+        public Vec3 station(int place) {
+            List<Vec3> stations = this.stations();
+
+            return this.pos.add(stations.get(Math.max(0, Math.min(place, stations.size() - 1))));
         }
 
         /**
@@ -644,9 +792,14 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
      *                    than its own crash speed to fly at all, every takeoff from anything but a
      *                    dead-flat runway ended in an explosion. This is the undercarriage doing what
      *                    an undercarriage does, and it applies only while it is down and on the ground
+     * @param retractable whether it goes up at all. Plenty of aircraft's does not — a helicopter's
+     *                    wheels and a light aeroplane's alike — and one whose legs are welded down
+     *                    should not answer the gear lever, since the only thing the pilot could
+     *                    achieve with it is to lose the step-climbing the wheels give them on the
+     *                    ground while nothing at all moves on the model
      */
     public record Undercarriage(int cycleTicks, float dragPenalty, float rollingFriction, float brakeFriction,
-            float lateralFriction, float steerRate, float steerFade, float climbHeight) {
+            float lateralFriction, float steerRate, float steerFade, float climbHeight, boolean retractable) {
         public static final Codec<Undercarriage> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.INT.fieldOf("cycle_ticks").forGetter(Undercarriage::cycleTicks),
                 Codec.FLOAT.fieldOf("drag_penalty").forGetter(Undercarriage::dragPenalty),
@@ -655,7 +808,8 @@ public record AircraftDefinition(Hitbox hitbox, ModelSetup model, Engine engine,
                 Codec.FLOAT.optionalFieldOf("lateral_friction", 0.55F).forGetter(Undercarriage::lateralFriction),
                 Codec.FLOAT.optionalFieldOf("steer_rate", 1.1F).forGetter(Undercarriage::steerRate),
                 Codec.FLOAT.optionalFieldOf("steer_fade", 1.2F).forGetter(Undercarriage::steerFade),
-                Codec.FLOAT.optionalFieldOf("climb_height", 1.05F).forGetter(Undercarriage::climbHeight)
+                Codec.FLOAT.optionalFieldOf("climb_height", 1.05F).forGetter(Undercarriage::climbHeight),
+                Codec.BOOL.optionalFieldOf("retractable", true).forGetter(Undercarriage::retractable)
         ).apply(instance, Undercarriage::new));
     }
 

@@ -1,16 +1,18 @@
 package com.ashvehicles.entity;
 
 import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.vehicle.VehicleChassis;
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.aircraft.Attitude;
+import com.ashvehicles.vehicle.Attitude;
+import com.ashvehicles.vehicle.Hitbox;
 
-import org.joml.Matrix3f;
-import com.ashvehicles.aircraft.AircraftManager;
-import com.ashvehicles.aircraft.AircraftShape;
+import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.particle.TintedParticleOption;
 import com.ashvehicles.sensor.Sensors;
@@ -18,6 +20,7 @@ import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.item.WeaponItem;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.weapon.Dispenser;
+import com.ashvehicles.weapon.TargetLock;
 import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.nbt.CompoundTag;
@@ -29,6 +32,8 @@ import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
@@ -51,6 +56,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
+import org.joml.Vector3f;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.animation.AnimationController;
@@ -69,9 +75,20 @@ import software.bernie.geckolib.util.GeckoLibUtil;
  * {@link com.ashvehicles.network.AircraftInputPayload} and the server mirrors them into synched
  * data for everyone else.
  */
-public class AircraftEntity extends VehicleEntity implements GeoEntity {
+public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     /** Engine setting in [0, 1]. Synced so other clients can drive engine animations. */
     private static final EntityDataAccessor<Float> DATA_THROTTLE =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.FLOAT);
+    /**
+     * How much reheat the engine is delivering, in [0, 1], from whichever side is flying it.
+     *
+     * <p>Synched for three separate reasons, which is unusual for one float. Every client that can
+     * see the aeroplane draws the plume out of its nozzles and pitches its engine note up, and
+     * neither of those can be worked out from anything else that is sent. And the server needs it
+     * whether or not anybody is looking: what a burner really costs is the heat, and how far a
+     * seeker can see this aircraft is decided over there. See {@link #reportAfterburner}.
+     */
+    private static final EntityDataAccessor<Float> DATA_AFTERBURNER =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.FLOAT);
     /**
      * Which way the aircraft is pointing, as a rotation. Minecraft gives an entity a heading and an
@@ -80,6 +97,24 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      */
     private static final EntityDataAccessor<Quaternionf> DATA_ATTITUDE =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.QUATERNION);
+    /**
+     * How fast the aircraft is really going, in blocks a tick, from whichever side is flying it.
+     *
+     * <p>Only one machine runs the flight model, and every other copy of the aircraft has to draw it
+     * from a stream of positions. Working the speed back out of that stream cannot be done cleanly —
+     * the updates arrive one a tick on average and never one a tick exactly, so a difference between
+     * two of them reads the drift between three unsynchronised clocks as speed. Sending the figure
+     * costs three floats a tick and removes the guesswork entirely. See {@link AircraftInterpolation}.
+     */
+    private static final EntityDataAccessor<Vector3f> DATA_VELOCITY =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.VECTOR3);
+    /**
+     * How fast it is turning, in radians a tick about its own axes, for the same reason and against
+     * the same drift. Written as a scaled axis rather than as three angles so that it stays additive
+     * and has no seam of its own — see {@link Attitude#rotationVector}.
+     */
+    private static final EntityDataAccessor<Vector3f> DATA_BODY_RATE =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.VECTOR3);
     /** Undercarriage selector. The legs swing to match over {@link #getGearCycleTicks()} ticks. */
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
@@ -114,8 +149,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_CHAFF =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.INT);
-    private static final EntityDataAccessor<Float> DATA_HEALTH =
-            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.FLOAT);
 
     /**
      * Downward acceleration, in blocks/tick^2. A block is a metre and a tick is a twentieth of a
@@ -136,13 +169,26 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private static final double HOVER_BAND = 0.25;
     /** Nozzle angle past which the wing is no longer what is holding the aircraft up, in degrees. */
     private static final float HOVERING_ANGLE = 30.0F;
+    /**
+     * How loud a helicopter at full rotor speed and no collective is, against one working.
+     *
+     * <p>High, and deliberately: a rotor turning is most of the noise a helicopter makes, and the
+     * difference the collective makes is the engines taking up the load underneath it. A machine
+     * sitting at flight idle is not quiet, it is merely not pulling.
+     */
+    private static final float ROTOR_IDLE_NOTE = 0.75F;
+
+    /**
+     * How far a collision box has to be inside a block before the aeroplane counts as embedded in it,
+     * in blocks. Generous, so that a wingtip resting a hand's breadth into a slope is not mistaken
+     * for an aeroplane that has had a mountain built around it.
+     */
+    private static final double EMBEDDED_MARGIN = 0.25;
 
     /** Airframe damage per tick for each G pulled beyond what the aircraft is stressed for. */
     private static final float OVER_G_DAMAGE = 4.0F;
     /** Load factor above which the wingtips start trailing vapour. */
     private static final float VORTEX_LOAD = 2.5F;
-    /** Blend into the gear cycle, for a pilot who changes their mind partway through one. */
-    private static final int GEAR_TRANSITION_TICKS = 4;
     /** Height above the aircraft's origin that the wings sit at, near enough for particles. */
     private static final double WING_HEIGHT = 1.5;
     /** Condensation is water and light, so it is the same pale puff wherever on the wing it forms. */
@@ -151,6 +197,54 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private static final double VAPOUR_SPEED = 0.88;
     private static final double VAPOUR_RADIUS = 3.0;
     private static final double VAPOUR_AHEAD = 2.0;
+
+    /**
+     * Ticks the throttle has to be held open with the lever already against its stop before the
+     * burner lights.
+     *
+     * <p>This is the detent, and it is the whole of the control. A real throttle quadrant has a
+     * physical gate at full military power that the pilot has to lift the lever over, so that
+     * nobody arrives in reheat by simply pushing the throttle forward and finding out afterwards.
+     * Nothing here can put a notch under anybody's finger, so the notch is time instead: three
+     * quarters of a second of asking for more than the engine has, which is far longer than the
+     * moment a pilot spends reaching full power and far shorter than the wait would be if it were
+     * a thing to be endured.
+     */
+    private static final int GATE_TICKS = 15;
+    /** Reheat past which the burner counts as alight: for the instruments, the plume and the note. */
+    private static final float LIT = 0.05F;
+    /** The flame itself, which opens white and settles to this. */
+    private static final int PLUME_COLOUR = 0xFFA33C;
+    /** And the hot air behind it, which is what gives the plume its length. */
+    private static final int EXHAUST_COLOUR = 0x8C8478;
+    /** How far behind the nozzle the plume is drawn, in blocks at full reheat. */
+    private static final double PLUME_LENGTH = 4.0;
+    /** How hard it is thrown out of the pipe, in blocks a tick on top of the aircraft's own speed. */
+    private static final double PLUME_SPEED = 0.9;
+    /** Width of the flame at the lip, in blocks. */
+    private static final float PLUME_SIZE = 0.85F;
+    /** Puffs of each of the two layers, per nozzle, per tick at full reheat. */
+    private static final int PLUME_PUFFS = 2;
+    /** How far off the axis a puff may start, which is what stops the column reading as a line. */
+    private static final double PLUME_SCATTER = 0.12;
+    /**
+     * How loud lighting the burner is where it happens, and at what pitch.
+     *
+     * <p>Its own loudness rather than a reach in the volume slot, unlike a weapon's report: this is
+     * a noise the aeroplane makes, and the aeroplane already has an engine note that carries as far
+     * as its file says. Public because the client has to know the figures to put a stand-in
+     * recording at the same loudness; see {@code AfterburnerSounds}.
+     */
+    public static final float AFTERBURNER_VOLUME = 1.0F;
+    public static final float AFTERBURNER_LIGHT_PITCH = 1.0F;
+    /**
+     * {@code engine.<aircraft>.afterburner}: the burner catching.
+     *
+     * <p>Named on this side because the server is the one that decides it has happened, and it can
+     * only ever name a sound — resource packs are something the client has and the server has never
+     * seen. Which recording actually plays is settled over there; see {@code AfterburnerSounds}.
+     */
+    public static final String AFTERBURNER_ROLE = "afterburner";
 
     /** Where the angle of attack limiter starts to bite, as a fraction of the limit it holds. */
     private static final float ALPHA_LIMITER_BITE = 0.6F;
@@ -212,12 +306,19 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private static final double SMALLEST_PYLON_BOX = 0.5;
     /** Speed, squared, below which an aircraft counts as standing still. */
     private static final double PARKED_SPEED = 1.0E-4;
+    /**
+     * What a wreck keeps of its speed each tick on the way down. A burnt-out airframe is a shape
+     * falling through the air rather than a wing flying through it, so this is one figure standing in
+     * for the whole of the aerodynamics: enough to stop a write-off carrying its airspeed to the
+     * ground, nowhere near enough to hold it up.
+     */
+    private static final double WRECK_DRAG = 0.99;
+    /** And what it keeps once it is down. A wreck does not slide; it arrives and it stays there. */
+    private static final double WRECK_FRICTION = 0.7;
 
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
     /** What the aircraft is carrying. Authoritative on the server; a copy of the tag on a client. */
     private final WeaponMounts weapons = new WeaponMounts(this);
-    /** The radar and the warning receiver. Server side; the pilot is sent what they find. */
-    private final Sensors sensors = new Sensors(this);
     /** Flares and chaff, and when the dispenser will part with the next one. */
     private final Dispenser dispenser = new Dispenser(this);
 
@@ -230,13 +331,20 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      */
     private float thrustLevel;
     /**
+     * Whether the pilot has taken the lever through the gate. A latch rather than a held key: a
+     * throttle stays where it is put, and the way out of reheat is to pull it back.
+     */
+    private boolean reheatCommanded;
+    /** What the burner is actually delivering, 0 to 1. It lights quickly, but it does not light at a step. */
+    private float reheat;
+    /** Ticks the lever has been held against its stop, counting towards {@link #GATE_TICKS}. */
+    private int gateHeld;
+    /**
      * How much of the aircraft's weight the wheels are still carrying, 1 sitting on them and 0 with
      * the wing holding everything. Ground friction is scaled by it, so the last of a takeoff roll
      * goes light as the wing takes over instead of gripping right up to the instant of lift-off.
      */
     private float weightOnWheels = 1.0F;
-    private Quaternionf attitude = new Quaternionf();
-    private Quaternionf attitudeO = new Quaternionf();
     /** Heading change over the last tick, handed to the pilot so their view turns with the aircraft. */
     private float deltaRotation;
     // Angular rates, in degrees per tick. Held between ticks so the controls have some weight.
@@ -247,17 +355,18 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     private float angleOfAttack;
     /** Set by whichever side ran the physics when the airframe hit something at speed. */
     private boolean crashing;
-    /** The boxes that make up the aircraft's real shape, or empty if its file lists none. */
-    private AircraftPart[] parts = new AircraftPart[0];
     /** The chunk this aircraft is holding open while it flies, if any. */
-    private ChunkPos heldChunk;
+    private Set<ChunkPos> heldChunks = Set.of();
     /** How this aircraft is drawn on a client that is not flying it. */
     private final AircraftInterpolation interpolation = new AircraftInterpolation();
     /** How fast the pilot's client says it is going. The server's only honest answer while flown. */
     private Vec3 pilotVelocity = Vec3.ZERO;
-    /** The last blow taken, so one that arrives through several boxes at once only lands once. */
-    private DamageSource lastHurtSource;
-    private long lastHurtTime = Long.MIN_VALUE;
+    /**
+     * Server side: the attitude the last update came in at, so the turn since can be measured
+     * against one whole tick of whoever is flying rather than against one of the server's own.
+     */
+    private final Quaternionf ratedAttitude = new Quaternionf();
+    private boolean hasRatedAttitude;
     // Client side only: the last answer to whether the world stands in the way, and when it was
     // worked out. Tracing the line costs something and the answer barely changes within a tick.
     /** How far the undercarriage has swung out: 0 is up and locked, 1 is down and locked. */
@@ -269,6 +378,27 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     /** How far the flaps have travelled: 0 is retracted, 1 is fully down. */
     private float flapsProgress;
     private float flapsProgressO;
+    /**
+     * How fast the rotor is turning, as a fraction of governed. Zero for anything that has none.
+     *
+     * <p>Worked out on every side rather than sent, because every side already knows everything it
+     * depends on: a rotor winds up while somebody is at the controls and runs down when nobody is,
+     * and who is aboard is synced with the passengers. A packet a tick to say how fast a wheel is
+     * going round would be a poor use of one.
+     */
+    private float rotorSpeed;
+    private float rotorSpeedO;
+    /**
+     * Where the rotors have got to, in degrees. Drawing only, and integrated wherever it is drawn.
+     *
+     * <p>The tail is counted separately rather than scaled off the main one. It turns several times
+     * faster and the two do not come back into step at any convenient angle, so a tail angle worked
+     * out from the main one jumps every time the main one is brought back inside a turn.
+     */
+    private float rotorAngle;
+    private float rotorAngleO;
+    private float tailAngle;
+    private float tailAngleO;
 
     // Interpolation state for instances that are not simulating this aircraft themselves.
     private int lerpSteps;
@@ -301,21 +431,40 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     // ------------------------------------------------------------------
-    // Flight characteristics, read from the aircraft's data pack file. Nothing is cached: the
-    // lookup is a map hit, and going back to the registry every time means /reload takes effect
-    // on aircraft that are already in the air.
+    // Flight characteristics, read from the aircraft's data pack file.
+    //
+    // Held rather than looked up afresh, but only for as long as the files stand still: the copy is
+    // thrown away the moment Definitions reports a different version, so /reload still takes
+    // effect on aircraft that are already in the air. That is worth the two fields. An aircraft asks
+    // for its own figures several dozen times in a tick — the flight model alone reads a dozen
+    // records out of them — and each ask was a reverse lookup through the entity registry to build
+    // the name, followed by a hash of that name and a map search. Once a tick is plenty.
     // ------------------------------------------------------------------
+
+    /** The figures and the shape under that name, and which set of files they came out of. */
+    @Nullable
+    private AircraftDefinition stats;
+    @Nullable
+    private int statsVersion = -1;
 
     /**
      * This aircraft's id, which is its entity type's id. Everything else about it, from its file to
      * its model to the item that places it, is found under the same name.
      */
     public ResourceLocation getAircraftId() {
-        return BuiltInRegistries.ENTITY_TYPE.getKey(this.getType());
+        return this.getVehicleId();
     }
 
     public AircraftDefinition getStats() {
-        return AircraftManager.get(this.getAircraftId());
+        AircraftDefinition current = this.stats;
+
+        if (current == null || this.statsVersion != Definitions.version()) {
+            current = Definitions.AIRCRAFT.get(this.getAircraftId());
+            this.stats = current;
+            this.statsVersion = Definitions.version();
+        }
+
+        return current;
     }
 
     /** Acceleration along the nose at full throttle, in blocks/tick^2. */
@@ -326,6 +475,22 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     /** Throttle change per tick while a throttle key is held. */
     public float getThrottleRate() {
         return this.getStats().engine().throttleRate();
+    }
+
+    /** Whether this airframe has an afterburner at all. Most of them do not. */
+    public boolean hasAfterburner() {
+        return this.getStats().engine().afterburner().isPresent();
+    }
+
+    /** How much reheat the engine is delivering, 0 to 1. */
+    @Override
+    public float getAfterburner() {
+        return this.reheat;
+    }
+
+    /** Whether the burner is alight: what the instruments, the plume and the note all read off. */
+    public boolean isAfterburning() {
+        return this.reheat > LIT;
     }
 
     /** Hard speed limit, in blocks/tick. */
@@ -363,60 +528,14 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         return this.getStats().handling().yawRate();
     }
 
-    /**
-     * What a whole airframe of this sort is worth, in hit points.
-     *
-     * <p>Never nothing, whatever the file says. An aeroplane worth zero points is destroyed by the
-     * first scratch it takes, which is not a thing anybody means to write down, and it would be very
-     * hard to work out from the aeroplane vanishing.
-     */
-    public float getMaxHealth() {
-        return Math.max(this.getStats().airframe().health(), 1.0F);
-    }
-
-    /** What this airframe has left, in hit points. Zero is a smoking hole. */
-    public float getHealth() {
-        return this.entityData.get(DATA_HEALTH);
-    }
-
-    /**
-     * Sets what is left, never below nothing and never above what the airframe is worth.
-     *
-     * <p>The ceiling matters as much as the floor: an aircraft whose file has been edited down since
-     * it was parked would otherwise come back out of the world with more than it can have.
-     */
-    public void setHealth(float health) {
-        this.entityData.set(DATA_HEALTH, Mth.clamp(health, 0.0F, this.getMaxHealth()));
-    }
-
-    /** What is left as a fraction of a whole airframe, in [0, 1]. */
-    public float getHealthFraction() {
-        float max = this.getMaxHealth();
-
-        return max <= 0.0F ? 0.0F : Mth.clamp(this.getHealth() / max, 0.0F, 1.0F);
-    }
-
     /** Impact speed, in blocks/tick, above which hitting something writes the aircraft off. */
     protected float getCrashSpeed() {
         return this.getStats().airframe().crashSpeed();
     }
 
-    protected float getExplosionPower() {
+    @Override
+    protected float explosionPower() {
         return this.getStats().airframe().explosionPower();
-    }
-
-    public int getMaxPassengers() {
-        return this.getStats().airframe().seats().size();
-    }
-
-    /**
-     * Seat position relative to the entity origin, before the aircraft's attitude is applied, along
-     * the aircraft's own axes: x to the right, y up, z towards the nose.
-     */
-    public Vec3 getSeatOffset(int passengerIndex) {
-        List<Vec3> seats = this.getStats().airframe().seats();
-
-        return seats.isEmpty() ? Vec3.ZERO : seats.get(Math.min(passengerIndex, seats.size() - 1));
     }
 
     /** Ticks the undercarriage takes to travel from up and locked to down and locked. */
@@ -443,6 +562,68 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     // ------------------------------------------------------------------
+    // What the base class needs from an aircraft
+    // ------------------------------------------------------------------
+
+    @Override
+    public VehicleChassis.Hitbox hitbox() {
+        return this.getStats().hitbox();
+    }
+
+    @Override
+    public VehicleChassis.Sound soundSetup() {
+        return this.getStats().sound();
+    }
+
+    @Override
+    protected float health() {
+        return this.getStats().airframe().health();
+    }
+
+    @Override
+    protected int declaredSalvage() {
+        return this.getStats().airframe().salvage();
+    }
+
+    @Override
+    protected List<VehicleChassis.Seat> seats() {
+        return this.getStats().airframe().seats();
+    }
+
+    @Override
+    protected VehicleChassis.CameraMount cameraMount() {
+        return this.getStats().camera();
+    }
+
+    /** Everything on an aeroplane is bolted to the airframe and is where the file says it is. */
+    @Override
+    protected Vec3 boxCentre(VehicleShape.Box box) {
+        return this.position().add(Attitude.toWorld(this.attitude, box.offset()));
+    }
+
+    /** The box's own angle within the airframe, then the airframe's angle in the world. */
+    @Override
+    protected Quaternionf boxRotation(VehicleShape.Box box) {
+        return new Quaternionf(this.attitude).mul(box.orientation());
+    }
+
+    /**
+     * The pylons, which are not among the collision boxes: a place to hang a store is a place on the
+     * aeroplane rather than a piece of it, and it is worth clicking on its own.
+     */
+    @Override
+    protected List<VehiclePart> extraParts() {
+        List<AircraftDefinition.Hardpoint> hardpoints = this.getStats().hardpoints();
+        List<VehiclePart> pylons = new java.util.ArrayList<>(hardpoints.size());
+
+        for (int i = 0; i < hardpoints.size(); i++) {
+            pylons.add(VehiclePart.pylon(this, hardpoints.get(i).name(), i));
+        }
+
+        return pylons;
+    }
+
+    // ------------------------------------------------------------------
     // State
     // ------------------------------------------------------------------
 
@@ -450,14 +631,14 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_THROTTLE, 0.0F);
+        builder.define(DATA_AFTERBURNER, 0.0F);
         builder.define(DATA_ATTITUDE, new Quaternionf());
+        builder.define(DATA_VELOCITY, new Vector3f());
+        builder.define(DATA_BODY_RATE, new Vector3f());
         builder.define(DATA_GEAR_DOWN, true);
         builder.define(DATA_FLAPS_DOWN, false);
         builder.define(DATA_VTOL, false);
         builder.define(DATA_WEAPONS, new CompoundTag());
-        // A figure rather than this aircraft's own maximum, because this runs from inside the entity
-        // constructor, before there is an aircraft to ask. The constructor fills in the real one.
-        builder.define(DATA_HEALTH, AircraftDefinition.Airframe.DEFAULT_HEALTH);
         builder.define(DATA_FLARES, 0);
         builder.define(DATA_CHAFF, 0);
     }
@@ -514,12 +695,25 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 : 1.0F;
     }
 
-    public Sensors getSensors() {
-        return this.sensors;
-    }
-
     public WeaponMounts getWeapons() {
         return this.weapons;
+    }
+
+    /** An aeroplane aims by pointing itself, so where the weapons look is where the nose is. */
+    @Override
+    public Vec3 getAimDirection(float partialTick) {
+        return Attitude.nose(this.getAttitude(partialTick));
+    }
+
+    @Override
+    public VehicleChassis.Radar radar() {
+        return this.getStats().radar();
+    }
+
+    /** The seeker lives with the pylons, since what it is looking for is what is hanging on them. */
+    @Override
+    public TargetLock lock() {
+        return this.weapons.lock();
     }
 
     @Override
@@ -541,10 +735,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         if (!this.level().isClientSide) {
             this.entityData.set(DATA_THROTTLE, this.throttle);
         }
-    }
-
-    public Quaternionf getAttitude() {
-        return this.attitude;
     }
 
     /**
@@ -570,6 +760,68 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.attitudeO = new Quaternionf(this.attitude);
         this.yRotO = this.getYRot();
         this.xRotO = this.getXRot();
+        // Placed rather than flown here, so it is not turning and nothing should extrapolate as if
+        // it were. Measuring the next tick's rate from here also stops the placement itself being
+        // read as a turn, which on a stand-in aircraft can be most of a revolution.
+        this.ratedAttitude.set(this.attitude);
+        this.hasRatedAttitude = true;
+
+        if (!this.level().isClientSide) {
+            this.entityData.set(DATA_BODY_RATE, new Vector3f());
+        }
+    }
+
+    /**
+     * Takes the attitude from the client at the controls, one tick of theirs at a time.
+     *
+     * <p>Separate from {@link #setAttitude} for when it happens rather than for what it does: one of
+     * these is one whole tick of the pilot's flight model, which is what makes the turn measured
+     * across it the aircraft's real turn rate. The server's own tick is not a safe place to measure
+     * that — the pilot's clock and the server's drift past one another, so a server tick sometimes
+     * holds two of these updates and sometimes none, and a rate taken against it would report that
+     * drift as an aeroplane rolling in fits.
+     */
+    public void reportAttitude(Quaternionf attitude) {
+        this.setAttitude(attitude);
+        this.recordTurnRate();
+    }
+
+    /**
+     * Works out how far the aircraft has turned since this was last called and tells everyone
+     * watching, as the rate they extrapolate its attitude with between updates.
+     *
+     * <p>Called once per update from the side that is flying: per packet for a piloted aircraft, per
+     * tick for one the server is flying itself. Never more than once for the same rotation — the
+     * flight model turns an aircraft in several steps within one tick, and each of those on its own
+     * is a fraction of the turn rather than the rate.
+     */
+    private void recordTurnRate() {
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        if (this.hasRatedAttitude) {
+            this.entityData.set(DATA_BODY_RATE, Attitude.rotationVector(
+                    new Quaternionf(this.ratedAttitude).conjugate().mul(this.attitude).normalize()));
+        }
+
+        this.ratedAttitude.set(this.attitude);
+        this.hasRatedAttitude = true;
+    }
+
+    /**
+     * Tells everyone watching how fast the aircraft is going, once a tick, from the server.
+     *
+     * <p>Nobody but the side running the flight model can answer this honestly, and every other copy
+     * of the aircraft needs it to draw the thing without stuttering. {@link #getVelocity()} already
+     * knows where to look — the pilot's own figure while one is at the stick, and what the aircraft
+     * covered this tick otherwise — so this is only a matter of passing it on.
+     */
+    private void publishVelocity() {
+        Vec3 velocity = this.getVelocity();
+
+        this.entityData.set(DATA_VELOCITY,
+                new Vector3f((float) velocity.x, (float) velocity.y, (float) velocity.z));
     }
 
     /** The attitude for rendering, taking the short way round between the last two ticks. */
@@ -663,16 +915,55 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.entityData.set(DATA_VTOL, !this.isVtolSelected());
     }
 
+    /** Whether this machine is held up by a rotor rather than by a wing. */
+    public boolean isRotorcraft() {
+        return this.getStats().rotor().isPresent();
+    }
+
+    /** How fast the rotor is turning, 0 stopped to 1 governed. Zero for anything without one. */
+    public float getRotorSpeed() {
+        return this.rotorSpeed;
+    }
+
+    /**
+     * What the engine note should follow, 0 to 1.
+     *
+     * <p>The throttle, for an aeroplane, where the lever and the noise are the same thing. A
+     * helicopter's rotor turns at one speed whatever the collective is doing, and it is the loudest
+     * thing about the machine long before the pilot has asked it for anything — so there the note
+     * follows the rotor coming up to speed, with a little of the collective over the top for the
+     * load the engines take when the pilot pulls.
+     */
+    public float getEngineNote() {
+        if (!this.isRotorcraft()) {
+            return this.getThrottle();
+        }
+
+        return this.rotorSpeed * Mth.lerp(this.getThrottle(), ROTOR_IDLE_NOTE, 1.0F);
+    }
+
+    /** Where the main rotor has got to, in degrees, interpolated for drawing. */
+    public float getRotorAngle(float partialTick) {
+        return Mth.lerp(partialTick, this.rotorAngleO, this.rotorAngle);
+    }
+
+    /** The same for the tail rotor, which turns several times faster and is counted separately. */
+    public float getTailRotorAngle(float partialTick) {
+        return Mth.lerp(partialTick, this.tailAngleO, this.tailAngle);
+    }
+
     public boolean isGearDown() {
         return this.entityData.get(DATA_GEAR_DOWN);
     }
 
     /**
      * Raises or lowers the undercarriage. Refused while the aircraft is sitting on its wheels, which
-     * is the job a weight-on-wheels switch does on the real thing.
+     * is the job a weight-on-wheels switch does on the real thing, and refused outright by an
+     * aircraft whose legs do not go up.
      */
     public void toggleGear() {
-        if (this.level().isClientSide || (this.isGearDown() && this.onGround())) {
+        if (this.level().isClientSide || !this.getStats().landingGear().retractable()
+                || (this.isGearDown() && this.onGround())) {
             return;
         }
 
@@ -750,9 +1041,14 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * Whether the lift system is carrying enough of the aircraft for the wing not to matter.
      *
      * <p>Asked wherever something would otherwise be alarmed by a wing that has stopped flying. It
-     * has stopped flying; that is what the nozzle is for.
+     * has stopped flying; that is what the nozzle is for. A helicopter answers yes always, its wing
+     * having never been what was holding it up in the first place.
      */
     public boolean isHovering() {
+        if (this.isRotorcraft()) {
+            return true;
+        }
+
         return this.getStats().vtol()
                 .map(vtol -> this.vtolProgress * vtol.maxAngle() > HOVERING_ANGLE)
                 .orElse(false);
@@ -772,6 +1068,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.attitudeO = new Quaternionf(this.attitude);
         this.tickGear();
         this.tickVtol();
+        this.tickRotor();
         this.tickLerp();
 
         if (this.isControlledByLocalInstance()) {
@@ -781,11 +1078,63 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 this.input = AircraftInput.NONE;
             }
 
-            this.flightTick();
+            // A wreck is not flown. It falls, and then it lies where it landed.
+            if (this.isWrecked()) {
+                this.wreckTick();
+            } else {
+                this.flightTick();
+            }
 
             Vec3 impactVelocity = this.getDeltaMovement();
-            this.move(MoverType.SELF, impactVelocity);
-            this.detectCrash(impactVelocity);
+
+            // Ground that arrived around the aeroplane is not ground the aeroplane flew into.
+            //
+            // Chunks are asked for along the flight path and made on somebody else's threads, and at
+            // a few hundred knots the asking can lose the race: the aircraft crosses air that has not
+            // been decided yet, and a moment later the hillside that was always going to be there
+            // exists, with the aeroplane inside it. Collided with in the ordinary way that is a
+            // crash, and the pilot is destroyed by terrain they never saw and could not have avoided.
+            //
+            // So an aircraft already inside the world flies out of it rather than into it. Nothing
+            // else changes: a hillside met from the outside stops the aeroplane at its surface, as it
+            // always did, because the swept test in move() cannot be tunnelled through. The only way
+            // to be inside something here is to have had it appear.
+            //
+            // Not for a wreck, though, and the difference matters: what flies an aircraft out of a
+            // hillside is its own airspeed, and a wreck's is a slow drift downwards. Pushed through
+            // the world by that with nothing to stop it -- this branch does not collide with
+            // anything -- a write-off that came down on a slope would sink through the ground and go
+            // on sinking. One embedded in a hillside simply stops there instead, which is what a
+            // wreck in a hillside ought to do.
+            //
+            // Out, and never further in. This branch collides with nothing, so whatever it is
+            // handed is a distance the aeroplane covers through solid rock; sideways and upwards
+            // that is the escape, but in a world made of ground, downwards is only ever deeper.
+            // Left to carry a rate of descent, an aircraft that found itself inside something low
+            // down would be posted through the floor a little further every tick and never come to
+            // anything that could stop it. Held level instead, it leaves on its airspeed, which is
+            // what was meant to be getting it out.
+            if (!this.isWrecked() && this.insideTerrain()) {
+                this.setPos(this.getX() + impactVelocity.x,
+                        this.getY() + Math.max(impactVelocity.y, 0.0),
+                        this.getZ() + impactVelocity.z);
+            } else {
+                this.move(MoverType.SELF, impactVelocity);
+
+                // A wreck meeting a hillside is a wreck meeting a hillside. There is no airframe left
+                // to write off and nothing to be decided about how hard it arrived.
+                if (!this.isWrecked()) {
+                    this.detectCrash(impactVelocity);
+                }
+            }
+
+            if (!this.level().isClientSide) {
+                // Flown here, so this side is the one that knows. Measured after the move: what the
+                // aircraft covered is what everyone else has to draw, and a hillside can take a good
+                // deal of that away between the flight model asking and the world agreeing.
+                this.recordTurnRate();
+                this.publishVelocity();
+            }
         } else {
             // How far this side actually saw the aircraft move, and deliberately not the speed the
             // pilot reports. An aircraft is registered for velocity updates, so the server
@@ -804,6 +1153,10 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             Vec3 travelled = this.travelled();
             this.setDeltaMovement(travelled);
             this.throttle = this.entityData.get(DATA_THROTTLE);
+            // Not worked out on this side at all: there is no gate to hold here and no latch to
+            // hold it with, so what the burner is doing is whatever the side flying the aeroplane
+            // last said it was doing.
+            this.reheat = this.entityData.get(DATA_AFTERBURNER);
             // Nothing here spools an engine, but this side may be handed the aircraft at any moment
             // — a pilot climbing out, or a client taking over the controls — and starting from a cold
             // engine on an aeroplane that is already flying would drop it out of the sky.
@@ -814,6 +1167,12 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             if (this.level().isClientSide) {
                 // Drawn, so it is worth keeping the aircraft turning between the attitudes that
                 // arrive rather than letting it sit still and then snap. See AircraftInterpolation.
+                Vector3f rate = this.entityData.get(DATA_BODY_RATE);
+
+                // Before the attitude, so a correction is taken up knowing what the aircraft is
+                // doing rather than having to work it out from the corrections themselves.
+                this.interpolation.receiveBodyRate(rate.x(), rate.y(), rate.z());
+
                 if (this.interpolation.isNewAttitude(reported)) {
                     this.interpolation.receiveAttitude(reported);
                 }
@@ -828,6 +1187,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
             if (!this.level().isClientSide) {
                 this.checkStructuralLoad(travelled);
+                // Flown by a client, so what goes out is what that client said. The turn rate is
+                // recorded as each of its updates lands rather than here; see reportAttitude.
+                this.publishVelocity();
             }
         }
 
@@ -839,15 +1201,16 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
         if (this.level().isClientSide) {
             this.spawnFlightEffects();
-        } else {
+        } else if (!this.isWrecked()) {
+            // A burnt-out airframe has no trigger to hold, no radar to sweep and no dispenser to fire.
             this.tickWeapons();
-            this.sensors.tick();
+            this.getSensors().tick();
             this.dispenser.tick(this.input.flare(), this.input.chaff());
         }
 
         // Hold the chunk under us open, so flying beyond everyone's render distance does not simply
         // stop the aircraft existing.
-        this.heldChunk = AircraftChunkLoader.update(this, this.heldChunk);
+        this.heldChunks = AircraftChunkLoader.update(this, this.heldChunks);
 
         this.checkInsideBlocks();
     }
@@ -870,6 +1233,28 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         if (!this.level().isClientSide) {
             this.weapons.selectNext();
         }
+    }
+
+    /**
+     * Whether the aircraft is inside the world rather than in front of it.
+     *
+     * <p>Asked before every move, and true only when the ground got there second: an aeroplane that
+     * flies at a hillside is stopped at its face, so being <em>within</em> one means it appeared. On
+     * the wheels this is never asked, since an aeroplane standing on the ground is standing on it and
+     * a wheel resting in a block edge is not an emergency.
+     *
+     * <p>Being on the wheels is not the only way to be over the runway, though, and that is what the
+     * floor line is for. The last few feet of an approach are flown nose-up, and an airframe is
+     * longer than its undercarriage is tall: a flare puts the tail a good half-block below the
+     * wheels, a bank does the same to a wingtip, and the wheels are still in the air the whole time.
+     * Measured against every block alike, the aeroplane is then <em>inside</em> the runway it is
+     * about to land on, and this branch flies it out of the world — downwards, because that is the
+     * way it was going — and on down through the floor for good. So ground that reaches no higher
+     * than the wheels is the floor, not the world: {@link #floorLine}, and the same line
+     * {@link #move} already scrapes over.
+     */
+    private boolean insideTerrain() {
+        return !this.onGround() && !this.hasRoomHere(EMBEDDED_MARGIN, this.floorLine());
     }
 
     /**
@@ -920,7 +1305,183 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     /**
-     * One tick of flight.
+     * The reheat gate, and the burner behind it. Run once a tick by whichever side is flying, before
+     * the throttle lever is allowed to move.
+     *
+     * <p><b>Why there is no key for this.</b> An afterburner is not a switch on the panel; it is the
+     * top of the throttle's own travel, past a stop the pilot has to push the lever through. So it
+     * is flown with the throttle: hold the lever open with the engine already giving everything it
+     * has and, after {@link #GATE_TICKS}, it goes through the gate. It latches there, because a
+     * throttle stays where it is put and nobody flies a supersonic dash holding a key down.
+     *
+     * <p>Coming back out is the same gate from the other side. The first pull on the throttle takes
+     * the lever out of reheat and no further — which is what the {@code true} this can return is
+     * for — so a pilot who wanted military power gets military power rather than sliding through it
+     * on the way down. The second pull, and every one after it, moves the lever as it always did.
+     *
+     * <p>What the burner then delivers chases the latch rather than matching it. Quicker than the
+     * engine spools, because lighting reheat is a match rather than a turbine coming up to speed,
+     * but not instant: the plume, the note and the shove all want a moment to arrive.
+     *
+     * @return true if this tick's throttle input was spent coming out of the gate rather than on
+     *         the lever
+     */
+    private boolean tickAfterburner(AircraftDefinition definition) {
+        AircraftDefinition.Afterburner burner = definition.engine().afterburner().orElse(null);
+
+        if (burner == null) {
+            this.reheatCommanded = false;
+            this.gateHeld = 0;
+            this.reheat = 0.0F;
+
+            return false;
+        }
+
+        // Not with the lift system out, whatever the pilot asks for. The exhaust is being turned
+        // down through a nozzle and a good deal of the engine is driving a fan in the roof: there is
+        // nowhere to put reheat, and an aeroplane that lit it in the hover would be a rocket pointed
+        // at the ground. Being held at full throttle is what a conversion looks like from in here,
+        // so without this the gate would open every single time.
+        boolean converted = this.vtolProgress > 0.0F;
+        boolean swallowed = false;
+
+        if (converted) {
+            this.reheatCommanded = false;
+            this.gateHeld = 0;
+        } else if (this.input.throttle() < 0.0F) {
+            this.gateHeld = 0;
+            swallowed = this.reheatCommanded;
+            this.reheatCommanded = false;
+        } else if (this.reheatCommanded) {
+            // Latched. Nothing to count towards, and nothing the pilot has to keep doing.
+            this.gateHeld = GATE_TICKS;
+        } else if (this.throttle >= 1.0F && this.input.throttle() > 0.0F) {
+            this.reheatCommanded = ++this.gateHeld >= GATE_TICKS;
+        } else {
+            this.gateHeld = 0;
+        }
+
+        // And it goes out the moment the lever comes off its stop, whatever the latch says. The
+        // burner is fed by the engine in front of it, and an engine at part throttle has nothing
+        // spare to burn.
+        float commanded = this.reheatCommanded && this.throttle >= 1.0F ? 1.0F : 0.0F;
+        this.reheat += (commanded - this.reheat) * Mth.clamp(burner.lightRate(), 0.01F, 1.0F);
+
+        if (this.reheat < 1.0E-3F) {
+            this.reheat = 0.0F;
+        }
+
+        if (!this.level().isClientSide) {
+            // Flown by this side, so this side is the one that publishes it. A client at the
+            // controls sends its own figure up instead; see reportAfterburner.
+            this.entityData.set(DATA_AFTERBURNER, this.reheat);
+        }
+
+        return swallowed;
+    }
+
+    /** What the burner is multiplying the engine's thrust by. One with no burner, or an unlit one. */
+    private double reheatThrust() {
+        if (this.reheat <= 0.0F) {
+            return 1.0;
+        }
+
+        AircraftDefinition.Afterburner burner = this.getStats().engine().afterburner().orElse(null);
+
+        return burner == null ? 1.0 : burner.thrustFactor(this.reheat);
+    }
+
+    /**
+     * The reheat setting from the client that is flying, taken on trust and mirrored to everyone
+     * else — the same arrangement, and for the same reason, as the throttle beside it.
+     *
+     * <p>Clamped, and refused outright by an airframe with no burner in its file, so that what
+     * arrives can only ever be a figure the aircraft could have produced itself. It matters more
+     * here than it does for the throttle: the thrust is the client's business either way, but how
+     * far a seeker can see this aeroplane is decided on this side, off this number.
+     */
+    public void reportAfterburner(float level) {
+        float delivered = this.hasAfterburner() ? Mth.clamp(level, 0.0F, 1.0F) : 0.0F;
+        boolean was = this.reheat > LIT;
+
+        this.reheat = delivered;
+        this.entityData.set(DATA_AFTERBURNER, delivered);
+
+        if (!was && delivered > LIT) {
+            this.playAfterburnerLight();
+        }
+    }
+
+    /**
+     * The bang of the burner catching, heard where it happens.
+     *
+     * <p>Sent at its own loudness rather than with the reach in the volume slot, unlike a weapon's
+     * report: this is a noise the aeroplane makes, and the aeroplane already has a note that
+     * carries as far as its file says. What lighting the burner adds is for the pilot and for
+     * anybody it has just gone over the top of.
+     *
+     * <p>The recording is looked for under this aircraft's own name and resolved on the client,
+     * which is the only side that has ever seen a resource pack. Nothing here is shipped; see
+     * {@code AfterburnerSounds}, which finds something to put in its place.
+     */
+    private void playAfterburnerLight() {
+        ResourceLocation id = this.getAircraftId();
+        ResourceLocation event = id.withPath(
+                VehicleEntityBase.SOUND_PREFIX + id.getPath() + "." + AFTERBURNER_ROLE);
+
+        this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
+                SoundEvent.createVariableRangeEvent(event), SoundSource.NEUTRAL,
+                AFTERBURNER_VOLUME, AFTERBURNER_LIGHT_PITCH);
+    }
+
+    /**
+     * How hot this aircraft looks to something homing on heat: what the airframe is worth cold, and
+     * the burner over the top of it while it is lit.
+     *
+     * <p>The counterpart of {@link #radarCrossSection}, and deliberately not the same figure. What
+     * a stealth aeroplane bought with its shape was a small radar return; nothing about that shape
+     * makes its exhaust any cooler, and lighting the burner throws the difference away in any case.
+     */
+    public float infraredSignature() {
+        AircraftDefinition.Afterburner burner = this.getStats().engine().afterburner().orElse(null);
+        float clean = this.getStats().signature().heat();
+
+        return burner == null ? clean : clean * burner.heatFactor(this.reheat);
+    }
+
+    /**
+     * How far a heat-seeking head sees that entity, as a fraction of what the same head manages
+     * against the hottest thing it will ever be pointed at. Anything that is not an aeroplane is
+     * that hottest thing as far as this is concerned, which is a way of saying nothing has been
+     * decided about it.
+     */
+    public static float heatVisibility(Entity entity) {
+        return entity instanceof AircraftEntity aircraft
+                ? AircraftDefinition.Signature.heatReach(aircraft.infraredSignature())
+                : 1.0F;
+    }
+
+    /**
+     * One tick of flight, under whichever model this machine is flown by.
+     *
+     * <p>Two of them, and they are genuinely different aircraft rather than one with a switch. An
+     * aeroplane is thrown forward and held up by the air it is passing through; a helicopter carries
+     * its own airflow and is held up by it standing still. Which one applies is decided by the file:
+     * a {@code rotor} block makes the machine a helicopter, and nothing else does.
+     */
+    private void flightTick() {
+        AircraftDefinition definition = this.getStats();
+        AircraftDefinition.Rotor rotor = definition.rotor().orElse(null);
+
+        if (rotor == null) {
+            this.wingFlightTick(definition);
+        } else {
+            this.rotorFlightTick(definition, rotor);
+        }
+    }
+
+    /**
+     * One tick of flight on a wing.
      *
      * <p>The aircraft is not pushed along its nose. Thrust acts along the nose, gravity acts down,
      * and the wing produces lift square to the airflow in proportion to the angle it meets that
@@ -929,8 +1490,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * the nose up past the stalling angle drops it, and a hard turn bleeds speed because lift is not
      * free.
      */
-    private void flightTick() {
-        AircraftDefinition definition = this.getStats();
+    private void wingFlightTick(AircraftDefinition definition) {
         AircraftDefinition.Wing wing = definition.wing();
         AircraftDefinition.Handling handling = definition.handling();
         AircraftDefinition.Undercarriage gear = definition.landingGear();
@@ -939,7 +1499,12 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         Vec3 motion = this.getDeltaMovement();
         double speed = motion.length();
 
-        this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
+        // The gate is worked before the lever moves, because it sits in the lever's travel rather
+        // than beside it: coming out of reheat is the first thing a pull on the throttle does, and
+        // on that one tick it is all it does. See tickAfterburner.
+        if (!this.tickAfterburner(definition)) {
+            this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
+        }
 
         // The lever moves at once and the engine does not. A turbofan asked for full power takes
         // several seconds to give it, and most of what a takeoff roll feels like is that wait.
@@ -987,7 +1552,8 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // pointing, which is why a banked aircraft pulls round into a turn instead of climbing.
         float lag = Mth.clamp(handling.controlLag(), 0.02F, 1.0F);
 
-        float commandedPitch = this.limitToWing(this.input.pitch() * handling.pitchRate() * authority / damping);
+        float commandedPitch = this.limitToWing(
+                this.input.pitch() * handling.pitchRate() * authority / damping, lifting);
 
         // On the wheels, the nose does not come up until there is enough air over the tailplane to
         // lift it. That speed is what makes a takeoff a takeoff: the aircraft runs, the stick does
@@ -1043,9 +1609,10 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
                 ? definition.engine().maxThrust()
                 : Mth.lerp(lifting, definition.engine().maxThrust(), vtol.liftThrust());
 
-        // Against the air it is breathing, and against what the engine is actually delivering rather
-        // than what the lever is asking for.
-        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(thrustAxis.scale(thrust * this.thrustLevel * density));
+        // Against the air it is breathing, against what the engine is actually delivering rather
+        // than what the lever is asking for, and with the burner over the top of that.
+        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0)
+                .add(thrustAxis.scale(thrust * this.thrustLevel * this.reheatThrust() * density));
 
         // And a hover is not a slide. Nothing aerodynamic bites at a walking pace -- drag is a square
         // law and squares of small numbers are nothing -- so an aeroplane nudged sideways in the
@@ -1128,6 +1695,267 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         }
 
         this.setDeltaMovement(motion);
+    }
+
+    /**
+     * One tick of flight on a rotor.
+     *
+     * <p>The whole of a helicopter is one force. The rotor pulls square to its own disc, the disc is
+     * square to the machine hanging under it, and so pointing the machine is the only steering there
+     * is: nose down and it goes forward, banked and it goes sideways, level and it hangs there. There
+     * is no thrust along the nose to be found anywhere below, because a helicopter has none — what
+     * carries it forward is a share of the same force that is holding it up, which is exactly why one
+     * is nose-down in the cruise and why hauling the collective in a hurry makes it climb rather than
+     * accelerate.
+     *
+     * <p>The cyclic therefore walks the disc round and then leaves it there, rather than springing
+     * back to level the moment the key comes up. That is what the attitude-hold system every modern
+     * helicopter carries does, and on a keyboard it is the only way to ask for a cruise at all: a key
+     * is all the way down or not down, so a stick that returned to level would leave the machine with
+     * two settings, hovering and charging, and nothing whatever between them. Levelling off is
+     * something the pilot does, exactly as it is in the real thing. The one thing the machine insists
+     * on for itself is the tilt limit, past which the disc is walked back — so a helicopter here
+     * cannot be turned over, by the pilot or by a blast or by flying into a hill.
+     *
+     * <p>Everything aerodynamic is still here and still means what it does on an aeroplane — drag,
+     * the fin, the stub wings a gunship carries — but all of it goes as the square of the speed, and
+     * a helicopter spends its life at speeds where squares of small numbers are nothing. That is the
+     * point: what flies this machine is the rotor, and the rotor does not care whether it is going
+     * anywhere.
+     */
+    private void rotorFlightTick(AircraftDefinition definition, AircraftDefinition.Rotor rotor) {
+        AircraftDefinition.Wing wing = definition.wing();
+        AircraftDefinition.Handling handling = definition.handling();
+        AircraftDefinition.Undercarriage gear = definition.landingGear();
+        boolean rolling = this.onGround();
+
+        Vec3 motion = this.getDeltaMovement();
+        double speed = motion.length();
+
+        // The collective. Same lever and same keys as an aeroplane's throttle, doing a quite
+        // different job: not how fast the machine goes, but how hard the rotor pulls and therefore
+        // whether it goes up or down.
+        this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
+
+        // Blade pitch answers within a moment. What takes time on a helicopter is the rotor itself,
+        // and that is wound up in tickRotor rather than here.
+        float spool = Mth.clamp(definition.engine().spoolRate(), 0.01F, 1.0F);
+        this.thrustLevel += (this.throttle - this.thrustLevel) * spool;
+
+        double density = this.airDensity();
+        float collective = Mth.clamp(this.thrustLevel, 0.0F, 1.0F);
+
+        // Lift goes as the square of the speed the blades are turning at, so a rotor at half speed is
+        // worth a quarter of its lift and the machine is not going anywhere. This is what the wait
+        // after climbing in actually buys.
+        double turning = (double) this.rotorSpeed * this.rotorSpeed;
+
+        // The fin and the stub wings, which are an aeroplane's arrangement and behave like one's: on
+        // the dynamic pressure, and on nothing whatever while the machine is standing still.
+        double reference = Math.max(wing.stallSpeed(), 1.0E-4F);
+        double pressure = density * speed * speed / (reference * reference);
+        float damping = 1.0F + handling.aeroDamping() * (float) pressure;
+
+        // And what actually flies the helicopter, which is the rotor and is unaffected by any of
+        // that. A machine at a standstill has full control and a machine at speed has no more, which
+        // is the opposite of an aeroplane and is the whole reason one can be flown into a clearing.
+        float bite = Math.min(this.rotorSpeed * this.rotorSpeed * rotor.authority(), 1.0F);
+
+        float previousYRot = this.getYRot();
+        float weathervaneYaw = 0.0F;
+        float lag = Mth.clamp(handling.controlLag(), 0.02F, 1.0F);
+        float tilt = Mth.clamp(rotor.maxTilt(), 1.0F, 89.0F);
+        float trim = Mth.clamp(rotor.trim(), 0.01F, 1.0F);
+
+        // The cyclic walks the disc round and then leaves it where it was put, which is what an
+        // attitude-hold system does and the only way a keyboard can ask for a cruise: a key is all
+        // the way down or not down at all, so a stick that sprang back to level would leave the
+        // machine with two settings, hovering and charging, and nothing whatever between them.
+        //
+        // What is subtracted is the limiter, and it is nothing at all while the machine is inside
+        // its limits — which is where it spends its life. Past them it walks the disc back, so a
+        // helicopter cannot be tipped over, by the pilot or by a blast or by flying into a hill.
+        // Minecraft's elevation is positive nose-down, hence the negation into the nose-up figure
+        // the rest of this class works in; the bank angle is already positive with the right wing low.
+        float commandedPitch = Mth.clamp(
+                this.input.pitch() * handling.pitchRate() * trim
+                        - overTilt(-this.getXRot(), tilt) * rotor.stability(),
+                -handling.pitchRate(), handling.pitchRate()) * bite;
+        float commandedRoll = Mth.clamp(
+                this.input.roll() * handling.rollRate() * trim
+                        - overTilt(this.getRoll(), tilt) * rotor.stability(),
+                -handling.rollRate(), handling.rollRate()) * bite;
+
+        // On the wheels the cyclic argues with the undercarriage and loses, as it should: what holds
+        // a parked helicopter level is its wheels. It comes alive exactly as the rotor takes the
+        // weight, which is the moment a real one goes light on the skids and starts to be flown.
+        if (rolling) {
+            float airborne = 1.0F - this.weightOnWheels;
+
+            commandedPitch *= airborne;
+            commandedRoll *= airborne;
+        }
+
+        // The pedals, which are a rate and not an angle: a tail rotor swings the nose and then leaves
+        // it wherever it was put, without the machine going anywhere. An aeroplane's rudder cannot do
+        // that at all, and it is why a helicopter can look one way while travelling another.
+        float commandedYaw = this.input.yaw() * handling.yawRate() * bite / damping;
+
+        this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
+        this.rollVelocity += (commandedRoll - this.rollVelocity) * lag;
+        this.yawVelocity += (commandedYaw - this.yawVelocity) * lag;
+
+        // A steerable tail wheel, which is the same thing a nosewheel is and is here for the same
+        // reason: rolling along the ground, the pedals turn a wheel rather than a rotor.
+        float nosewheel = 0.0F;
+
+        if (rolling) {
+            float grip = (float) Mth.clamp(1.0 - speed / Math.max(gear.steerFade(), 1.0E-3F), 0.0, 1.0);
+
+            nosewheel = this.input.yaw() * gear.steerRate() * grip;
+        }
+
+        Vec3 up = this.getLiftVector();
+        Vec3 right = Attitude.right(this.attitude);
+        Vec3 nose = this.getNoseVector();
+
+        double disc = this.rotorLift(rotor, speed);
+        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(up.scale(disc));
+
+        // Air coming from below or above meets the rotor and everything slung under it broadside;
+        // air coming from ahead meets a fuselage. The difference is most of an order of magnitude,
+        // and it is the reason a helicopter's rate of climb is quoted in feet per minute while the
+        // speed beside it is in knots — the fuselage's own drag does not begin to explain either
+        // figure. It is also what the machine falls against with the collective down, and it goes
+        // with the rotor, so one whose rotor has stopped falls like the lump of metal it now is.
+        double sink = motion.y;
+
+        forces = forces.add(new Vec3(0.0,
+                -rotor.discDrag() * sink * Math.abs(sink) * turning * density, 0.0));
+
+        // The fuselage is hanging off a rotor, and a rotor turning one way pushes what it is bolted
+        // to the other. The tail rotor is the answer to it, and since this follows the collective,
+        // the nose walks round whenever the machine is asked to climb — which is most of what flying
+        // one by hand consists of.
+        float torqueYaw = (float) (rotor.torque() * collective * turning);
+
+        double lift = 0.0;
+
+        if (speed > 1.0E-4) {
+            Vec3 flow = motion.scale(1.0 / speed);
+
+            this.angleOfAttack = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(up), -1.0, 1.0)));
+
+            // The stub wings, which on a gunship are real wings and carry a useful share of the
+            // machine at speed — they are also where the weapons hang, which is what they are for.
+            // Nothing here stalls: past the critical angle the wing simply stops helping, and the
+            // rotor was doing the work anyway.
+            double liftCoefficient = wing.liftCoefficient(this.angleOfAttack);
+            Vec3 liftAxis = up.subtract(flow.scale(up.dot(flow)));
+
+            lift = wing.lift() * liftCoefficient * speed * speed * density;
+
+            if (liftAxis.lengthSqr() > 1.0E-8) {
+                forces = forces.add(liftAxis.normalize().scale(lift));
+            }
+
+            // Drag, and a great deal of it: a helicopter is a shape nobody chose for going fast, and
+            // what settles its top speed is the disc running out of tilt against this.
+            //
+            // Which way round it is facing matters here and does not on an aeroplane, because a
+            // helicopter can be flown in any direction it likes and an aeroplane cannot. A fuselage
+            // is a shape for going forwards; turned round it is a barn door, and without saying so
+            // the machine would reach its forward top speed flying backwards.
+            double bluff = Mth.lerp((1.0 - Mth.clamp(flow.dot(nose), -1.0, 1.0)) * 0.5,
+                    1.0, Math.max(rotor.bluffDrag(), 1.0F));
+            double drag = wing.drag() * bluff * (this.input.brake() ? 4.0 : 1.0)
+                    + wing.inducedDrag() * liftCoefficient * liftCoefficient;
+
+            forces = forces.add(flow.scale(-drag * speed * speed * density));
+            this.checkStructuralLoad(motion);
+
+            if (!rolling) {
+                // The fin, weakened by the same dynamic pressure everything aerodynamic here is,
+                // so a hovering machine is not dragged round onto a flight path it barely has.
+                double aerodynamic = Math.min(pressure, AUTHORITY_CEILING);
+
+                weathervaneYaw = (float) (flow.dot(right) * handling.weathervane() * aerodynamic / damping);
+
+                // And the fuselage's dislike of being flown sideways, which fades out with it. An
+                // aeroplane's never does, because an aeroplane is never asked to fly sideways; a
+                // helicopter is asked to constantly, and refusing would take away half of what one is
+                // worth having.
+                motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()
+                        * Mth.clamp(pressure, 0.0, 1.0)));
+            }
+
+            // A hover is not a slide. Nothing aerodynamic bites at a walking pace, so without this a
+            // machine nudged sideways would keep going until it hit something. It lets go as the
+            // helicopter picks up speed, or it would be a parking brake rather than a hover.
+            //
+            // It has to be gentler than it looks, and the reason is a trap worth writing down. Since
+            // it grows with speed and then fades away again, it peaks partway up the band — at a
+            // quarter of hover_drag times the band — and that peak is a wall the machine has to be
+            // pushed over before it can go anywhere at all. Set generously it is not station-keeping
+            // but a threshold: gentle forward stick does nothing whatever, and then somewhere past
+            // it the helicopter leaps off. Keep the peak below the smallest tilt anybody would use
+            // deliberately and the wall is under the floor, where it belongs.
+            double band = Math.max(rotor.translationalSpeed() * HOVER_BAND, 1.0E-4);
+            double slow = Mth.clamp(1.0 - speed / band, 0.0, 1.0);
+
+            forces = forces.add(motion.scale(-rotor.hoverDrag() * turning * slow));
+        } else {
+            this.angleOfAttack = 0.0F;
+        }
+
+        // How much of the machine the wheels are still carrying. Read a tick late by the cyclic gate
+        // above, which is a tick nobody can see and saves working the rotor out twice.
+        this.weightOnWheels = (float) Mth.clamp(1.0 - (disc + lift) / GRAVITY, 0.0, 1.0);
+
+        this.applyBodyRotation(this.rollVelocity, this.pitchVelocity,
+                this.yawVelocity + weathervaneYaw + nosewheel + torqueYaw);
+        this.deltaRotation = Mth.wrapDegrees(this.getYRot() - previousYRot);
+        motion = motion.add(forces);
+
+        if (rolling) {
+            motion = this.groundTick(motion);
+        }
+
+        if (wing.maxSpeed() > 0.0F && motion.length() > wing.maxSpeed()) {
+            motion = motion.normalize().scale(wing.maxSpeed());
+        }
+
+        this.setDeltaMovement(motion);
+    }
+
+    /**
+     * What the rotor is pulling, in blocks per tick squared. The whole of a helicopter's lift.
+     *
+     * <p>Worked out here rather than inline so that the instruments can ask for the same figure the
+     * flight model is using. Everything it needs is either synced or worked out identically on every
+     * side, so the answer does not depend on running the physics.
+     *
+     * <p>The translational term in it is a rotor in a hover beating air it has already thrown down
+     * and used: move the machine along and every blade reaches air nothing has touched, and the same
+     * collective is worth more. It is why one too heavy to lift off vertically can often still fly
+     * away along the ground, and why the first seconds of a departure feel like it finding its feet.
+     */
+    private double rotorLift(AircraftDefinition.Rotor rotor, double speed) {
+        double translational = 1.0 + rotor.translationalLift()
+                * Mth.clamp(speed / Math.max(rotor.translationalSpeed(), 1.0E-4F), 0.0, 1.0);
+
+        return rotor.lift() * Mth.clamp(this.thrustLevel, 0.0F, 1.0F)
+                * this.rotorSpeed * this.rotorSpeed
+                * this.airDensity() * translational * this.groundEffect();
+    }
+
+    /**
+     * How far past the angle the machine is willing to hold an attitude at it has got, in degrees.
+     * Zero while it is inside that angle, which is where a helicopter spends its life; what comes
+     * back is signed, so subtracting it from a commanded rate walks the disc the short way home.
+     */
+    private static float overTilt(float angle, float limit) {
+        return angle - Mth.clamp(angle, -limit, limit);
     }
 
     /**
@@ -1385,10 +2213,13 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     /**
-     * How far the aircraft moved over the last tick, which is its velocity wherever it is being
-     * simulated. Read this rather than the delta movement: a piloted aircraft is flown by its
-     * pilot's client and every other copy of it holds a delta movement of zero, so anything that
-     * needs to know how fast it is going, instruments included, has to look at where it has been.
+     * How fast the aircraft is really going, in blocks a tick, on whichever side is asking.
+     *
+     * <p>Read this rather than the delta movement: only one machine runs the flight model, and every
+     * other copy of the aircraft holds a delta movement that means nothing. The side that is flying
+     * measures it; every other side is told, which is the same figure a tick later rather than a
+     * guess. Anything that needs to know how fast an aeroplane is going — instruments, the speed a
+     * weapon leaves with, the prediction that draws it — should come here.
      */
     public Vec3 getVelocity() {
         // On the server, an aircraft with a pilot at the stick is not moved by anything here: its
@@ -1397,11 +2228,20 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // difference is flatly zero however fast it is really going — which quietly robbed every
         // weapon fired from it of the speed it should have left with. The pilot's own figure is the
         // only truthful answer on that side.
-        if (!this.level().isClientSide && !this.isControlledByLocalInstance()) {
+        if (this.isControlledByLocalInstance()) {
+            return this.travelled();
+        }
+
+        if (!this.level().isClientSide) {
             return this.pilotVelocity;
         }
 
-        return this.travelled();
+        // A client that is not flying it is told, for the same reason the server is: what it can see
+        // of the movement is a drawn approximation of it, smoothed and predicted, and the instruments
+        // should read the aircraft rather than the drawing of it.
+        Vector3f reported = this.entityData.get(DATA_VELOCITY);
+
+        return new Vec3(reported.x(), reported.y(), reported.z());
     }
 
     /**
@@ -1430,11 +2270,21 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
     }
 
     /**
-     * How many times its own weight the wing is currently pulling. One is level flight, zero is
+     * How many times its own weight the aircraft is currently pulling. One is level flight, zero is
      * weightless, and beyond what the airframe is stressed for it starts to bend.
      */
     public float getLoadFactor(Vec3 velocity) {
         double speed = velocity.length();
+
+        AircraftDefinition.Rotor rotor = this.getStats().rotor().orElse(null);
+
+        // A helicopter has no wing to read this off, and does not need one: what it is pulling is
+        // whatever the rotor is pulling, which is the same figure hovering as it is in a turn.
+        // Honest on every side too, unlike the wing figure below — nothing here depends on running
+        // the flight model, so the server and every onlooker get the same answer as the pilot.
+        if (rotor != null) {
+            return (float) (this.rotorLift(rotor, speed) / GRAVITY);
+        }
 
         if (speed < 1.0E-4) {
             return 0.0F;
@@ -1458,14 +2308,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         return Attitude.nose(this.attitude);
     }
 
-    /**
-     * Turns an offset written in the aircraft's own axes (x right, y up, z towards the nose) into a
-     * world position. Used for seats and for the cockpit viewpoint, so both ride the airframe.
-     */
-    public Vec3 toWorld(Vec3 offset, float partialTick) {
-        return this.getPosition(partialTick).add(Attitude.toWorld(this.getAttitude(partialTick), offset));
-    }
-
     private static float approach(float current, float target, float step) {
         return current > target ? Math.max(current - step, target) : Math.min(current + step, target);
     }
@@ -1487,6 +2329,58 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
         this.vtolProgress = approach(this.vtolProgress, this.isVtolSelected() ? 1.0F : 0.0F,
                 1.0F / Math.max(vtol.cycleTicks(), 1));
+    }
+
+    /**
+     * One tick of the rotor turning.
+     *
+     * <p>Run on every side, and deliberately: what it depends on is who is in the seat, which every
+     * side is told about anyway, so there is nothing to send. That also means the rotor keeps turning
+     * on a helicopter nobody is simulating — a client watching one across the valley draws it exactly
+     * as the pilot's client does, without a packet passing between them.
+     *
+     * <p>Climbing in is the starter and climbing out is the shutdown. A helicopter is not an aircraft
+     * anybody sprints to and takes off in: the rotor has to come up to speed first, and the wait for
+     * it is most of what makes flying one feel like flying one rather than like driving a hovering
+     * brick. Getting out leaves it running down, so a machine left at a pad settles rather than
+     * stopping dead.
+     */
+    private void tickRotor() {
+        this.rotorSpeedO = this.rotorSpeed;
+        this.rotorAngleO = this.rotorAngle;
+        this.tailAngleO = this.tailAngle;
+
+        AircraftDefinition.Rotor rotor = this.getStats().rotor().orElse(null);
+
+        if (rotor == null) {
+            this.rotorSpeed = 0.0F;
+            this.rotorAngle = 0.0F;
+            this.rotorAngleO = 0.0F;
+            this.tailAngle = 0.0F;
+            this.tailAngleO = 0.0F;
+
+            return;
+        }
+
+        boolean running = this.getControllingPassenger() != null;
+
+        this.rotorSpeed = approach(this.rotorSpeed, running ? 1.0F : 0.0F,
+                1.0F / Math.max(rotor.spoolTicks(), 1));
+        this.rotorAngle += this.rotorSpeed * rotor.degreesPerTick();
+        this.tailAngle += this.rotorSpeed * rotor.tailDegreesPerTick();
+
+        // Kept inside a turn so the floats never grow large. The previous angle comes back with each,
+        // because a lerp between 359 and 1 across the seam draws the rotor spinning backwards for a
+        // frame, and a rotor that stutters once a second is worse than one that does not turn at all.
+        while (this.rotorAngle >= 360.0F) {
+            this.rotorAngle -= 360.0F;
+            this.rotorAngleO -= 360.0F;
+        }
+
+        while (this.tailAngle >= 360.0F) {
+            this.tailAngle -= 360.0F;
+            this.tailAngleO -= 360.0F;
+        }
     }
 
     private void tickGear() {
@@ -1524,6 +2418,12 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         AircraftDefinition.Sync sync = this.getStats().sync();
 
         this.interpolation.tune(sync.correctionTicks(), sync.snapDistance(), sync.maxPredictionTicks());
+
+        // What the side flying it says it is doing, rather than what the last two position updates
+        // seem to say. Handed over before the prediction moves, so this tick already uses it.
+        Vector3f velocity = this.entityData.get(DATA_VELOCITY);
+
+        this.interpolation.receiveVelocity(velocity.x(), velocity.y(), velocity.z());
 
         if (this.interpolation.advance()) {
             this.lerpSteps = 0;
@@ -1637,12 +2537,12 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * away inside the airframe rather than left standing in the air.
      */
     private void tickParts() {
-        List<AircraftShape.Box> shape = AircraftManager.shape(this.getAircraftId()).boxes();
+        List<VehicleShape.Box> shape = this.getShape().boxes();
 
         List<AircraftDefinition.Hardpoint> hardpoints = this.getStats().hardpoints();
 
         for (int i = 0; i < this.parts.length; i++) {
-            AircraftPart part = this.parts[i];
+            VehiclePart part = this.parts[i];
 
             if (part.isPylon()) {
                 this.placePylon(part, hardpoints);
@@ -1651,22 +2551,16 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             }
 
             if (i >= shape.size()) {
-                part.place(this.position(), 1.0E-3, 1.0E-3, 1.0E-3);
+                part.fold(this.position());
 
                 continue;
             }
 
-            AircraftShape.Box box = shape.get(i);
-            Vec3 centre = this.position().add(Attitude.toWorld(this.attitude, box.offset()));
-            Vec3 half = box.size().scale(0.5);
-            // The box's own angle within the aircraft, then the aircraft's angle in the world.
-            Matrix3f rotation = new Quaternionf(this.attitude).mul(box.orientation()).get(new Matrix3f());
-
-            part.place(centre,
-                    2.0 * extent(rotation, 0, half),
-                    2.0 * extent(rotation, 1, half),
-                    2.0 * extent(rotation, 2, half));
+            part.place(this.hitbox(shape.get(i)));
         }
+
+        this.notePlacement();
+        this.carryStanders();
     }
 
     /**
@@ -1676,20 +2570,19 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * rather than an object, and it has to stay reachable when it is bare, which is exactly when
      * somebody wants to hang something on it.
      */
-    private void placePylon(AircraftPart part, List<AircraftDefinition.Hardpoint> hardpoints) {
+    private void placePylon(VehiclePart part, List<AircraftDefinition.Hardpoint> hardpoints) {
         int slot = part.getPylon();
 
         if (slot >= hardpoints.size()) {
             // The file no longer lists this one. It cannot be got rid of, so it is folded away.
-            part.place(this.position(), 1.0E-3, 1.0E-3, 1.0E-3);
+            part.fold(this.position());
 
             return;
         }
 
         Vec3 where = hardpoints.get(slot).pos();
         Vec3 centre = this.position().add(Attitude.toWorld(this.attitude, where));
-        double size = pylonBox(where, hardpoints, slot);
-        part.place(centre, size, size, size);
+        part.place(centre, pylonBox(where, hardpoints, slot));
     }
 
     /**
@@ -1728,8 +2621,19 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * most visible thing an aeroplane does and it is worth seeing from further off than that.
      */
     private void spawnFlightEffects() {
+        // Nothing a wreck does is flying. Vapour off the wingtips of a burnt-out airframe on its way
+        // down would read as the aeroplane still pulling.
+        if (this.isWrecked()) {
+            return;
+        }
+
         Vec3 velocity = this.getVelocity();
         double speed = velocity.length();
+
+        // Ahead of everything aerodynamic below, because none of that applies to it. A burner is lit
+        // on the runway as often as it is in the air, and a plume that waited for the aeroplane to
+        // be fast would be missing from exactly the moment the pilot lit it for.
+        this.spawnAfterburnerPlume(velocity);
 
         if (speed < 0.5) {
             return;
@@ -1785,11 +2689,88 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         }
     }
 
+    /**
+     * The flame out of the jet pipes, while the burner is lit.
+     *
+     * <p>Two layers, because a plume is two things. In front is the flame, which opens white at the
+     * lip and settles to orange behind it, and around and behind that is the hot air it leaves,
+     * which is what gives the plume its length and most of what is seen of it from any distance.
+     *
+     * <p>Thrown along the aircraft's own nose rather than along its flight path, and the difference
+     * shows in every hard turn: what comes out of a pipe goes the way the pipe is pointing, so an
+     * aeroplane pulling round trails its plume off to one side rather than down its own tail. What
+     * the exhaust is carried along by is the aircraft's velocity, less the speed it is thrown out
+     * at — so at low speed the flame stands still behind the aeroplane, and at high speed it is a
+     * streak that barely moves relative to it, which is what a plume does.
+     *
+     * <p>Drawn with the mod's own particles rather than vanilla's flame, for the same reason the
+     * wingtip vapour is: this wants to be seen from further away than thirty-two blocks, and it
+     * wants to be its own light — a burner beyond the loaded world would otherwise be drawn in flat
+     * black, which is the one colour it certainly is not.
+     */
+    private void spawnAfterburnerPlume(Vec3 velocity) {
+        AircraftDefinition.Afterburner burner = this.getStats().engine().afterburner().orElse(null);
+
+        if (burner == null || this.reheat <= LIT) {
+            return;
+        }
+
+        Vec3 nose = this.getNoseVector();
+        Vec3 blown = velocity.subtract(nose.scale(PLUME_SPEED * this.reheat));
+        RandomSource random = this.level().random;
+        TintedParticleOption flame = ModParticles.BLAST.get().of(PLUME_COLOUR, PLUME_SIZE * this.reheat);
+        TintedParticleOption exhaust = ModParticles.MOTOR_SMOKE.get().of(EXHAUST_COLOUR, this.reheat);
+        double length = PLUME_LENGTH * this.reheat;
+        int puffs = Math.max(1, Math.round(PLUME_PUFFS * this.reheat));
+
+        for (Vec3 nozzle : this.nozzles(burner)) {
+            Vec3 lip = this.position().add(Attitude.toWorld(this.attitude, nozzle));
+
+            for (int i = 0; i < puffs; i++) {
+                // Strung back down the plume rather than all left at the lip. One tick is a long way
+                // at these speeds, and a single puff a tick would read as a dotted line rather than
+                // as a column of flame.
+                this.puff(flame, lip.subtract(nose.scale(random.nextDouble() * length * 0.5)), blown, random);
+                this.puff(exhaust, lip.subtract(nose.scale(random.nextDouble() * length)), blown, random);
+            }
+        }
+    }
+
+    /** One particle of the plume, scattered a little off the axis so the column has some width. */
+    private void puff(TintedParticleOption particle, Vec3 at, Vec3 blown, RandomSource random) {
+        this.level().addParticle(particle,
+                at.x + random.nextGaussian() * PLUME_SCATTER,
+                at.y + random.nextGaussian() * PLUME_SCATTER,
+                at.z + random.nextGaussian() * PLUME_SCATTER,
+                blown.x, blown.y, blown.z);
+    }
+
+    /**
+     * Where the plume comes out, in the aircraft's own axes.
+     *
+     * <p>What the file says, and for a file that says nothing, one pipe out of the back of the
+     * collision shape. That fallback is right for a single engine buried in the fuselage and wrong
+     * for a pair of them set apart, which is why any airframe that cares names its own.
+     */
+    private List<Vec3> nozzles(AircraftDefinition.Afterburner burner) {
+        if (!burner.nozzles().isEmpty()) {
+            return burner.nozzles();
+        }
+
+        double tail = -this.getBbWidth() / 2.0;
+
+        for (VehicleShape.Box box : this.getShape().boxes()) {
+            tail = Math.min(tail, box.offset().z - box.size().z / 2.0);
+        }
+
+        return List.of(new Vec3(0.0, WING_HEIGHT, tail));
+    }
+
     /** Half the width of the widest part of the aircraft, taken from its collision shape. */
     private double getWingSpan() {
         double span = this.getBbWidth() / 2.0;
 
-        for (AircraftShape.Box box : AircraftManager.shape(this.getAircraftId()).boxes()) {
+        for (VehicleShape.Box box : this.getShape().boxes()) {
             span = Math.max(span, Math.abs(box.offset().x) + box.size().x / 2.0);
         }
 
@@ -1801,83 +2782,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         AircraftDefinition.Wing wing = this.getStats().wing();
 
         return wing.drag() > 0.0F ? Math.sqrt(this.getStats().engine().maxThrust() / wing.drag()) : 1.0;
-    }
-
-    /** One part per box in the aircraft's shape file. */
-    /**
-     * Builds the aircraft's boxes: the airframe first, from its collision file, and then one for
-     * each pylon.
-     *
-     * <p>A pylon gets a box of its own so that it can be reached for on its own. Aiming at the left
-     * inner pylon and aiming at the right outer one are different intentions, and until now the
-     * aeroplane could not tell them apart: a click anywhere on it hung a weapon on whichever pylon
-     * happened to be free first. The box is what makes the difference visible to the game.
-     */
-    private void buildParts() {
-        List<AircraftShape.Box> shape = AircraftManager.shape(this.getAircraftId()).boxes();
-        List<AircraftDefinition.Hardpoint> hardpoints = this.getStats().hardpoints();
-        this.parts = new AircraftPart[shape.size() + hardpoints.size()];
-
-        for (int i = 0; i < shape.size(); i++) {
-            this.parts[i] = new AircraftPart(this, shape.get(i).name());
-        }
-
-        for (int i = 0; i < hardpoints.size(); i++) {
-            this.parts[shape.size() + i] = new AircraftPart(this, hardpoints.get(i).name(), i);
-        }
-
-        // Numbered from the aircraft's own id rather than left with whatever the entity counter
-        // handed out, so that the two sides agree about which box is which. See setId.
-        this.setId(this.getId());
-    }
-
-    /**
-     * Numbers the aircraft's boxes after the aircraft itself, so that both sides call the same box
-     * by the same name.
-     *
-     * <p>A box is an entity with an id, and ids come from a counter each side keeps for itself. The
-     * server makes an aircraft, its boxes take the next few numbers, and the client is then told the
-     * aircraft's id and quietly renumbers only the aircraft — leaving its boxes on whatever numbers
-     * its own counter had reached. The two sides then disagree about every box.
-     *
-     * <p>Nothing notices until a player clicks one. Being shot is decided by the server against its
-     * own boxes and never crosses the gap, but a click is the client naming what it hit and asking
-     * the server to act on it; named by a number the server does not recognise, the click reaches
-     * nothing and climbing aboard or hanging a weapon on a pylon simply fails to happen. That is
-     * what made this show up the moment the boxes became the only thing a click could land on.
-     *
-     * <p>Deriving each box's id from the aircraft's own makes the two sides agree by construction.
-     * It is what vanilla does for the ender dragon, for the same reason.
-     */
-    @Override
-    public void setId(int id) {
-        super.setId(id);
-
-        // Called once by the entity's own constructor, before there are any boxes to number.
-        if (this.parts == null) {
-            return;
-        }
-
-        for (int i = 0; i < this.parts.length; i++) {
-            this.parts[i].setId(id + i + 1);
-        }
-    }
-
-    /** Half the reach of a rotated box along one world axis: the usual sum of absolute terms. */
-    private static double extent(Matrix3f rotation, int axis, Vec3 half) {
-        return Math.abs(rotation.get(0, axis)) * half.x
-                + Math.abs(rotation.get(1, axis)) * half.y
-                + Math.abs(rotation.get(2, axis)) * half.z;
-    }
-
-    @Override
-    public boolean isMultipartEntity() {
-        return this.parts.length > 0;
-    }
-
-    @Override
-    public AircraftPart[] getParts() {
-        return this.parts;
     }
 
     /**
@@ -1898,99 +2802,70 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // update loop, and taking a ticket there loads a chunk and re-enters that loop mid-iteration
         // (ConcurrentModificationException in DistanceManager.runAllUpdates). Anything still flying
         // asks again on its next tick.
-        this.heldChunk = AircraftChunkLoader.release(this, this.heldChunk);
+        this.heldChunks = AircraftChunkLoader.release(this, this.heldChunks);
     }
 
+    /**
+     * The end of an aeroplane, under the name the flight model calls it by. What happens is
+     * {@link VehicleEntityBase#wreck}'s and is the same whichever way the airframe was finished —
+     * shot down, or flown into a hillside.
+     */
     protected void crash() {
-        if (this.level().isClientSide || this.isRemoved()) {
-            return;
-        }
-
-        Vec3 pos = this.position();
-        this.ejectPassengers();
-        // Gone before the blast, not after. An explosion damages everything in reach as it goes off,
-        // and this aircraft's own collision boxes are in reach: they pass the hit to the aircraft,
-        // which is destroyed again, which explodes again. Removing it first makes hurt() a no-op and
-        // the blast has nothing of ours left to hit.
-        this.discard();
-        this.level().explode(this, pos.x, pos.y + 0.5, pos.z, this.getExplosionPower(), Level.ExplosionInteraction.MOB);
+        this.wreck();
     }
 
     /**
-     * Takes a blow, once, however many of the aircraft's boxes it arrived through.
+     * Shuts the aeroplane down the moment it stops being one.
      *
-     * <p>Anything that hurts an area — an explosion above all — asks the level for everything inside
-     * it and hurts each in turn, and the aircraft's boxes are all in that list. Passed straight
-     * through, a single blast would land once for every box the aircraft is described with: eleven
-     * times over for the Su-25. That would make an aeroplane's toughness depend on how finely
-     * somebody chose to draw its shape, which is precisely backwards.
+     * <p>Three things, and each of them is something that would otherwise go on happening to a
+     * burnt-out airframe. The engine is out, so the note it is heard at is nothing. What was hanging
+     * under the wings went up with the aircraft, so the pylons are bare — a charred wreck carrying a
+     * spotless missile it will not let anybody take off it is worse than one carrying nothing.
      *
-     * <p>So the same blow is counted once. Sameness is the damage source itself: one explosion builds
-     * one of those and hands it to everything it touches, while two shells arriving in the same tick
-     * bring one each and both count.
+     * <p>And the aircraft is no longer turning. That one matters on the clients rather than here:
+     * they draw an aeroplane between attitude updates by carrying on the rate it was last turning
+     * at, and a wreck written off in a hard bank would otherwise roll for ever. Snapping the
+     * attitude to where it already is publishes a rate of zero without moving anything.
      */
     @Override
-    public boolean hurt(DamageSource source, float amount) {
-        if (this.level().isClientSide || this.isRemoved()) {
-            return true;
-        }
-
-        if (this.isInvulnerableTo(source)) {
-            return false;
-        }
-
-        long now = this.level().getGameTime();
-
-        if (source == this.lastHurtSource && now == this.lastHurtTime) {
-            return true;
-        }
-
-        this.lastHurtSource = source;
-        this.lastHurtTime = now;
-
-        // Deliberately not markHurt(). All that does is ask the server to broadcast this aircraft's
-        // velocity at the end of the tick, which for a boat is its knockback and for an aeroplane is
-        // the flat zero the server keeps for a piloted one. See lerpMotion.
-        this.setHurtDir(-this.getHurtDir());
-        this.setHurtTime(10);
-        this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
-
-        // Everything that hurts an aeroplane goes through its health and nothing else takes it out
-        // early. A boat is removed outright by one punch from anyone in creative, and an aircraft
-        // inherited that: an arrow, a stray swing, a test shot, and a whole airframe was gone with
-        // three hundred points still on the gauge. Whoever wants rid of one sneaks and clicks it,
-        // which puts it back in their pocket rather than scattering it over the runway.
-        if (this.wound(amount)) {
-            this.destroy(source);
-        }
-
-        return true;
+    protected void onWrecked() {
+        this.setThrottle(0.0F);
+        this.thrustLevel = 0.0F;
+        this.reheatCommanded = false;
+        this.gateHeld = 0;
+        this.reheat = 0.0F;
+        this.entityData.set(DATA_AFTERBURNER, 0.0F);
+        this.input = AircraftInput.NONE;
+        // Already answered. Left standing it would call crash() again on every tick of the fall, and
+        // each of those is a wreck() that has to work out it has nothing to do.
+        this.crashing = false;
+        this.weapons.clear();
+        this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+        this.snapAttitude(this.attitude);
     }
 
     /**
-     * Takes points off the airframe, wherever they came from.
+     * One tick of being a wreck, which is one tick of falling.
      *
-     * <p>Point for point: what a weapon's file says it does is what it does here, with none of the
-     * scaling a boat applies. An aeroplane is worth a few hundred of these and a player is worth
-     * twenty, so the same round that costs a man two hearts costs an aeroplane four points of a
-     * three-hundred-point airframe, which is the whole of what the two numbers mean.
+     * <p>Nothing is flown here. There is no thrust, no lift and no control, and the airframe keeps
+     * whatever attitude it was written off at: a wreck that levels its own wings on the way down is
+     * an aeroplane, not a wreck. Gravity does the rest, what is left of the airspeed bleeds off on
+     * the way, and the ground takes the last of it.
      *
-     * @return true if that was the last of it
+     * <p>Whatever the world stopped last tick stays stopped. {@link #move} zeroes nothing of its
+     * own when it is our collision boxes rather than the plain one that ran into something, so a
+     * wreck lying against a hillside would otherwise go on accumulating a speed it can never spend —
+     * and one lying on flat ground would never settle, because the vertical axis has to be pushed
+     * into the floor every tick for {@code onGround} to keep saying so.
      */
-    protected boolean wound(float amount) {
-        if (amount <= 0.0F) {
-            return false;
-        }
+    private void wreckTick() {
+        Vec3 velocity = this.getDeltaMovement();
+        double slide = this.onGround() ? WRECK_FRICTION : WRECK_DRAG;
+        double x = this.horizontalCollision ? 0.0 : velocity.x * slide;
+        double z = this.horizontalCollision ? 0.0 : velocity.z * slide;
+        double y = this.verticalCollision ? 0.0 : velocity.y * WRECK_DRAG;
 
-        this.setHealth(this.getHealth() - amount);
-
-        return this.getHealth() <= 0.0F;
-    }
-
-    /** A shot-down aircraft comes apart rather than dropping a serviceable one. */
-    @Override
-    protected void destroy(DamageSource source) {
-        this.crash();
+        this.setDeltaMovement(x, y - GRAVITY, z);
     }
 
     // ------------------------------------------------------------------
@@ -2012,6 +2887,23 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return InteractionResult.SUCCESS;
         }
 
+        // Crouching means the hold: whatever is in the player's hand, and whichever box of the
+        // aeroplane the click landed on.
+        //
+        // It has to come before the pylons and before the stores, because those are what somebody
+        // crouching at an aircraft is most likely to be holding — offer a missile to a bare pylon
+        // and it goes on the pylon, which is exactly right for a click that was not crouching and
+        // exactly wrong for one that was. Crouch and it goes in the hold instead.
+        //
+        // What this replaces is a crouched click meaning "not now" and falling through to whatever
+        // the click would otherwise have done. That is still a thing a click can do; it is now
+        // spelt without the crouch.
+        if (player.isSecondaryUseActive()) {
+            this.openHold(player);
+
+            return InteractionResult.CONSUME;
+        }
+
         // A click whose line passed through a pylon was a click on that pylon, whichever box the
         // game happened to hand it to.
         //
@@ -2023,7 +2915,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         //
         // A pylon that has nothing to offer -- bare, with an empty hand -- answers PASS, and the
         // click carries on down and means what it usually means.
-        AircraftPart pylon = this.pylonInSight(player);
+        VehiclePart pylon = this.pylonInSight(player);
 
         if (pylon != null) {
             InteractionResult reached = this.interactPylon(player, hand, pylon.getPylon());
@@ -2056,14 +2948,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return this.dismantle(player);
         }
 
-        // Crouching is how somebody walks along a wing without stepping off it, so it cannot also
-        // mean "take this aeroplane to pieces" -- that is what the wrench is for. It still means
-        // "not now" rather than falling through to the cockpit: a player holding something and
-        // crouching by an aircraft is doing something else with it.
-        if (player.isSecondaryUseActive()) {
-            return InteractionResult.PASS;
-        }
-
         return player.startRiding(this) ? InteractionResult.CONSUME : InteractionResult.PASS;
     }
 
@@ -2080,6 +2964,14 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * the aeroplane in general, and it works from the last station loaded backwards.
      */
     private InteractionResult dismantle(Player player) {
+        // A wreck answers first and answers differently: there are no stores left to strip and no
+        // aeroplane left to fold up, only a hulk to clear away and the metal in it. It is also not
+        // asked to be parked — a write-off on its way down is a write-off, and there is nothing to
+        // be gained by making somebody wait for it to land.
+        if (this.isWrecked()) {
+            return this.salvage();
+        }
+
         // Ground work, and not while anybody is sitting in it.
         if (!this.getPassengers().isEmpty() || !this.isParked()) {
             return InteractionResult.PASS;
@@ -2096,6 +2988,9 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return InteractionResult.CONSUME;
         }
 
+        // The pylons are bare by the time this is reached; the hold is not, and an airframe folded
+        // up with a load still inside it would take the load with it.
+        this.spillHold();
         this.destroy(this.getDropItem());
 
         return InteractionResult.CONSUME;
@@ -2123,7 +3018,10 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         // and it will not fold the aeroplane away: a pylon is for hanging weapons on, and a click
         // that cannot hang or take one simply does nothing. Anyone who meant to get in has the whole
         // rest of the aeroplane to click on.
-        if (!this.isParked()) {
+        //
+        // A wreck has no stations at all. Its pylons are bare and there is nothing to hang a weapon
+        // on, so the click falls through to the airframe behind, where a wrench clears the hulk away.
+        if (this.isWrecked() || !this.isParked()) {
             return InteractionResult.PASS;
         }
 
@@ -2168,18 +3066,18 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * one being pointed at.
      */
     @Nullable
-    private AircraftPart pylonInSight(Player player) {
+    private VehiclePart pylonInSight(Player player) {
         Vec3 eye = player.getEyePosition();
         Vec3 reach = eye.add(player.getViewVector(1.0F).scale(player.entityInteractionRange()));
-        AircraftPart nearest = null;
+        VehiclePart nearest = null;
         double closest = Double.MAX_VALUE;
 
-        for (AircraftPart part : this.parts) {
+        for (VehiclePart part : this.parts) {
             if (!part.isPylon() || !part.isPickable()) {
                 continue;
             }
 
-            Optional<Vec3> hit = part.getBoundingBox().clip(eye, reach);
+            Optional<Vec3> hit = part.clip(eye, reach, 0.0);
 
             if (hit.isEmpty()) {
                 continue;
@@ -2200,9 +3098,17 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * Whether this hardpoint is one a player could hang something on, now or later: a pylon rather
      * than a gun bolted into the airframe.
      *
-     * <p>Asked by the pylon's own box to decide whether it is worth reaching for at all.
+     * <p>Asked by the pylon's own box to decide whether it is worth reaching for at all. A wreck has
+     * none: its stations went up with the aeroplane and there is nothing to be done with them, so
+     * every box stands aside and lets the click reach the airframe behind — which is where a wrench
+     * clears the hulk away. Worked out on both sides from state that reaches both, so the client and
+     * the server agree about what any given click was aimed at.
      */
     public boolean isLoadablePylon(int slot) {
+        if (this.isWrecked()) {
+            return false;
+        }
+
         List<AircraftDefinition.Hardpoint> hardpoints = this.getStats().hardpoints();
 
         return slot >= 0 && slot < hardpoints.size() && !hardpoints.get(slot).isFixed();
@@ -2217,35 +3123,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      */
     private boolean canBeArmedWith(ItemStack held) {
         return held.getItem() instanceof WeaponItem && this.isParked() && this.weapons.hasFreePylon();
-    }
-
-    @Override
-    protected boolean canAddPassenger(Entity passenger) {
-        return this.getPassengers().size() < this.getMaxPassengers();
-    }
-
-    @Override
-    public LivingEntity getControllingPassenger() {
-        return this.getFirstPassenger() instanceof LivingEntity pilot ? pilot : super.getControllingPassenger();
-    }
-
-    /** Which seat a rider occupies, or 0 if they are not aboard. */
-    public int getSeatIndex(Entity passenger) {
-        return Math.max(this.getPassengers().indexOf(passenger), 0);
-    }
-
-    @Override
-    protected Vec3 getPassengerAttachmentPoint(Entity passenger, EntityDimensions dimensions, float scale) {
-        Vec3 seat = this.getSeatOffset(this.getSeatIndex(passenger));
-
-        // Built from the aircraft's own axes rather than from yaw and pitch alone, so the seat banks
-        // with the wings. Rotating the offset by the euler angles instead leaves the pilot sitting
-        // upright in a rolled aircraft, adrift of the cockpit the model draws.
-        Vec3 nose = this.getNoseVector();
-        Vec3 up = this.getLiftVector();
-        Vec3 right = Attitude.right(this.attitude);
-
-        return right.scale(seat.x).add(up.scale(seat.y)).add(nose.scale(seat.z));
     }
 
     @Override
@@ -2265,24 +3142,19 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         this.clampRotation(passenger);
     }
 
-    /** Keeps a passenger from looking further round than they could from inside a cockpit. */
+    /**
+     * Sits a passenger facing the way the aircraft is facing.
+     *
+     * <p>Their body only. Where they are <em>looking</em> used to be clamped here as well, to a
+     * hundred and thirty-five degrees either side, on the grounds that a head does not turn further
+     * than that. It is true of a head and it is not true of a camera: from outside the aircraft there
+     * is no head involved at all, and the one thing an outside view is for is seeing what is behind
+     * you — which that limit made impossible. The cockpit view still stops where a neck stops, but it
+     * stops there in {@code CockpitView}, which is measuring against the aircraft rather than against
+     * a compass and is the only one of the two that can do it correctly.
+     */
     protected void clampRotation(Entity passenger) {
         passenger.setYBodyRot(this.getYRot());
-        float relative = Mth.wrapDegrees(passenger.getYRot() - this.getYRot());
-        float clamped = Mth.clamp(relative, -135.0F, 135.0F);
-        passenger.yRotO += clamped - relative;
-        passenger.setYRot(passenger.getYRot() + clamped - relative);
-        passenger.setYHeadRot(passenger.getYRot());
-    }
-
-    /**
-     * An aircraft does not collide with itself. Its own boxes are solid to everyone else, which is
-     * the point of them, but to the aircraft they are simply where it is: without this it spends
-     * every tick shouldering its way past its own wings and never gets up to speed.
-     */
-    @Override
-    public boolean canCollideWith(Entity other) {
-        return !(other instanceof AircraftPart part && part.getParent() == this) && super.canCollideWith(other);
     }
 
     /**
@@ -2290,12 +3162,12 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      *
      * <p>Minecraft gives an entity one upright box with a square footprint, and for a fifteen-metre
      * aeroplane that is a shed — six and a half blocks across whatever the wings are doing, and
-     * nowhere near the wing once it banks. The boxes in the aircraft's collision file are the real
+     * nowhere near the wing once it banks. The boxes in the aircraft's own file are the real
      * shape, so once there are any, they do the work and the plain box stops pretending to.
      *
-     * <p>Nothing is lost by standing down: {@link AircraftPart} passes hits, clicks and pick results
+     * <p>Nothing is lost by standing down: {@link VehiclePart} passes hits, clicks and pick results
      * straight to the aircraft, so being shot, being climbed into and being stood on all still reach
-     * here. An aircraft with no collision file keeps its plain box, because otherwise it would have
+     * here. An aircraft with no boxes of its own keeps its plain box, because otherwise it would have
      * no way of being touched at all.
      *
      * <p>The plain box does still exist, and still earns its keep: it is what the aircraft's own
@@ -2317,21 +3189,16 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      * Whether any of the aircraft's boxes is a piece of airframe rather than a pylon.
      *
      * <p>Pylons alone are not enough to stand the plain box down. An aircraft with hardpoints but no
-     * collision file would otherwise have nothing to be clicked or shot but five small boxes hanging
+     * boxes of its own would otherwise have nothing to be clicked or shot but five small boxes hanging
      * under its wings, and no way to be climbed into at all.
      */
     private boolean hasAirframeBoxes() {
-        for (AircraftPart part : this.parts) {
+        for (VehiclePart part : this.parts) {
             if (!part.isPylon()) {
                 return true;
             }
         }
 
-        return false;
-    }
-
-    @Override
-    public boolean isPushable() {
         return false;
     }
 
@@ -2383,16 +3250,21 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
             return movement;
         }
 
-        List<AircraftShape.Box> shape = AircraftManager.shape(this.getAircraftId()).boxes();
+        List<VehicleShape.Box> shape = this.getShape().boxes();
 
         if (shape.isEmpty()) {
             return movement;
         }
 
         Vec3 allowed = movement;
+        double underside = this.scrapeLine();
 
-        for (AircraftShape.Box box : shape) {
-            Vec3 stopped = collideBoundingBox(this, movement, this.worldBox(box), this.level(), List.of());
+        for (VehicleShape.Box box : shape) {
+            // The box as it is really lying, swept against the blocks. A wing banked over occupies a
+            // thin plate on a slant; stopped against the upright slab drawn round that plate, an
+            // aeroplane rolled into a turn is brought up short by air.
+            Vec3 stopped = Hitboxes.throughBlocks(this, this.hitbox(box), movement, underside);
+
             allowed = new Vec3(
                     nearerToZero(allowed.x, stopped.x),
                     nearerToZero(allowed.y, stopped.y),
@@ -2402,97 +3274,67 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         return allowed;
     }
 
-    /**
-     * Whether the aircraft's real shape has room where it is standing, give or take a margin.
-     *
-     * <p>Used when one is put down. Now that the wings stop against the world, an aeroplane set down
-     * with a wing inside a hillside would be wedged there and unable to move, so the whole shape has
-     * to be clear rather than just the middle of it.
-     *
-     * @param margin how much each box may overlap the world and still count as clear, which keeps a
-     *               wingtip resting a hair inside a slope from making the aircraft unplaceable
-     */
-    public boolean hasRoomHere(double margin) {
-        List<AircraftShape.Box> shape = AircraftManager.shape(this.getAircraftId()).boxes();
-
-        if (shape.isEmpty()) {
-            return this.level().noCollision(this, this.getBoundingBox().deflate(margin));
-        }
-
-        for (AircraftShape.Box box : shape) {
-            AABB room = this.worldBox(box).deflate(margin);
-
-            if (room.getXsize() > 0.0 && room.getYsize() > 0.0 && room.getZsize() > 0.0
-                    && !this.level().noCollision(this, room)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /** One of the aircraft's boxes as an upright box in the world, where it is standing right now. */
-    private AABB worldBox(AircraftShape.Box box) {
-        Vec3 centre = this.position().add(Attitude.toWorld(this.attitude, box.offset()));
-        Vec3 half = box.size().scale(0.5);
-        Matrix3f rotation = new Quaternionf(this.attitude).mul(box.orientation()).get(new Matrix3f());
-        double x = extent(rotation, 0, half);
-        double y = extent(rotation, 1, half);
-        double z = extent(rotation, 2, half);
-
-        return new AABB(centre.x - x, centre.y - y, centre.z - z, centre.x + x, centre.y + y, centre.z + z);
-    }
-
     /** Whichever of the two allows less movement, keeping the sign the pilot asked for. */
     private static double nearerToZero(double a, double b) {
         return Math.abs(a) <= Math.abs(b) ? a : b;
     }
 
     /**
-     * The box the renderer decides visibility against, which is deliberately not the box the
-     * aircraft collides with.
+     * The height below which ground is something the aeroplane scrapes rather than something it
+     * flies into.
      *
-     * <p>The plain hitbox is kept small on purpose — it covers the fuselage so that an overhanging
-     * wingtip does not make the aeroplane unplaceable or catch on every doorway. That is the right
-     * size to collide with and quite the wrong size to be drawn against: a fifteen-metre aeroplane
-     * whose six-metre box has just left the screen is still very much on it, and would blink out.
-     * So the shape the aircraft really occupies is what culling is given.
+     * <p>The undercarriage is the lowest thing an aeroplane is meant to touch the ground with, and
+     * it is not the lowest thing an aeroplane <em>has</em>. Rotating for takeoff swings the tail
+     * below the wheels and into the runway; a flared landing does the same thing on the way in.
+     * Swept against the blocks like anything else, that tail is a wall the aeroplane runs into at
+     * flying speed — the takeoff roll stops dead, the speed the impact took away is the whole of it,
+     * and {@link #detectCrash} quite correctly concludes that an aeroplane which lost eighty knots
+     * in one tick has hit something. It has: it has hit the runway it was rolling along.
+     *
+     * <p>So while the aircraft is in the configuration where the wheels are what touches the ground
+     * — undercarriage out, wings roughly level — nothing that reaches no higher than the wheels and
+     * the step they roll over stops the airframe. Above that line everything still does, which is
+     * the difference between scraping a runway and flying into the hill at the end of it. In the air
+     * with the gear up, or rolled past the point where a wingtip is lower than a wheel, the aircraft
+     * hits everything again.
+     *
+     * <p>It cannot let the aeroplane through the floor. The plain box sits on the wheels and is
+     * settled against the world by {@code move} exactly as before, so ground below the wheels still
+     * holds the aircraft up and a descent into it is still an arrival at whatever speed it arrived.
      */
-    @Override
-    public AABB getBoundingBoxForCulling() {
-        double reach = 0.0;
-
-        for (AircraftShape.Box box : AircraftManager.shape(this.getAircraftId()).boxes()) {
-            for (int axis = 0; axis < 3; axis++) {
-                double corner = Math.abs(component(box.offset(), axis)) + component(box.size(), axis) / 2.0;
-                reach = Math.max(reach, corner);
-            }
+    private double scrapeLine() {
+        if (this.gearProgress <= 0.5F || this.getLiftVector().y <= UPRIGHT) {
+            return Hitboxes.UNDERSIDE_NONE;
         }
 
-        return reach > 0.0 ? this.getBoundingBox().inflate(reach) : this.getBoundingBox();
-    }
-
-    private static double component(Vec3 v, int axis) {
-        return axis == 0 ? v.x : axis == 1 ? v.y : v.z;
+        // The same step the undercarriage rolls over rather than the wheels alone: a kerb the wheels
+        // climb is not a kerb the airframe should be stopped by. See maxUpStep.
+        return this.getBoundingBox().minY + this.getStats().landingGear().climbHeight();
     }
 
     /**
-     * Ticks wherever it is, but only on a client.
+     * The height below which blocks are the floor the aircraft is over, rather than world it is
+     * buried in.
      *
-     * <p>An aircraft beyond the world the player has loaded is still being sent, and is still drawn
-     * as a ghost, but the client stops ticking anything whose chunk it does not have — and an
-     * aircraft that is not ticked never runs the interpolation that the position packets feed, so
-     * what is drawn out there is a contact frozen at the moment it crossed the edge. Saying it
-     * always ticks is what keeps it flying.
+     * <p>The companion to {@link #scrapeLine}, for {@link #insideTerrain} rather than for movement,
+     * and the reason the two are not the same method is the aeroplane with its gear up. There is no
+     * scraping to be done then — a belly has no wheels to roll on, so the airframe hits everything,
+     * and an arrival is an arrival — but the question of what the aeroplane is <em>inside</em> has
+     * the same answer either way: the plain box sits on the wheels and is settled against the world
+     * by {@code move} in the ordinary way, so anything reaching no higher than the bottom of it is
+     * what holds the aircraft up. Overlapping that is what standing on the ground looks like from
+     * underneath. It is not the world having closed over an aeroplane, and flying out of it is not
+     * the answer to it.
      *
-     * <p>Emphatically not on the server. Out there the aircraft holds its own chunk open and ticks
-     * because of that; if the ticket is ever let go — a parked one lets go — then ticking anyway
-     * would run the flight model over ground the server has not loaded, and every block it asked
-     * about would be generated on the spot to answer.
+     * <p>Terrain that really did arrive around an aircraft is untouched by this. A hillside that
+     * appears where an aeroplane is flying reaches past the wheels and well above them — that is
+     * what being inside a hillside is — and every block of it above this line still counts.
      */
-    @Override
-    public boolean isAlwaysTicking() {
-        return this.level().isClientSide;
+    private double floorLine() {
+        double scrape = this.scrapeLine();
+
+        // On the wheels and the right way up, the step the undercarriage rolls over is floor too.
+        return scrape == Hitboxes.UNDERSIDE_NONE ? this.getBoundingBox().minY : scrape;
     }
 
     /**
@@ -2506,7 +3348,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      */
     @Override
     public boolean shouldRenderAtSqrDistance(double distance) {
-        AircraftDefinition.Hitbox hitbox = this.getStats().hitbox();
+        VehicleChassis.Hitbox hitbox = this.getStats().hitbox();
 
         if (!hitbox.hasGhostLimit()) {
             return true;
@@ -2515,15 +3357,6 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
         double range = hitbox.ghostRange();
 
         return distance < range * range;
-    }
-
-    // ------------------------------------------------------------------
-    // Persistence and GeckoLib
-    // ------------------------------------------------------------------
-
-    @Override
-    protected net.minecraft.world.item.Item getDropItem() {
-        return BuiltInRegistries.ITEM.get(this.getAircraftId());
     }
 
     /**
@@ -2544,12 +3377,13 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
      */
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
-        controllers.add(new AnimationController<>(this, "gear", GEAR_TRANSITION_TICKS,
+        controllers.add(new AnimationController<>(this, "gear", AircraftAnimations.TRANSITION_TICKS,
                 AircraftAnimations::gearCycle).setAnimationSpeedHandler(AircraftAnimations::gearSpeed));
     }
 
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
+        super.readAdditionalSaveData(tag);
         this.setThrottle(tag.getFloat("Throttle"));
 
         if (tag.contains("Attitude")) {
@@ -2581,6 +3415,7 @@ public class AircraftEntity extends VehicleEntity implements GeoEntity {
 
     @Override
     protected void addAdditionalSaveData(CompoundTag tag) {
+        super.addAdditionalSaveData(tag);
         tag.putFloat("Throttle", this.getThrottle());
 
         ListTag stored = new ListTag();

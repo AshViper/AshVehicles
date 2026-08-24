@@ -12,6 +12,8 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
+import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.model.GeoModel;
@@ -20,16 +22,17 @@ import software.bernie.geckolib.util.Color;
 
 /**
  * Draws a ghost's GeckoLib model from its snapshot — the geometry and texture the snapshot names,
- * at the snapshot's scale, posed by whatever the adapter's poser does and otherwise left as
- * authored.
+ * at the snapshot's scale, played and posed as the entity it stands for is.
  *
- * <p>This is the static model the simplified tiers are drawn from, and the simply-posed one the
- * ghost tier is drawn from. It is not the entity's renderer and needs no entity: everything it
- * draws from was copied out when the snapshot was taken, so it draws just as well after the
- * entity has gone.
+ * <p>It is not the entity's renderer and needs no entity: everything it draws from was copied out
+ * when the snapshot was taken, so it draws just as well after the entity has gone. What it does
+ * with that is the same in both halves as the entity's own renderer: whatever the adapter has
+ * registered controllers for is played from the animation file the snapshot names, and the
+ * adapter's poser then sets the bones that follow the flight from moment to moment.
  *
- * <p>One renderer and one model serve every ghost; the animatable is the shared
- * {@link GhostAnimatable}, set before each draw.
+ * <p>One renderer and one model serve every ghost, as one serves every entity of a kind; the
+ * animatable is the shared {@link GhostAnimatable}, set before each draw, and each ghost's
+ * animation state is kept apart by {@link #getInstanceId}.
  */
 public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     /** How solid a ghost is. Enough to read against the sky, far too little to mistake for near. */
@@ -54,11 +57,43 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
         }
 
         GhostAnimatable animatable = GhostAnimatable.of(ghost, snapshot, poser);
+        startClock(animatable);
         RenderType type = renderType(snapshot.texture(), context.ghostStyle());
         MultiBufferSource buffers = context.buffers();
 
         INSTANCE.render(context.poseStack(), animatable, buffers, type, buffers.getBuffer(type),
                 context.packedLight(), context.partialTick());
+    }
+
+    /**
+     * Starts every ghost's animation clock at the same moment, before GeckoLib starts it at the
+     * one the ghost happened to first be drawn at.
+     *
+     * <p>GeckoLib times anything that is not an entity from its own first frame, and then advances
+     * one clock — the model's — by the difference between one draw and the next. That is fine when
+     * a model draws one thing. Ours draws every ghost, and ghosts first appear at different
+     * moments, so left alone the clock would leap back and forth by the difference between their
+     * starting points and every animation with it. Pinning the start of each to zero makes the
+     * figure the same absolute clock for all of them, which is what the game does for entities and
+     * why one model can draw a hundred of those.
+     */
+    private static void startClock(GhostAnimatable animatable) {
+        AnimatableManager<?> manager = animatable.getAnimatableInstanceCache()
+                .getManagerForId(INSTANCE.getInstanceId(animatable));
+
+        if (manager.getFirstTickTime() == -1) {
+            manager.startedAt(0.0);
+        }
+    }
+
+    /**
+     * One ghost, one animation state: GeckoLib files controllers under this, and two aeroplanes
+     * putting their gear down at different times must not share a set. The ghost's UUID is its
+     * identity for the same reason it is everywhere else — entity ids are reused.
+     */
+    @Override
+    public long getInstanceId(GhostAnimatable animatable) {
+        return animatable.ghost().uuid().getLeastSignificantBits();
     }
 
     /**
@@ -74,9 +109,13 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
 
     @Override
     public Color getRenderColor(GhostAnimatable animatable, float partialTick, int packedLight) {
-        return GhostRenderContext.isTranslucent()
-                ? Color.ofRGBA(255, 255, 255, (int) (GHOST_ALPHA * 255.0F))
-                : Color.WHITE;
+        // How see-through it is is the distance's business; how dark it is is the entity's. A wreck
+        // is charred at any range, and a ghost drawn in the aeroplane's colours would have one come
+        // back to life the moment the game's own renderer handed it over.
+        int alpha = GhostRenderContext.isTranslucent() ? (int) (GHOST_ALPHA * 255.0F) : 255;
+        int level = (int) (255.0F * Mth.clamp(animatable.snapshot().shade(), 0.0F, 1.0F));
+
+        return Color.ofRGBA(level, level, level, alpha);
     }
 
     /**
@@ -97,9 +136,12 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
         poseStack.translate(-0.5F, -0.51F, -0.5F);
     }
 
-    /** Geometry and texture from the snapshot; pose from the adapter's poser. */
+    /** Geometry, texture and animations from the snapshot; pose from the adapter's poser. */
     private static final class Model extends GeoModel<GhostAnimatable> {
-        /** Only consulted if a controller ever plays a named animation, and a ghost has no controllers. */
+        /**
+         * Stands in for the animation file of a ghost that has none. Nothing asks for an animation
+         * out of it: a ghost with nothing to play has no controllers to ask.
+         */
         private static final ResourceLocation NO_ANIMATION =
                 ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "animations/ghost/none.animation.json");
 
@@ -115,7 +157,9 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
 
         @Override
         public ResourceLocation getAnimationResource(GhostAnimatable animatable) {
-            return NO_ANIMATION;
+            ResourceLocation animation = animatable.snapshot().animation();
+
+            return animation == null ? NO_ANIMATION : animation;
         }
 
         /** A bone a poser names and the geometry lacks is skipped, not a crash. */
@@ -132,7 +176,7 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
             GhostAnimatable.GhostPoser poser = animatable.poser();
 
             if (poser != null) {
-                poser.pose(this, animatable.snapshot());
+                poser.pose(this, animatable.ghost(), animationState.getPartialTick());
             }
         }
     }

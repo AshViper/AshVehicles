@@ -36,8 +36,6 @@ public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
         Vec3 position = rocket.position();
         Vec3 travel = rocket.getDeltaMovement();
         AABB bounds = rocket.getBoundingBox().move(position.reverse());
-        float animationTime = previous == null ? 0.0F : previous.animationTime() + 0.05F;
-
         // Heading and elevation along the flight path, in the turns the renderer applies rather
         // than in the game's own convention: a missile has no yaw of its own to speak of, it simply
         // lies along the way it is going.
@@ -64,12 +62,13 @@ public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
                 yaw,
                 null,
                 1.0F,
+                1.0F,
                 WeaponModel.geometryFile(rocket.getWeaponId()),
                 WeaponModel.textureFile(rocket.getWeaponId()),
                 null,
+                null,
                 bounds,
                 true,
-                animationTime,
                 gameTime,
                 null);
     }
@@ -91,16 +90,5 @@ public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
         EntityGhostRenderer.drawModel(ghost, snapshot, context, null);
         poseStack.popPose();
-    }
-
-    /**
-     * Not handed to Distant Horizons. A box group is a buffer on the graphics card, and a missile
-     * lives for a few seconds: making and destroying one per shot would cost far more than drawing
-     * the model does, and at the distances the simplified tier covers a missile is a few pixels
-     * either way.
-     */
-    @Override
-    public boolean supportsDhBoxes() {
-        return false;
     }
 }

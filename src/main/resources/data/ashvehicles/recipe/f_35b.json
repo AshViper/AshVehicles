@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "K": {
+      "tag": "c:storage_blocks/iron"
+    },
+    "D": {
+      "tag": "c:gems/diamond"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "N": {
+      "tag": "c:ingots/netherite"
+    }
+  },
+  "pattern": ["#K#", "DQD", "KNK"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:f_35b"
+  }
+}

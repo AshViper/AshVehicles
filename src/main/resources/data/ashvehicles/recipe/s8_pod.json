@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_pod",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "G": {
+      "item": "minecraft:gunpowder"
+    },
+    "B": {
+      "item": "minecraft:blaze_powder"
+    }
+  },
+  "pattern": ["###", "GBG", "###"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:s8_pod"
+  }
+}

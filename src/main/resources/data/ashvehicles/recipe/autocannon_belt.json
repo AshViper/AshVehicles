@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_ammo",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "C": {
+      "tag": "c:ingots/copper"
+    },
+    "G": {
+      "item": "minecraft:gunpowder"
+    }
+  },
+  "pattern": ["CCC", "GGG", " # "],
+  "result": {
+    "count": 4,
+    "id": "ashvehicles:autocannon_belt"
+  }
+}

@@ -3,7 +3,10 @@ package com.ashvehicles.client.sound;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.weapon.Dispenser;
+import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.client.sounds.SoundManager;
@@ -39,20 +42,35 @@ import net.minecraft.resources.ResourceLocation;
  */
 public final class ModSounds {
     /** {@code engine.<aircraft>}: an airframe's own engine note. */
-    public static final String ENGINE_PREFIX = "engine.";
+    public static final String ENGINE_PREFIX = VehicleEntityBase.SOUND_PREFIX;
+    /** {@code engine.<aircraft>.afterburner}: the burner catching, for an airframe that has one. */
+    public static final String AFTERBURNER_ROLE = AircraftEntity.AFTERBURNER_ROLE;
     /** {@code gear.<aircraft>}: an airframe's own undercarriage. */
     public static final String GEAR_PREFIX = "gear.";
     /** {@code weapon.<weapon>}, and {@code weapon.<weapon>.<role>} for everything but the report. */
     public static final String WEAPON_PREFIX = WeaponMounts.SOUND_PREFIX;
     /** {@code rwr.<role>}: the warning receiver, which belongs to no particular weapon. */
     public static final String RWR_PREFIX = "rwr.";
+    /** {@code seeker.<role>}: the crew's own seeker, for a weapon that has recorded nothing itself. */
+    public static final String SEEKER_PREFIX = "seeker.";
 
     /** The role of a sound a weapon makes other than firing, as the tail of its name. */
     public static final String FLIGHT_ROLE = "flight";
     public static final String FALL_ROLE = "fall";
+    public static final String RICOCHET_ROLE = Ricochet.SOUND_ROLE;
+    /** What a weapon's own seeker has to say: working on something, holding it, and losing it. */
+    public static final String SEEK_ROLE = "seek";
+    public static final String LOCK_ROLE = "lock";
+    public static final String LOST_ROLE = "lost";
 
     /** The engine note every aircraft falls back on. Shipped. */
     public static final ResourceLocation ENGINE = id(ENGINE_PREFIX + "default");
+    /**
+     * The burner lighting, for any aircraft with no recording of its own. Not shipped: unlike the
+     * engine note this is one short bang rather than a loop, so there is something sensible in the
+     * game to fall back to until somebody records it. See {@link AfterburnerSounds}.
+     */
+    public static final ResourceLocation AFTERBURNER = id(ENGINE_PREFIX + AFTERBURNER_ROLE);
     /**
      * The undercarriage every aircraft falls back on. Looped, and not shipped: an aircraft is silent
      * on the gear lever until something provides this or a note of its own.
@@ -83,6 +101,13 @@ public final class ModSounds {
     public static final ResourceLocation BLAST = id(WEAPON_PREFIX + "blast");
 
     /**
+     * A round skidding off armour rather than going into it, for any weapon with no clang recorded
+     * of its own. Named by the server; not shipped, so until something records one it falls through
+     * to the game's own metal-on-metal. See {@link Ricochet}.
+     */
+    public static final ResourceLocation RICOCHET = Ricochet.SOUND;
+
+    /**
      * The warning receiver's tone: one short beep, repeated as fast as the trouble deserves.
      *
      * <p>A beep rather than a loop, deliberately. What tells a pilot how much trouble they are in is
@@ -103,6 +128,29 @@ public final class ModSounds {
     public static final ResourceLocation RWR_LOCK = id(RWR_PREFIX + "lock");
     /** Something has left their rail and is coming for you. Beeped five times a second. */
     public static final ResourceLocation RWR_MISSILE = id(RWR_PREFIX + "missile");
+
+    /**
+     * The crew's own seeker, which is the receiver pointed the other way round: not somebody taking
+     * you, but your own missile saying what it can see. See {@link SeekerSounds}.
+     *
+     * <p>Three names, because a lock is three moments. This one is the seeker working on something
+     * and not yet having it: a growl, looped for as long as it is working, and <b>the one recording
+     * here that does not play at exactly the note it was cut at</b> — it climbs a little as the lock
+     * closes, which is what tells a pilot watching the target rather than the instruments how far
+     * along it has got. A hand's breadth either side of as-recorded, so cut it at the note it should
+     * be heard at and the climb looks after itself. Shipped, as a four-second loop.
+     */
+    public static final ResourceLocation SEEKER_SEARCH = id(SEEKER_PREFIX + "search");
+    /** The seeker has it. A steady tone, running for exactly as long as the lock does. Shipped. */
+    public static final ResourceLocation SEEKER_LOCK = id(SEEKER_PREFIX + LOCK_ROLE);
+    /**
+     * A lock that was had and has fallen away. One short note, and then the growl again or silence.
+     *
+     * <p>Not shipped, and the one of the three with no fallback among the others: the two above are
+     * loops, and a loop played once over the top of the growl starting again is not a short note. So
+     * until somebody records this the game's own is used. See {@link SeekerSounds}.
+     */
+    public static final ResourceLocation SEEKER_LOST = id(SEEKER_PREFIX + LOST_ROLE);
 
     /** The event named after one aircraft or one weapon: {@code <namespace>:<prefix><name>}. */
     public static ResourceLocation named(ResourceLocation subject, String prefix) {

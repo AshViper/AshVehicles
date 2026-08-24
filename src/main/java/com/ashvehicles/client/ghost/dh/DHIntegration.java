@@ -1,11 +1,6 @@
 package com.ashvehicles.client.ghost.dh;
 
-import java.util.List;
-
-import com.ashvehicles.client.ghost.EntityGhost;
-
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.ModList;
 
@@ -23,9 +18,7 @@ import net.neoforged.fml.ModList;
  *   <li>how far it is drawing terrain, which decides whether a ghost has ground behind it;</li>
  *   <li>its terrain data, column by column, which is the only way to know that one of its
  *       mountains stands between the camera and a ghost — it leaves no depth in the game's depth
- *       buffer;</li>
- *   <li>a register of box groups drawn inside its own pass, which is what the simplified tier
- *       uses when allowed, so that those ghosts are depth-tested, fogged and lit by it.</li>
+ *       buffer.</li>
  * </ul>
  */
 public final class DHIntegration {
@@ -60,29 +53,6 @@ public final class DHIntegration {
      */
     public static boolean isOccluded(ClientLevel level, Vec3 from, Vec3 to, double skip) {
         return LOADED && DHRendererBridge.isOccluded(level, from, to, skip);
-    }
-
-    /** Whether the simplified tier may be drawn as box groups in Distant Horizons' own pass. */
-    public static boolean boxesAvailable(ClientLevel level) {
-        return LOADED && DHRendererBridge.boxesAvailable(level);
-    }
-
-    /**
-     * Shows, moves or hides a ghost's box group.
-     *
-     * @param boxes the boxes, in world coordinates; empty hides the group
-     */
-    public static void updateBoxes(ClientLevel level, EntityGhost ghost, List<AABB> boxes, int argb) {
-        if (LOADED) {
-            DHRendererBridge.updateBoxes(level, ghost, boxes, argb);
-        }
-    }
-
-    /** Removes a ghost's box group, if it has one. Safe to call for any ghost. */
-    public static void removeBoxes(EntityGhost ghost) {
-        if (LOADED) {
-            DHRendererBridge.removeBoxes(ghost);
-        }
     }
 
     /** Forgets everything tied to the old level. */

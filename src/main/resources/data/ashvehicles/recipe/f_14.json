@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "D": {
+      "tag": "c:gems/diamond"
+    },
+    "K": {
+      "tag": "c:storage_blocks/iron"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "R": {
+      "tag": "c:dusts/redstone"
+    }
+  },
+  "pattern": ["#K#", "DQD", "KRK"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:f_14"
+  }
+}

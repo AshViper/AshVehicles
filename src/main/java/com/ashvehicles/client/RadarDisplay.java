@@ -2,8 +2,8 @@ package com.ashvehicles.client;
 
 import java.util.List;
 
-import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.VehicleEntityBase;
+import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.sensor.Contact;
 import com.ashvehicles.sensor.Threat;
 
@@ -34,15 +34,13 @@ public final class RadarDisplay {
     /** The scope, in screen pixels. Wide enough to tell two contacts apart and no wider. */
     private static final int SCOPE_WIDTH = 104;
     private static final int SCOPE_HEIGHT = 68;
-    /** Clear of the status column below it. */
-    private static final int SCOPE_BOTTOM_GAP = 66;
+    /** Clear of the screen edge the instrument is pinned to. */
     private static final int EDGE = 8;
     /** Range rings across the scope, as fractions of the radar's reach. */
     private static final float[] RINGS = {0.05F, 0.25F, 0.5F};
 
     /** The receiver's ring, and the three rings threats sit on as they get worse. */
     private static final int RWR_RADIUS = 34;
-    private static final int RWR_BOTTOM_GAP = 10;
     private static final float SEARCH_RING = 0.86F;
     private static final float LOCK_RING = 0.6F;
     private static final float MISSILE_RING = 0.34F;
@@ -52,8 +50,8 @@ public final class RadarDisplay {
     /** How much higher or lower a contact has to be before the scope says so, in blocks. */
     private static final float NOTABLE_CLIMB = 20.0F;
 
-    public static void draw(GuiGraphics graphics, Font font, AircraftEntity aircraft) {
-        AircraftDefinition.Radar radar = aircraft.getStats().radar();
+    public static void draw(GuiGraphics graphics, Font font, VehicleEntityBase vehicle) {
+        VehicleChassis.Radar radar = vehicle.radar();
 
         // Two boxes, not one. An aeroplane with no radar at all still hears somebody else's, which
         // is exactly the aeroplane that most needs to.
@@ -67,11 +65,14 @@ public final class RadarDisplay {
     }
 
     /** Bearing across, range up: what the aerial found in front of the aeroplane. */
-    private static void drawScope(GuiGraphics graphics, Font font, AircraftDefinition.Radar radar) {
+    private static void drawScope(GuiGraphics graphics, Font font, VehicleChassis.Radar radar) {
         int left = EDGE;
         int right = left + SCOPE_WIDTH;
-        int bottom = graphics.guiHeight() - SCOPE_BOTTOM_GAP;
-        int top = bottom - SCOPE_HEIGHT;
+        // Halfway up the left-hand side. The scope is read with a glance sideways from the
+        // boresight rather than a look down into the corner, and the status column keeps the
+        // bottom of this edge to itself.
+        int top = (graphics.guiHeight() - SCOPE_HEIGHT) / 2;
+        int bottom = top + SCOPE_HEIGHT;
         int middle = (left + right) / 2;
 
         graphics.fill(left, top, right, bottom, AircraftHud.SHADOW);
@@ -115,7 +116,7 @@ public final class RadarDisplay {
 
     /** One contact, at its bearing across the scope and its range up it. */
     private static void plot(GuiGraphics graphics, Font font, Contact contact,
-            AircraftDefinition.Radar radar, int left, int right, int top, int bottom) {
+            VehicleChassis.Radar radar, int left, int right, int top, int bottom) {
         float across = Mth.clamp(contact.bearing() / Math.max(radar.arc(), 1.0F), -1.0F, 1.0F);
         float out = up(Mth.clamp(contact.range() / Math.max(radar.range(), 1.0F), 0.0F, 1.0F));
 
@@ -145,8 +146,10 @@ public final class RadarDisplay {
 
     /** Who is looking at you, and from where. */
     private static void drawReceiver(GuiGraphics graphics, Font font) {
-        int centreX = graphics.guiWidth() / 2;
-        int centreY = graphics.guiHeight() - RWR_BOTTOM_GAP - RWR_RADIUS;
+        // Halfway up the right-hand side, opposite the scope: the two instruments that say what
+        // else is in the sky sit either side of the boresight at the same height.
+        int centreX = graphics.guiWidth() - EDGE - RWR_RADIUS;
+        int centreY = graphics.guiHeight() / 2;
 
         AircraftHud.circle(graphics, centreX, centreY, RWR_RADIUS, AircraftHud.DIM);
         AircraftHud.circle(graphics, centreX, centreY, Math.round(RWR_RADIUS * LOCK_RING), AircraftHud.DIM);

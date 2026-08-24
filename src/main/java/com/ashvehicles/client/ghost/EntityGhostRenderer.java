@@ -11,6 +11,7 @@ import com.mojang.math.Axis;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 
 /**
@@ -70,6 +71,9 @@ public final class EntityGhostRenderer {
         RenderType type = RenderType.entityTranslucentEmissive(texture);
         VertexConsumer buffer = context.buffers().getBuffer(type);
         int alpha = context.ghostStyle() ? (int) (GhostGeoRenderer.GHOST_ALPHA * 255.0F) : 255;
+        // An icon standing in for a wreck is darkened the same way the model is, so the furthest
+        // tier does not quietly repaint it.
+        int level = (int) (255.0F * Mth.clamp(snapshot.shade(), 0.0F, 1.0F));
         int light = context.packedLight();
 
         poseStack.pushPose();
@@ -78,19 +82,19 @@ public final class EntityGhostRenderer {
         poseStack.mulPose(context.camera().rotation());
         PoseStack.Pose pose = poseStack.last();
 
-        vertex(buffer, pose, -half, -half, 0.0F, 1.0F, alpha, light);
-        vertex(buffer, pose, half, -half, 1.0F, 1.0F, alpha, light);
-        vertex(buffer, pose, half, half, 1.0F, 0.0F, alpha, light);
-        vertex(buffer, pose, -half, half, 0.0F, 0.0F, alpha, light);
+        vertex(buffer, pose, -half, -half, 0.0F, 1.0F, level, alpha, light);
+        vertex(buffer, pose, half, -half, 1.0F, 1.0F, level, alpha, light);
+        vertex(buffer, pose, half, half, 1.0F, 0.0F, level, alpha, light);
+        vertex(buffer, pose, -half, half, 0.0F, 0.0F, level, alpha, light);
         poseStack.popPose();
 
         return true;
     }
 
     private static void vertex(VertexConsumer buffer, PoseStack.Pose pose, float x, float y, float u, float v,
-            int alpha, int light) {
+            int level, int alpha, int light) {
         buffer.addVertex(pose, x, y, 0.0F)
-                .setColor(255, 255, 255, alpha)
+                .setColor(level, level, level, alpha)
                 .setUv(u, v)
                 .setOverlay(OverlayTexture.NO_OVERLAY)
                 .setLight(light)

@@ -13,6 +13,12 @@
     "sounds": ["ashvehicles:loadsound"] },
   "weapon.blast":   { "subtitle": "subtitles.ashvehicles.blast",
     "sounds": ["ashvehicles:blastsound"] },
+  "weapon.tank":    { "subtitle": "subtitles.ashvehicles.tank_gun",
+    "sounds": ["ashvehicles:tankgunsound"] },
+  "weapon.ricochet": { "subtitle": "subtitles.ashvehicles.ricochet",
+    "sounds": ["ashvehicles:ricochetsound"] },
+  "engine.tank":    { "subtitle": "subtitles.ashvehicles.tank_engine",
+    "sounds": ["ashvehicles:tankenginesound"] },
   "gear.default":   { "subtitle": "subtitles.ashvehicles.gear",
     "sounds": ["ashvehicles:gearsound"] },
   "rwr.contact":       { "subtitle": "subtitles.ashvehicles.rwr_contact",
@@ -22,5 +28,11 @@
   "rwr.missile":    { "subtitle": "subtitles.ashvehicles.rwr_missile",
     "sounds": ["ashvehicles:rwrmissile"] },
   "weapon.decoy": { "subtitle": "subtitles.ashvehicles.decoy",
-    "sounds": ["ashvehicles:decoysound"] }
+    "sounds": ["ashvehicles:decoysound"] },
+  "seeker.search":  { "subtitle": "subtitles.ashvehicles.seeker_search",
+    "sounds": ["ashvehicles:seekersearch"] },
+  "seeker.lock":    { "subtitle": "subtitles.ashvehicles.seeker_lock",
+    "sounds": ["ashvehicles:seekerlock"] },
+  "seeker.lost":    { "subtitle": "subtitles.ashvehicles.seeker_lost",
+    "sounds": ["ashvehicles:seekerlost"] }
 }

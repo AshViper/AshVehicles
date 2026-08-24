@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "H": {
+      "item": "minecraft:chain"
+    }
+  },
+  "pattern": ["###", "#Q#", "H H"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:bmd_4"
+  }
+}

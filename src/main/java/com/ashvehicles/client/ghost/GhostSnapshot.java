@@ -31,12 +31,20 @@ import org.joml.Quaternionf;
  * @param attitude the full orientation as a rotation, for things whose orientation is more than two
  *        angles; {@code null} when yaw and pitch tell the whole story
  * @param scale model scale
+ * @param shade how much of its own colour the thing keeps, 1 for all of it. The one thing about how
+ *        a ghost looks that is the entity's business rather than the distance's: a machine that has
+ *        been written off is charred wherever it is being drawn from, and a ghost drawn in the
+ *        aeroplane's colours would have a wreck come back to life at the hand-over distance
  * @param model the geometry file to draw the ghost from, or {@code null} if it has none
  * @param texture the texture to draw it with, or {@code null}
+ * @param animation the animation file whose cycles the ghost plays, or {@code null} for a ghost
+ *        with nothing to play
  * @param billboard the flat icon for the furthest tier, or {@code null} for none
- * @param bounds the entity's bounding box, relative to {@code position}
+ * @param bounds the box the entity is drawn within, relative to {@code position}: what the ghost
+ *        is culled against, what the occlusion trace is aimed at and what a billboard is sized by.
+ *        Deliberately not the box the entity collides with, which for these machines is kept
+ *        smaller than they are
  * @param useGeckoLib whether {@code model} is a GeckoLib geometry file
- * @param animationTime seconds of simplified animation elapsed, for adapters that want a clock
  * @param gameTime the game tick the snapshot was taken on
  * @param payload anything else the adapter that took this snapshot wants back when it draws it
  */
@@ -51,12 +59,13 @@ public record GhostSnapshot(
         float bodyYaw,
         @Nullable Quaternionf attitude,
         float scale,
+        float shade,
         @Nullable ResourceLocation model,
         @Nullable ResourceLocation texture,
+        @Nullable ResourceLocation animation,
         @Nullable ResourceLocation billboard,
         AABB bounds,
         boolean useGeckoLib,
-        float animationTime,
         long gameTime,
         @Nullable Object payload) {
 

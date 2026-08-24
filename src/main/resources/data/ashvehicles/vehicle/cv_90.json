@@ -1,0 +1,347 @@
+{
+  "hitbox": {
+    "width": 4.75,
+    "height": 3.5,
+    "tracking_range": 10,
+    "boxes": [
+      {
+        "name": "tower",
+        "offset": [0.0, 2.688, -0.755],
+        "size": [3.44, 1.25, 2.991],
+        "mount": "turret"
+      },
+      {
+        "name": "corpus",
+        "offset": [0.0, 1.227, 1.638],
+        "size": [3.065, 1.637, 1.716]
+      },
+      {
+        "name": "corpus_left",
+        "offset": [1.906, 1.684, -1.938],
+        "size": [0.813, 0.906, 5.625]
+      },
+      {
+        "name": "corpus_right",
+        "offset": [-1.906, 1.684, -1.938],
+        "size": [0.813, 0.906, 5.625]
+      },
+      {
+        "name": "corpus_2",
+        "offset": [0.0, 2.022, -3.413],
+        "size": [4.375, 0.294, 2.711]
+      },
+      {
+        "name": "corpus_right_2",
+        "offset": [-1.758, 1.674, 1.875],
+        "size": [1.517, 0.924, 2.759]
+      },
+      {
+        "name": "whell19_right",
+        "offset": [-1.854, 0.406, -0.462],
+        "size": [0.645, 0.793, 5.757]
+      },
+      {
+        "name": "corpus_left_2",
+        "offset": [1.758, 1.674, 1.875],
+        "size": [1.517, 0.924, 2.759]
+      },
+      {
+        "name": "corpus_3",
+        "offset": [0.0, 1.248, 3.479],
+        "size": [4.25, 0.549, 1.136],
+        "rotation": [-12.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_left_3",
+        "offset": [1.24, 1.286, -3.326],
+        "size": [0.537, 1.61, 2.776]
+      },
+      {
+        "name": "corpus_right_3",
+        "offset": [-1.24, 1.286, -3.326],
+        "size": [0.537, 1.61, 2.776]
+      },
+      {
+        "name": "whell9_left",
+        "offset": [1.854, 0.406, -0.462],
+        "size": [0.645, 0.793, 5.757]
+      },
+      {
+        "name": "tower_2",
+        "offset": [0.0, 1.844, -2.485],
+        "size": [2.94, 2.188, 0.486],
+        "rotation": [0.0, 12.5, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "tower_3",
+        "offset": [0.0, 1.469, -0.229],
+        "size": [2.634, 1.438, 0.437],
+        "mount": "turret"
+      },
+      {
+        "name": "tower_4",
+        "offset": [-1.44, 2.56, -1.038],
+        "size": [0.77, 0.755, 2.424],
+        "mount": "turret"
+      },
+      {
+        "name": "tower_5",
+        "offset": [-0.911, 2.758, -0.868],
+        "size": [1.314, 1.235, 0.825],
+        "rotation": [16.0, 0.0, 2.0],
+        "mount": "turret"
+      },
+      {
+        "name": "corpus_4",
+        "offset": [0.0, 1.878, 2.071],
+        "size": [2.75, 0.22, 2.44],
+        "rotation": [-12.0, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_5",
+        "offset": [0.0, 0.512, -0.688],
+        "size": [2.875, 0.062, 6.25]
+      },
+      {
+        "name": "whell16_left",
+        "offset": [1.805, 0.899, 2.81],
+        "size": [0.813, 1.071, 1.078],
+        "rotation": [32.5, 0.0, 0.0]
+      },
+      {
+        "name": "whell8_right",
+        "offset": [-1.805, 0.899, 2.81],
+        "size": [0.813, 1.071, 1.078],
+        "rotation": [32.5, 0.0, 0.0]
+      },
+      {
+        "name": "tower_6",
+        "offset": [0.767, 1.844, -2.305],
+        "size": [0.913, 2.188, 0.366],
+        "rotation": [0.0, -32.5, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "tower_7",
+        "offset": [0.0, 2.875, -1.528],
+        "size": [2.61, 0.125, 2.125],
+        "mount": "turret"
+      },
+      {
+        "name": "whell10_right",
+        "offset": [-1.94, 1.009, -3.876],
+        "size": [0.621, 1.131, 0.793],
+        "rotation": [-28.5, 0.0, 0.0]
+      },
+      {
+        "name": "whell17_left",
+        "offset": [1.94, 1.009, -3.876],
+        "size": [0.621, 1.131, 0.793],
+        "rotation": [-28.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_6",
+        "offset": [0.0, 1.352, -4.652],
+        "size": [3.0, 1.438, 0.125]
+      },
+      {
+        "name": "tower_8",
+        "offset": [-1.313, 1.5, -0.813],
+        "size": [0.125, 1.5, 2.75],
+        "mount": "turret"
+      },
+      {
+        "name": "corpus_left_4",
+        "offset": [1.469, 1.137, -0.688],
+        "size": [0.063, 1.313, 6.25]
+      },
+      {
+        "name": "corpus_right_4",
+        "offset": [-1.469, 1.137, -0.688],
+        "size": [0.063, 1.313, 6.25]
+      },
+      {
+        "name": "corpus_7",
+        "offset": [-1.063, 1.576, -4.861],
+        "size": [0.875, 0.813, 0.625],
+        "rotation": [12.5, 0.0, 0.0]
+      },
+      {
+        "name": "boardscreens",
+        "offset": [-2.219, 1.445, 1.791],
+        "size": [0.188, 0.883, 2.649],
+        "rotation": [-11.5, 0.0, 0.0]
+      },
+      {
+        "name": "tower_9",
+        "offset": [0.0, 0.719, -1.228],
+        "size": [2.634, 0.063, 2.436],
+        "mount": "turret"
+      },
+      {
+        "name": "tower_right",
+        "offset": [-0.813, 1.492, -1.549],
+        "size": [0.81, 0.992, 0.434],
+        "rotation": [43.0, 0.0, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "tower_left",
+        "offset": [0.813, 1.492, -1.549],
+        "size": [0.81, 0.992, 0.434],
+        "rotation": [43.0, 0.0, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "gun",
+        "offset": [0.0, 2.531, 1.938],
+        "size": [0.5, 0.438, 2.5],
+        "mount": "turret"
+      },
+      {
+        "name": "corpus_8",
+        "offset": [0.0, 2.075, 0.375],
+        "size": [4.375, 0.063, 1.0]
+      },
+      {
+        "name": "engine",
+        "offset": [0.645, 1.171, 1.711],
+        "size": [0.35, 0.35, 2.022]
+      },
+      {
+        "name": "rubberscreens_right",
+        "offset": [-2.219, 1.075, -0.531],
+        "size": [0.063, 0.5, 6.313]
+      },
+      {
+        "name": "rubberscreens3_left",
+        "offset": [2.219, 1.075, -0.531],
+        "size": [0.063, 0.5, 6.313]
+      },
+      {
+        "name": "corpus_9",
+        "offset": [0.0, 0.793, 2.869],
+        "size": [2.875, 0.063, 1.063],
+        "rotation": [32.5, 0.0, 0.0]
+      },
+      {
+        "name": "kletka",
+        "offset": [0.0, 3.717, -2.286],
+        "size": [2.235, 1.687, 0.05],
+        "rotation": [3.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_left_5",
+        "offset": [1.656, 2.075, -1.344],
+        "size": [1.063, 0.063, 2.438]
+      },
+      {
+        "name": "corpus_10",
+        "offset": [0.0, 0.588, -4.216],
+        "size": [2.875, 0.063, 0.875],
+        "rotation": [-10.0, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_right_5",
+        "offset": [-1.656, 2.075, -1.344],
+        "size": [1.063, 0.063, 2.438]
+      },
+      {
+        "name": "corpus_11",
+        "offset": [1.387, 1.022, 0.313],
+        "size": [0.188, 0.938, 0.75],
+        "rotation": [0.0, 0.0, 5.0]
+      },
+      {
+        "name": "corpus_left_6",
+        "offset": [0.777, 0.755, -3.236],
+        "size": [0.553, 0.156, 1.482]
+      },
+      {
+        "name": "corpus_right_6",
+        "offset": [-0.777, 0.755, -3.236],
+        "size": [0.553, 0.156, 1.482]
+      },
+      {
+        "name": "tower_10",
+        "offset": [1.12, 1.438, -1.228],
+        "size": [0.05, 1.375, 1.562],
+        "mount": "turret"
+      }
+    ]
+  },
+  "model": {
+    "scale": 1,
+    "bones": {
+      "turret": "TOWER",
+      "gun": "gun",
+      "mg": "mg422",
+      "commander_hatch": "Commandershatch",
+      "driver_hatch": "drivershatch"
+    },
+    "road_wheels": [
+      "WHELL2", "WHELL3", "WHELL4", "WHELL5", "WHELL6", "WHELL7", "WHELL8", "WHELL9", "WHELL10",
+      "WHELL11", "WHELL12", "WHELL13", "WHELL14", "WHELL15", "WHELL16", "WHELL17", "WHELL19",
+      "WHELL20"
+    ],
+    "track": {
+      "link": "track_link"
+    }
+  },
+  "powertrain": {
+    "max_speed": 0.95,
+    "reverse_speed": 0.3,
+    "acceleration": 0.006,
+    "braking": 0.035,
+    "rolling_resistance": 0.0035,
+    "steer_rate": 1.2,
+    "pivot_rate": 1.5,
+    "grade_resistance": 0.05
+  },
+  "suspension": {
+    "climb_height": 1,
+    "slope_limit": 50,
+    "settle_rate": 0.22,
+    "grip": 0.82,
+    "wheel_radius": 0.38,
+    "contact_length": 5.7,
+    "contact_width": 3.68
+  },
+  "turret": {
+    "traverse_rate": 2.4,
+    "elevation_rate": 2,
+    "depression": 8,
+    "elevation": 35,
+    "ring": [-0.15, 2.38, -0.94]
+  },
+  "armament": {
+    "main": "ashvehicles:bofors_40",
+    "trunnion": [-0.09, 2.51, 0.01],
+    "barrel_length": 3.74,
+    "recoil": 0.18,
+    "recoil_ticks": 6,
+    "kick": 0.03
+  },
+  "hull": {
+    "health": 300,
+    "explosion_power": 4,
+    "armour": 2.5,
+    "seats": [
+      [-0.15, 1.4, -0.95]
+    ]
+  },
+  "camera": {
+    "pos": [0.0, 2.2, -11.0],
+    "tilt": 8,
+    "cockpit": [0.98, 3.2, -1.35]
+  },
+  "sound": {
+    "engine": "ashvehicles:engine.tank",
+    "volume": 0.75,
+    "idle_volume": 0.35,
+    "pitch_min": 0.95,
+    "pitch_max": 1.35,
+    "range": 130
+  }
+}

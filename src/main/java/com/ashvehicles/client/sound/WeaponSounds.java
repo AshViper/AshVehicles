@@ -8,9 +8,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.AshVehicles;
-import com.ashvehicles.aircraft.AircraftManager;
 import com.ashvehicles.weapon.Dispenser;
+import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 
@@ -47,6 +48,9 @@ import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
  * <li>{@code weapon.release} itself falls back on {@code weapon.launch}, which the mod does ship. So
  *     a bomb sounds like something leaving the aeroplane until somebody records the clunk it should
  *     be, rather than sounding like nothing.
+ * <li>{@code weapon.<name>.ricochet}, a round skidding off armour, falls back on the mod's shared
+ *     {@code weapon.ricochet} and then on the game's own anvil, which is the nearest thing it has to
+ *     something hard glancing off plate.
  * <li>{@code weapon.load}, the ground crew at work, falls back on the game's own metal-on-metal.
  * <li>{@code weapon.gun} and {@code weapon.launch} fall back on nothing: the mod ships both, and a
  *     pack that has taken them away has said what it wants.
@@ -77,6 +81,14 @@ public final class WeaponSounds {
      */
     private static final ResourceLocation DECOY_FALLBACK =
             ResourceLocation.withDefaultNamespace("entity.firework_rocket.launch");
+
+    /**
+     * And a ricochet: the game's own anvil landing, which is the only thing in it that sounds like a
+     * hard heavy object meeting plate. Pitched up by {@link Ricochet#PITCH}, which is what turns a
+     * blacksmith's thump into a shell skidding off a turret.
+     */
+    private static final ResourceLocation RICOCHET_FALLBACK =
+            ResourceLocation.withDefaultNamespace("block.anvil.land");
 
     /**
      * How loud the ground crew are. The same figures the server asked for, taken from the one place
@@ -138,12 +150,16 @@ public final class WeaponSounds {
 
         SoundManager sounds = Minecraft.getInstance().getSoundManager();
         WeaponDefinition firing = weaponFor(id);
+        // Whether the server put a reach in the volume slot rather than a loudness, which is the one
+        // thing deciding how this has to be played. See instance.
+        boolean carried = firing != null || isRicochet(id);
 
         if (ModSounds.exists(sounds, id)) {
             // The recording is there; only how loud it should be at this distance is wrong, and only
-            // for a weapon's report, which is the only thing sent further than the game would send it.
-            if (firing != null) {
-                event.setSound(instance(SoundEvent.createVariableRangeEvent(id), sound, firing.sound(), firing));
+            // for the sounds that were sent further than the game would ever send one.
+            if (carried) {
+                event.setSound(instance(SoundEvent.createVariableRangeEvent(id), sound,
+                        setupFor(id, firing), true));
             }
 
             return;
@@ -161,7 +177,8 @@ public final class WeaponSounds {
         }
 
         // Same place and the same figures whatever asked for it wanted: only the recording changes.
-        event.setSound(instance(SoundEvent.createVariableRangeEvent(fallback), sound, setupFor(id, weapon), weapon));
+        event.setSound(instance(SoundEvent.createVariableRangeEvent(fallback), sound,
+                setupFor(id, weapon), carried));
     }
 
     /**
@@ -182,10 +199,10 @@ public final class WeaponSounds {
      * still placed where it happened so it comes from the right direction.
      */
     private static SimpleSoundInstance instance(SoundEvent recording, SoundInstance sound,
-            WeaponDefinition.SoundSetup setup, @Nullable WeaponDefinition weapon) {
-        if (weapon == null) {
-            // Not a weapon firing: ground crew and the like, which are heard where they happen and
-            // were never sent any further than that.
+            WeaponDefinition.SoundSetup setup, boolean carried) {
+        if (!carried) {
+            // Sent no further than the game would send anything: ground crew and the like, which are
+            // heard where they happen and whose volume really is a volume.
             return new SimpleSoundInstance(recording, sound.getSource(), setup.volume(), setup.pitch(),
                     SoundInstance.createUnseededRandom(), sound.getX(), sound.getY(), sound.getZ());
         }
@@ -226,6 +243,13 @@ public final class WeaponSounds {
             return null;
         }
 
+        if (weapon == null && isRicochet(id)) {
+            // One weapon's clang, then the mod's shared one, then the game's. Never the switch below:
+            // a ricochet that fell through to weapon.gun would be the cannon firing a second time.
+            // A weapon that has claimed this event by name wins, as it does everywhere else here.
+            return ModSounds.firstPresent(sounds, ModSounds.RICOCHET, RICOCHET_FALLBACK);
+        }
+
         // Anything else under weapon.* is a weapon's own name, which nothing answers to.
         return switch (weapon == null ? WeaponDefinition.Type.GUN : weapon.type()) {
             case GUN -> ModSounds.firstPresent(sounds, ModSounds.GUN);
@@ -234,10 +258,26 @@ public final class WeaponSounds {
         };
     }
 
+    /**
+     * Whether this is one weapon's ricochet, or the shared one everything falls back on.
+     *
+     * <p>Both are named for the role rather than for the weapon — {@code weapon.rh120.ricochet} and
+     * {@code weapon.ricochet} — so the tail of the name is the whole test.
+     */
+    private static boolean isRicochet(ResourceLocation id) {
+        return id.getPath().endsWith("." + ModSounds.RICOCHET_ROLE);
+    }
+
     /** How loud and at what pitch: the weapon's own figures, or the ones whoever asked for it used. */
     private static WeaponDefinition.SoundSetup setupFor(ResourceLocation id, @Nullable WeaponDefinition weapon) {
         if (weapon != null) {
             return weapon.sound();
+        }
+
+        // A ricochet is not the gun going off and was not sent as though it were: its own figures
+        // are the ones both ends of it were written against.
+        if (isRicochet(id)) {
+            return Ricochet.SOUND_SETUP;
         }
 
         if (id.equals(ModSounds.LOAD)) {
@@ -257,7 +297,7 @@ public final class WeaponSounds {
      */
     @Nullable
     private static WeaponDefinition weaponFor(ResourceLocation event) {
-        for (Map.Entry<ResourceLocation, WeaponDefinition> entry : AircraftManager.allWeapons().entrySet()) {
+        for (Map.Entry<ResourceLocation, WeaponDefinition> entry : Definitions.WEAPONS.all().entrySet()) {
             ResourceLocation fire = entry.getValue().sound().fire()
                     .orElseGet(() -> ModSounds.named(entry.getKey(), ModSounds.WEAPON_PREFIX));
 

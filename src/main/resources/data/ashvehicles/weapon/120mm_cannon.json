@@ -1,0 +1,23 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 42,
+  "firing": {
+    "rounds_per_second": 0.15,
+    "automatic": false,
+    "spread": 0.12
+  },
+  "projectile": {
+    "damage": 150.0,
+    "speed": 41.0,
+    "gravity": 0.00075,
+    "range": 1400.0,
+    "ricochet": 65.0,
+    "tracer": "FFE9B0"
+  },
+  "sound": {
+    "fire": "ashvehicles:weapon.tank",
+    "volume": 2.4,
+    "pitch": 0.85
+  }
+}

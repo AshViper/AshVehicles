@@ -1,6 +1,6 @@
 package com.ashvehicles.client;
 
-import com.ashvehicles.aircraft.Attitude;
+import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.entity.AircraftEntity;
 
 import net.minecraft.client.Minecraft;
@@ -87,6 +87,31 @@ public final class CockpitView {
     public static void turn(double deltaYaw, double deltaPitch) {
         yaw = Mth.clamp((float) (yaw + deltaYaw), -YAW_LIMIT, YAW_LIMIT);
         pitch = Mth.clamp((float) (pitch + deltaPitch), -PITCH_LIMIT, PITCH_LIMIT);
+    }
+
+    /**
+     * Points the head at a direction in the world, as far as a head can be pointed at it.
+     *
+     * <p>What the mouse moves while flying by pointing is the mark in the sky, not the head; the head
+     * then follows the mark, so the pilot is always looking at what they are asking the aeroplane to
+     * fly at. The two angles are worked out afresh from the direction rather than accumulated, so
+     * nothing drifts, and they are clamped exactly as a mouse movement would be — a mark that has
+     * gone further round than a head can turn simply leaves the head at the end of its travel.
+     */
+    public static void lookAlong(Vec3 direction) {
+        if (!isActive() || direction.lengthSqr() < 1.0E-8) {
+            return;
+        }
+
+        Quaternionf attitude = aircraft.getAttitude(1.0F);
+        double ahead = direction.dot(Attitude.nose(attitude));
+        double across = direction.dot(Attitude.right(attitude));
+        double above = direction.dot(Attitude.up(attitude));
+
+        yaw = Mth.clamp((float) Math.toDegrees(Mth.atan2(across, ahead)), -YAW_LIMIT, YAW_LIMIT);
+        // The head's elevation is counted down-positive, the way Minecraft counts every other one.
+        pitch = Mth.clamp((float) -Math.toDegrees(Math.asin(Mth.clamp(above, -1.0, 1.0))),
+                -PITCH_LIMIT, PITCH_LIMIT);
     }
 
     /** Where the pilot is looking in the world: the aircraft's attitude, then the head's turn. */

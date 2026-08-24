@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "D": {
+      "tag": "c:gems/diamond"
+    },
+    "E": {
+      "item": "minecraft:ender_eye"
+    },
+    "N": {
+      "tag": "c:ingots/netherite"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    }
+  },
+  "pattern": ["#N#", "DQD", "NEN"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:su_57"
+  }
+}

@@ -5,20 +5,33 @@ import com.ashvehicles.client.ghost.EntityGhostRegistry;
 import com.ashvehicles.client.ghost.GhostConfig;
 import com.ashvehicles.client.ghost.adapter.AircraftGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.BulletGhostAdapter;
+import com.ashvehicles.client.ghost.adapter.GroundVehicleGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.RocketGhostAdapter;
 import com.ashvehicles.client.particle.BlastParticle;
+import com.ashvehicles.client.particle.FlameParticle;
 import com.ashvehicles.client.particle.SmokeParticle;
 import com.ashvehicles.client.particle.ShockwaveParticle;
 import com.ashvehicles.client.particle.SparkParticle;
+import com.ashvehicles.client.item.VehicleIcons;
+import com.ashvehicles.client.item.VehicleItemModels;
+import com.ashvehicles.client.item.VehicleItemRenderer;
+import com.ashvehicles.client.model.WeaponModel;
 import com.ashvehicles.client.renderer.AircraftRenderer;
 import com.ashvehicles.client.renderer.BulletRenderer;
 import com.ashvehicles.client.renderer.CountermeasureRenderer;
+import com.ashvehicles.client.renderer.GroundVehicleRenderer;
 import com.ashvehicles.client.renderer.RocketRenderer;
 import com.ashvehicles.registry.ModEntities;
+import com.ashvehicles.registry.ModItems;
 import com.ashvehicles.registry.ModParticles;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer;
+import net.minecraft.world.item.Item;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
@@ -28,8 +41,13 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.RegisterParticleProvidersEvent;
+import net.neoforged.neoforge.client.event.RenderFrameEvent;
+import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
+import net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent;
+import net.neoforged.neoforge.event.AddPackFindersEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 
@@ -58,6 +76,8 @@ public class AshVehiclesClient {
         // draws from a snapshot, whether the thing is an aeroplane, a missile or a tracer.
         AircraftGhostAdapter aircraft = new AircraftGhostAdapter();
         ModEntities.aircraft().values().forEach(type -> EntityGhostRegistry.register(type.get(), aircraft));
+        GroundVehicleGhostAdapter ground = new GroundVehicleGhostAdapter();
+        ModEntities.vehicles().values().forEach(type -> EntityGhostRegistry.register(type.get(), ground));
         EntityGhostRegistry.register(ModEntities.BULLET.get(), new BulletGhostAdapter());
         EntityGhostRegistry.register(ModEntities.ROCKET.get(), new RocketGhostAdapter());
     }
@@ -81,6 +101,8 @@ public class AshVehiclesClient {
     static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         ModEntities.aircraft().values()
                 .forEach(type -> event.registerEntityRenderer(type.get(), AircraftRenderer::new));
+        ModEntities.vehicles().values()
+                .forEach(type -> event.registerEntityRenderer(type.get(), GroundVehicleRenderer::new));
         event.registerEntityRenderer(ModEntities.BULLET.get(), BulletRenderer::new);
         event.registerEntityRenderer(ModEntities.ROCKET.get(), RocketRenderer::new);
         event.registerEntityRenderer(ModEntities.COUNTERMEASURE.get(), CountermeasureRenderer::new);
@@ -99,11 +121,74 @@ public class AshVehiclesClient {
         event.registerSpriteSet(ModParticles.BLAST_SMOKE.get(),
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.BLAST));
         event.registerSpriteSet(ModParticles.BLAST.get(), BlastParticle::provider);
+        event.registerSpriteSet(ModParticles.FIRE.get(), FlameParticle::provider);
         event.registerSpriteSet(ModParticles.SHOCKWAVE.get(), ShockwaveParticle::provider);
         event.registerSpriteSet(ModParticles.SPARK.get(), sprites -> SparkParticle.provider(sprites, true));
         event.registerSpriteSet(ModParticles.DEBRIS.get(), sprites -> SparkParticle.provider(sprites, false));
         event.registerSpriteSet(ModParticles.VAPOUR.get(),
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.VAPOUR));
+    }
+
+    /**
+     * An item model for every machine, generated rather than written out one file per machine. See
+     * {@link VehicleItemModels}: what such a file has to say is the same for all of them, and none
+     * of it is about the machine.
+     */
+    @SubscribeEvent
+    static void onAddPackFinders(AddPackFindersEvent event) {
+        VehicleItemModels.addTo(event);
+    }
+
+    /**
+     * What a machine's item is drawn as: a picture taken from the machine's own geometry, rather
+     * than a texture somebody had to make. See {@link VehicleIcons}.
+     */
+    @SubscribeEvent
+    static void onRegisterClientExtensions(RegisterClientExtensionsEvent event) {
+        IClientItemExtensions drawing = new IClientItemExtensions() {
+            @Override
+            public BlockEntityWithoutLevelRenderer getCustomRenderer() {
+                return VehicleItemRenderer.instance();
+            }
+        };
+
+        List<Item> machines = new ArrayList<>();
+        ModItems.aircraft().values().forEach(item -> machines.add(item.get()));
+        ModItems.vehicles().values().forEach(item -> machines.add(item.get()));
+
+        event.registerItem(drawing, machines.toArray(Item[]::new));
+    }
+
+    /**
+     * Where a machine's picture is taken: the top of a frame, one machine at a time.
+     *
+     * <p>Here rather than where it is first wanted because taking one means drawing a whole model
+     * into a texture of its own, with the projection, the framing and the lighting all set aside and
+     * put back. Doing that in the middle of drawing a screen is asking for the screen to be drawn
+     * with somebody else's matrices; doing ten of them in one frame, which is what opening a
+     * creative tab full of machines would ask for, is a visible stall.
+     */
+    @SubscribeEvent
+    static void onRenderFrame(RenderFrameEvent.Pre event) {
+        VehicleIcons.takeNext();
+    }
+
+    /**
+     * Which files each weapon is drawn from is worked out once and remembered, because deciding it
+     * means asking the resource manager and that ends in a file being looked for on disk — far too
+     * much to do on every frame of every missile on the screen. A reload is the one thing that can
+     * change the answer, so it is also the one thing that has to throw the answer away.
+     *
+     * <p>The pictures the machines' items are drawn as go the same way and for the same reason: they
+     * were taken from geometry and textures that have just been read again.
+     */
+    @SubscribeEvent
+    static void onRegisterReloadListeners(RegisterClientReloadListenersEvent event) {
+        event.registerReloadListener(
+                (net.minecraft.server.packs.resources.ResourceManagerReloadListener) manager -> {
+                    WeaponModel.clearCache();
+                    VehicleIcons.forget();
+                });
     }
 
     @SubscribeEvent

@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_missile",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "E": {
+      "item": "minecraft:ender_eye"
+    },
+    "D": {
+      "tag": "c:gems/diamond"
+    },
+    "G": {
+      "item": "minecraft:gunpowder"
+    },
+    "B": {
+      "item": "minecraft:blaze_powder"
+    }
+  },
+  "pattern": [" E ", "DGD", "#B#"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:aim120"
+  }
+}

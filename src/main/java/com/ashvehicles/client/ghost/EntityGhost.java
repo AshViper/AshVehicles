@@ -43,17 +43,12 @@ public final class EntityGhost {
     /** Far enough back that the first check is due at once, without {@code now - this} overflowing. */
     private long occlusionCheckedAt = Long.MIN_VALUE / 2;
 
-    // What the last frame decided, kept for the debug overlay and for the Distant Horizons bridge.
+    // What the last frame decided, kept for the debug overlay.
     private GhostLOD lod = GhostLOD.HIDDEN;
     private double distanceSq = Double.MAX_VALUE;
-    private boolean drawnLastFrame;
+    private GhostVerdict verdict = GhostVerdict.HIDDEN;
     private int lastLight;
     private boolean lastInWorld;
-
-    /** Whatever the Distant Horizons bridge attaches to this ghost. Untyped so that this class never loads a DH class. */
-    @Nullable
-    private Object dhHandle;
-    private volatile boolean dhDrawn;
 
     EntityGhost(UUID uuid, GhostAdapter<?> adapter, Entity entity, GhostSnapshot first) {
         this.uuid = uuid;
@@ -184,15 +179,20 @@ public final class EntityGhost {
     }
 
     public boolean wasDrawnLastFrame() {
-        return this.drawnLastFrame;
+        return this.verdict == GhostVerdict.DRAWN;
     }
 
-    void record(GhostLOD lod, double distanceSq, boolean drawn) {
+    /** Why it was, or was not, drawn last frame. */
+    public GhostVerdict verdict() {
+        return this.verdict;
+    }
+
+    void record(GhostLOD lod, double distanceSq, GhostVerdict verdict) {
         this.lod = lod;
         this.distanceSq = distanceSq;
-        this.drawnLastFrame = drawn;
+        this.verdict = verdict;
 
-        if (!drawn) {
+        if (verdict != GhostVerdict.DRAWN) {
             // Nothing was drawn, so the light of the last draw is somebody else's frame. Reported
             // as it stands it reads as fact, which is worse than reporting nothing.
             this.lastLight = 0;
@@ -212,27 +212,5 @@ public final class EntityGhost {
     void recordLight(int light, boolean inWorld) {
         this.lastLight = light;
         this.lastInWorld = inWorld;
-    }
-
-    // ------------------------------------------------------------------
-    // Distant Horizons
-    // ------------------------------------------------------------------
-
-    @Nullable
-    public Object dhHandle() {
-        return this.dhHandle;
-    }
-
-    public void setDhHandle(@Nullable Object handle) {
-        this.dhHandle = handle;
-    }
-
-    /** Whether Distant Horizons is drawing this ghost this tick, so that our pass must not. */
-    public boolean isDhDrawn() {
-        return this.dhDrawn;
-    }
-
-    public void setDhDrawn(boolean dhDrawn) {
-        this.dhDrawn = dhDrawn;
     }
 }

@@ -3,7 +3,7 @@ package com.ashvehicles.client;
 import java.util.List;
 
 import com.ashvehicles.AshVehicles;
-import com.ashvehicles.aircraft.Attitude;
+import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
@@ -33,7 +33,9 @@ import org.joml.Quaternionf;
  * and what the engine and the moving parts are doing. Two marks sit in the middle of the screen and
  * are worth knowing apart. The boresight is where the nose is pointing. The flight path marker is
  * where the aircraft is actually going, which in a climb or a hard turn is not the same place, and
- * the gap between the two is the angle of attack made visible.
+ * the gap between the two is the angle of attack made visible. With a gun selected there is a
+ * third: the pipper, which is where the rounds would land, and which from the chase camera is not
+ * where the boresight is either — see {@link GunSight}.
  *
  * <p>Everything is read from state that reaches every client, so a passenger sees the same
  * instruments as the pilot rather than a panel of zeroes.
@@ -49,6 +51,15 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
     /** Fraction of the airframe left below which the readout goes amber. */
     private static final float LOW_HEALTH = 0.3F;
+
+    /**
+     * Rotor speed, as a percentage, at which a helicopter's readout goes green.
+     *
+     * <p>Not a hundred. Lift goes as the square of it, so the last few per cent are worth very
+     * little, and a needle that only ever settles on the mark at the exact instant it arrives is a
+     * needle nobody can read. This is the point at which pulling collective will do something.
+     */
+    private static final int ROTOR_READY = 95;
 
     /** Screen pixels the horizon slides for every degree of pitch. */
     private static final float PIXELS_PER_DEGREE = 3.0F;
@@ -90,6 +101,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         drawAttitude(graphics, attitude, centreX, centreY);
         drawMarkers(graphics, minecraft, aircraft, attitude, velocity, speed, centreX, centreY);
+        drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawNumbers(graphics, minecraft.font, aircraft, attitude, velocity, speed);
         drawStatus(graphics, minecraft.font, aircraft, attitude, velocity, speed);
         drawStores(graphics, minecraft.font, aircraft, centreX, centreY);
@@ -158,12 +170,13 @@ public final class AircraftHud implements LayeredDraw.Layer {
     /**
      * The sight over the nose, which is a different instrument depending on what is selected.
      *
-     * <p>Every weapon is aimed differently and so deserves to be shown differently. A gun is aimed
-     * by pointing the aeroplane, so it gets a pipper on the boresight. A rocket is aimed the same
-     * way but arrives lower, so its mark is drawn open, as a reminder that it is not a promise. A
-     * missile is not aimed at all — it is <em>given</em> something — so what matters is where its
-     * seeker can see, and the ring drawn is exactly the cone it can lock inside. A bomb is aimed by
-     * flying, and its mark is on the ground where it would land rather than up here at all.
+     * <p>Every weapon is aimed differently and so deserves to be shown differently. A gun or a
+     * rocket is aimed by pointing the aeroplane, so over the nose there is only the plain cross that
+     * says where the nose is; the pipper that says where the rounds would <em>land</em> is a
+     * different mark in a different place, and is {@link #drawGunSight}'s. A missile is not aimed
+     * at all — it is <em>given</em> something — so what matters is where its seeker can see, and
+     * the ring drawn is exactly the cone it can lock inside. A bomb is aimed by flying, and its mark
+     * is on the ground where it would land rather than up here at all.
      *
      * @param focal how many screen pixels one radian off the line of sight comes to, which is what
      *              turns the seeker's cone into a ring of the right size
@@ -189,24 +202,115 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
-        if (type == WeaponDefinition.Type.ROCKET) {
-            // Open at the top and bottom: rockets leave along the nose and sag from there, so the
-            // mark is deliberately not a closed promise of where they will go.
-            graphics.fill(x - 7, y, x - 2, y + 1, GREEN);
-            graphics.fill(x + 2, y, x + 7, y + 1, GREEN);
-            graphics.fill(x - 1, y - 1, x + 1, y + 1, GREEN);
+        // A gun, a rocket, or nothing selected at all: the plain boresight the instruments always
+        // had. Dim, because for a gun it is the nose and not the sight — from the cockpit the two
+        // lie on top of each other, but from the chase camera they do not, and the one to fire on
+        // is the other.
+        graphics.fill(x - 5, y, x + 5, y + 1, DIM);
+        graphics.fill(x, y - 5, x + 1, y + 5, DIM);
+    }
 
+    /**
+     * The gunsight proper: where the rounds would land, and where the nose has to go to land them
+     * on something that is moving. See {@link GunSight} for how both are worked out.
+     *
+     * <p>The pipper is drawn on the point in the world the rounds would reach, not along a
+     * direction from the camera. From the cockpit those are the same mark; from a chase camera a
+     * dozen blocks back and several up they are not, and the difference is the difference between
+     * a strafing run and a furrow short of the target. Green with rounds left to fire, amber
+     * without, so whether the gun can be fired is the same glance as where it is pointing; and the
+     * range to whatever it is laid on beneath it, which is the number a pilot flies a gun pass to.
+     *
+     * <p>The lead is a diamond on the point the target will have reached by the time a round fired
+     * now arrives, raised by the round's drop. Put the pipper on the diamond and fire. Dim while
+     * the target is beyond the round's reach, green inside it, and amber — with the word — while
+     * the nose is close enough to the lead that firing now would hit.
+     */
+    private static void drawGunSight(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
+            float partialTick, int centreX, int centreY) {
+        WeaponDefinition weapon = aircraft.getWeapons().selectedWeapon();
+
+        if (weapon == null || !GunSight.aims(weapon)) {
             return;
         }
 
-        // A gun, or nothing selected at all: the plain boresight the instruments always had.
-        int colour = type == WeaponDefinition.Type.GUN ? GREEN : DIM;
-        graphics.fill(x - 5, y, x + 5, y + 1, colour);
-        graphics.fill(x, y - 5, x + 1, y + 5, colour);
+        GunSight.Solution sight = GunSight.solve(aircraft);
 
-        if (type == WeaponDefinition.Type.GUN) {
-            // A pipper around it, so a gunsight reads as a gunsight rather than as a stray cross.
-            circle(graphics, x, y, 9, DIM);
+        if (sight == null) {
+            return;
+        }
+
+        float focal = focalLength(minecraft, graphics);
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        // Rebuilt from this frame's nose rather than read off last tick's: only how far out the
+        // pipper sits is a tick old, and the mark itself follows the nose as smoothly as it moves.
+        Vec3 muzzle = sight.bore().muzzle(partialTick);
+        Vec3 nose = sight.bore().direction(partialTick);
+        Vec3 pipper = muzzle.add(nose.scale(sight.pipperRange())).add(sight.pipperDrop());
+        int colour = aircraft.getWeapons().selectedAmmo() > 0 ? GREEN : WARNING;
+        int[] at = project(minecraft, pipper.subtract(camera).normalize(), focal, centreX, centreY);
+
+        if (at != null) {
+            int x = at[0];
+            int y = at[1];
+
+            if (weapon.type() == WeaponDefinition.Type.GUN) {
+                // The pipper, so a gunsight reads as a gunsight rather than as a stray dot.
+                circle(graphics, x, y, 9, colour);
+            } else {
+                // Open at the top and bottom: rockets scatter more than a gun does, so the mark is
+                // deliberately not a closed promise of where each of them will go.
+                graphics.fill(x - 9, y, x - 3, y + 1, colour);
+                graphics.fill(x + 4, y, x + 10, y + 1, colour);
+            }
+
+            graphics.fill(x - 1, y - 1, x + 1, y + 1, colour);
+
+            if (sight.struck()) {
+                String reach = Math.round(sight.pipperRange()) + " m";
+                graphics.drawString(minecraft.font, reach, x - minecraft.font.width(reach) / 2, y + 12, DIM, true);
+            }
+        }
+
+        Entity target = sight.target();
+
+        if (target == null || target.isRemoved()) {
+            return;
+        }
+
+        // The target has moved since the tick the lead was worked out; the offset has not, so the
+        // mark rides along with wherever the target is drawn this frame.
+        Vec3 lead = target.getPosition(partialTick).add(0.0, target.getBbHeight() * 0.5, 0.0).add(sight.leadOffset());
+        int[] mark = project(minecraft, lead.subtract(camera).normalize(), focal, centreX, centreY);
+
+        if (mark == null) {
+            return;
+        }
+
+        int leadColour = !sight.inRange() ? DIM : sight.onTarget() ? WARNING : GREEN;
+        diamond(graphics, mark[0], mark[1], 6, leadColour);
+
+        String reach = Math.round(sight.targetRange()) + " m";
+        graphics.drawString(minecraft.font, reach, mark[0] - minecraft.font.width(reach) / 2, mark[1] + 10,
+                leadColour, true);
+
+        if (sight.inRange() && sight.onTarget()) {
+            String cue = "SHOOT";
+            graphics.drawString(minecraft.font, cue, mark[0] - minecraft.font.width(cue) / 2, mark[1] + 20,
+                    WARNING, true);
+        }
+    }
+
+    /**
+     * A diamond, one pixel thick: a square stood on its corner. Walked a pixel at a time, since the
+     * only thing the GUI draws is an upright rectangle and four of those make a box, not a diamond.
+     */
+    static void diamond(GuiGraphics graphics, int centreX, int centreY, int radius, int colour) {
+        for (int step = 0; step < radius; step++) {
+            graphics.fill(centreX + step, centreY - radius + step, centreX + step + 1, centreY - radius + step + 1, colour);
+            graphics.fill(centreX + radius - step, centreY + step, centreX + radius - step + 1, centreY + step + 1, colour);
+            graphics.fill(centreX - step, centreY + radius - step, centreX - step + 1, centreY + radius - step + 1, colour);
+            graphics.fill(centreX - radius + step, centreY - step, centreX - radius + step + 1, centreY - step + 1, colour);
         }
     }
 
@@ -217,6 +321,14 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * upright rectangle, and a ring built out of a handful of those is a lozenge. This walks an
      * eighth of the circle and mirrors it into the other seven, which is exact and needs no
      * trigonometry per pixel.
+     *
+     * <p><b>Drawn in runs rather than a pixel at a time.</b> A rectangle is the only thing the GUI
+     * can draw, so a pixel costs a whole one — four vertices and a look-up of the batch to put them
+     * in — and the seeker's cone is a ring of a couple of hundred pixels' radius, redrawn every
+     * frame a guided weapon is selected. But the algorithm holds {@code x} still for several steps
+     * at a time, and every step it holds it for lies in the same row as the last in four of the
+     * eight octants and the same column in the other four. So a whole run of them goes down as one
+     * rectangle, and the same pixels are lit for a third of the work.
      */
     static void circle(GuiGraphics graphics, int centreX, int centreY, int radius, int colour) {
         if (radius < 1) {
@@ -226,9 +338,11 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int x = radius;
         int y = 0;
         int error = 1 - radius;
+        // The run of steps that share the current x, as the y values it covers.
+        int runRow = x;
+        int runFrom = 0;
 
         while (x >= y) {
-            plotOctants(graphics, centreX, centreY, x, y, colour);
             y++;
 
             if (error < 0) {
@@ -237,23 +351,36 @@ public final class AircraftHud implements LayeredDraw.Layer {
                 x--;
                 error += 2 * (y - x) + 1;
             }
+
+            // Only once x has moved — or the walk has finished — is the run it was on complete.
+            if (x != runRow || x < y) {
+                plotOctants(graphics, centreX, centreY, runRow, runFrom, y - 1, colour);
+                runRow = x;
+                runFrom = y;
+            }
         }
     }
 
-    /** One point of a circle, reflected into all eight octants. */
-    private static void plotOctants(GuiGraphics graphics, int centreX, int centreY, int x, int y, int colour) {
-        pixel(graphics, centreX + x, centreY + y, colour);
-        pixel(graphics, centreX + y, centreY + x, colour);
-        pixel(graphics, centreX - y, centreY + x, colour);
-        pixel(graphics, centreX - x, centreY + y, colour);
-        pixel(graphics, centreX - x, centreY - y, colour);
-        pixel(graphics, centreX - y, centreY - x, colour);
-        pixel(graphics, centreX + y, centreY - x, colour);
-        pixel(graphics, centreX + x, centreY - y, colour);
-    }
+    /**
+     * The run of points at one {@code x}, covering {@code from} to {@code to} in y, reflected into
+     * all eight octants: four upright runs at the columns {@code centreX ± x}, and four flat ones at
+     * the rows {@code centreY ± x}.
+     */
+    private static void plotOctants(GuiGraphics graphics, int centreX, int centreY, int x,
+            int from, int to, int colour) {
+        if (to < from) {
+            return;
+        }
 
-    private static void pixel(GuiGraphics graphics, int x, int y, int colour) {
-        graphics.fill(x, y, x + 1, y + 1, colour);
+        graphics.fill(centreX + x, centreY + from, centreX + x + 1, centreY + to + 1, colour);
+        graphics.fill(centreX - x, centreY + from, centreX - x + 1, centreY + to + 1, colour);
+        graphics.fill(centreX + x, centreY - to, centreX + x + 1, centreY - from + 1, colour);
+        graphics.fill(centreX - x, centreY - to, centreX - x + 1, centreY - from + 1, colour);
+
+        graphics.fill(centreX + from, centreY + x, centreX + to + 1, centreY + x + 1, colour);
+        graphics.fill(centreX - to, centreY + x, centreX - from + 1, centreY + x + 1, colour);
+        graphics.fill(centreX + from, centreY - x, centreX + to + 1, centreY - x + 1, colour);
+        graphics.fill(centreX - to, centreY - x, centreX - from + 1, centreY - x + 1, colour);
     }
 
     /**
@@ -305,8 +432,9 @@ public final class AircraftHud implements LayeredDraw.Layer {
         graphics.drawString(minecraft.font, reach, at[0] - minecraft.font.width(reach) / 2, at[1] + 10, DIM, true);
     }
 
-    /** One corner of the target box: two short strokes meeting at a right angle. */
-    private static void corner(GuiGraphics graphics, int x, int y, int alongX, int alongY, int colour) {
+    /** One corner of the target box: two short strokes meeting at a right angle. Shared with the
+     * ground vehicles, whose seeker draws the same box round the same sort of target. */
+    static void corner(GuiGraphics graphics, int x, int y, int alongX, int alongY, int colour) {
         int arm = 6;
         graphics.fill(Math.min(x, x + alongX * arm), y, Math.max(x, x + alongX * arm), y + 1, colour);
         graphics.fill(x, Math.min(y, y + alongY * arm), x + 1, Math.max(y, y + alongY * arm), colour);
@@ -439,9 +567,28 @@ public final class AircraftHud implements LayeredDraw.Layer {
         }
 
         int throttle = Math.round(aircraft.getThrottle() * 100.0F);
-        value(graphics, font, "THR " + throttle + "%", left, bottom - 42);
-        value(graphics, font, "GEAR " + (aircraft.isGearDown() ? "DOWN" : "UP"), left, bottom - 32);
-        value(graphics, font, "FLAP " + (aircraft.isFlapsDown() ? "DOWN" : "UP"), left, bottom - 22);
+
+        if (aircraft.isRotorcraft()) {
+            // The same lever under the name it goes by on a helicopter, and beside it the one figure
+            // a helicopter pilot has that an aeroplane pilot does not: what the rotor is doing.
+            // Pulling collective before it is up to speed achieves nothing at all, so the wait needs
+            // to be something the pilot can watch rather than guess at. Amber until it is there.
+            int rotor = Math.round(aircraft.getRotorSpeed() * 100.0F);
+
+            value(graphics, font, "COLL " + throttle + "%", left, bottom - 42);
+            value(graphics, font, "RTR " + rotor + "%", left, bottom - 32,
+                    rotor >= ROTOR_READY ? GREEN : WARNING);
+        } else {
+            // The lever, and the one place past the top of it. Reheat is not a percentage — the
+            // pilot is through the gate or they are not — and "THR 100%" beside an aeroplane
+            // accelerating like that would say nothing whatever about why.
+            boolean reheat = aircraft.isAfterburning();
+
+            value(graphics, font, reheat ? "THR A/B" : "THR " + throttle + "%", left, bottom - 42,
+                    reheat ? WARNING : GREEN);
+            value(graphics, font, "GEAR " + (aircraft.isGearDown() ? "DOWN" : "UP"), left, bottom - 32);
+            value(graphics, font, "FLAP " + (aircraft.isFlapsDown() ? "DOWN" : "UP"), left, bottom - 22);
+        }
 
         // Only for an aeroplane that can do it, and amber while the nozzle is on its way: a
         // conversion is the one part of flying this thing where where the engine is pointing is the
@@ -486,7 +633,9 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         ResourceLocation selected = aircraft.getWeapons().selected();
         int right = graphics.guiWidth() - 8;
-        int y = centreY + 30;
+        // Clear of the warning receiver, which sits at the middle of this edge and takes its
+        // MISSILE and LOCKED calls a little way below itself.
+        int y = centreY + 52;
 
         label(graphics, font, "STORES", right - font.width("STORES"), y);
         y += 11;
@@ -556,7 +705,11 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * off the line of sight something is, divided by how far along it, scaled by the focal length
      * the field of view implies. Returns null for anything behind the viewer.
      */
-    private static int[] project(Minecraft minecraft, Vec3 direction, float focal, int centreX, int centreY) {
+    /**
+     * Where a direction out of the camera lands on the screen, or null if it is behind it. Shared
+     * with the ground vehicles' instruments, which have the same job to do with a gun barrel.
+     */
+    static int[] project(Minecraft minecraft, Vec3 direction, float focal, int centreX, int centreY) {
         var camera = minecraft.gameRenderer.getMainCamera();
         Vec3 look = toVec3(camera.getLookVector());
         Vec3 up = toVec3(camera.getUpVector());
@@ -574,13 +727,18 @@ public final class AircraftHud implements LayeredDraw.Layer {
         return new int[]{x, y};
     }
 
-    private static float focalLength(Minecraft minecraft, GuiGraphics graphics) {
-        double fov = minecraft.options.fov().get();
+    /**
+     * How many screen pixels one radian off the line of sight comes to, at the field of view the
+     * world is being drawn at this frame — which with the sight up is narrower than the one in the
+     * options, and everything placed by it has to agree with the world or it is placed wrongly.
+     */
+    static float focalLength(Minecraft minecraft, GuiGraphics graphics) {
+        double fov = minecraft.options.fov().get() / AimZoom.factor();
 
         return (float) (graphics.guiHeight() / 2.0 / Math.tan(Math.toRadians(fov) / 2.0));
     }
 
-    private static String cardinal(int heading) {
+    static String cardinal(int heading) {
         String[] points = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
 
         return points[Math.floorMod((int) Math.round(heading / 45.0), 8)];

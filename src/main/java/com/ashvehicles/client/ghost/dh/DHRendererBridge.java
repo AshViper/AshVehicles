@@ -1,32 +1,19 @@
 package com.ashvehicles.client.ghost.dh;
 
-import java.awt.Color;
-import java.util.ArrayList;
-import java.util.List;
-
 import javax.annotation.Nullable;
 
-import com.ashvehicles.AshVehicles;
-import com.ashvehicles.client.ghost.EntityGhost;
 import com.seibel.distanthorizons.api.DhApi;
-import com.seibel.distanthorizons.api.enums.rendering.EDhApiBlockMaterial;
 import com.seibel.distanthorizons.api.interfaces.config.IDhApiConfig;
 import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataCache;
 import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataRepo;
-import com.seibel.distanthorizons.api.interfaces.render.IDhApiCustomRenderObjectFactory;
-import com.seibel.distanthorizons.api.interfaces.render.IDhApiCustomRenderRegister;
-import com.seibel.distanthorizons.api.interfaces.render.IDhApiRenderableBoxGroup;
 import com.seibel.distanthorizons.api.interfaces.world.IDhApiLevelWrapper;
 import com.seibel.distanthorizons.api.interfaces.world.IDhApiWorldProxy;
 import com.seibel.distanthorizons.api.objects.DhApiResult;
 import com.seibel.distanthorizons.api.objects.data.DhApiRaycastResult;
 import com.seibel.distanthorizons.api.objects.data.DhApiTerrainDataPoint;
-import com.seibel.distanthorizons.api.objects.math.DhApiVec3d;
-import com.seibel.distanthorizons.api.objects.render.DhApiRenderableBox;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -55,13 +42,6 @@ import net.minecraft.world.phys.Vec3;
  *       alone would draw a ghost straight through a hill. Its {@code raycast()} walks one block at a
  *       time through those columns, and blocks while the data loads, so it is called from a
  *       worker thread and rationed by the manager.</li>
- *   <li>{@link DhApi.Delayed#customRenderObjectFactory} and
- *       {@link IDhApiLevelWrapper#getRenderRegister()}: box groups drawn inside its own pass, with
- *       its depth, its fog and its lighting. The simplified tier uses these when allowed: a
- *       handful of boxes is all an aeroplane is at a kilometre, and drawn there it sits behind the
- *       hill it should sit behind for free. A group's origin is moved with
- *       {@code setOriginBlockPos}; its boxes are mutable and re-uploaded after
- *       {@code triggerBoxChange()}, which only marks them dirty.</li>
  * </ul>
  *
  * <p><b>Where it draws, and why ours draws where it does.</b> Its NeoForge
@@ -83,11 +63,21 @@ import net.minecraft.world.phys.Vec3;
  * part of the published API jar this mod compiles against.
  */
 final class DHRendererBridge {
-    /** Name every box group is registered under; the ghost's UUID is appended. */
-    private static final String GROUP_NAMESPACE = AshVehicles.MODID;
-
     /** Blocks left off the end of an occlusion ray, so the ground under a target is not "in front" of it. */
     private static final double TARGET_MARGIN = 2.5;
+
+    /**
+     * The same margin as a fraction of the ray, which is what decides it on a long one.
+     *
+     * <p>Distant Horizons draws its terrain at a detail that falls away with distance: a column a
+     * kilometre out stands for a good many blocks of real ground, and its top is an average of
+     * them. Stopping two and a half blocks short of an aeroplane a kilometre away therefore ends
+     * the ray inside the column the aeroplane is flying over, and the average ground the column
+     * reports is enough to call the aeroplane hidden. Ending it a fiftieth of the way short —
+     * twenty blocks at a kilometre, forty at two — leaves the ground beneath the target out of it
+     * while still catching the hill in between.
+     */
+    private static final double TARGET_MARGIN_FRACTION = 0.02;
 
     /** Re-resolve the level wrapper no more often than this, in ticks, when there is none. */
     private static final long WRAPPER_RETRY_TICKS = 20L;
@@ -239,7 +229,7 @@ final class DHRendererBridge {
 
         Vec3 gap = to.subtract(from);
         double away = gap.length();
-        double length = away - skip - TARGET_MARGIN;
+        double length = away - skip - Math.max(TARGET_MARGIN, away * TARGET_MARGIN_FRACTION);
 
         if (length <= 1.0) {
             return false;
@@ -269,7 +259,7 @@ final class DHRendererBridge {
     }
 
     // ------------------------------------------------------------------
-    // Box groups
+    // Debug
     // ------------------------------------------------------------------
 
     /** A word or two more than "active", for the debug overlay: what, if anything, is missing. */
@@ -278,139 +268,7 @@ final class DHRendererBridge {
             return "inactive";
         }
 
-        if (wrapperFor(level) == null) {
-            return "no level wrapper";
-        }
-
-        return boxesAvailable(level) ? "level + boxes" : "level, no boxes";
-    }
-
-    static boolean boxesAvailable(ClientLevel level) {
-        IDhApiConfig configs = DhApi.Delayed.configs;
-
-        if (configs == null || DhApi.Delayed.customRenderObjectFactory == null) {
-            return false;
-        }
-
-        try {
-            if (!Boolean.TRUE.equals(configs.graphics().renderingEnabled().getValue())
-                    || !Boolean.TRUE.equals(configs.graphics().genericRendering().renderingEnabled().getValue())) {
-                return false;
-            }
-        } catch (RuntimeException e) {
-            return false;
-        }
-
-        return wrapperFor(level) != null;
-    }
-
-    static void updateBoxes(ClientLevel level, EntityGhost ghost, List<AABB> boxes, int argb) {
-        Handle handle = (Handle) ghost.dhHandle();
-
-        if (boxes.isEmpty()) {
-            if (handle != null) {
-                handle.group.setActive(false);
-            }
-
-            return;
-        }
-
-        IDhApiLevelWrapper dhLevel = wrapperFor(level);
-        IDhApiCustomRenderObjectFactory factory = DhApi.Delayed.customRenderObjectFactory;
-
-        if (dhLevel == null || factory == null) {
-            return;
-        }
-
-        // The first box's centre is as good an origin as any; what matters is that every box is
-        // near it, so that the floats the group is uploaded as stay precise.
-        AABB first = boxes.get(0);
-        double ox = (first.minX + first.maxX) * 0.5;
-        double oy = (first.minY + first.maxY) * 0.5;
-        double oz = (first.minZ + first.maxZ) * 0.5;
-
-        try {
-            if (handle != null && (handle.level != dhLevel || handle.group.size() != boxes.size())) {
-                remove(handle);
-                handle = null;
-            }
-
-            if (handle == null) {
-                List<DhApiRenderableBox> dhBoxes = new ArrayList<>(boxes.size());
-                Color colour = new Color(argb, true);
-
-                for (AABB box : boxes) {
-                    dhBoxes.add(new DhApiRenderableBox(
-                            new DhApiVec3d(box.minX - ox, box.minY - oy, box.minZ - oz),
-                            new DhApiVec3d(box.maxX - ox, box.maxY - oy, box.maxZ - oz),
-                            colour, EDhApiBlockMaterial.METAL));
-                }
-
-                // Null until the DH level behind the wrapper exists; try again next tick.
-                IDhApiCustomRenderRegister register = dhLevel.getRenderRegister();
-
-                if (register == null) {
-                    return;
-                }
-
-                IDhApiRenderableBoxGroup group = factory.createRelativePositionedGroup(
-                        GROUP_NAMESPACE + ":ghost/" + ghost.uuid(), new DhApiVec3d(ox, oy, oz), dhBoxes);
-                group.setSkyLight(15);
-                group.setBlockLight(0);
-                group.setSsaoEnabled(false);
-                register.add(group);
-                handle = new Handle(dhLevel, group);
-                ghost.setDhHandle(handle);
-            } else {
-                IDhApiRenderableBoxGroup group = handle.group;
-
-                for (int i = 0; i < boxes.size(); i++) {
-                    AABB box = boxes.get(i);
-                    DhApiRenderableBox dhBox = group.get(i);
-                    dhBox.minPos.x = box.minX - ox;
-                    dhBox.minPos.y = box.minY - oy;
-                    dhBox.minPos.z = box.minZ - oz;
-                    dhBox.maxPos.x = box.maxX - ox;
-                    dhBox.maxPos.y = box.maxY - oy;
-                    dhBox.maxPos.z = box.maxZ - oz;
-                }
-
-                group.setOriginBlockPos(new DhApiVec3d(ox, oy, oz));
-                group.triggerBoxChange();
-            }
-
-            handle.group.setActive(true);
-        } catch (RuntimeException e) {
-            // Between levels, or a register that no longer exists: drop the handle and try afresh.
-            ghost.setDhHandle(null);
-        }
-    }
-
-    static void removeBoxes(EntityGhost ghost) {
-        Handle handle = (Handle) ghost.dhHandle();
-
-        if (handle == null) {
-            return;
-        }
-
-        ghost.setDhHandle(null);
-        remove(handle);
-    }
-
-    private static void remove(Handle handle) {
-        try {
-            handle.group.setActive(false);
-            IDhApiCustomRenderRegister register = handle.level.getRenderRegister();
-
-            if (register != null) {
-                register.remove(handle.group.getId());
-            }
-        } catch (RuntimeException e) {
-            // The level it was registered in is gone, and the register with it. Nothing to do.
-        }
-    }
-
-    /** A group and the level it was registered in; the level matters for taking it out again. */
-    private record Handle(IDhApiLevelWrapper level, IDhApiRenderableBoxGroup group) {
+        return wrapperFor(level) == null ? "no level wrapper" : "level";
     }
 }
+

@@ -2,7 +2,7 @@ package com.ashvehicles.item;
 
 import java.util.List;
 
-import com.ashvehicles.aircraft.AircraftManager;
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.registry.ModItems;
 import com.ashvehicles.weapon.WeaponDefinition;
 
@@ -39,7 +39,7 @@ public class WeaponItem extends Item {
     }
 
     public WeaponDefinition getWeapon() {
-        return AircraftManager.weapon(this.weapon);
+        return Definitions.weapon(this.weapon);
     }
 
     /** One of a weapon, carrying the rounds given. */

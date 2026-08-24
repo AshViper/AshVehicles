@@ -2,100 +2,40 @@ package com.ashvehicles.weapon;
 
 import javax.annotation.Nullable;
 
-import com.ashvehicles.network.BlastSoundPayload;
-import com.ashvehicles.particle.TintedParticleOption;
+import com.ashvehicles.particle.Effects;
 import com.ashvehicles.registry.ModParticles;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Holder;
-import net.minecraft.core.particles.ParticleOptions;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.sounds.SoundEvent;
 import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Explosion;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * What a weapon looks and sounds like where it lands, sent from the server so that everyone who
- * could see or hear it gets the same thing.
+ * What a weapon looks and sounds like where it lands.
  *
- * <p>The one thing worth knowing about this file is why every particle packet goes out with the
- * long-distance flag set. Ordinary particles are sent to nobody more than thirty-two blocks away, and thrown away
- * again by a client that somehow receives one from further off than that. Thirty-two blocks is a
- * sensible distance for a torch and a nonsensical one for ordnance: a bomb is aimed from a thousand
- * feet up, and the whole question a pilot has after releasing it is whether it went off, and where.
- * The flag lifts both limits to five hundred and twelve blocks, which is the protocol's own ceiling.
- *
- * <p>It is also what makes a detonation beyond the loaded world visible at all. Nothing here needs
- * the world: the particles are told where to be and what colour to be, and
- * {@link com.ashvehicles.client.particle.WeaponParticle} sees to it that they are lit out there
- * rather than drawn in black.
- *
- * <p>The bang cannot be sent that way at all — a sound has no long-distance flag, and its reach is
- * fixed at {@code volume * 16} blocks at both ends — so it goes as the mod's own packet and is timed
- * and shaped by the client. See {@link BlastSoundPayload} and
- * {@link com.ashvehicles.client.sound.BlastSounds}.
+ * <p>The fire, the smoke, the wave and the bang are not here: those are the same wherever they come
+ * from, and a wreck burning makes exactly the same ones, so they live in {@link Effects}. What is
+ * left is the part that really is a weapon's — what a round does to the block it struck, and what a
+ * barrel does as the round leaves it.
  */
 public final class WeaponEffects {
-    /**
-     * Nothing the mod sets off leaves anything burning.
-     *
-     * <p>An explosion in Minecraft can scatter fire over everything it did not destroy, and half a
-     * tonne of high explosive scatters it a long way. What that gives is not a battlefield but a
-     * forest fire that spreads for the rest of the evening across ground nobody is looking at any
-     * more — every bomb quietly setting light to a landscape the pilot has already flown away from.
-     * The blast, the crater and the wave are the weapon; the fire afterwards is somebody else's mod.
-     */
-    private static final boolean NO_FIRE = false;
+    /** How far in front of the muzzle the flash sits, per point of power. Clear of the barrel. */
+    private static final double MUZZLE_STANDOFF = 0.22;
 
-    /** Soot: the colour of the cloud a blast leaves, whatever the weapon's own colour is. */
-    private static final int SOOT = 0x3A3631;
-    /** And of what it throws off, which is burning rather than glowing. */
-    private static final int EMBER = 0xFFB449;
-
-    /** The largest blast that is drawn any bigger, or heard any further off, than the last one. */
-    private static final float BIGGEST = 12.0F;
-
-    /**
-     * How far the wave runs, in blocks, for every point of blast.
-     *
-     * <p>This is the whole of what decides its size, so a warhead twice the size throws a ring twice
-     * as wide and everything that goes off throws one of some size: a rocket's is a few blocks
-     * across, a heavy bomb's covers a hundred feet of ground. Turn this one figure up and every
-     * weapon's wave grows with it, in proportion.
-     *
-     * <p>Further than the blast itself reaches, deliberately. What is drawn here is the dust an
-     * explosion throws outwards, which in life runs well beyond anything it actually damages.
-     */
-    private static final float WAVE_REACH = 2.8F;
-    /** Held clear of the ground it is running over, so the ring does not fight it for the pixels. */
-    private static final double WAVE_LIFT = 0.35;
-    /**
-     * The dust a blast throws up.
-     *
-     * <p>White, and the same white wherever it goes off. It used to be the colour of whatever the
-     * bomb landed on — sand over a desert, grey over stone — which is what dust really does and
-     * which looked, in practice, like the explosion changing colour from one target to the next.
-     * A wall of dust reads as a wall of dust; what it was made of is not worth that.
-     */
-    private static final int DUST = 0xFFFFFF;
-
-    /**
-     * The one sound the engine will not play and will not complain about not playing.
-     *
-     * <p>Vanilla puts the explosion's noise, its smoke and its knockback in a single packet, and
-     * sends the lot to anyone within sixty-four blocks. The knockback has to go, so the packet has
-     * to go, so the only way to be rid of the noise is to ask for a noise there is none of — which
-     * is what {@code minecraft:intentionally_empty} is for.
-     */
-    private static final Holder<SoundEvent> SILENCE = Holder.direct(SoundEvent.createVariableRangeEvent(
-            ResourceLocation.withDefaultNamespace("intentionally_empty")));
+    /** How big a scatter of sparks a ricochet makes at the plate, on {@link Effects#sparks}'s scale. */
+    private static final float RICOCHET_SPARKS = 1.6F;
+    /** And how many of them are thrown down the new line rather than scattered. */
+    private static final int RICOCHET_STREAKS = 6;
+    /** How fast those are thrown, in blocks a tick. Fast enough to read as a streak, not as a spray. */
+    private static final double RICOCHET_THROW = 0.9;
+    /** And how far they fan out from that line, so the six of them are six. */
+    private static final double RICOCHET_FAN = 0.18;
+    /** A little smoke off the plate, for the metal that came with them. */
+    private static final int RICOCHET_SMOKE = 4;
+    private static final float RICOCHET_SMOKE_SIZE = 0.5F;
 
     /**
      * Everything that happens where a round lands: the blast if it carries one, the sparks either
@@ -107,14 +47,14 @@ public final class WeaponEffects {
      */
     public static void detonation(ServerLevel level, Vec3 at, WeaponDefinition.Projectile round,
             @Nullable BlockState struck) {
-        float power = Mth.clamp(round.explosion(), 0.0F, BIGGEST);
+        float power = Mth.clamp(round.explosion(), 0.0F, Effects.BIGGEST);
 
         if (power > 0.0F) {
-            fireball(level, at, power, round.tracer());
-            boom(level, at, power);
-            wave(level, at, power);
+            Effects.fireball(level, at, power, round.tracer());
+            Effects.boom(level, at, power);
+            Effects.wave(level, at, power);
         } else {
-            sparks(level, at, round.tracer(), 1.0F);
+            Effects.sparks(level, at, round.tracer(), 1.0F);
         }
 
         if (struck != null && !struck.isAir()) {
@@ -122,86 +62,79 @@ public final class WeaponEffects {
         }
     }
 
-    /** Fire, then smoke, then fragments: the three things anyone watching an explosion sees. */
-    private static void fireball(ServerLevel level, Vec3 at, float power, int tracer) {
-        send(level, at, ModParticles.BLAST.get().of(tracer, power * 0.34F),
-                4 + (int) (power * 1.6F), power * 0.16, power * 0.035);
-        send(level, at, ModParticles.BLAST_SMOKE.get().of(SOOT, power * 0.42F),
-                8 + (int) (power * 3.0F), power * 0.28, power * 0.022);
-        sparks(level, at, EMBER, power);
-    }
-
-    /**
-     * The blast wave: one particle, which draws the ring and raises the dust for itself. See
-     * {@link com.ashvehicles.client.particle.ShockwaveParticle}.
-     *
-     * <p>The colour it carries is the dust's; the ring whitens itself against it, being squeezed air
-     * rather than ground. The size it carries is how far the front is to run, which is the blast's
-     * own size and nothing else — see {@link #WAVE_REACH} — so every warhead throws a wave in
-     * proportion to itself rather than only the ones over some threshold.
-     */
-    private static void wave(ServerLevel level, Vec3 at, float power) {
-        send(level, at.add(0.0, WAVE_LIFT, 0.0),
-                ModParticles.SHOCKWAVE.get().of(DUST, power * WAVE_REACH), 1, 0.0, 0.0);
-    }
-
-    /**
-     * The bang, sent as the mod's own packet so that a client can time it, place it and shape it
-     * for itself. Everyone who could hear it is told; the rest are not troubled. See
-     * {@link BlastSoundPayload}.
-     */
-    private static void boom(ServerLevel level, Vec3 at, float power) {
-        double carry = BlastSoundPayload.carry(power);
-        BlastSoundPayload payload = new BlastSoundPayload(at.x, at.y, at.z, power);
-
-        for (ServerPlayer player : level.players()) {
-            if (player.distanceToSqr(at) < carry * carry) {
-                PacketDistributor.sendToPlayer(player, payload);
-            }
-        }
-    }
-
-    /**
-     * The blast proper: the damage, the fire and the knockback, with vanilla's own noise and its own
-     * puff of smoke taken off it.
-     *
-     * <p>The particle slots are given the mod's fireball, since the client draws one of them whether
-     * or not the server would like it to; and the sound slot is given {@link #SILENCE}, because the
-     * bang belongs to {@link #boom} and having both would be one explosion heard twice, once on time
-     * and once late.
-     */
+    /** The blast proper, sized and coloured by the round that carried it. See {@link Effects#blast}. */
     public static void blast(ServerLevel level, Entity source, Vec3 at, WeaponDefinition.Projectile round) {
-        float power = Mth.clamp(round.explosion(), 1.0F, BIGGEST);
-        ParticleOptions fireball = ModParticles.BLAST.get().of(round.tracer(), power * 0.3F);
-
-        level.explode(source, Explosion.getDefaultDamageSource(level, source), null,
-                at.x, at.y, at.z, round.explosion(), NO_FIRE, Level.ExplosionInteraction.MOB,
-                fireball, fireball, SILENCE);
+        Effects.blast(level, source, at, round.explosion(), round.tracer());
     }
 
-    private static void sparks(ServerLevel level, Vec3 at, int colour, float power) {
-        send(level, at, ModParticles.SPARK.get().of(colour, 1.0F),
-                5 + (int) (power * 3.5F), 0.05, 0.09 + power * 0.05);
+    /**
+     * The flash and the smoke a gun makes as the round leaves it.
+     *
+     * <p>Thrown forwards rather than scattered, because that is what a muzzle blast does: the gas
+     * behind the round comes out after it, faster than it, and for a moment there is a cone of fire
+     * in front of the barrel. What that is worth is telling everyone within sight which way a tank
+     * is pointing and that it has just fired, which is most of what there is to know about a tank.
+     *
+     * @param at the muzzle
+     * @param along the way the barrel is pointing, as a unit vector
+     * @param power how big the gun is, on the same scale as a blast: a tank's main armament is
+     *              several, a machine gun a fraction of one
+     * @param tracer the colour of the flash, which is the round's own
+     */
+    public static void muzzleBlast(ServerLevel level, Vec3 at, Vec3 along, float power, int tracer) {
+        Vec3 ahead = at.add(along.scale(MUZZLE_STANDOFF * power));
+
+        Effects.send(level, ahead, ModParticles.BLAST.get().of(tracer, power * 0.3F),
+                2 + (int) (power * 1.2F), power * 0.06, power * 0.02);
+        Effects.send(level, ahead, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, power * 0.36F),
+                4 + (int) (power * 2.0F), power * 0.12, power * 0.03);
+        // Blown out along the barrel rather than left where the flash was, so the smoke reads as
+        // having been driven out of the gun instead of having been sitting in front of it.
+        Effects.send(level, ahead.add(along.scale(power * 0.35)),
+                ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, power * 0.22F),
+                2 + (int) power, power * 0.08, power * 0.05);
+        Effects.sparks(level, ahead, Effects.EMBER, power * 0.5F);
+    }
+
+    /**
+     * A round skidding off armour: a hard spray of sparks thrown down the line it left on.
+     *
+     * <p>Aimed rather than scattered, and that is the whole of what this has to say. A hit that went
+     * in and a hit that did not look much the same as a flash on the plate; what tells the gunner
+     * which of the two they just got is that the sparks went <em>somewhere</em> — off along the
+     * slope, away from the tank, on the line the round itself is now travelling. A stream of those
+     * coming back off a turret front is a gunner being told to aim somewhere else.
+     *
+     * @param at where it struck the plate
+     * @param away where it is going now, as it leaves
+     * @param round the round that did it, for its colour
+     */
+    public static void ricochet(ServerLevel level, Vec3 at, Vec3 away, WeaponDefinition.Projectile round) {
+        Vec3 along = away.lengthSqr() < 1.0E-8 ? Vec3.ZERO : away.normalize();
+        RandomSource random = level.getRandom();
+
+        Effects.sparks(level, at, round.tracer(), RICOCHET_SPARKS);
+
+        for (int i = 0; i < RICOCHET_STREAKS; i++) {
+            // Each one thrown a little off the others, or six particles given the same velocity from
+            // the same point are one particle drawn six times over.
+            Vec3 thrown = along.scale(RICOCHET_THROW).add(
+                    random.nextGaussian() * RICOCHET_FAN, random.nextGaussian() * RICOCHET_FAN,
+                    random.nextGaussian() * RICOCHET_FAN);
+
+            Effects.aimed(level, at, ModParticles.SPARK.get().of(Effects.EMBER, 1.0F), thrown);
+        }
+
+        Effects.send(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, RICOCHET_SMOKE_SIZE),
+                RICOCHET_SMOKE, 0.08, 0.04);
     }
 
     /** Chips of whatever was hit, in the colour of the block they came off. */
     private static void debris(ServerLevel level, Vec3 at, BlockState struck, float power) {
         int colour = struck.getMapColor(level, BlockPos.containing(at)).col;
 
-        send(level, at, ModParticles.DEBRIS.get().of(colour, 1.0F),
+        Effects.send(level, at, ModParticles.DEBRIS.get().of(colour, 1.0F),
                 5 + (int) (power * 2.5F), 0.08, 0.08 + power * 0.03);
-    }
-
-    /**
-     * One packet per player, because the long-distance flag can only be set on the per-player call.
-     * The server drops it for anyone out of range itself, so this is a loop over the player list and
-     * a handful of packets, not a broadcast.
-     */
-    private static void send(ServerLevel level, Vec3 at, TintedParticleOption particle, int count,
-            double spread, double speed) {
-        for (ServerPlayer player : level.players()) {
-            level.sendParticles(player, particle, true, at.x, at.y, at.z, count, spread, spread, spread, speed);
-        }
     }
 
     private WeaponEffects() {

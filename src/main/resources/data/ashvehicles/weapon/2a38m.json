@@ -1,0 +1,23 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 1400,
+  "firing": {
+    "rounds_per_second": 20.0,
+    "salvo": 2,
+    "salvo_spread": 0.35,
+    "spread": 0.25
+  },
+  "projectile": {
+    "damage": 6.0,
+    "speed": 48.0,
+    "gravity": 0.0009,
+    "range": 1200.0,
+    "ricochet": 35.0,
+    "tracer": "FFD27A"
+  },
+  "sound": {
+    "volume": 2.0,
+    "pitch": 1.15
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "D": {
+      "tag": "c:gems/diamond"
+    },
+    "E": {
+      "item": "minecraft:ender_eye"
+    },
+    "K": {
+      "tag": "c:storage_blocks/iron"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "R": {
+      "tag": "c:dusts/redstone"
+    }
+  },
+  "pattern": ["KDK", "#Q#", "RER"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:fa_18e"
+  }
+}

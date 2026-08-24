@@ -1,0 +1,34 @@
+{
+  "type": "rocket",
+  "item": false,
+  "ammo": 24,
+  "ammo_item": "rocket",
+  "firing": {
+    "rounds_per_second": 1.6,
+    "automatic": true,
+    "spread": 1.2,
+    "salvo_spread": 0.0
+  },
+  "projectile": {
+    "damage": 45.0,
+    "speed": 1.0,
+    "thrust": 0.062,
+    "burn_ticks": 95,
+    "top_speed": 4.6,
+    "gravity": 0.0016,
+    "range": 2500.0,
+    "explosion": 7.0,
+    "tracer": "FFB060",
+    "trail": {
+      "colour": "D8D2C6",
+      "exhaust": "6E6862",
+      "density": 2.1,
+      "size": 1.1
+    }
+  },
+  "sound": {
+    "fire": "ashvehicles:weapon.launch",
+    "volume": 2.2,
+    "pitch": 0.9
+  }
+}

@@ -8,9 +8,9 @@ import net.minecraft.world.level.Level;
  *
  * <p>Fast, straight and short-lived. It is given its whole speed at the muzzle and does nothing
  * afterwards but fall, which is the whole of what a bullet does; everything else it needs is in
- * {@link AircraftProjectile}.
+ * {@link VehicleProjectile}.
  */
-public class BulletEntity extends AircraftProjectile {
+public class BulletEntity extends VehicleProjectile {
     public BulletEntity(EntityType<? extends BulletEntity> type, Level level) {
         super(type, level);
     }

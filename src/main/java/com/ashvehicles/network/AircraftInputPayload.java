@@ -20,8 +20,9 @@ import org.joml.Quaternionf;
  * applies it to whatever the sending player is piloting, so it cannot be aimed at someone else's
  * aircraft.
  */
-public record AircraftInputPayload(AircraftInput input, float throttle, Quaternionf attitude, Vec3 velocity,
-        boolean crashed, boolean toggleGear, boolean toggleFlaps, boolean toggleVtol, boolean cycleWeapon)
+public record AircraftInputPayload(AircraftInput input, float throttle, float afterburner,
+        Quaternionf attitude, Vec3 velocity, boolean crashed, boolean toggleGear, boolean toggleFlaps,
+        boolean toggleVtol, boolean cycleWeapon)
         implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<AircraftInputPayload> TYPE =
@@ -31,6 +32,10 @@ public record AircraftInputPayload(AircraftInput input, float throttle, Quaterni
             (buf, payload) -> {
                 payload.input().write(buf);
                 buf.writeFloat(payload.throttle());
+                // Beside the throttle because it is part of the throttle: the gate that lights it is
+                // the top of the same lever's travel, and only the flying client knows whether the
+                // pilot has been through it. See AircraftEntity.tickAfterburner.
+                buf.writeFloat(payload.afterburner());
                 buf.writeFloat(payload.attitude().x);
                 buf.writeFloat(payload.attitude().y);
                 buf.writeFloat(payload.attitude().z);
@@ -46,7 +51,7 @@ public record AircraftInputPayload(AircraftInput input, float throttle, Quaterni
                 buf.writeBoolean(payload.toggleVtol());
                 buf.writeBoolean(payload.cycleWeapon());
             },
-            buf -> new AircraftInputPayload(AircraftInput.read(buf), buf.readFloat(),
+            buf -> new AircraftInputPayload(AircraftInput.read(buf), buf.readFloat(), buf.readFloat(),
                     new Quaternionf(buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat()),
                     new Vec3(buf.readFloat(), buf.readFloat(), buf.readFloat()),
                     buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
@@ -69,7 +74,8 @@ public record AircraftInputPayload(AircraftInput input, float throttle, Quaterni
 
             aircraft.setInput(payload.input());
             aircraft.setThrottle(payload.throttle());
-            aircraft.setAttitude(payload.attitude());
+            aircraft.reportAfterburner(payload.afterburner());
+            aircraft.reportAttitude(payload.attitude());
             aircraft.setPilotVelocity(payload.velocity());
 
             if (payload.crashed()) {

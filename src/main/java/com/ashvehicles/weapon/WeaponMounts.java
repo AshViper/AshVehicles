@@ -6,16 +6,18 @@ import java.util.Objects;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftDefinition;
-import com.ashvehicles.aircraft.AircraftManager;
-import com.ashvehicles.aircraft.Attitude;
+import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.entity.AircraftEntity;
-import com.ashvehicles.entity.AircraftProjectile;
+import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.item.WeaponItem;
+import com.ashvehicles.entity.VehicleHold;
 import com.ashvehicles.registry.ModEntities;
+import com.ashvehicles.registry.ModItems;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -100,6 +102,9 @@ public final class WeaponMounts {
     /** What the seeker of the selected weapon is on, for the weapons that have one. */
     private final TargetLock lock;
     private Mount[] mounts = new Mount[0];
+    /** {@link #mounts} as an immutable list, rebuilt only when the array behind it is. */
+    @Nullable
+    private List<Mount> mountsView;
     @Nullable
     private ResourceLocation selected;
     /** Whether the server's copy has changed since it was last sent to the clients. */
@@ -120,7 +125,7 @@ public final class WeaponMounts {
     /** The figures of the selected weapon, or null if nothing is selected. */
     @Nullable
     public WeaponDefinition selectedWeapon() {
-        return this.selected == null ? null : AircraftManager.weapon(this.selected);
+        return this.selected == null ? null : Definitions.weapon(this.selected);
     }
 
     // ------------------------------------------------------------------
@@ -130,7 +135,18 @@ public final class WeaponMounts {
     public List<Mount> mounts() {
         this.ensureLayout();
 
-        return List.of(this.mounts);
+        List<Mount> view = this.mountsView;
+
+        if (view == null) {
+            // A Mount is mutable and stays put; only the array around it is ever replaced, and
+            // ensureLayout drops this when it does. So the list is built once per layout rather than
+            // once per ask — and this is asked several times a frame by the instruments, once a
+            // frame by the renderer, and once a tick by the ghost, all for the same few objects.
+            view = List.of(this.mounts);
+            this.mountsView = view;
+        }
+
+        return view;
     }
 
     /** The hardpoint a mount belongs to, or null if the file no longer has one for it. */
@@ -260,7 +276,7 @@ public final class WeaponMounts {
             return false;
         }
 
-        int capacity = AircraftManager.weapon(weapon).ammo();
+        int capacity = Definitions.weapon(weapon).ammo();
         this.mounts[slot].set(weapon, ammo < 0 ? capacity : Math.min(ammo, capacity));
 
         if (this.selected == null) {
@@ -293,7 +309,7 @@ public final class WeaponMounts {
             return false;
         }
 
-        int capacity = AircraftManager.weapon(weapon).ammo();
+        int capacity = Definitions.weapon(weapon).ammo();
         this.mounts[slot].set(weapon, ammo < 0 ? capacity : Math.min(ammo, capacity));
 
         if (this.selected == null) {
@@ -361,6 +377,30 @@ public final class WeaponMounts {
         return ItemStack.EMPTY;
     }
 
+    /**
+     * Empties every pylon, handing nothing back.
+     *
+     * <p>For an airframe that has been written off: whatever was hanging under the wings went up
+     * with it. Nothing is dropped and nothing is returned — this is not somebody unloading an
+     * aeroplane, it is the aeroplane no longer being one.
+     *
+     * <p>A gun built into the airframe comes back the next time the layout is checked, which is
+     * right: a fixed station is part of the machine rather than something hung on it, and the model
+     * goes on drawing it whatever state the aircraft is in. It fires nothing, the wreck no longer
+     * ticking its weapons at all.
+     */
+    public void clear() {
+        this.ensureLayout();
+
+        for (Mount mount : this.mounts) {
+            mount.set(null, 0);
+        }
+
+        this.selected = null;
+        this.lock.clear();
+        this.dirty = true;
+    }
+
     /** Selects the next weapon aboard, in hardpoint order, wrapping round. */
     public void selectNext() {
         List<ResourceLocation> weapons = this.carried();
@@ -401,6 +441,7 @@ public final class WeaponMounts {
             }
 
             this.mounts = resized;
+            this.mountsView = null;
             this.dirty = true;
         }
 
@@ -409,7 +450,7 @@ public final class WeaponMounts {
 
             if (hardpoint.isFixed() && !hardpoint.fixed().get().equals(this.mounts[slot].weapon)) {
                 ResourceLocation weapon = hardpoint.fixed().get();
-                this.mounts[slot].set(weapon, AircraftManager.weapon(weapon).ammo());
+                this.mounts[slot].set(weapon, Definitions.weapon(weapon).ammo());
                 this.dirty = true;
             }
         }
@@ -429,10 +470,16 @@ public final class WeaponMounts {
         this.ensureLayout();
         this.reselect();
 
-        WeaponDefinition selectedWeapon = this.selected == null ? null : AircraftManager.weapon(this.selected);
+        WeaponDefinition selectedWeapon = this.selected == null ? null : Definitions.weapon(this.selected);
 
         // The seeker only looks while something that can use a lock is selected.
         if (this.lock.tick(selectedWeapon == null ? null : selectedWeapon.guidance().orElse(null))) {
+            this.dirty = true;
+        } else if (this.lock.isClosing()) {
+            // Nothing has changed that a target or a lock would show, and yet something has: how far
+            // along the lock has got. That figure is the whole of what the seeker box and the seeker
+            // tone are made of while the pilot is holding the nose on something, so it goes out every
+            // tick for the few seconds it is moving. See TargetLock.isClosing.
             this.dirty = true;
         }
 
@@ -440,9 +487,10 @@ public final class WeaponMounts {
         boolean armed = trigger && selectedWeapon != null && !this.aircraft.isCrashing()
                 && this.aircraft.getControllingPassenger() instanceof Player;
 
-        // A gun fires for as long as the trigger is held. Everything else goes one press at a time,
-        // so holding the button does not empty a rail of missiles in half a second.
-        if (armed && selectedWeapon.type().isSingleShot() && this.triggerHeld) {
+        // An automatic weapon fires for as long as the trigger is held. Everything else goes one
+        // press at a time, so holding the button does not empty a rail of missiles in half a second.
+        // Which it is, is the weapon's own to say; see WeaponDefinition.isAutomatic.
+        if (armed && !selectedWeapon.isAutomatic() && this.triggerHeld) {
             armed = false;
         }
 
@@ -456,7 +504,7 @@ public final class WeaponMounts {
             }
 
             if (armed && mount.weapon.equals(this.selected)) {
-                WeaponDefinition weapon = AircraftManager.weapon(mount.weapon);
+                WeaponDefinition weapon = Definitions.weapon(mount.weapon);
                 // Counted down without a floor while firing, so a rate that is not a whole number
                 // of rounds a tick still averages out to the figure in the file.
                 mount.cooldown -= 1.0F;
@@ -480,6 +528,7 @@ public final class WeaponMounts {
 
                 if (mount.ammo <= 0) {
                     mount.cooldown = 0.0F;
+                    this.expend(slot, mount);
                 }
             } else {
                 mount.cooldown = Math.max(0.0F, mount.cooldown - 1.0F);
@@ -510,6 +559,19 @@ public final class WeaponMounts {
         Vec3 up = this.aircraft.getLiftVector();
         Vec3 right = Attitude.right(this.aircraft.getAttitude());
         LivingEntity pilot = this.aircraft.getControllingPassenger();
+
+        // Refused rather than fired blind. Everything below is built on the nose vector, and a nose
+        // vector of no length is the one input here that fails quietly instead of loudly: Vec3's own
+        // normalize answers ZERO for anything shorter than a ten-thousandth rather than throwing, so
+        // a bad attitude would not raise anything -- it would send every round out with no speed at
+        // all, to fall out of the aeroplane and be blamed on the weapon. There is nothing sensible to
+        // fire along instead, so nothing is fired, and the figure that was wrong is named.
+        if (nose.lengthSqr() < 1.0E-6) {
+            AshVehicles.LOGGER.warn("{} not fired: {} has no attitude to fire along (nose={}, attitude={})",
+                    weaponId, this.aircraft.getType(), nose, this.aircraft.getAttitude());
+
+            return;
+        }
 
         // A missile takes whatever the seeker had when it left the rail, and nothing afterwards: it
         // is the missile's own problem to keep up with it.
@@ -545,14 +607,24 @@ public final class WeaponMounts {
                     ? this.aircraft.getVelocity().add(up.scale(-weapon.projectile().speed()))
                     : direction.scale(weapon.projectile().speed()).add(carried);
 
-            AircraftProjectile shot = weapon.type() == WeaponDefinition.Type.GUN
+            // TEMPORARY, for diagnosing a launch that leaves with no speed. Remove once settled.
+            if (weapon.type() != WeaponDefinition.Type.GUN) {
+                AshVehicles.LOGGER.info(
+                        "[launch] {} dropped={} attitude={} nose={} up={} aircraftV={} |aircraftV|={} "
+                                + "dir={} speed={} carried={} v={} |v|={}",
+                        weaponId, weapon.isDropped(), this.aircraft.getAttitude(), nose, up,
+                        this.aircraft.getVelocity(), this.aircraft.getVelocity().length(),
+                        direction, weapon.projectile().speed(), carried, velocity, velocity.length());
+            }
+
+            VehicleProjectile shot = weapon.type() == WeaponDefinition.Type.GUN
                     ? new BulletEntity(ModEntities.BULLET.get(), level)
                     : new RocketEntity(ModEntities.ROCKET.get(), level);
 
             shot.setup(weaponId, this.aircraft, pilot);
             shot.setPos(muzzle);
             // launch rather than setDeltaMovement: the speed has to reach the clients, and it is too
-            // fast for the packets that would ordinarily carry it. See AircraftProjectile.
+            // fast for the packets that would ordinarily carry it. See VehicleProjectile.
             shot.launch(velocity);
 
             if (shot instanceof RocketEntity rocket && locked != null) {
@@ -605,37 +677,171 @@ public final class WeaponMounts {
     }
 
     /**
-     * Refills every mount a little, so that a full load takes {@link #REARM_TICKS} whatever its size.
+     * Takes an expended store off its pylon.
      *
-     * <p>Which needs saying two ways round. A cannon holds hundreds of rounds, so several go on
+     * <p>A missile or a bomb <em>is</em> the thing hanging there: let it go and the rail is bare, and
+     * a mount still naming one is a bare rail claiming to be loaded. It has been drawn as bare all
+     * along — see {@code AircraftRenderer} — and this is the rest of that being true. The station
+     * is empty, the weapon drops off the list the pilot cycles through, and the ground crew have a
+     * pylon to hang the next one on.
+     *
+     * <p>A pod and a built-in gun stay where they are however empty they run. A pod is a container
+     * bolted to the pylon and a gun is part of the airframe; neither leaves with what it fired.
+     */
+    private void expend(int slot, Mount mount) {
+        AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
+
+        if (mount.isEmpty() || hardpoint == null || hardpoint.isFixed()
+                || !Definitions.weapon(mount.weapon).leavesRail()) {
+            return;
+        }
+
+        mount.set(null, 0);
+        this.dirty = true;
+    }
+
+    /**
+     * The ground crew at work on a parked aircraft: stores hung on bare pylons, rounds put back into
+     * what is already up there, and all of it out of the hold.
+     *
+     * <p><b>Out of the hold and nowhere else.</b> This used to conjure a full load out of the air
+     * whenever an aeroplane stood still for ten seconds, which made everything under the wings free
+     * and the pylons a formality. What an aircraft can fire is now what somebody loaded into it —
+     * see {@link VehicleHold} — and one flown out empty comes home empty.
+     *
+     * <p>The rate is the one it always was, a full load in {@link #REARM_TICKS} whatever its size,
+     * and that needs saying two ways round. A cannon holds hundreds of rounds, so several go on
      * every tick; a rail holds one missile, so the tick has to wait for it. Adding
      * {@code capacity / REARM_TICKS} alone gets the first case right and rounds down to nothing in
-     * the second, and then the floor of one round a tick reloads a missile in a twentieth of a
-     * second — which was invisible while an expended missile was still drawn on its rail, and is
-     * very visible now that it is not.
+     * the second, and the floor of one round a tick then loads a missile in a twentieth of a second,
+     * which is a good deal faster than anybody wheels one out.
      */
     private void rearm() {
-        for (Mount mount : this.mounts) {
+        boolean hung = false;
+
+        for (int slot = 0; slot < this.mounts.length; slot++) {
+            Mount mount = this.mounts[slot];
+
             if (mount.isEmpty()) {
+                // A bare pylon, which now that a launched store comes off its rail is most of them
+                // by the end of a sortie. One store at a time, so that four empty pylons are worked
+                // through in the order they are written rather than filled at once — and so that
+                // four loading noises do not land on the same tick.
+                if (!hung && this.aircraft.tickCount % REARM_TICKS == 0) {
+                    hung = this.hangFromHold(slot);
+                }
+
                 continue;
             }
 
-            int capacity = AircraftManager.weapon(mount.weapon).ammo();
+            int capacity = Definitions.weapon(mount.weapon).ammo();
 
             if (mount.ammo >= capacity) {
                 continue;
             }
 
             int perTick = capacity / REARM_TICKS;
+            int wanted;
 
             if (perTick > 0) {
-                mount.ammo = Math.min(capacity, mount.ammo + perTick);
-                this.dirty = true;
+                wanted = Math.min(perTick, capacity - mount.ammo);
             } else if (this.aircraft.tickCount % Math.max(1, REARM_TICKS / capacity) == 0) {
-                mount.ammo++;
+                wanted = 1;
+            } else {
+                continue;
+            }
+
+            int loaded = this.draw(mount.weapon, wanted);
+
+            if (loaded > 0) {
+                mount.ammo += loaded;
                 this.dirty = true;
             }
         }
+    }
+
+    /**
+     * Hangs one store out of the hold on a bare pylon: the first thing in the hold that is a weapon
+     * at all, in the order the hold is laid out, so which store ends up where is settled by whoever
+     * packed it.
+     *
+     * @return whether anything was hung
+     */
+    private boolean hangFromHold(int slot) {
+        AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
+
+        if (hardpoint == null || hardpoint.isFixed()) {
+            return false;
+        }
+
+        VehicleHold hold = this.aircraft.getHold();
+
+        for (int at = 0; at < hold.getContainerSize(); at++) {
+            ItemStack stack = hold.getItem(at);
+
+            // An empty pod is worth carrying home and not worth hanging back up.
+            if (!(stack.getItem() instanceof WeaponItem store) || WeaponItem.ammoOf(stack) == 0) {
+                continue;
+            }
+
+            if (this.mountAt(slot, store.getWeaponId(), WeaponItem.ammoOf(stack))) {
+                hold.removeItem(at, 1);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Takes rounds of one weapon out of the hold, and answers with how many there were to take.
+     *
+     * <p>Rounds are the currency and the item is the purse. A gun pod lying in the hold with sixty
+     * rounds left in it is sixty rounds of resupply; what is left after the crew have been at it
+     * goes back in its slot as a pod with the rest still inside, and a store the last round is taken
+     * out of is gone.
+     *
+     * <p>A weapon with no item of its own is the one thing this cannot charge for. A cannon built
+     * into an airframe is not something anybody can carry, stow in a hold or run out of, so it keeps
+     * the stock it always had — the ground crew's own, off the books. Everything that <em>can</em>
+     * be put in a hold comes out of one.
+     */
+    private int draw(ResourceLocation weapon, int rounds) {
+        if (!ModItems.weapons().containsKey(weapon)) {
+            return rounds;
+        }
+
+        int capacity = Definitions.weapon(weapon).ammo();
+        VehicleHold hold = this.aircraft.getHold();
+        int taken = 0;
+
+        for (int at = 0; at < hold.getContainerSize() && taken < rounds; at++) {
+            ItemStack stack = hold.getItem(at);
+
+            if (!(stack.getItem() instanceof WeaponItem store) || !store.getWeaponId().equals(weapon)) {
+                continue;
+            }
+
+            // No count at all means a full one: nothing has ever been fired out of it.
+            int held = WeaponItem.ammoOf(stack);
+            int available = held < 0 ? capacity : held;
+            int want = Math.min(rounds - taken, available);
+
+            if (want <= 0) {
+                continue;
+            }
+
+            taken += want;
+
+            if (want >= available) {
+                hold.removeItem(at, 1);
+            } else {
+                hold.setItem(at, WeaponItem.stackOf(weapon, available - want));
+            }
+        }
+
+        return taken;
     }
 
     // ------------------------------------------------------------------
@@ -693,6 +899,7 @@ public final class WeaponMounts {
     public void load(CompoundTag tag) {
         ListTag list = tag.getList("Mounts", Tag.TAG_COMPOUND);
         this.mounts = new Mount[list.size()];
+        this.mountsView = null;
 
         for (int slot = 0; slot < list.size(); slot++) {
             CompoundTag entry = list.getCompound(slot);
@@ -710,9 +917,9 @@ public final class WeaponMounts {
         this.dirty = true;
     }
 
-    /** Whether the given entity is this aircraft or part of it: something its own rounds pass through. */
-    public static boolean isPartOf(AircraftEntity aircraft, Entity entity) {
-        return entity == aircraft || entity.getRootVehicle() == aircraft
-                || (entity instanceof com.ashvehicles.entity.AircraftPart part && part.getParent() == aircraft);
+    /** Whether the given entity is this vehicle or part of it: something its own rounds pass through. */
+    public static boolean isPartOf(Entity vehicle, Entity entity) {
+        return entity == vehicle || entity.getRootVehicle() == vehicle
+                || (entity instanceof com.ashvehicles.entity.VehiclePart part && part.getParent() == vehicle);
     }
 }

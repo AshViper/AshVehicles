@@ -6,10 +6,11 @@ import java.util.List;
 
 import javax.annotation.Nullable;
 
-import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.RocketEntity;
+import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.network.SensorPayload;
+import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.weapon.TargetLock;
 
 import net.minecraft.server.level.ServerLevel;
@@ -22,22 +23,30 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * What one aircraft can tell about everything else in the sky: the radar looking forward, and the
- * warning receiver listening in every direction at once.
+ * What one machine can tell about everything else around it: the radar looking where the weapons
+ * look, and the warning receiver listening in every direction at once.
  *
  * <p>The two are one class because they are one sweep. Both want the same question asked of the same
  * piece of sky — what is out there, and where — and asking it twice would be paying twice for it.
- * What they do with the answer is opposite: the radar reports what <em>this</em> aircraft can see
- * ahead of it, and the receiver reports who can see <em>this</em> aircraft, from wherever they are.
+ * What they do with the answer is opposite: the radar reports what <em>this</em> machine can see
+ * ahead of it, and the receiver reports who can see <em>this</em> machine, from wherever they are.
+ *
+ * <p><b>Not an aircraft's instrument, a machine's.</b> A launcher on the ground looks for aeroplanes
+ * with exactly the same set an aeroplane looks for aeroplanes with, and the two have to be the same
+ * sort of thing or neither can warn the other: the whole of what makes flying over a battery
+ * frightening is that the pilot's receiver goes off, and it can only go off about a radar that
+ * exists on the same terms as theirs. So this is asked of {@link VehicleEntityBase} and knows
+ * nothing about which kind it has — the one place it would have to is which way the set is pointing,
+ * and {@link VehicleEntityBase#getAimDirection} answers that for both.
  *
  * <p><b>All of it runs on the server</b>, like the seeker in {@link TargetLock}, because deciding
- * what an aircraft knows about is not something a client may do. The result is sent to the one
- * player flying it and to nobody else: a radar picture is the pilot's instrument, not a broadcast,
- * and it is a good deal of it. See {@link SensorPayload}.
+ * what a crew knows about is not something a client may do. The result is sent to the one player at
+ * the controls and to nobody else: a radar picture is an instrument, not a broadcast, and it is a
+ * good deal of it. See {@link SensorPayload}.
  *
- * <p>Nothing happens at all while the aircraft is empty. A parked aeroplane's radar is off, which
- * costs nothing to run and also means it paints nobody — so an unmanned aircraft sitting on an
- * apron does not set off warning receivers across the map.
+ * <p>Nothing happens at all while the machine is empty. A parked aeroplane's radar is off, which
+ * costs nothing to run and also means it paints nobody — so an unmanned machine sitting on an apron
+ * does not set off warning receivers across the map.
  *
  * <p><b>What it does not do.</b> There is no terrain in this: a contact behind a mountain is still a
  * contact. Radar in life is not so obliging, but the alternative is a line-of-sight trace per
@@ -48,21 +57,21 @@ public final class Sensors {
     private static final int MOST_CONTACTS = 16;
     private static final int MOST_THREATS = 8;
 
-    private final AircraftEntity aircraft;
+    private final VehicleEntityBase vehicle;
     private List<Contact> contacts = List.of();
     private List<Threat> threats = List.of();
     private int sinceSweep;
 
-    public Sensors(AircraftEntity aircraft) {
-        this.aircraft = aircraft;
+    public Sensors(VehicleEntityBase vehicle) {
+        this.vehicle = vehicle;
     }
 
-    /** What the radar found on its last pass. Empty for an aircraft nobody is flying. */
+    /** What the radar found on its last pass. Empty for a machine nobody is aboard. */
     public List<Contact> contacts() {
         return this.contacts;
     }
 
-    /** Who is looking at this aircraft, worst first. */
+    /** Who is looking at this machine, worst first. */
     public List<Threat> threats() {
         return this.threats;
     }
@@ -84,24 +93,24 @@ public final class Sensors {
         return false;
     }
 
-    /** One tick. Sweeps when it is due, and tells the pilot what the sweep found. */
+    /** One tick. Sweeps when it is due, and tells the crew what the sweep found. */
     public void tick() {
-        if (!(this.aircraft.level() instanceof ServerLevel level)) {
+        if (!(this.vehicle.level() instanceof ServerLevel level)) {
             return;
         }
 
-        ServerPlayer pilot = this.pilot();
+        ServerPlayer crew = this.crew();
 
-        if (pilot == null) {
+        if (crew == null) {
             this.clear();
 
             return;
         }
 
-        AircraftDefinition.Radar radar = this.aircraft.getStats().radar();
+        VehicleChassis.Radar radar = this.vehicle.radar();
 
-        // An aeroplane with neither a radar nor a receiver has nothing to sweep for.
-        if (!radar.fitted() && radar.warningRange() <= 0.0F) {
+        // A machine with neither a radar nor a receiver has nothing to sweep for.
+        if (!radar.exists()) {
             this.clear();
 
             return;
@@ -113,7 +122,7 @@ public final class Sensors {
 
         this.sinceSweep = 0;
         this.sweep(level, radar);
-        PacketDistributor.sendToPlayer(pilot, new SensorPayload(this.contacts, this.threats));
+        PacketDistributor.sendToPlayer(crew, new SensorPayload(this.contacts, this.threats));
     }
 
     private void clear() {
@@ -124,24 +133,28 @@ public final class Sensors {
     /**
      * One pass of the aerial, in one walk of everything nearby.
      *
-     * <p>Aircraft are asked both questions — are they in front of me, and are they interested in me
+     * <p>Machines are asked both questions — are they in front of me, and are they interested in me
      * — because those are the only things that can be either. A player on foot goes on the scope and
      * nothing else; a missile in the air is a warning and nothing else.
      */
-    private void sweep(ServerLevel level, AircraftDefinition.Radar radar) {
-        Vec3 from = this.aircraft.position();
-        Vec3 nose = flat(this.aircraft.getNoseVector());
-        // Square to the heading rather than to the wings: a scope read while the aeroplane is banked
-        // should not have the world tipping over on it.
-        Vec3 right = new Vec3(-nose.z, 0.0, nose.x);
+    private void sweep(ServerLevel level, VehicleChassis.Radar radar) {
+        Vec3 from = this.vehicle.position();
+        // Where the set is looking, which is where the weapons are looking: an aeroplane's nose, a
+        // turret's bore. Flattened, and the beam squared to that rather than to the machine's own
+        // sides — a scope read while the aeroplane is banked should not have the world tipping over
+        // on it, and neither should one read from a hull lying across a slope.
+        Vec3 along = flat(this.vehicle.getAimDirection(1.0F));
+        Vec3 right = new Vec3(-along.z, 0.0, along.x);
         double reach = radar.reach();
         double widest = Math.cos(Math.toRadians(radar.arc()));
+        TargetLock lock = this.vehicle.lock();
+        Entity seeking = lock == null ? null : lock.target();
 
         List<Contact> found = new ArrayList<>();
         List<Threat> warnings = new ArrayList<>();
-        AABB box = this.aircraft.getBoundingBox().inflate(reach);
+        AABB box = this.vehicle.getBoundingBox().inflate(reach);
 
-        for (Entity other : level.getEntities(this.aircraft, box, Sensors::worthLookingAt)) {
+        for (Entity other : level.getEntities(this.vehicle, box, Sensors::worthLookingAt)) {
             Vec3 gap = other.position().subtract(from);
             double distance = gap.length();
 
@@ -149,17 +162,17 @@ public final class Sensors {
                 continue;
             }
 
-            float bearing = bearing(gap, nose, right);
+            float bearing = bearing(gap, along, right);
 
             if (other instanceof RocketEntity missile) {
-                if (missile.getTarget() == this.aircraft && distance <= radar.warningRange()) {
+                if (missile.getTarget() == this.vehicle && distance <= radar.warningRange()) {
                     warnings.add(new Threat(bearing, Threat.Kind.MISSILE));
                 }
 
                 continue;
             }
 
-            if (other instanceof AircraftEntity hostile && distance <= radar.warningRange()) {
+            if (other instanceof VehicleEntityBase hostile && distance <= radar.warningRange()) {
                 Threat.Kind attention = this.attentionFrom(hostile);
 
                 if (attention != null) {
@@ -171,10 +184,10 @@ public final class Sensors {
             // reaches. A shape built to return nothing is found close in or not at all, and a stealth
             // aeroplane carrying its missiles on the outside is not one.
             if (radar.fitted() && distance <= radar.range() * AircraftEntity.visibility(other)
-                    && gap.scale(1.0 / distance).dot(nose) > widest) {
+                    && gap.scale(1.0 / distance).dot(along) > widest) {
                 found.add(new Contact(other.getId(), bearing, (float) distance,
-                        (float) (other.getY() - this.aircraft.getY()),
-                        other == this.aircraft.getWeapons().lock().target(),
+                        (float) (other.getY() - this.vehicle.getY()),
+                        other == seeking,
                         other instanceof AircraftEntity));
             }
         }
@@ -187,23 +200,29 @@ public final class Sensors {
     }
 
     /**
-     * What one other aircraft is doing about this one, or null if it has not noticed it.
+     * What one other machine is doing about this one, or null if it has not noticed it.
      *
      * <p>Its seeker counts for more than its radar: being on somebody's scope is a fact about the
      * afternoon, and being in their seeker is a fact about the next few seconds.
      */
     @Nullable
-    private Threat.Kind attentionFrom(AircraftEntity other) {
-        TargetLock lock = other.getWeapons().lock();
+    private Threat.Kind attentionFrom(VehicleEntityBase other) {
+        TargetLock lock = other.lock();
 
-        if (lock.target() == this.aircraft) {
+        if (lock != null && lock.target() == this.vehicle) {
             return lock.isLocked() ? Threat.Kind.LOCK : Threat.Kind.SEARCH;
         }
 
-        return other.getSensors().paints(this.aircraft) ? Threat.Kind.SEARCH : null;
+        return other.getSensors().paints(this.vehicle) ? Threat.Kind.SEARCH : null;
     }
 
-    /** Aeroplanes, people on foot, and anything already on its way here. */
+    /**
+     * Machines, people on foot, and anything already on its way here.
+     *
+     * <p>Ground vehicles as well as aircraft, and both for the same two reasons: an aeroplane out to
+     * attack a column wants them on its scope, and a battery on the ground has to be a thing an
+     * aeroplane's receiver can hear.
+     */
     private static boolean worthLookingAt(Entity candidate) {
         if (!candidate.isAlive()) {
             return false;
@@ -213,18 +232,21 @@ public final class Sensors {
             return true;
         }
 
-        if (candidate instanceof AircraftEntity) {
-            return true;
+        if (candidate instanceof VehicleEntityBase machine) {
+            // A wreck is scenery. It is still there and still made of metal, but a scope that goes on
+            // painting everything anyone has ever shot down fills up with contacts that cannot be
+            // fought, and the one that can be is somewhere in among them.
+            return !machine.isWrecked();
         }
 
-        // Somebody riding this aircraft is crew, not a contact; and a spectator is not there at all.
+        // Somebody riding a machine is crew, not a contact; and a spectator is not there at all.
         return candidate instanceof Player player && !player.isSpectator() && player.getVehicle() == null;
     }
 
-    /** Degrees off the nose, positive to the right, measured flat. */
-    private static float bearing(Vec3 gap, Vec3 nose, Vec3 right) {
+    /** Degrees off the boresight, positive to the right, measured flat. */
+    private static float bearing(Vec3 gap, Vec3 along, Vec3 right) {
         return (float) Mth.wrapDegrees(Math.toDegrees(
-                Math.atan2(gap.x * right.x + gap.z * right.z, gap.x * nose.x + gap.z * nose.z)));
+                Math.atan2(gap.x * right.x + gap.z * right.z, gap.x * along.x + gap.z * along.z)));
     }
 
     /** The heading alone, with the climb taken out of it. */
@@ -235,7 +257,7 @@ public final class Sensors {
     }
 
     @Nullable
-    private ServerPlayer pilot() {
-        return this.aircraft.getControllingPassenger() instanceof ServerPlayer player ? player : null;
+    private ServerPlayer crew() {
+        return this.vehicle.getControllingPassenger() instanceof ServerPlayer player ? player : null;
     }
 }

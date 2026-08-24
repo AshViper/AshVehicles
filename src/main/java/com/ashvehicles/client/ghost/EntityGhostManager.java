@@ -13,7 +13,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.AshVehicles;
-import com.ashvehicles.client.ghost.dh.DHGhostRenderer;
 import com.ashvehicles.client.ghost.dh.DHIntegration;
 
 import net.minecraft.client.Minecraft;
@@ -34,8 +33,8 @@ import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
  * <p>The manager lives on the game thread. It learns about entities from the join and leave
  * events rather than by searching the level — the level is never scanned, on any thread — and it
  * does its work once a tick: take a snapshot of each entity, decide which tier each ghost is in,
- * spend a small budget of occlusion checks, and tell Distant Horizons which ghosts are its to draw.
- * The render pass reads the result; it adds nothing and removes nothing.
+ * and spend a small budget of occlusion checks. The render pass reads the result; it adds nothing
+ * and removes nothing.
  *
  * <p>Ghosts are keyed by UUID. Entity ids are reused and a ghost may outlive the entity whose id
  * it was given; a UUID is forever.
@@ -48,6 +47,13 @@ import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 public final class EntityGhostManager {
     /** Concurrent so that the render thread may read it while the game thread writes it. */
     private static final Map<UUID, EntityGhost> GHOSTS = new ConcurrentHashMap<>();
+    /** The same, as the read-only view {@link #ghosts()} hands out. Wrapped once, not once a frame. */
+    private static final Collection<EntityGhost> VIEW = Collections.unmodifiableCollection(GHOSTS.values());
+    /** The tick's working list, kept between ticks rather than made fresh. Game thread only. */
+    private static final List<EntityGhost> ORDERED = new ArrayList<>();
+    /** Nearest first: the draw budget and the Distant Horizons budget both favour the near. */
+    private static final Comparator<EntityGhost> NEAREST_FIRST =
+            Comparator.comparingDouble(EntityGhost::distanceSq);
 
     @Nullable
     private static ClientLevel level;
@@ -55,10 +61,8 @@ public final class EntityGhostManager {
 
     // Last tick's figures, for the debug overlay.
     private static int countGhost;
-    private static int countSimplified;
     private static int countBillboard;
     private static int countOccluded;
-    private static int countDhDrawn;
     private static int countOrphaned;
 
     private EntityGhostManager() {
@@ -69,7 +73,7 @@ public final class EntityGhostManager {
     // ------------------------------------------------------------------
 
     public static Collection<EntityGhost> ghosts() {
-        return Collections.unmodifiableCollection(GHOSTS.values());
+        return VIEW;
     }
 
     @Nullable
@@ -87,7 +91,7 @@ public final class EntityGhostManager {
 
     @SubscribeEvent
     static void onEntityJoin(EntityJoinLevelEvent event) {
-        if (!event.getLevel().isClientSide()) {
+        if (!(event.getLevel() instanceof ClientLevel joined)) {
             return;
         }
 
@@ -98,7 +102,15 @@ public final class EntityGhostManager {
             return;
         }
 
-        long now = event.getLevel().getGameTime();
+        // A change of level is noticed here as well as in the tick, and it has to be. Entities
+        // arrive as their packets are handled, which is between ticks, so the first machines of a
+        // new world join before the tick that would notice the world had changed — and that tick
+        // then clears them along with the old world's. Nothing ever makes those ghosts again: the
+        // manager learns about entities from this event and never scans the level. The machines
+        // they stood for are drawn by nobody from the hand-over distance out.
+        levelChanged(joined);
+
+        long now = joined.getGameTime();
         EntityGhost ghost = GHOSTS.get(entity.getUUID());
 
         if (ghost != null) {
@@ -139,20 +151,29 @@ public final class EntityGhostManager {
     }
 
     private static void remove(EntityGhost ghost) {
-        DHGhostRenderer.release(ghost);
         GHOSTS.remove(ghost.uuid());
+    }
+
+    /**
+     * Notices that the level has changed, and forgets the one before it. Asked from the tick and
+     * from the join event, since either may be the first to see a new level. Game thread.
+     */
+    private static void levelChanged(@Nullable ClientLevel current) {
+        if (current == level) {
+            return;
+        }
+
+        clear();
+        level = current;
     }
 
     /** Forgets everything. Level change, logout, or the system being switched off. */
     public static void clear() {
-        for (EntityGhost ghost : GHOSTS.values()) {
-            DHGhostRenderer.release(ghost);
-        }
-
         GHOSTS.clear();
+        ORDERED.clear();
         GhostOcclusion.reset();
         DHIntegration.onLevelChanged();
-        countGhost = countSimplified = countBillboard = countOccluded = countDhDrawn = countOrphaned = 0;
+        countGhost = countBillboard = countOccluded = countOrphaned = 0;
     }
 
     // ------------------------------------------------------------------
@@ -164,10 +185,7 @@ public final class EntityGhostManager {
         Minecraft minecraft = Minecraft.getInstance();
         ClientLevel current = minecraft.level;
 
-        if (current != level) {
-            clear();
-            level = current;
-        }
+        levelChanged(current);
 
         if (current == null) {
             return;
@@ -183,13 +201,13 @@ public final class EntityGhostManager {
 
         long now = current.getGameTime();
         Vec3 eye = minecraft.gameRenderer.getMainCamera().getPosition();
-        boolean dhBoxes = DHGhostRenderer.available(current);
         int timeout = GhostConfig.timeoutTicks();
         int interval = GhostConfig.occlusionInterval();
         occlusionRaysThisTick = 0;
 
         // Refreshed from the entity, or timed out, in one pass.
-        List<EntityGhost> ordered = new ArrayList<>(GHOSTS.size());
+        List<EntityGhost> ordered = ORDERED;
+        ordered.clear();
 
         for (Iterator<EntityGhost> it = GHOSTS.values().iterator(); it.hasNext();) {
             EntityGhost ghost = it.next();
@@ -207,44 +225,41 @@ public final class EntityGhostManager {
                     refresh(ghost, entity, now);
                 }
             } else if (now - ghost.orphanedAt() > timeout) {
-                DHGhostRenderer.release(ghost);
                 it.remove();
                 continue;
             }
 
             double distanceSq = ghost.current().position().distanceToSqr(eye);
-            ghost.record(GhostLOD.of(distanceSq), distanceSq, ghost.wasDrawnLastFrame());
+            ghost.record(GhostLOD.of(distanceSq), distanceSq, ghost.verdict());
             ordered.add(ghost);
         }
 
-        // Nearest first: the draw budget and the Distant Horizons budget both favour the near.
-        ordered.sort(Comparator.comparingDouble(EntityGhost::distanceSq));
+        ordered.sort(NEAREST_FIRST);
 
         int budget = GhostConfig.maxGhosts();
         int maxRays = GhostConfig.maxOcclusionRays();
-        countGhost = countSimplified = countBillboard = countOccluded = countDhDrawn = countOrphaned = 0;
+        countGhost = countBillboard = countOccluded = countOrphaned = 0;
 
         for (int i = 0; i < ordered.size(); i++) {
             EntityGhost ghost = ordered.get(i);
             GhostLOD lod = ghost.lod();
             boolean inBudget = i < budget;
 
-            DHGhostRenderer.sync(current, ghost, lod, dhBoxes && inBudget);
-
-            // A ghost Distant Horizons draws is depth-tested by it, and needs no ray of ours; nor
-            // does one whose adapter has said it is not worth the budget.
-            if (lod.isGhost() && inBudget && !ghost.isDhDrawn() && ghost.adapter().needsOcclusionCheck()
+            // A ghost whose adapter has said it is not worth the ray budget takes none of it.
+            if (lod.isGhost() && inBudget && ghost.adapter().needsOcclusionCheck()
                     && !ghost.isOcclusionPending()
                     && now - ghost.occlusionCheckedAt() >= interval && occlusionRaysThisTick < maxRays) {
                 // Staggered by the interval: a ghost checked this tick is not checked again for a
-                // while, so the cost spreads itself across ticks without any scheduling.
-                occlusionRaysThisTick++;
-                GhostOcclusion.check(current, eye, ghost, now);
+                // while, so the cost spreads itself across ticks without any scheduling. A ghost
+                // inside the built world answers without a ray and takes none of the budget, which
+                // is what leaves the whole of it for the ones out past the world that need it.
+                if (GhostOcclusion.check(current, eye, ghost, now)) {
+                    occlusionRaysThisTick++;
+                }
             }
 
             switch (lod) {
                 case GHOST -> countGhost++;
-                case SIMPLIFIED -> countSimplified++;
                 case BILLBOARD -> countBillboard++;
                 default -> {
                 }
@@ -254,14 +269,13 @@ public final class EntityGhostManager {
                 countOccluded++;
             }
 
-            if (ghost.isDhDrawn()) {
-                countDhDrawn++;
-            }
-
             if (ghost.isOrphaned()) {
                 countOrphaned++;
             }
         }
+
+        // Nothing is held between ticks: a ghost kept here would outlive its own removal.
+        ordered.clear();
     }
 
     @SuppressWarnings("unchecked")
@@ -278,20 +292,12 @@ public final class EntityGhostManager {
         return countGhost;
     }
 
-    public static int countSimplified() {
-        return countSimplified;
-    }
-
     public static int countBillboard() {
         return countBillboard;
     }
 
     public static int countOccluded() {
         return countOccluded;
-    }
-
-    public static int countDhDrawn() {
-        return countDhDrawn;
     }
 
     public static int countOrphaned() {
