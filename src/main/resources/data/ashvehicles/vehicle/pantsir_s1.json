@@ -34,13 +34,13 @@
         "name": "gun_left",
         "offset": [1.415, 3.62, -1.651],
         "size": [0.692, 1.161, 4.456],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "gun_right",
         "offset": [-1.415, 3.62, -1.651],
         "size": [0.692, 1.161, 4.456],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "reb",

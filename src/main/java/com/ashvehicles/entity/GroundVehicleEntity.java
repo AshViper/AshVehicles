@@ -622,6 +622,28 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * A point on the gun, in the vehicle's own axes, rocked about the trunnion by however far the
+     * gun is elevated — the same idea as {@link #onTurret}, but about the trunnion and in the
+     * vertical plane rather than about the ring and in the horizontal one.
+     *
+     * <p>Given in the turret's own, untraversed frame: whatever this returns still wants swinging
+     * about the ring by {@link #onTurret} afterwards, the same as any other point carried by the
+     * turret, since the gun rides round with it.
+     */
+    private Vec3 onGun(Vec3 offset, float partialTick) {
+        Vec3 trunnion = this.getStats().armament().trunnion();
+        Vec3 local = offset.subtract(trunnion);
+        float radians = -this.getGunPitch(partialTick) * DEG_TO_RAD;
+        double sin = Mth.sin(radians);
+        double cos = Mth.cos(radians);
+
+        return trunnion.add(new Vec3(
+                local.x,
+                local.y * cos - local.z * sin,
+                local.y * sin + local.z * cos));
+    }
+
+    /**
      * A point on the turret, in the world: swung about the ring by the traverse, then out through
      * the hull's attitude. For anything that rides the turret round rather than sitting on the
      * hull — the commander's eye, most of all, which looks out of a hatch in the turret roof and
@@ -776,14 +798,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     /**
      * The rotation a box is standing at: the hull's attitude, then the turret's traverse if the box
-     * is on it, then the box's own angle within whatever carries it.
+     * is on it, then the gun's elevation on top of that if the box rides the gun as well, then the
+     * box's own angle within whatever carries it.
      */
     @Override
     protected Quaternionf boxRotation(VehicleShape.Box box) {
         Quaternionf rotation = new Quaternionf(this.attitude);
 
-        if (box.mount() == VehicleShape.Mount.TURRET) {
+        if (box.mount() == VehicleShape.Mount.TURRET || box.mount() == VehicleShape.Mount.GUN) {
             rotation.rotateY(-this.turretYaw * DEG_TO_RAD);
+        }
+
+        if (box.mount() == VehicleShape.Mount.GUN) {
+            rotation.rotateX(-this.gunPitch * DEG_TO_RAD);
         }
 
         return rotation.mul(box.orientation());
@@ -797,12 +824,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     /**
      * Where a box sits in the vehicle's own axes right now. One on the hull is where the file says
-     * it is; one on the turret is swung about the ring by however far the turret is traversed.
+     * it is; one on the turret is swung about the ring by however far the turret is traversed; one
+     * on the gun is rocked about the trunnion by however far the gun is elevated first, and then
+     * carried round with the turret the same as any other turret box.
      */
     private Vec3 mountOffset(VehicleShape.Box box) {
-        return box.mount() == VehicleShape.Mount.TURRET
-                ? this.onTurret(box.offset(), 1.0F)
-                : box.offset();
+        return switch (box.mount()) {
+            case GUN -> this.onTurret(this.onGun(box.offset(), 1.0F), 1.0F);
+            case TURRET -> this.onTurret(box.offset(), 1.0F);
+            case HULL -> box.offset();
+        };
     }
 
     /**

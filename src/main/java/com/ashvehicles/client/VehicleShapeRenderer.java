@@ -154,21 +154,35 @@ public final class VehicleShapeRenderer {
 
         Vec3 position = vehicle.getPosition(partialTick);
         Vec3 ring = vehicle.getStats().turret().ring();
+        Vec3 trunnion = vehicle.getStats().armament().trunnion();
         float traverse = vehicle.getTurretYaw(partialTick);
+        float elevation = vehicle.getGunPitch(partialTick);
 
         poseStack.pushPose();
         poseStack.translate(position.x - eye.x, position.y - eye.y, position.z - eye.z);
         poseStack.mulPose(vehicle.getAttitude(partialTick));
 
         for (VehicleShape.Box box : shape.boxes()) {
-            boolean onTurret = box.mount() == VehicleShape.Mount.TURRET;
-            Vec3 offset = onTurret ? box.offset().subtract(ring) : box.offset();
+            boolean onTurret = box.mount() == VehicleShape.Mount.TURRET || box.mount() == VehicleShape.Mount.GUN;
+            boolean onGun = box.mount() == VehicleShape.Mount.GUN;
+            Vec3 offset = onTurret
+                    ? box.offset().subtract(onGun ? trunnion : ring)
+                    : box.offset();
 
             poseStack.pushPose();
 
             if (onTurret) {
                 poseStack.translate(-ring.x, ring.y, ring.z);
                 poseStack.mulPose(Axis.YP.rotationDegrees(-traverse));
+            }
+
+            // The gun's own pivot sits somewhere on the turret, so once traversed it is reached by
+            // a further move within the now-traversed frame, exactly as the ring was reached from
+            // the vehicle's origin above.
+            if (onGun) {
+                Vec3 fromRing = trunnion.subtract(ring);
+                poseStack.translate(-fromRing.x, fromRing.y, fromRing.z);
+                poseStack.mulPose(Axis.XP.rotationDegrees(-elevation));
             }
 
             poseStack.translate(-offset.x, offset.y, offset.z);

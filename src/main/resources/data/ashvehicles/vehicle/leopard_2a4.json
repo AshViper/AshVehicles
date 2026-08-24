@@ -36,7 +36,7 @@
         "offset": [0.0, 2.479, 3.372],
         "size": [0.803, 0.734, 7.43],
         "rotation": [1.0, 0.0, 0.0],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "basnia_left",

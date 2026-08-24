@@ -92,7 +92,7 @@
         "name": "puska",
         "offset": [0.0, 1.895, 1.786],
         "size": [1.358, 2.338, 0.556],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "basnia_2",
@@ -161,7 +161,7 @@
         "name": "puska_2",
         "offset": [0.0, 2.737, 3.177],
         "size": [0.771, 0.252, 4.405],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "basnia_6",
