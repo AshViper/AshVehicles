@@ -19,6 +19,11 @@ import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
  * decides for itself what should be playing; see {@link LiveSounds}. All this does is hand every one
  * of them the ticks and the arrivals, so that there is a single tick handler rather than one per
  * family, and so a family is a field somewhere rather than a class the mod has to be told to load.
+ *
+ * <p>{@link BulletSounds} is fed from here too, and is not a {@link LiveSounds}: what a gun's round
+ * makes is one crack as it goes by rather than a sound that runs for as long as the round exists.
+ * The bookkeeping is the same — a list of what is in the air, wound on once a tick — which is why it
+ * belongs here rather than in a handler of its own.
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class EntitySounds {
@@ -34,6 +39,8 @@ public final class EntitySounds {
         for (LiveSounds<?> family : FAMILIES) {
             family.offer(event.getEntity());
         }
+
+        BulletSounds.offer(event.getEntity());
     }
 
     @SubscribeEvent
@@ -45,6 +52,8 @@ public final class EntitySounds {
                 family.forget();
             }
 
+            BulletSounds.forget();
+
             return;
         }
 
@@ -55,6 +64,8 @@ public final class EntitySounds {
         for (LiveSounds<?> family : FAMILIES) {
             family.tick(minecraft);
         }
+
+        BulletSounds.tick(minecraft);
     }
 
     private EntitySounds() {

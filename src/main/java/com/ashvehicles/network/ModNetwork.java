@@ -10,7 +10,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 @EventBusSubscriber(modid = AshVehicles.MODID)
 public final class ModNetwork {
     /** Bump this whenever a payload's wire format changes. */
-    private static final String PROTOCOL_VERSION = "10";
+    private static final String PROTOCOL_VERSION = "11";
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
@@ -26,6 +26,8 @@ public final class ModNetwork {
                 DefinitionSyncPayload::handle);
         registrar.playToClient(BlastSoundPayload.TYPE, BlastSoundPayload.STREAM_CODEC, BlastSoundPayload::handle);
         registrar.playToClient(SensorPayload.TYPE, SensorPayload.STREAM_CODEC, SensorPayload::handle);
+        registrar.playToClient(HitReportPayload.TYPE, HitReportPayload.STREAM_CODEC,
+                HitReportPayload::handle);
     }
 
     private ModNetwork() {

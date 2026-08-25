@@ -92,14 +92,17 @@ file is still in the history if you want it: `git show cf0ee44:tool/hitbox-edito
 4. **Build the boxes off the bones.** Press <kbd>Shift</kbd>+<kbd>B</kbd> for a whole set at once,
    worked out from the model — see *[Automatic boxes](#automatic-boxes)* below — or build them one
    at a time: pick a bone under **Bones** and press <kbd>Shift</kbd>+<kbd>F</kbd> and you get a box
-   round exactly that part, marked as being on the turret if that is where the bone is. **Fit** does
+   round exactly that part, marked as being on the turret — or on the gun, if the bone is the barrel
+   or the mantlet — if that is where the bone is. **Fit** does
    the other half — make a box roughly big enough over something, press <kbd>F</kbd>, and it closes
    onto whatever geometry is inside it.
 5. **Mirror the pairs.** A machine is symmetric and its boxes come in pairs, so **Mirror** makes
    the twin across the centreline and **Sym** keeps the two in step from then on. Fit a skirt once.
 6. **Traverse the turret** (<kbd>Q</kbd> <kbd>E</kbd>) and watch the boxes marked *turret* follow
    the model. If they drift, the ring is in the wrong place, and the editor will say so and offer
-   to put it where the model's own turret bone turns.
+   to put it where the model's own turret bone turns. **Elevate the gun** (<kbd>[</kbd> <kbd>]</kbd>)
+   and the boxes marked *gun* should follow the barrel the same way; if those drift, it is the
+   trunnion that is wrong.
 7. **Fill in the figures.** Everything the file says that is *not* a place on the machine — thrust,
    stall speed, gear cycle time, the powertrain, the suspension, what it sounds like — is under
    **Performance**, a field to a line, laid out block by block as the file is. It starts at what the
@@ -319,6 +322,7 @@ straight one, so the draft only turns a box where the turn plainly pays.
 | tinted solids | the model, a colour per bone, for fitting against |
 | green | collision boxes on the hull |
 | blue | collision boxes on the turret, swung about the ring |
+| yellow | collision boxes on the gun: swung about the ring and rocked about the trunnion |
 | violet | a crew place, drawn as the crew: a seat is where their *feet* go, and whether their head is inside the roof is the only question anyone asks of one |
 | pale blue, tied to a seat by a hairline | that seat's own first-person eye, if it has been given one |
 | orange | the turret ring, and the circle its boxes sweep |
@@ -441,11 +445,18 @@ Its y and z are what matter there.
 The editor draws both circles, checks both pivots against the model, and offers to put each point
 where the model says it should be.
 
-One thing it shows that looks like a fault in the editor and is not: elevate the gun and the model's
-barrel rises while the box marked *gun* stays flat. That is the mod. A box is bolted either to the
-hull or to the turret — `VehicleShape.Mount` has no third case — so a gun's box traverses and never
-elevates. It is worth knowing when you size one: a box drawn round a barrel at its resting angle is
-the box the barrel is shot at through the whole of its travel.
+`VehicleShape.Mount` has three cases and a box may be bolted to any of them. **hull** is the
+machine itself. **turret** is swung about `turret.ring` by the traverse. **gun** is swung about the
+ring as well *and* rocked about `armament.trunnion` by the elevation, which is what a barrel does and
+what anything clamped to a barrel does with it — the mantlet, and the coaxial's own box.
+
+Elevate the gun (<kbd>[</kbd> <kbd>]</kbd>) and a box marked *gun* rises with the model's barrel.
+If it does not, the trunnion is in the wrong place, exactly as a box marked *turret* drifting under
+<kbd>Q</kbd> <kbd>E</kbd> means the ring is.
+
+Get that mount right or the barrel is shot at through the wrong volume: left on *turret*, a barrel's
+box stays at its resting angle however far the gun is laid, so a gun elevated at an aircraft is hit
+where it is not and missed where it is.
 
 ### Seeing the model
 

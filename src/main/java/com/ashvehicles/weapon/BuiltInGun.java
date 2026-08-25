@@ -354,6 +354,13 @@ public final class BuiltInGun {
                     .add(up.scale(random.nextGaussian() * (scatter + spread)))
                     .normalize();
 
+            // What the barrel adds, plus what the vehicle was already doing along it. Only the part
+            // along the bore, never the whole velocity: a hull crabbing sideways down a slope would
+            // otherwise bend every round off the barrel by the angle it was sliding at. The same
+            // rule a pylon follows — see WeaponMounts.fireRound — and the same one GunSight flies
+            // its trajectory with, which is what makes the mark on the screen the truth.
+            Vec3 carried = direction.scale(Math.max(0.0, this.vehicle.getVelocity().dot(direction)));
+
             VehicleProjectile shot = weapon.type() == WeaponDefinition.Type.GUN
                     ? new BulletEntity(ModEntities.BULLET.get(), level)
                     : new RocketEntity(ModEntities.ROCKET.get(), level);
@@ -362,7 +369,7 @@ public final class BuiltInGun {
             shot.setPos(muzzle);
             // launch rather than setDeltaMovement: the speed has to reach the clients, and it is far
             // too fast for the packets that would ordinarily carry it. See VehicleProjectile.
-            shot.launch(direction.scale(weapon.projectile().speed()));
+            shot.launch(direction.scale(weapon.projectile().speed()).add(carried));
 
             level.addFreshEntity(shot);
         }

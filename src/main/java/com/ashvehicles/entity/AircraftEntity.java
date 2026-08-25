@@ -259,9 +259,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private static final double UPRIGHT = 0.5;
     /**
-     * Rate of descent an undercarriage absorbs, as a fraction of the speed that writes the airframe
-     * off. Above it the gear being down makes no difference: the aircraft is not landing, it is
-     * hitting the ground with the wheels out.
+     * Rate of descent an undercarriage absorbs whatever the aircraft's speed along the ground, as a
+     * fraction of the speed it is allowed to touch down at. This is what a rollout is measured
+     * against rather than a landing: past it the aircraft has to be slow enough to arrive on the
+     * wheels outright, and above <em>that</em> the gear being down makes no difference — it is not
+     * landing, it is hitting the ground with the wheels out.
      */
     private static final double TOUCHDOWN_SINK = 0.25;
     /** Nose-up attitude the wheels allow before the tail would strike the runway. */
@@ -313,8 +315,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * ground, nowhere near enough to hold it up.
      */
     private static final double WRECK_DRAG = 0.99;
-    /** And what it keeps once it is down. A wreck does not slide; it arrives and it stays there. */
-    private static final double WRECK_FRICTION = 0.7;
+    /**
+     * And what it keeps once it is down.
+     *
+     * <p>High, because an airframe arriving at flying speed does not stop where it touched: it
+     * ploughs. The figure is what decides how far — a wreck slides roughly {@code 1 / (1 - this)}
+     * times its speed at touchdown, so a fast jet coming down flat covers a good stretch of field
+     * before it comes to rest, and a helicopter that fell straight down covers none of it, having
+     * had no speed to carry. Terrain usually settles it long before the arithmetic does.
+     */
+    private static final double WRECK_FRICTION = 0.92;
 
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
     /** What the aircraft is carrying. Authoritative on the server; a copy of the tag on a client. */
@@ -355,6 +365,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private float angleOfAttack;
     /** Set by whichever side ran the physics when the airframe hit something at speed. */
     private boolean crashing;
+    /**
+     * How far the aeroplane actually got last time it moved itself, rather than how far it asked to.
+     *
+     * <p>Only a wreck reads it, and it is the whole of what lets one carry its momentum into the
+     * ground. The delta movement cannot: {@code move} takes the blocked axes out of it, so at the
+     * end of the tick an aeroplane that flew into a field at four hundred knots holds a speed of
+     * nothing — the same figure as one that was sitting on the apron. What the two do not share is
+     * how far they got, and that is measured here.
+     */
+    private Vec3 lastTravel = Vec3.ZERO;
     /** The chunk this aircraft is holding open while it flies, if any. */
     private Set<ChunkPos> heldChunks = Set.of();
     /** How this aircraft is drawn on a client that is not flying it. */
@@ -531,6 +551,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     /** Impact speed, in blocks/tick, above which hitting something writes the aircraft off. */
     protected float getCrashSpeed() {
         return this.getStats().airframe().crashSpeed();
+    }
+
+    /**
+     * Speed, in blocks/tick, an arrival on the wheels is survivable at however it was flown: 200
+     * km/h for an aeroplane and 50 for a helicopter unless the file says otherwise.
+     */
+    protected float getLandingSpeed() {
+        return this.getStats().landingSpeed();
     }
 
     @Override
@@ -1268,16 +1296,28 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         float limit = this.getCrashSpeed();
+        double safe = this.getLandingSpeed();
 
-        // Whether what just happened was a landing rather than an arrival. It takes all three: the
-        // undercarriage out, the aircraft the right way up on it, and a rate of descent an
-        // undercarriage can absorb. Flying into the ground fails the last of those however level the
-        // wings are and however far down the gear is, which is the point — a shallow dive into a
-        // field blocks only the vertical axis and lets the aircraft slide, so nothing about the
-        // horizontal speed alone can tell a crash from a rollout.
+        // Whether what just happened was a landing rather than an arrival. Two of it are not in
+        // question: the undercarriage has to be out and the aircraft the right way up on it. What
+        // the machine then did with the ground can qualify either of two ways.
+        //
+        // A rate of descent an undercarriage absorbs is the first, and it is what lets an aeroplane
+        // use a runway at all. A takeoff run collides with the ground on every tick of it, so the
+        // sink rate — not the speed — is the only thing that tells rolling along a field from flying
+        // into one, and a shallow dive blocks the vertical axis and slides exactly as a rollout
+        // does.
+        //
+        // Arriving slowly enough is the second, and it is the one the pilot can actually fly to.
+        // At or under the speed the undercarriage is rated for — the figure on their own readout,
+        // 200 km/h for an aeroplane and 50 for a helicopter — nothing about how it was flown writes
+        // the airframe off, however hard it came down at the end. This is the whole of how a
+        // helicopter lands: one comes to a stop and then descends, so it has no shallow approach to
+        // pass the sink test with, and holding it to a fraction of an aeroplane's crash speed meant
+        // that setting down at anything but a crawl destroyed it.
         boolean landing = this.gearProgress > 0.5F
                 && this.getLiftVector().y > UPRIGHT
-                && impactVelocity.y > -limit * TOUCHDOWN_SINK;
+                && (impactVelocity.y > -safe * TOUCHDOWN_SINK || impactVelocity.length() <= safe);
 
         if (landing) {
             // Down safely, but there is still such a thing as running into something afterwards.
@@ -1288,7 +1328,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             double before = Math.sqrt(impactVelocity.x * impactVelocity.x + impactVelocity.z * impactVelocity.z);
             double after = Math.sqrt(surviving.x * surviving.x + surviving.z * surviving.z);
 
-            if (this.horizontalCollision && before - after > limit) {
+            // Never below the speed the machine is allowed to touch down at, whatever its crash
+            // speed says. A helicopter may set down at 50 km/h, so a skid catching the lip of a
+            // block on the way in cannot be the thing that writes it off — which it was, its crash
+            // speed being less than half of that.
+            if (this.horizontalCollision && before - after > Math.max(limit, safe)) {
                 this.crashing = true;
             }
 
@@ -1979,20 +2023,44 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
+     * Whether the wheels are what the aeroplane is meant to be meeting the ground with.
+     *
+     * <p>Undercarriage out and the aircraft the right way up on it, and nothing whatever about
+     * whether it is on the ground yet. That is the configuration the undercarriage is holding the
+     * airframe in, and it is the one question behind all three of the things that follow from
+     * having wheels: what the shape scrapes over rather than hits, what the box rolls up rather
+     * than stops against, and whether the aircraft is being held down onto the runway at all. They
+     * have to be the same question, or a kerb the shape is let through and the box is not is a wall
+     * made of nothing.
+     *
+     * <p>Deliberately not {@code onGround}. That flag is the leftovers of the last collision and it
+     * is only ever true along a runway because {@link #groundTick} pushes the wheels into it; asking
+     * it here would make the undercarriage come and go with it.
+     */
+    private boolean onWheels() {
+        return this.gearProgress > 0.5F && this.getLiftVector().y > UPRIGHT;
+    }
+
+    /**
      * How big a step the aircraft rolls over instead of running into.
      *
-     * <p>Only with the undercarriage down and the wheels on the ground: in the air an aeroplane does
-     * not step over anything, and a belly landing has no wheels to do it with. On the ground it is
-     * the difference between an undercarriage and a wall — the collision box is a single square box
-     * six blocks across, so without this the lip of one block anywhere under it is a head-on impact,
-     * and since the aircraft must pass its own crash speed to fly at all, that impact was fatal on
-     * every takeoff from ground that was not perfectly flat.
+     * <p>Only on the wheels: in the air with the gear up an aeroplane does not step over anything,
+     * and a belly landing has no wheels to do it with. On them it is the difference between an
+     * undercarriage and a wall — the collision box is a single square box six blocks across, so
+     * without this the lip of one block anywhere under it is a head-on impact, and since the
+     * aircraft must pass its own crash speed to fly at all, that impact was fatal on every takeoff
+     * from ground that was not perfectly flat.
+     *
+     * <p>The same line the airframe scrapes over, and for the same reason — see {@link #onWheels}.
+     * Nothing is given away by not asking whether the wheels are down on something: vanilla only
+     * reaches for this when the move was stopped and the aircraft is either standing on the ground
+     * or coming down onto it, so what it adds is a wheels-down arrival rolling up onto the kerb it
+     * touched down against instead of being stopped dead by it. Anything taller than the step was
+     * taken out of the movement by {@link #limitToShape} before this is reached.
      */
     @Override
     public float maxUpStep() {
-        return this.onGround() && this.gearProgress > 0.5F
-                ? this.getStats().landingGear().climbHeight()
-                : 0.0F;
+        return this.onWheels() ? this.getStats().landingGear().climbHeight() : 0.0F;
     }
 
     /**
@@ -2134,7 +2202,25 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             ground = ground.scale(along);
         }
 
-        return new Vec3(ground.x, Math.max(motion.y, 0.0), ground.z);
+        // And the wheels are kept pressed onto the runway. Settled at exactly nothing — which is
+        // what clamping a sinking aeroplane at zero comes to — the aircraft asks to move along a
+        // perfectly level line, meets nothing below it, and vanilla concludes it is standing on
+        // nothing: onGround goes out on the very next tick, comes back on the one after it
+        // when gravity has dropped the aeroplane onto the ground again, and flickers like that for
+        // the whole of a takeoff roll. Everything that hangs off it flickers with it — the tyres'
+        // grip, the levelling, and above all the step the undercarriage is allowed to climb, so a
+        // kerb it should roll straight over is a wall on every other tick. One block is enough to
+        // stop an aeroplane dead that way, which is what this is here to prevent.
+        //
+        // One tick of the weight the wheels are carrying, and no more. The floor takes it, which is
+        // all that is wanted; anything heavier would start to read as a rate of descent, and
+        // detectCrash would stop calling a rollout a rollout — see TOUCHDOWN_SINK.
+        //
+        // Only while the wheels are what is touching. On its belly there is nothing to hold the
+        // aircraft down onto, and an arrival there is still an arrival.
+        double onto = this.onWheels() ? -GRAVITY : 0.0;
+
+        return new Vec3(ground.x, Math.max(motion.y, onto), ground.z);
     }
 
     /**
@@ -2852,20 +2938,28 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * an aeroplane, not a wreck. Gravity does the rest, what is left of the airspeed bleeds off on
      * the way, and the ground takes the last of it.
      *
-     * <p>Whatever the world stopped last tick stays stopped. {@link #move} zeroes nothing of its
-     * own when it is our collision boxes rather than the plain one that ran into something, so a
-     * wreck lying against a hillside would otherwise go on accumulating a speed it can never spend —
-     * and one lying on flat ground would never settle, because the vertical axis has to be pushed
-     * into the floor every tick for {@code onGround} to keep saying so.
+     * <p><b>It carries on from what the world let it do, not from what it asked for.</b> Those two
+     * part company at exactly the moment that decides whether there is any momentum left. An
+     * aeroplane that flew into a field had the blocked axes taken out of its delta movement by
+     * {@code move} on the way in — so read from there, a shallow dive at flying speed and a parked
+     * aeroplane are the same standing wreck a tick later. Read from how far it actually got, the
+     * one that was travelling keeps travelling: the ground took the part of the speed that went into
+     * it and left the part that went along it, which is what ploughing is.
+     *
+     * <p>It settles for the same reason. A wreck jammed against a hillside got nowhere last tick, so
+     * there is nothing to carry and nothing to accumulate; one lying on flat ground got nowhere
+     * downwards, so the gravity below is the whole of its vertical speed — which is what has to be
+     * pushed into the floor every tick for {@code onGround} to keep saying so.
      */
     private void wreckTick() {
-        Vec3 velocity = this.getDeltaMovement();
-        double slide = this.onGround() ? WRECK_FRICTION : WRECK_DRAG;
-        double x = this.horizontalCollision ? 0.0 : velocity.x * slide;
-        double z = this.horizontalCollision ? 0.0 : velocity.z * slide;
-        double y = this.verticalCollision ? 0.0 : velocity.y * WRECK_DRAG;
+        Vec3 carried = this.lastTravel;
+        // Down on something, which is not only what onGround says. That flag is the plain box, and
+        // the plain box sits at the wheels — an airframe lying on its back, or propped on a wingtip,
+        // is being held up by its own boxes with the wheel line still in the air. Friction is what
+        // ploughing is; without this an inverted wreck would skate.
+        double slide = this.onGround() || this.verticalCollision ? WRECK_FRICTION : WRECK_DRAG;
 
-        this.setDeltaMovement(x, y - GRAVITY, z);
+        this.setDeltaMovement(carried.x * slide, carried.y * WRECK_DRAG - GRAVITY, carried.z * slide);
     }
 
     // ------------------------------------------------------------------
@@ -3215,11 +3309,34 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      *
      * <p>Only blocks are tested this way. Entities are left to the plain box, as they always were,
      * which also keeps the aircraft from colliding with its own boxes.
+     *
+     * <p>Only the flight model's own movement, though. Anything else moving the aircraft is telling
+     * it where it has <em>already got to</em> — above all vanilla's vehicle packet, which arrives on
+     * the server as a {@link MoverType#PLAYER} move and is then stamped over by {@code absMoveTo} a
+     * few lines later whatever this decides. Testing that report against the shape is worse than
+     * useless: the answer is thrown away, and working it out means sweeping every box the aeroplane
+     * is made of along a whole tick of its flight path — seventeen blocks at the top end, a dozen
+     * times over, on the server thread, for every aircraft anybody is flying. That is a hitch felt by
+     * everyone on the server, and it buys nothing at all. The driving side has already run this test
+     * against ground it could actually see, which is the same reason {@code GroundVehicleEntity} has
+     * never run it on a reported move either.
      */
     @Override
     public void move(MoverType type, Vec3 movement) {
+        if (type != MoverType.SELF) {
+            super.move(type, movement);
+
+            return;
+        }
+
         Vec3 allowed = this.limitToShape(movement);
+        Vec3 before = this.position();
+
         super.move(type, allowed);
+        // What the world actually let it do, which is not what it was asked for and not what the
+        // delta movement holds afterwards either. A wreck flies on this and on nothing else; see
+        // wreckTick.
+        this.lastTravel = this.position().subtract(before);
 
         // super.move only knows whether the plain box was stopped. If it was our own shape that
         // stopped us, the flags have to say so, or a wing could be folded against a cliff without
@@ -3303,7 +3420,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * holds the aircraft up and a descent into it is still an arrival at whatever speed it arrived.
      */
     private double scrapeLine() {
-        if (this.gearProgress <= 0.5F || this.getLiftVector().y <= UPRIGHT) {
+        if (!this.onWheels()) {
             return Hitboxes.UNDERSIDE_NONE;
         }
 

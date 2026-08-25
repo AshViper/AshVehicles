@@ -30,10 +30,14 @@ import net.neoforged.neoforge.client.event.ViewportEvent;
  * along the axes being looked down — so the vehicle is seen from above and there is ground on the
  * screen where the sky was.
  *
- * <p>It is the view that is tipped and not the crew: the turret is still laid on where the crew are
- * looking, which the mouse moves and this does not touch. What that costs is that the middle of the
- * screen stops being the line of the gun, which is why the gun's own mark is drawn out in the world
- * where the round will land rather than at the crosshair — see {@link GroundVehicleHud}.
+ * <p>It is the view that is tipped and not the crew: the mouse still moves the head, and this does
+ * not touch it. What the gun does about it is lay itself down by the same amount — see
+ * {@code GroundVehicleEntity.setSightTilt}, which {@link GroundVehicleInputHandler} feeds the tilt
+ * to every tick — so that the middle of the screen goes on being the line of the gun. Left alone,
+ * the two would be the whole of the tilt apart: the crew put the middle of the screen on a target,
+ * the gun points ten degrees over the top of it, and the round goes there. The gun's own mark is
+ * still drawn out in the world at the point the round will reach, which is what makes it a range as
+ * well as a direction — see {@link GroundVehicleHud} — and it now sits where the crew are looking.
  *
  * <p>First person is the opposite case and gets the opposite treatment, the same as an aircraft's:
  * the camera is placed outright at {@code camera.cockpit}, in the vehicle's own axes, so the file

@@ -42,12 +42,24 @@ public final class GroundVehicleInputHandler {
             return;
         }
 
-        // Drained whether or not this player is at the controls, so a press made while riding in the
-        // back cannot queue up and switch weapons the moment they take the driver's seat. One key
-        // serves every machine in the mod, so only one handler may take the press: see the note in
-        // {@link AircraftInputHandler}, which stands aside whenever the player is aboard one of
-        // these.
-        boolean cycleWeapon = ModKeyMappings.CYCLE_WEAPON.consumeClick();
+        // One key steps through the weapons of everything in the mod, and a mapping hands a click to
+        // whichever caller asks for it first. Both this handler and AircraftInputHandler run every
+        // tick with no order between them, so the two conditions have to be exact mirrors of each
+        // other or they race: this one takes the press whenever the player is aboard a ground
+        // vehicle, that one whenever they are not, and exactly one of them takes it whatever order
+        // they run in.
+        //
+        // Drained while merely riding as well as while driving — and thrown away in that case — so a
+        // press made in the back cannot queue up and switch weapons the moment the crew change
+        // seats.
+        //
+        // Draining it unconditionally, which is what this used to do, ate the press out from under a
+        // pilot: in a cockpit this handler had no use for the click and took it anyway, and the
+        // aircraft's own handler found nothing left. Holding the key appeared to fix it because a
+        // held key repeats and makes a second click for the other handler to find, which is the
+        // whole of why switching weapons wanted a long press.
+        boolean cycleWeapon = player.getVehicle() instanceof GroundVehicleEntity
+                && ModKeyMappings.CYCLE_WEAPON.consumeClick();
 
         GroundVehicleEntity vehicle = drivenVehicle(player);
 
@@ -73,6 +85,9 @@ public final class GroundVehicleInputHandler {
                 ModKeyMappings.FIRE_COAXIAL.isDown());
 
         vehicle.setInput(input);
+        // Before the vehicle is ticked, which is this event's whole reason for being Pre: the turret
+        // is laid inside that tick and has to know how the view it is being laid through is sitting.
+        vehicle.setSightTilt(sightTilt(minecraft, vehicle));
         // The hull, the speed and the turret go with it because the server cannot see any of them:
         // a vehicle driven from here is moved on the server by packets that land between its ticks,
         // and vanilla's movement packet carries a heading and an elevation and nothing else.
@@ -94,6 +109,23 @@ public final class GroundVehicleInputHandler {
             event.setSwingHand(false);
             event.setCanceled(true);
         }
+    }
+
+    /**
+     * How far the view the crew are using is tipped below their own line of sight, in degrees.
+     *
+     * <p>The chase view is rotated down by the machine's {@code camera.tilt} so that there is ground
+     * on the screen rather than sky; the first-person view is not rotated at all. What the gun does
+     * about it is {@code GroundVehicleEntity.setSightTilt}: it is laid down by the same amount, so
+     * the middle of the screen is the line of the gun in either view rather than only in one of
+     * them.
+     *
+     * <p>Switching between the two therefore moves the gun, and it moves at the turret's own
+     * elevation rate like any other lay. That is the honest thing for it to do — the two views are
+     * pointing at different places, and the gun follows whichever one the crew are looking through.
+     */
+    private static float sightTilt(Minecraft minecraft, GroundVehicleEntity vehicle) {
+        return minecraft.options.getCameraType().isFirstPerson() ? 0.0F : vehicle.getStats().camera().tilt();
     }
 
     private static GroundVehicleEntity drivenVehicle(LocalPlayer player) {

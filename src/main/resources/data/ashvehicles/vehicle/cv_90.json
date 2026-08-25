@@ -226,12 +226,6 @@
         "rotation": [32.5, 0.0, 0.0]
       },
       {
-        "name": "kletka",
-        "offset": [0.0, 3.717, -2.286],
-        "size": [2.235, 1.687, 0.05],
-        "rotation": [3.5, 0.0, 0.0]
-      },
-      {
         "name": "corpus_left_5",
         "offset": [1.656, 2.075, -1.344],
         "size": [1.063, 0.063, 2.438]
@@ -300,10 +294,10 @@
     "grade_resistance": 0.05
   },
   "suspension": {
-    "climb_height": 1,
+    "climb_height": 1.25,
     "slope_limit": 50,
-    "settle_rate": 0.22,
-    "grip": 0.82,
+    "settle_rate": 0.25,
+    "grip": 0.9,
     "wheel_radius": 0.38,
     "contact_length": 5.7,
     "contact_width": 3.68
@@ -323,10 +317,6 @@
     "recoil_ticks": 6,
     "kick": 0.03
   },
-  "coaxial": {
-    "gun": "ashvehicles:mg3",
-    "muzzle": [-0.32, 3.05, 0.33]
-  },
   "hull": {
     "health": 300,
     "explosion_power": 4,
@@ -338,7 +328,7 @@
   "camera": {
     "pos": [0.0, 2.2, -11.0],
     "tilt": 8,
-    "cockpit": [0.98, 3.2, -1.35]
+    "cockpit": [-0.75, 2.75, 0.2]
   },
   "sound": {
     "engine": "ashvehicles:engine.tank",
@@ -347,5 +337,9 @@
     "pitch_min": 0.95,
     "pitch_max": 1.35,
     "range": 130
+  },
+  "coaxial": {
+    "gun": "ashvehicles:mg3",
+    "muzzle": [-0.32, 3.05, 0.33]
   }
 }

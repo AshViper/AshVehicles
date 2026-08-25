@@ -1,0 +1,133 @@
+{
+	"format_version": "1.8.0",
+	"animations": {
+		"gear_down": {
+			"loop": "hold_on_last_frame",
+			"animation_length": 1.25,
+			"bones": {
+				"Tyre": {
+					"rotation": {
+						"0.25": {
+							"vector": [-90, 0, 0]
+						},
+						"1.25": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"LeftTyre": {
+					"rotation": {
+						"0.25": {
+							"vector": [-90, 0, 0]
+						},
+						"1.25": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"LeftTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, -90]
+						},
+						"0.5": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"RightTyre": {
+					"rotation": {
+						"0.25": {
+							"vector": [-90, 0, 0]
+						},
+						"1.25": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"RightTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 90]
+						},
+						"0.5": {
+							"vector": [0, 0, 0]
+						}
+					}
+				}
+			}
+		},
+		"gear_up": {
+			"loop": "hold_on_last_frame",
+			"animation_length": 1.25,
+			"bones": {
+				"Tyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [-90, 0, 0]
+						}
+					}
+				},
+				"ForwardTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"1.25": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"LeftTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [-90, 0, 0]
+						}
+					}
+				},
+				"LeftTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.75": {
+							"vector": [0, 0, 0]
+						},
+						"1.25": {
+							"vector": [0, 0, -90]
+						}
+					}
+				},
+				"RightTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [-90, 0, 0]
+						}
+					}
+				},
+				"RightTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 2.5]
+						},
+						"0.75": {
+							"vector": [0, 0, 2.5]
+						},
+						"1.25": {
+							"vector": [0, 0, 90]
+						}
+					}
+				}
+			}
+		}
+	}
+}

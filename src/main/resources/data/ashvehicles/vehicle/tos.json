@@ -8,7 +8,7 @@
         "name": "turret",
         "offset": [0.0, 2.931, 0.094],
         "size": [3.496, 1.361, 4.188],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "corpus",
@@ -199,14 +199,14 @@
         "offset": [-1.468, 2.158, -1.208],
         "size": [0.189, 0.442, 2.883],
         "rotation": [7.5, 0.0, 0.0],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "turret_left",
         "offset": [1.468, 2.158, -1.208],
         "size": [0.189, 0.442, 2.883],
         "rotation": [7.5, 0.0, 0.0],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "corpus_11",
@@ -267,11 +267,11 @@
     "rolling_resistance": 0.003,
     "steer_rate": 0.85,
     "pivot_rate": 1.1,
-    "grade_resistance": 0.055
+    "grade_resistance": 0.05
   },
   "suspension": {
-    "climb_height": 1.05,
-    "slope_limit": 48,
+    "climb_height": 1.25,
+    "slope_limit": 50,
     "settle_rate": 0.25,
     "grip": 0.9,
     "wheel_radius": 0.42,

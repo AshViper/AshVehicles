@@ -4,9 +4,11 @@ import javax.annotation.Nullable;
 
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.network.HitReportPayload;
 import com.ashvehicles.particle.TintedParticleOption;
 import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.vehicle.Hitbox;
+import com.ashvehicles.weapon.Impact;
 import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponEffects;
@@ -765,8 +767,53 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
         // What it is still worth rather than what it left the barrel worth. The two are the same for
         // every round that has come straight here, which is nearly all of them.
-        hit.getEntity().hurt(source, this.getRound().damage() * Ricochet.energy(this.deflections));
+        float damage = this.getRound().damage() * Ricochet.energy(this.deflections);
+
+        hit.getEntity().hurt(source, damage);
+        // Told to whoever fired it, and to nobody else. At the range these are used at, this is the
+        // only way the gunner learns whereabouts on the target the round went. See HitReportPayload.
+        HitReportPayload.report(this.getOwner(), hit.getEntity(), hit.getLocation(),
+                this.getDeltaMovement(), damage, false);
+        this.struck(hit);
         this.burst(hit.getLocation(), null);
+    }
+
+    /**
+     * The noise a round makes going into one of the mod's own boxes.
+     *
+     * <p>Played here rather than in {@link #burst}, which is the other end of every round's life and
+     * cannot tell what it arrived in: a shot into a hillside and a shot into a turret front are the
+     * same call there, and only one of them is a hit. So this asks what was struck, and asks it at
+     * the one moment the answer is still to hand.
+     *
+     * <p>Only what has no blast of its own, and only against a machine. Anything that goes off where
+     * it lands is already heard going off, and a clang over the top of that says nothing the bang
+     * did not; and a round into the ground has the block's own debris rather than a strike on plate.
+     * What is left is exactly the case that used to be silent — an armour-piercing shot or a burst
+     * of machine-gun fire arriving on a tank. See {@link Impact}.
+     */
+    private void struck(EntityHitResult hit) {
+        if (!(this.level() instanceof ServerLevel level)
+                || this.getRound().explosion() > 0.0F
+                || !isMachine(hit.getEntity())) {
+            return;
+        }
+
+        Vec3 at = hit.getLocation();
+
+        // Named after the weapon, so a pack can record one gun's strike without recording them all;
+        // a client with neither falls back on the mod's. The reach goes in the volume slot for the
+        // reason it does everywhere here: that slot is the only thing deciding who is told about the
+        // sound at all, and a hit is worth hearing from further off than thirty-two blocks.
+        level.playSound(null, at.x, at.y, at.z,
+                SoundEvent.createVariableRangeEvent(Impact.soundFor(this.getWeaponId())),
+                SoundSource.NEUTRAL, Impact.SOUND_SETUP.packetVolume(), Impact.SOUND_SETUP.pitch());
+    }
+
+    /** Whether this is one of the mod's machines, struck either on a box of its own or on itself. */
+    private static boolean isMachine(Entity target) {
+        return target instanceof VehicleEntityBase
+                || target instanceof VehiclePart part && part.getParent() instanceof VehicleEntityBase;
     }
 
     /**
@@ -816,6 +863,11 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
         Vec3 away = Ricochet.away(velocity, normal, this.random);
 
+        // Reported before the round is turned round, so that the mark is drawn against the line it
+        // came in on rather than the one it left on. A ricochet is worth telling the gunner about
+        // for its own sake: from behind the sight it looks exactly like a miss, and the answer to
+        // one of those is to fire again at the same place.
+        HitReportPayload.report(this.getOwner(), hit.getEntity(), at, velocity, 0.0F, true);
         this.deflections++;
         // Clear of every margin a hit is allowed, or the round is thrown off the same plate from the
         // same place next tick and every tick after. See Ricochet.CLEARANCE.

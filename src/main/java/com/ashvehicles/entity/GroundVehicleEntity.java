@@ -290,6 +290,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private float gunPitchO;
 
     /**
+     * Degrees the crew's view is tipped below their own line of sight, which the gun is laid down by
+     * to match. See {@link #setSightTilt}.
+     */
+    private float sightTilt;
+
+    /**
      * How far the vehicle has driven altogether, in blocks, which is what the road wheels are turned
      * from. Wrapped inside a single revolution so that it cannot lose precision over a long journey.
      */
@@ -608,6 +614,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.speed = travelSpeed;
         this.entityData.set(DATA_SPEED, travelSpeed);
         this.setTurret(turret, gun);
+    }
+
+    /** The same, and the turret and gun with it, which is most of what there is to see on a tank. */
+    @Override
+    public void poseForDrawing(Quaternionf hull, float turret, float gun) {
+        super.poseForDrawing(hull, turret, gun);
+
+        this.turretYaw = Mth.wrapDegrees(turret);
+        this.turretYawO = this.turretYaw;
+        this.gunPitch = gun;
+        this.gunPitchO = gun;
     }
 
     public float getTurretYaw(float partialTick) {
@@ -1692,12 +1709,34 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * How far the crew's view is tipped below their own line of sight, in degrees.
+     *
+     * <p>Set by the driving client every tick, and zero everywhere else. The chase view is rotated
+     * down by the machine's {@code camera.tilt} so that there is ground on the screen rather than
+     * sky — see {@code GroundVehicleCameraHandler} — and the gun is laid down by the same amount so
+     * that the middle of the screen goes on being the line of the gun. Without it the two are the
+     * whole of the tilt apart, which on these vehicles is five to twelve degrees: the crew lay the
+     * crosshair on a target, the gun is pointing well over the top of it, and the round goes there.
+     *
+     * <p>Told rather than worked out here, because which view the crew are using and how it has been
+     * tipped are questions only their own client can answer. Nothing is given away by trusting it:
+     * the turret is laid on this client already — see {@link #tickTurret} — and what the server is
+     * told is the angle, not the reasoning behind it.
+     */
+    public void setSightTilt(float degrees) {
+        this.sightTilt = degrees;
+    }
+
+    /**
      * Brings the turret round to where the crew are looking, as fast as it is able.
      *
      * <p>Both angles are held in the hull's frame and aimed in the world's, so what is worked out
      * here is the difference: where the gunner is looking, less where the hull is pointing. The
      * mechanical limits are the hull's — a gun can only depress so far into its own roof — so they
      * are applied after the hull's own pitch has been taken out and not before.
+     *
+     * <p>Laid on the middle of the crew's screen rather than on their line of sight, which in the
+     * chase view are not the same direction: see {@link #setSightTilt}.
      */
     private void tickTurret(GroundVehicleDefinition.Turret turret) {
         if (!turret.exists()) {
@@ -1709,7 +1748,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         }
 
         float wantYaw = Mth.wrapDegrees(crew.getYHeadRot() - this.heading);
-        float wantPitch = Mth.clamp(-crew.getXRot() - this.hullPitch, -turret.depression(), turret.elevation());
+        float wantPitch = Mth.clamp(-(crew.getXRot() + this.sightTilt) - this.hullPitch,
+                -turret.depression(), turret.elevation());
 
         float yaw = approachAngle(this.turretYaw, wantYaw, turret.traverseRate());
         float pitch = approach(this.gunPitch, wantPitch, turret.elevationRate());

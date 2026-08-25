@@ -10,7 +10,6 @@
     "damage": 5.0,
     "speed": 18.5,
     "gravity": 0.00125,
-    "explosion": 10.0,
     "range": 700.0,
     "ricochet": 50.0,
     "tracer": "FFB347"

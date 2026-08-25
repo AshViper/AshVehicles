@@ -167,7 +167,7 @@
         "offset": [0.0, 1.983, 2.379],
         "size": [0.347, 0.313, 7.812],
         "rotation": [-0.5, 0.0, 40.0],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "whell21_right",
@@ -190,39 +190,12 @@
       {
         "name": "puska",
         "offset": [0.0, 1.97, -1.552],
-        "size": [0.536, 0.385, 2.151],
-        "mount": "gun"
+        "size": [0.536, 0.385, 2.151]
       },
       {
         "name": "corpus_7",
         "offset": [0.0, 1.079, -2.929],
         "size": [2.671, 1.264, 0.093]
-      },
-      {
-        "name": "kozirek",
-        "offset": [0.0, 3.958, -2.182],
-        "size": [3.648, 0.05, 1.514],
-        "mount": "turret"
-      },
-      {
-        "name": "kozirek_2",
-        "offset": [0.0, 3.822, -0.698],
-        "size": [3.648, 0.05, 1.514],
-        "rotation": [-13.0, 0.0, 0.0],
-        "mount": "turret"
-      },
-      {
-        "name": "basnia2_12",
-        "offset": [0.0, 3.293, -2.507],
-        "size": [0.562, 1.776, 0.409],
-        "mount": "turret"
-      },
-      {
-        "name": "basnia2_right",
-        "offset": [-1.361, 3.141, -1.335],
-        "size": [0.577, 1.549, 0.29],
-        "rotation": [-5.0, 0.0, 0.0],
-        "mount": "turret"
       },
       {
         "name": "bof_right",
@@ -233,13 +206,6 @@
         "name": "bof2_left",
         "offset": [2.292, 1.172, -1.214],
         "size": [0.053, 0.561, 7.765]
-      },
-      {
-        "name": "osnova_left",
-        "offset": [1.361, 3.141, -1.335],
-        "size": [0.577, 1.549, 0.29],
-        "rotation": [-5.0, 0.0, 0.0],
-        "mount": "turret"
       },
       {
         "name": "osnova",
@@ -264,34 +230,6 @@
         "offset": [1.244, 1.29, -1.402],
         "size": [0.08, 1.0, 1.054],
         "rotation": [0.0, -0.5, 0.0],
-        "mount": "turret"
-      },
-      {
-        "name": "kozirek_left",
-        "offset": [0.964, 3.116, -2.921],
-        "size": [0.069, 1.753, 0.069],
-        "rotation": [-4.0, 0.0, 0.0],
-        "mount": "turret"
-      },
-      {
-        "name": "kozirek_right",
-        "offset": [-0.964, 3.116, -2.921],
-        "size": [0.069, 1.753, 0.069],
-        "rotation": [-4.0, 0.0, 0.0],
-        "mount": "turret"
-      },
-      {
-        "name": "kozirek_left_2",
-        "offset": [0.585, 2.988, -0.101],
-        "size": [0.069, 1.41, 0.069],
-        "rotation": [-4.0, 0.0, 0.0],
-        "mount": "turret"
-      },
-      {
-        "name": "kozirek_right_2",
-        "offset": [-0.585, 2.988, -0.101],
-        "size": [0.069, 1.41, 0.069],
-        "rotation": [-4.0, 0.0, 0.0],
         "mount": "turret"
       }
     ]
@@ -324,7 +262,7 @@
     "grade_resistance": 0.05
   },
   "suspension": {
-    "climb_height": 1.1,
+    "climb_height": 1.25,
     "slope_limit": 50,
     "settle_rate": 0.25,
     "grip": 0.9,
@@ -347,10 +285,6 @@
     "recoil_ticks": 18,
     "kick": 0.08
   },
-  "coaxial": {
-    "gun": "ashvehicles:kord",
-    "muzzle": [1.18, 2.77, -0.58]
-  },
   "hull": {
     "health": 490,
     "explosion_power": 6,
@@ -371,5 +305,9 @@
     "pitch_min": 1,
     "pitch_max": 1.45,
     "range": 160
+  },
+  "coaxial": {
+    "gun": "ashvehicles:kord",
+    "muzzle": [1.18, 2.77, -0.58]
   }
 }

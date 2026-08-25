@@ -91,14 +91,7 @@
       {
         "name": "puska",
         "offset": [0.0, 1.895, 1.786],
-        "size": [1.358, 2.338, 0.556],
-        "mount": "gun"
-      },
-      {
-        "name": "basnia_2",
-        "offset": [0.0, 2.92, -0.427],
-        "size": [1.701, 4.129, 0.225],
-        "mount": "turret"
+        "size": [1.358, 2.338, 0.556]
       },
       {
         "name": "osnova_5",
@@ -313,10 +306,10 @@
     "grade_resistance": 0.05
   },
   "suspension": {
-    "climb_height": 0.93,
+    "climb_height": 1.25,
     "slope_limit": 50,
-    "settle_rate": 0.22,
-    "grip": 0.8,
+    "settle_rate": 0.25,
+    "grip": 0.9,
     "wheel_radius": 0.51,
     "contact_length": 4.53,
     "contact_width": 3.07

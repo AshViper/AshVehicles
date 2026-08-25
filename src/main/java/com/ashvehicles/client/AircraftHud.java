@@ -37,6 +37,11 @@ import org.joml.Quaternionf;
  * third: the pipper, which is where the rounds would land, and which from the chase camera is not
  * where the boresight is either — see {@link GunSight}.
  *
+ * <p>In the top right-hand corner, {@link HitReadout}: where the last few rounds landed on whatever
+ * they were fired at. Everything else here is about getting a round away; that is the only thing
+ * that says what happened when one arrived, and a burst at a mile is not something the pilot can
+ * see the end of for themselves.
+ *
  * <p>Everything is read from state that reaches every client, so a passenger sees the same
  * instruments as the pilot rather than a panel of zeroes.
  */
@@ -108,6 +113,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
         drawLock(graphics, minecraft, aircraft, centreX, centreY);
         drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
         drawCrew(graphics, minecraft.font, aircraft);
+        // What the last few rounds did, if any of them have landed lately. The same instrument the
+        // tank crews get and for the same reason: at the range a gun is fired at from the air, a
+        // burst that connected and a burst that went past look identical from behind the sight.
+        HitReadout.draw(graphics, minecraft.font);
         RadarDisplay.draw(graphics, minecraft.font, aircraft);
     }
 
@@ -393,6 +402,12 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * <p>The mark falls off the bottom of the screen when the aircraft is climbing away and the
      * bomb would land somewhere behind the viewer, which is the honest answer: from here, it would
      * not land anywhere you can see.
+     *
+     * <p>From high up the bomb lands beyond the chunks the client has, and there {@link BombSight}
+     * can only work the fall out against an assumed floor rather than trace it against real blocks.
+     * The mark is still drawn — height is exactly when a pilot needs it — but dimmed, with a tilde
+     * on the range, so it reads as what it is: the right place if the ground out there is as high as
+     * the ground back here.
      */
     private static void drawBombSight(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
             int centreX, int centreY) {
@@ -402,12 +417,14 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
-        Vec3 impact = BombSight.impact(aircraft, weapon);
+        BombSight.Solution fall = BombSight.solve(aircraft, weapon);
 
-        if (impact == null) {
+        if (fall == null) {
             return;
         }
 
+        Vec3 impact = fall.point();
+        int colour = fall.estimated() ? DIM : GREEN;
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
         int[] at = project(minecraft, impact.subtract(camera).normalize(),
                 focalLength(minecraft, graphics), centreX, centreY);
@@ -423,12 +440,12 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int radius = Mth.clamp((int) Math.round(BOMB_RING_BLOCKS / Math.max(away, 1.0)
                 * focalLength(minecraft, graphics)), 4, 60);
 
-        circle(graphics, at[0], at[1], radius, GREEN);
-        graphics.fill(at[0] - 1, at[1] - 1, at[0] + 1, at[1] + 1, GREEN);
+        circle(graphics, at[0], at[1], radius, colour);
+        graphics.fill(at[0] - 1, at[1] - 1, at[0] + 1, at[1] + 1, colour);
 
         // How far ahead it would fall, which is the number a pilot actually flies to.
         int range = (int) Math.round(aircraft.position().distanceTo(impact));
-        String reach = range + " m";
+        String reach = (fall.estimated() ? "~" : "") + range + " m";
         graphics.drawString(minecraft.font, reach, at[0] - minecraft.font.width(reach) / 2, at[1] + 10, DIM, true);
     }
 

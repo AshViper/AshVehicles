@@ -40,16 +40,28 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
  * instead. Missiles are not aimed at all; they are <em>given</em> something, so what is drawn is the
  * seeker's cone and a box round whatever it has taken.
  *
- * <p><b>The gun mark is deliberately not the crosshair.</b> The crew look wherever they please and
- * the turret follows at a couple of degrees a tick, so for the first second of any traverse the two
- * are yards apart — and firing on the crosshair in that second puts the round somewhere nobody was
- * aiming. The mark also goes on the point the gun is laid on rather than merely along the barrel:
- * from inside the turret those are the same mark, from a camera sitting back and above the hull they
- * are not, and the difference is what the whole shot turns on.
+ * <p><b>The gun mark is a ring, and it is the only mark on the screen.</b> Vanilla's crosshair is
+ * taken off while anybody is aboard — see {@link CrewHudSuppressor} — because two marks are two
+ * answers to the one question the crew are asking, and the crew will aim with whichever of them is
+ * in the middle of the screen whether or not it is the one the gun is on.
  *
- * <p>Beside them, the turret ring. A tank driver whose turret is laid abeam has no other way of
- * knowing which way the hull is pointing, and driving off in the direction of the gun is the
- * classic way to end up in a ditch.
+ * <p><b>It is still a mark on the world rather than a mark on the screen.</b> The gun is laid on the
+ * middle of the view, so the ring settles there and the two agree — but only once the turret has
+ * caught up: the crew look wherever they please and the turret follows at a couple of degrees a
+ * tick, so for the first second of any traverse the ring is well off the middle, which is the sight
+ * saying so. It also goes on the <em>point</em> the gun is laid on rather than merely along the
+ * barrel, so what it reads is a range as well as a direction, and a round that will strike a ridge
+ * short of the target puts the ring on the ridge.
+ *
+ * <p>Beside them, {@link PlanView}: the machine itself, from directly above, with the line of sight
+ * up the panel and the hull swinging about underneath it. A tank driver whose turret is laid abeam
+ * has no other way of knowing which way the hull is pointing, and driving off in the direction of
+ * the gun is the classic way to end up in a ditch.
+ *
+ * <p>And, opposite the sight, {@link HitReadout}: where the last few rounds actually landed on what
+ * they were fired at. Everything else here is about getting a round away; that is the only thing
+ * that says what happened when one arrived, which at the range a tank gun is used at is not
+ * something the crew can see for themselves.
  *
  * <p>Everything is read from state that reaches every client, so a passenger sees the same
  * instruments as the crew rather than a panel of zeroes.
@@ -62,12 +74,6 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     private static final float LOW_HEALTH = 0.3F;
     /** Rounds left below which the count goes amber. Two engagements' worth. */
     private static final int LOW_ROUNDS = 6;
-
-    /** The turret ring, in pixels: how big it is drawn and how far in from the corner it sits. */
-    private static final int RING_RADIUS = 22;
-    private static final int RING_INSET = 42;
-    /** Marks round the ring, so every one is a right angle or half of one. */
-    private static final int RING_MARKS = 8;
 
     private static final int RELOAD_BAR_WIDTH = 62;
     /** The empty part of the reload bar: there, but not competing with the part that has filled. */
@@ -103,9 +109,17 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         }
 
         drawCompass(graphics, minecraft.font, vehicle, partialTick, centreX, centreY);
-        drawStatus(graphics, minecraft.font, vehicle, partialTick);
-        drawTurretRing(graphics, minecraft.font, vehicle, partialTick);
+
+        // The plan of the machine goes in the corner itself and the readings are moved over to make
+        // room for it, so that the two share the bottom left-hand side rather than one being laid
+        // over the other.
+        PlanView.draw(graphics, vehicle, partialTick);
+        drawStatus(graphics, minecraft.font, vehicle, partialTick, PlanView.SIZE + 6);
         drawCrew(graphics, minecraft.font, vehicle);
+        // What the last few rounds did, if any of them have landed lately. Drawn from the crew's own
+        // instruments rather than as a layer of its own, so that it is up while they are aboard
+        // something and gone the moment they get out.
+        HitReadout.draw(graphics, minecraft.font);
         // Only a machine whose file gives it a set draws either instrument, which is every launcher
         // and no tank.
         RadarDisplay.draw(graphics, minecraft.font, vehicle);
@@ -140,18 +154,16 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             int x = mark[0];
             int y = mark[1];
 
-            // A gunner's cross: four arms with the middle left open, so what is being shot at is not
-            // hidden by the thing pointing at it, and a pip in the gap for the aiming point itself.
-            graphics.fill(x - 13, y, x - 4, y + 1, colour);
-            graphics.fill(x + 5, y, x + 14, y + 1, colour);
-            graphics.fill(x, y - 13, x + 1, y - 4, colour);
-            graphics.fill(x, y + 5, x + 1, y + 14, colour);
-            graphics.fill(x, y, x + 1, y + 1, colour);
+            // A ring round the aiming point with a pip in the middle of it, which is the same mark
+            // an aircraft's gun gets — see AircraftHud.drawGunSight. Open in the middle apart from
+            // the pip, so what is being shot at is not hidden by the thing pointing at it.
+            AircraftHud.circle(graphics, x, y, 9, colour);
+            graphics.fill(x - 1, y - 1, x + 1, y + 1, colour);
 
-            // Stadia at the ends of the arms, which is what the arms are for: something of a known
-            // width on the ground between them is something at a known range.
-            graphics.fill(x - 14, y - 3, x - 13, y + 4, colour);
-            graphics.fill(x + 14, y - 3, x + 15, y + 4, colour);
+            // Stadia either side of the ring, which is what they are for: something of a known width
+            // on the ground between them is something at a known range.
+            graphics.fill(x - 15, y - 3, x - 14, y + 4, colour);
+            graphics.fill(x + 15, y - 3, x + 16, y + 4, colour);
 
             if (sight.struck()) {
                 String text = Math.round(sight.pipperRange()) + " m";
@@ -303,8 +315,8 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
     /** What is left of the vehicle, how fast it is going, and what the armament has to say. */
     private static void drawStatus(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
-            float partialTick) {
-        int left = 8;
+            float partialTick, int indent) {
+        int left = 8 + indent;
         int bottom = graphics.guiHeight() - 8;
 
         float health = vehicle.getHealth();
@@ -420,68 +432,6 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         graphics.fill(x, y, x + Math.round(RELOAD_BAR_WIDTH * done), y + 6, AircraftHud.WARNING);
     }
 
-    /**
-     * Where the turret is pointing, relative to the hull.
-     *
-     * <p>The ring is bolted to the hull — its top is the bow, always — and the pointer is the gun.
-     * That is the way round a driver needs it: with the turret laid abeam there is nothing else on
-     * the screen that says which way the tank will go when the tracks are let out, and the answer to
-     * that is not where the gun is looking.
-     */
-    private static void drawTurretRing(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
-            float partialTick) {
-        if (!vehicle.getStats().turret().exists()) {
-            return;
-        }
-
-        int centreX = graphics.guiWidth() - RING_INSET;
-        int centreY = graphics.guiHeight() - RING_INSET;
-
-        for (int i = 0; i < RING_MARKS; i++) {
-            double angle = Math.toRadians(i * 360.0 / RING_MARKS);
-            int x = centreX + (int) Math.round(Math.sin(angle) * RING_RADIUS);
-            int y = centreY - (int) Math.round(Math.cos(angle) * RING_RADIUS);
-            // The bow mark is the long one, because it is the one being looked for.
-            int size = i == 0 ? 2 : 1;
-
-            graphics.fill(x - size, y - size, x + size, y + size, i == 0 ? AircraftHud.GREEN : AircraftHud.DIM);
-        }
-
-        float traverse = vehicle.getTurretYaw(partialTick);
-        double angle = Math.toRadians(traverse);
-        int gunX = centreX + (int) Math.round(Math.sin(angle) * (RING_RADIUS - 5));
-        int gunY = centreY - (int) Math.round(Math.cos(angle) * (RING_RADIUS - 5));
-
-        // A line out from the middle rather than a dot on the rim: the length is what reads as a
-        // barrel, and a dot on its own is hard to tell from the marks it is sitting between.
-        line(graphics, centreX, centreY, gunX, gunY, AircraftHud.GREEN);
-        graphics.fill(centreX - 1, centreY - 1, centreX + 2, centreY + 2, AircraftHud.GREEN);
-
-        int bearing = Math.round(Math.abs(traverse));
-        String side = bearing == 0 || bearing == 180 ? "" : traverse > 0.0F ? "R" : "L";
-        String text = String.format("TUR %03d%s", bearing, side);
-
-        graphics.drawString(font, text, centreX - font.width(text) / 2, centreY + RING_RADIUS + 4,
-                AircraftHud.DIM, true);
-    }
-
-    /**
-     * A straight line of pixels between two points, since the only thing the GUI can draw is a
-     * rectangle and a rectangle from the middle of the ring to the rim is a wedge rather than a gun.
-     */
-    private static void line(GuiGraphics graphics, int fromX, int fromY, int toX, int toY, int colour) {
-        int acrossX = toX - fromX;
-        int acrossY = toY - fromY;
-        int steps = Math.max(Math.abs(acrossX), Math.abs(acrossY));
-
-        for (int i = 0; i <= steps; i++) {
-            int x = steps == 0 ? fromX : fromX + Math.round((float) acrossX * i / steps);
-            int y = steps == 0 ? fromY : fromY + Math.round((float) acrossY * i / steps);
-
-            graphics.fill(x, y, x + 1, y + 1, colour);
-        }
-    }
-
     private static void drawCrew(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle) {
         List<Entity> aboard = vehicle.getPassengers();
 
@@ -491,7 +441,7 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         Entity commander = vehicle.getControllingPassenger();
         int right = graphics.guiWidth() - 8;
-        int y = graphics.guiHeight() - RING_INSET - RING_RADIUS - 18 - aboard.size() * 10;
+        int y = graphics.guiHeight() - 8 - aboard.size() * 10;
 
         for (Entity rider : aboard) {
             String name = (rider == commander ? "C  " : "-  ") + rider.getName().getString();

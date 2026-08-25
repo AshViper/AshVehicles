@@ -9,7 +9,7 @@
     "salvo_spread": 2.5
   },
   "projectile": {
-    "damage": 6.0,
+    "damage": 50.0,
     "speed": 1.5,
     "thrust": 0.1126,
     "burn_ticks": 80,

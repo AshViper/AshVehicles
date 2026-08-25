@@ -893,6 +893,7 @@ const JA = {
   "(unnamed)": "(名前なし)",
   " driver": " 操縦手",
   " turret": " 砲塔",
+  " gun": " 砲身",
   "turret ring": "砲塔リング",
   "trunnion": "砲耳",
   "cockpit eye": "一人称視点",
@@ -909,6 +910,7 @@ const JA = {
   "mount": "取り付け先",
   "hull": "車体",
   "turret &mdash; swung about the ring": "砲塔 — リングを中心に旋回",
+  "gun &mdash; and rocked about the trunnion": "砲身 — 旋回に加え、砲耳を中心に俯仰",
   "pos &mdash; where the rounds leave from, for a gun": "位置 — 機関砲なら発射位置",
   "fixed weapon &mdash; blank for a bare pylon": "固定武装 — 空欄なら素のパイロン",
   "internal &mdash; carried inside, nothing drawn": "内装 — 機内に積み、何も描かない",
@@ -1358,6 +1360,34 @@ const trunnion = () => point("trunnion").pos;
 /** A point on the turret, where the traverse has carried it. */
 const onTurret = p => state.pose.turret ? about(p, ring(), Ry(state.pose.turret)) : p;
 
+/**
+ * A point on the gun, where the elevation has rocked it about the trunnion.
+ *
+ * <p>Given in the turret's own, untraversed frame, exactly as the mod's own {@code onGun} is: what
+ * comes out of here still wants swinging about the ring afterwards, because the gun rides round with
+ * the turret as well as rocking in it. Turned about the trunnion rather than about the ring, and in
+ * the vertical plane rather than the horizontal one, which is the whole of the difference between a
+ * box on the turret roof and a box on the barrel.
+ */
+const onGun = p => state.pose.gun ? about(p, trunnion(), Rx(-state.pose.gun)) : p;
+
+/**
+ * Where a box sits in the machine's own axes right now, for whatever it is bolted to.
+ *
+ * <p>The same three cases the mod's own {@code mountOffset} has, in the same order: the hull's boxes
+ * are where the file says, the turret's are swung about the ring, and the gun's are rocked about the
+ * trunnion first and then swung about the ring like any other turret box.
+ */
+const mountedAt = box => box.mount === "gun" ? onTurret(onGun(box.offset))
+  : box.mount === "turret" ? onTurret(box.offset)
+  : box.offset;
+
+/** How a box is turned by whatever carries it, before its own rotation within that. */
+const mountRot = box => box.mount === "gun"
+    ? matMul(Ry(state.pose.turret), Rx(-state.pose.gun))
+  : box.mount === "turret" ? Ry(state.pose.turret)
+  : null;
+
 /** Which way the bore is pointing, in the machine's own frame. */
 const aimDir = () => apply(matMul(Ry(state.pose.turret), Rx(-state.pose.gun)), [0, 0, 1]);
 
@@ -1620,12 +1650,17 @@ function posedCubes() {
 const COLOURS = {
   hull: "#3be86a", turret: "#2fc6ff", pylon: "#ff5252", seat: "#c07dff",
   ring: "#ff9f43", trunnion: "#ffcf5c", cockpit: "#7fd7ff", chase: "#ff7ad9",
+  // A box on the barrel takes the trunnion's own colour, because the trunnion is the point it turns
+  // about: the two are one assembly, and telling them apart on screen is not what anybody needs.
+  // What does need telling apart is the barrel from the turret roof, and cyan against yellow is that.
+  gun: "#ffcf5c",
 };
 
 /** Which CSS name each of those comes out of. Two of them are not called the same thing twice. */
 const COLOUR_VARS = {
   hull: "--hull", turret: "--turret", pylon: "--pylon", seat: "--seat",
   ring: "--ring", trunnion: "--gun", cockpit: "--eye", chase: "--chase",
+  gun: "--gun",
 };
 
 /** Everything else the canvases draw with, likewise. */
@@ -1756,7 +1791,8 @@ function relevant(it) {
 }
 
 const colourOf = it =>
-  it.kind === "box" ? (it.mount === "turret" ? COLOURS.turret : COLOURS.hull)
+  it.kind === "box" ? (it.mount === "gun" ? COLOURS.gun
+      : it.mount === "turret" ? COLOURS.turret : COLOURS.hull)
   : it.kind === "pylon" ? COLOURS.pylon
   : it.kind === "seat" ? COLOURS.seat
   : it.kind === "eye" ? COLOURS.cockpit
@@ -1764,9 +1800,9 @@ const colourOf = it =>
 
 /** The eight corners of a box, where the machine is currently holding it. */
 function boxCorners(box) {
-  const m = box.mount === "turret" && state.pose.turret
-    ? matMul(Ry(state.pose.turret), boxRot(box.rotation)) : boxRot(box.rotation);
-  const centre = box.mount === "turret" ? onTurret(box.offset) : box.offset;
+  const carried = mountRot(box);
+  const m = carried ? matMul(carried, boxRot(box.rotation)) : boxRot(box.rotation);
+  const centre = mountedAt(box);
   const h = box.size.map(s => s / 2), out = [];
   for (let i = 0; i < 8; i++) {
     const r = apply(m, [(i & 1 ? h[0] : -h[0]), (i & 2 ? h[1] : -h[1]), (i & 4 ? h[2] : -h[2])]);
@@ -1777,9 +1813,30 @@ function boxCorners(box) {
 const LINKS = [[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]];
 
 /** Whether the turret carries this item round with it, so that it is not drawn where it is written. */
-const rides = it => (it.kind === "box" && it.mount === "turret")
+const rides = it => (it.kind === "box" && (it.mount === "turret" || it.mount === "gun"))
   || (it.kind === "eye" && eyeRides(it))
   || (it.kind === "point" && it.key === "trunnion");
+
+/** Whether this item also rocks with the gun, which only a box on the barrel does. */
+const elevates = it => it.kind === "box" && it.mount === "gun";
+
+/**
+ * Whether what is drawn is somewhere other than where the file writes it, so that a drag has to be
+ * wound back through whatever is carrying it before it can be written down.
+ *
+ * <p>Both poses count, and separately. A box on the turret roof is displaced by the traverse alone;
+ * a box on the barrel is displaced by the traverse <em>or</em> by the elevation, so a gun laid up
+ * over a turret that is still dead ahead is a case the traverse check on its own would miss — and
+ * missing it writes the drag straight into the file with the elevation still folded into it.
+ */
+const displaced = it => rides(it) && (!!state.pose.turret || (elevates(it) && !!state.pose.gun));
+
+/** A point where it is drawn, written back into the frame the file keeps it in. */
+const writtenBack = (it, at) => {
+  const off = about(at, ring(), Ry(-state.pose.turret));
+
+  return elevates(it) ? about(off, trunnion(), Rx(state.pose.gun)) : off;
+};
 
 /**
  * Puts an item where it is now, plus a delta measured in the machine's axes.
@@ -1787,15 +1844,18 @@ const rides = it => (it.kind === "box" && it.mount === "turret")
  * <p>Everything on the turret is written down where it sits with the turret dead ahead and drawn
  * where the traverse has carried it, so with the turret laid abeam a drag to the right on screen is
  * a step <em>along</em> the gun in the file. Taking the delta out where the item is drawn and
- * winding the traverse back off it is what makes dragging mean the same thing at every angle.
+ * winding the traverse back off it is what makes dragging mean the same thing at every angle. A box
+ * on the barrel has the elevation wound off it as well, and in the other order, since that is the
+ * order it was folded in.
  */
 function shift(it, delta) {
   const p = posOf(it);
 
-  if (rides(it) && state.pose.turret) {
-    const to = onTurret(p);
+  if (displaced(it)) {
+    // Copied, because mountedAt hands back the file's own array whenever nothing has moved it.
+    const to = [...(it.kind === "box" ? mountedAt(it) : onTurret(p))];
     for (let j = 0; j < 3; j++) if (delta[j]) to[j] = snap(to[j] + delta[j]);
-    const back = about(to, ring(), Ry(-state.pose.turret));
+    const back = writtenBack(it, to);
     for (let j = 0; j < 3; j++) p[j] = round3(back[j]);
     return;
   }
@@ -2256,7 +2316,7 @@ function drawItems(g, P, v, w, h) {
     if (on && it.rotation.some(n => n)) {
       // What the game will really collide with, which is never smaller.
       const s = aabbOf(it.size, it.rotation);
-      const centre = it.mount === "turret" ? onTurret(it.offset) : it.offset;
+      const centre = mountedAt(it);
       const fc = [];
       for (let i = 0; i < 8; i++) fc.push([
         centre[0] + (i & 1 ? s[0] : -s[0]) / 2,
@@ -2400,9 +2460,15 @@ function tag(g, corners, text, col) {
   g.fillText(text, x + 2, y - 2);
 }
 
-/** The circle the turret's own boxes sweep out. Nothing outside it can be on the turret. */
+/**
+ * The circle the turret's own boxes sweep out. Nothing outside it can be on the turret.
+ *
+ * <p>The barrel's boxes count as much as the roof's: they ride round with the turret exactly as any
+ * other turret box does, and a barrel is the longest thing on a tank, so leaving them out draws the
+ * circle a good deal smaller than the one the machine really sweeps.
+ */
 function ringSweep(g, P, col) {
-  const boxes = state.items.filter(i => i.kind === "box" && i.mount === "turret");
+  const boxes = state.items.filter(i => i.kind === "box" && (i.mount === "turret" || i.mount === "gun"));
   if (!boxes.length) return;
   const c = ring();
   let r = 0;
@@ -2565,8 +2631,8 @@ function pick(v, sx, sy, w, h) {
  */
 function edgeAt(v, box, sx, sy, w, h) {
   if (box.rotation.some(n => n)) return null;
-  const centre = box.mount === "turret" ? onTurret(box.offset) : box.offset;
-  if (box.mount === "turret" && state.pose.turret) return null;
+  const centre = mountedAt(box);
+  if (displaced(box)) return null;
   const lo = toScreen(v, sub(centre, scale(box.size, 0.5)), w, h);
   const hi = toScreen(v, add(centre, scale(box.size, 0.5)), w, h);
   const x0 = Math.min(lo[0], hi[0]), x1 = Math.max(lo[0], hi[0]);
@@ -2629,8 +2695,13 @@ function bindOrtho(v, index) {
     const target = selected();
     if (!target) return;
     snapshot();
-    // Where it is drawn, which for anything on a traversed turret is not where it is written.
-    drag = { sx, sy, start: rides(target) ? onTurret(posOf(target)) : [...posOf(target)], item: target };
+    // Where it is drawn, which for anything on a traversed turret — or on an elevated gun — is not
+    // where it is written.
+    drag = {
+      sx, sy, item: target,
+      start: target.kind === "box" ? [...mountedAt(target)]
+        : rides(target) ? onTurret(posOf(target)) : [...posOf(target)],
+    };
   });
 
   cv.addEventListener("mousemove", e => {
@@ -2690,8 +2761,8 @@ function bindOrtho(v, index) {
     to[v.ay] = snap(drag.start[v.ay] + dy);
     const p = posOf(drag.item);
 
-    if (rides(drag.item) && state.pose.turret) {
-      const back = about(to, ring(), Ry(-state.pose.turret));
+    if (displaced(drag.item)) {
+      const back = writtenBack(drag.item, to);
       for (let j = 0; j < 3; j++) p[j] = round3(back[j]);
     } else {
       p[v.ax] = to[v.ax];
@@ -2878,7 +2949,8 @@ function renderList() {
     const note = tr(it.kind === "seat" && driver && it.id === driver.id ? " driver"
       : it.kind === "eye" ? (it.mount === "turret" ? " on the turret"
           : it.mount === "hull" ? " on the hull" : "")
-      : it.kind === "box" && it.mount === "turret" ? " turret" : "");
+      : it.kind === "box" && it.mount === "turret" ? " turret"
+      : it.kind === "box" && it.mount === "gun" ? " gun" : "");
     const shown = it.kind === "eye" ? "↳ " + tr("eye") : (shownName(it) || tr("(unnamed)"));
     d.innerHTML = `<span class="dot" style="background:${colourOf(it)}"></span>`
       + `<span class="nm grow">${escapeHtml(shown)}<span class="muted">${note}</span></span>`
@@ -2932,6 +3004,7 @@ function renderEditor() {
       html += `<label>${tr("mount")}</label><select id="f-mount">
           <option value="hull"${it.mount === "hull" ? " selected" : ""}>${tr("hull")}</option>
           <option value="turret"${it.mount === "turret" ? " selected" : ""}>${tr("turret &mdash; swung about the ring")}</option>
+          <option value="gun"${it.mount === "gun" ? " selected" : ""}>${tr("gun &mdash; and rocked about the trunnion")}</option>
         </select><div class="sp"></div>`;
     }
     html += `<div id="note"></div>`;
@@ -3579,8 +3652,11 @@ function boxRoundBone() {
   const box = newBox(state.isolate.toLowerCase(),
     [0,1,2].map(j => round3((ext.lo[j] + ext.hi[j]) / 2)),
     [0,1,2].map(j => round3(Math.max(0.05, ext.hi[j] - ext.lo[j]))));
-  const turret = state.roles.turret;
-  if (turret && state.bones.find(b => b.name === state.isolate && b.part)) box.mount = "turret";
+  // What the model already says this bone is. The roles have named the turret, the gun and the
+  // mantlet, and loadGeo has tagged every cube under them accordingly — so a box drawn round the
+  // barrel comes out bolted to the barrel without anybody having to remember to say so.
+  const on = (state.bones.find(b => b.name === state.isolate) || {}).part;
+  if (state.roles.turret && on) box.mount = on === "gun" ? "gun" : "turret";
   state.items.push(box);
   state.tab = "box";
   state.sel = box.id;
@@ -3690,7 +3766,7 @@ function autoCubes() {
       lo[j] = Math.min(lo[j], p[j]); hi[j] = Math.max(hi[j], p[j]);
     }
     out.push({
-      pts: c.pts, bone: c.bone, mount: c.part ? "turret" : "hull",
+      pts: c.pts, bone: c.bone, mount: c.part === "gun" ? "gun" : c.part ? "turret" : "hull",
       lo, hi, mid: [0,1,2].map(j => (lo[j] + hi[j]) / 2),
       vol: edges[0] * edges[1] * edges[2],
     });
@@ -4992,7 +5068,7 @@ function boxesJson() {
   return state.items.filter(i => i.kind === "box").map(b => {
     const o = { name: b.name || "part", offset: b.offset.map(round3), size: b.size.map(round3) };
     if (b.rotation.some(n => n)) o.rotation = b.rotation.map(round3);
-    if (b.mount === "turret") o.mount = "turret";
+    if (b.mount === "turret" || b.mount === "gun") o.mount = b.mount;
     return o;
   });
 }
@@ -5264,7 +5340,7 @@ function takeJson(doc, name) {
     for (const b of boxes) {
       const box = newBox(b.name || "part", vec(b.offset, [0,0,0]), vec(b.size, [1,1,1]));
       box.rotation = vec(b.rotation, [0,0,0]);
-      box.mount = b.mount === "turret" ? "turret" : "hull";
+      box.mount = b.mount === "turret" || b.mount === "gun" ? b.mount : "hull";
       state.items.push(box);
     }
     took.push(tr("%s boxes", boxes.length));

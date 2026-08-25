@@ -31,6 +31,12 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
  * gauge stays, because it appears solely when the crew are drowning and that is the one moment
  * nothing on the panel would tell them.
  *
+ * <p>The crosshair goes too, and for the sharpest form of the same reason. A machine in this mod has
+ * a sight of its own — the ring on the point the round will reach, see {@link GroundVehicleHud} and
+ * {@link AircraftHud} — and vanilla's cross is a second mark answering the same question differently.
+ * It is not merely redundant: whichever mark sits in the middle of the screen is the one anybody will
+ * aim with, so leaving it there is an invitation to lay the gun on the wrong one.
+ *
  * <p>Nothing here changes what the player is holding or what the bars are counting — the items are
  * still there and still selected, the numbers still move, they are merely not drawn — so climbing
  * down puts everything back with no state to restore.
@@ -40,8 +46,12 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class CrewHudSuppressor {
-    /** The vanilla layers a crew member has no use for: the carried inventory, and the body's bars. */
+    /**
+     * The vanilla layers a crew member has no use for: the carried inventory, the body's bars, and
+     * the crosshair the machine's own sight replaces.
+     */
     private static final Set<ResourceLocation> HIDDEN = Set.of(
+            VanillaGuiLayers.CROSSHAIR,
             VanillaGuiLayers.HOTBAR,
             VanillaGuiLayers.SELECTED_ITEM_NAME,
             VanillaGuiLayers.PLAYER_HEALTH,

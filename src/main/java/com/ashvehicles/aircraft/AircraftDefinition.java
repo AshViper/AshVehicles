@@ -99,7 +99,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F),
             new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0,
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0)))),
-            new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true),
+            new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true, Optional.empty()),
             new Surface(20, 0.5F, 0.4F),
             VehicleChassis.CameraMount.DEFAULT,
             VehicleChassis.Sound.DEFAULT,
@@ -120,6 +120,18 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      */
     public boolean isHelicopter() {
         return this.type == VehicleType.HELICOPTER || this.rotor.isPresent();
+    }
+
+    /**
+     * The speed, in blocks per tick, this machine can arrive on its wheels at and be walked away
+     * from. A file may name its own; otherwise it is the one the kind of machine gets, and the two
+     * are far apart — an aeroplane lands at a speed a helicopter could not survive touching
+     * anything at. See {@link Undercarriage#landingSpeed}.
+     */
+    public float landingSpeed() {
+        return this.landingGear.landingSpeed().orElse(this.isHelicopter()
+                ? Undercarriage.HELICOPTER_LANDING_SPEED
+                : Undercarriage.DEFAULT_LANDING_SPEED);
     }
 
 
@@ -791,15 +803,37 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      *                    collision box catches it, and since the aircraft has to be travelling faster
      *                    than its own crash speed to fly at all, every takeoff from anything but a
      *                    dead-flat runway ended in an explosion. This is the undercarriage doing what
-     *                    an undercarriage does, and it applies only while it is down and on the ground
+     *                    an undercarriage does, and it applies only while the gear is down and the
+     *                    aircraft is the right way up on it. Anything below 1 cannot clear a full
+     *                    block, which is the step an aeroplane on a runway most often meets
      * @param retractable whether it goes up at all. Plenty of aircraft's does not — a helicopter's
      *                    wheels and a light aeroplane's alike — and one whose legs are welded down
      *                    should not answer the gear lever, since the only thing the pilot could
      *                    achieve with it is to lose the step-climbing the wheels give them on the
      *                    ground while nothing at all moves on the model
+     * @param landingSpeed the speed, in blocks per tick, an arrival on the wheels is survivable at
+     *                     whatever else is true of it. This is the figure on the pilot's readout, so
+     *                     2.78 is the 200 km/h it shows. Left out, {@link #DEFAULT_LANDING_SPEED} or
+     *                     {@link #HELICOPTER_LANDING_SPEED} by what the machine is
      */
     public record Undercarriage(int cycleTicks, float dragPenalty, float rollingFriction, float brakeFriction,
-            float lateralFriction, float steerRate, float steerFade, float climbHeight, boolean retractable) {
+            float lateralFriction, float steerRate, float steerFade, float climbHeight, boolean retractable,
+            Optional<Float> landingSpeed) {
+
+        /**
+         * Touchdown speed an aeroplane's undercarriage takes if its file does not say: 200 km/h, or
+         * 2.78 blocks a tick. Well over anything a landing is flown at and deliberately so — the
+         * point of it is that an approach flown at a sensible speed cannot be got wrong badly enough
+         * to write the aircraft off, whatever the rate of descent at the end of it.
+         */
+        public static final float DEFAULT_LANDING_SPEED = 2.78F;
+        /**
+         * The same for a helicopter: 50 km/h, or 0.7 blocks a tick. Lower because a helicopter has
+         * no approach speed to speak of — it comes to a stop and then descends — and it is the
+         * descent this has to cover, since nothing about the way one lands looks like a rollout.
+         */
+        public static final float HELICOPTER_LANDING_SPEED = 0.7F;
+
         public static final Codec<Undercarriage> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.INT.fieldOf("cycle_ticks").forGetter(Undercarriage::cycleTicks),
                 Codec.FLOAT.fieldOf("drag_penalty").forGetter(Undercarriage::dragPenalty),
@@ -809,7 +843,8 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.FLOAT.optionalFieldOf("steer_rate", 1.1F).forGetter(Undercarriage::steerRate),
                 Codec.FLOAT.optionalFieldOf("steer_fade", 1.2F).forGetter(Undercarriage::steerFade),
                 Codec.FLOAT.optionalFieldOf("climb_height", 1.05F).forGetter(Undercarriage::climbHeight),
-                Codec.BOOL.optionalFieldOf("retractable", true).forGetter(Undercarriage::retractable)
+                Codec.BOOL.optionalFieldOf("retractable", true).forGetter(Undercarriage::retractable),
+                Codec.FLOAT.optionalFieldOf("landing_speed").forGetter(Undercarriage::landingSpeed)
         ).apply(instance, Undercarriage::new));
     }
 

@@ -151,6 +151,27 @@ public final class Hitbox {
     }
 
     /**
+     * Whereabouts in the box a point lies, as a fraction of each of its own half-lengths: nought at
+     * the middle, one at a face, more than one outside it.
+     *
+     * <p>The same three projections {@link #contains} makes, kept rather than compared. What it is
+     * for is telling somebody where a round landed on a machine: a point in the world would be stale
+     * the moment the machine moved, but a fraction of the box it went into stays true however far the
+     * hull drives off or the turret traverses afterwards.
+     *
+     * <p>The axes are the box's own, in the order they were built in, so x runs along whichever way
+     * the box's own width does — which inside a machine's frame is out to its left.
+     */
+    public Vec3 within(Vec3 point) {
+        Vec3 from = point.subtract(this.centre);
+
+        return new Vec3(
+                from.dot(this.axes[0]) / Math.max(this.half.x, NOTHING),
+                from.dot(this.axes[1]) / Math.max(this.half.y, NOTHING),
+                from.dot(this.axes[2]) / Math.max(this.half.z, NOTHING));
+    }
+
+    /**
      * Where a line first enters the box, or empty if it misses.
      *
      * <p>The slab method, in the box's own axes. Each pair of opposite faces cuts the line down to

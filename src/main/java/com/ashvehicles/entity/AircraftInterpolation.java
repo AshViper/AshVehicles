@@ -90,6 +90,23 @@ public final class AircraftInterpolation {
     public static final int DEFAULT_MAX_PREDICTION_TICKS = 10;
 
     /**
+     * Ticks at the end of that budget over which the prediction eases off rather than stopping dead.
+     *
+     * <p>Running the reported velocity at full strength right up to the last tick of the budget and
+     * then cutting it puts a step in the drawn speed that is the whole of the aircraft's speed, which
+     * is the largest step this class can produce and exactly the thing the rest of it exists to
+     * prevent. What that looks like is an aeroplane flying normally and then simply stopping in
+     * mid-air, which is what a client sees of someone else's aircraft whenever half a second of
+     * updates goes missing — a hitch, a burst of packet loss, a server that skipped a beat.
+     *
+     * <p>Eased off instead, the aircraft coasts to a halt over the tail of the budget, and the
+     * correction that eventually arrives is flown out from there by the spring like any other.
+     * Nothing about ordinary flight goes anywhere near this: an update every tick or two leaves the
+     * counter at one or two, and the prediction runs at full strength throughout.
+     */
+    private static final int COAST_OUT_TICKS = 4;
+
+    /**
      * Most a reported velocity is believed, in blocks per tick. Nothing in the mod flies anywhere
      * near this; it is here so that a corrupt or hostile figure cannot fling an aircraft across the
      * world between two corrections.
@@ -367,9 +384,11 @@ public final class AircraftInterpolation {
             return false;
         }
 
-        simX += velX;
-        simY += velY;
-        simZ += velZ;
+        double coast = this.coasting(sinceCorrection);
+
+        simX += velX * coast;
+        simY += velY * coast;
+        simZ += velZ * coast;
 
         offsetX.step(correctionTicks);
         offsetY.step(correctionTicks);
@@ -464,8 +483,12 @@ public final class AircraftInterpolation {
 
         sinceAttitude++;
 
-        if (sinceAttitude <= maxPredictionTicks) {
-            simAttitude.mul(Attitude.rotationOf(spin)).normalize();
+        float coast = (float) this.coasting(sinceAttitude);
+
+        if (coast > 0.0F) {
+            // Eased off over the tail of the budget for the reason the position is, and rather more
+            // urgently: a roll that stopped dead is the most visible thing an aeroplane can do.
+            simAttitude.mul(Attitude.rotationOf(scratchVector.set(spin).mul(coast))).normalize();
         }
 
         offsetAboutX.step(correctionTicks);
@@ -473,6 +496,24 @@ public final class AircraftInterpolation {
         offsetAboutZ.step(correctionTicks);
 
         drawnAttitude(out);
+    }
+
+    /**
+     * How much of the reported velocity or turn rate the prediction still carries: all of it while
+     * there is budget in hand, easing to nothing as the last {@link #COAST_OUT_TICKS} of it run out.
+     *
+     * @param since ticks since the last correction of the kind being advanced
+     */
+    private double coasting(int since) {
+        int left = maxPredictionTicks - since + 1;
+
+        if (left <= 0) {
+            return 0.0;
+        }
+
+        int taper = Math.min(COAST_OUT_TICKS, maxPredictionTicks);
+
+        return left >= taper ? 1.0 : (double) left / taper;
     }
 
     /** The prediction, turned by however much error the spring has still to take up. */

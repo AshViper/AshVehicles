@@ -6,6 +6,7 @@ import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.weapon.Dispenser;
+import com.ashvehicles.weapon.Impact;
 import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponMounts;
 
@@ -57,7 +58,11 @@ public final class ModSounds {
     /** The role of a sound a weapon makes other than firing, as the tail of its name. */
     public static final String FLIGHT_ROLE = "flight";
     public static final String FALL_ROLE = "fall";
+    /** {@code weapon.<weapon>.crack}: one of its rounds going past. See {@link BulletSounds}. */
+    public static final String CRACK_ROLE = "crack";
     public static final String RICOCHET_ROLE = Ricochet.SOUND_ROLE;
+    /** {@code weapon.<weapon>.impact}: one of its rounds going into a machine. See {@link Impact}. */
+    public static final String IMPACT_ROLE = Impact.SOUND_ROLE;
     /** What a weapon's own seeker has to say: working on something, holding it, and losing it. */
     public static final String SEEK_ROLE = "seek";
     public static final String LOCK_ROLE = "lock";
@@ -96,6 +101,12 @@ public final class ModSounds {
     public static final ResourceLocation FLIGHT = id(WEAPON_PREFIX + FLIGHT_ROLE);
     /** The rising whistle of something falling under nothing but gravity. Looped, and not shipped. */
     public static final ResourceLocation FALL = id(WEAPON_PREFIX + FALL_ROLE);
+    /**
+     * A round going past, which is the one thing in the air here that is not a loop: it is one short
+     * crack at the moment it passes, so there is something sensible to fall back to. Not shipped;
+     * until it is, the game's own sweep stands in. See {@link BulletSounds}.
+     */
+    public static final ResourceLocation CRACK = id(WEAPON_PREFIX + CRACK_ROLE);
 
     /** The mod's own bang. See {@link BlastSounds}, which times and shapes it for the distance. */
     public static final ResourceLocation BLAST = id(WEAPON_PREFIX + "blast");
@@ -106,6 +117,13 @@ public final class ModSounds {
      * to the game's own metal-on-metal. See {@link Ricochet}.
      */
     public static final ResourceLocation RICOCHET = Ricochet.SOUND;
+
+    /**
+     * A round going into armour rather than off it, for any weapon with no strike recorded of its
+     * own. Named by the server; not shipped, so until something records one it falls through to the
+     * game's own anvil being set down. See {@link Impact}.
+     */
+    public static final ResourceLocation IMPACT = Impact.SOUND;
 
     /**
      * The warning receiver's tone: one short beep, repeated as fast as the trouble deserves.

@@ -15,7 +15,7 @@
     "spool_ticks": 88,
     "top_speed": 15.0,
     "gravity": 0.00025,
-    "range": 900.0,
+    "range": 2100.0,
     "explosion": 3.0,
     "tracer": "FFDD66",
     "trail": {

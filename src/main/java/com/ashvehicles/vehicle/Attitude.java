@@ -194,6 +194,21 @@ public final class Attitude {
         return toVec3(world);
     }
 
+    /**
+     * The other way about: something measured in the world, put back in the machine's own axes.
+     *
+     * <p>The exact inverse of {@link #toWorld}, negation and all — a unit rotation's conjugate is its
+     * inverse, and the x is crossed back over on the way out for the same reason it is crossed on the
+     * way in. What it answers is where on a machine something is: which side of it, how far up it,
+     * and how far forward, whatever the hull has been left lying at.
+     */
+    public static Vec3 toBody(Quaternionf attitude, Vec3 world) {
+        Vector3f body = new Quaternionf(attitude).conjugate().transform(
+                new Vector3f((float) world.x, (float) world.y, (float) world.z));
+
+        return new Vec3(-body.x, body.y, body.z);
+    }
+
     private static Vec3 toVec3(Vector3f vector) {
         return new Vec3(vector.x(), vector.y(), vector.z());
     }

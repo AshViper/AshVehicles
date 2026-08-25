@@ -108,6 +108,17 @@ public class VehiclePart extends PartEntity<Entity> {
         return this.slot;
     }
 
+    /**
+     * Which of the machine's own boxes this is, counting as its file lists them.
+     *
+     * <p>The same number as {@link #getPylon} and a different thing entirely, which is why they are
+     * asked for separately: on a pylon it counts hardpoints and on a piece of the machine it counts
+     * boxes. Ask {@link #isPylon} first, or the answer is an index into the wrong list.
+     */
+    public int getBox() {
+        return this.slot;
+    }
+
     /** A square box of a given size, for a pylon, which is a place on the machine rather than metal. */
     public void place(Vec3 centre, double size) {
         this.place(new Hitbox(centre, new Vec3(size, size, size), new Quaternionf()));

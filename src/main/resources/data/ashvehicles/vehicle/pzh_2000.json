@@ -170,11 +170,11 @@
     "rolling_resistance": 0.003,
     "steer_rate": 0.8,
     "pivot_rate": 1,
-    "grade_resistance": 0.055
+    "grade_resistance": 0.05
   },
   "suspension": {
-    "climb_height": 1.15,
-    "slope_limit": 48,
+    "climb_height": 1.25,
+    "slope_limit": 50,
     "settle_rate": 0.25,
     "grip": 0.9,
     "wheel_radius": 0.44,

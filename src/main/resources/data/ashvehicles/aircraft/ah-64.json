@@ -369,7 +369,7 @@
     "lateral_friction": 0.4,
     "steer_rate": 1.5,
     "steer_fade": 0.2,
-    "climb_height": 0.6,
+    "climb_height": 1.05,
     "retractable": false
   },
   "flaps": {

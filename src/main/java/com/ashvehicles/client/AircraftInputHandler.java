@@ -47,9 +47,12 @@ public final class AircraftInputHandler {
         boolean toggleVtol = ModKeyMappings.TOGGLE_VTOL.consumeClick();
         // One key steps through the weapons of everything in the mod, and only one handler may take
         // the press — a mapping hands a click to whoever asks for it first, and both of these run
-        // every tick. So this one stands aside entirely while the player is aboard a ground vehicle
-        // and lets {@link GroundVehicleInputHandler} have it; the short circuit is the whole of the
-        // arrangement, since not consuming is what leaves the press there for the other to find.
+        // every tick with no order between them. So this one stands aside entirely while the player
+        // is aboard a ground vehicle and lets {@link GroundVehicleInputHandler} have it, and that one
+        // stands aside whenever they are not. The two conditions are exact mirrors, which is what
+        // makes exactly one of them take the press whatever order the two handlers run in; the short
+        // circuit is the whole of the arrangement, since not consuming is what leaves the press
+        // there for the other to find.
         boolean cycleWeapon = !(player.getVehicle() instanceof com.ashvehicles.entity.GroundVehicleEntity)
                 && ModKeyMappings.CYCLE_WEAPON.consumeClick();
 

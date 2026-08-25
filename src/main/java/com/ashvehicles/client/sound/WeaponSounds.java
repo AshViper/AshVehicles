@@ -11,6 +11,7 @@ import javax.annotation.Nullable;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.weapon.Dispenser;
+import com.ashvehicles.weapon.Impact;
 import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
@@ -51,6 +52,10 @@ import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
  * <li>{@code weapon.<name>.ricochet}, a round skidding off armour, falls back on the mod's shared
  *     {@code weapon.ricochet} and then on the game's own anvil, which is the nearest thing it has to
  *     something hard glancing off plate.
+ * <li>{@code weapon.<name>.impact}, a round going into one of the mod's boxes rather than off it,
+ *     falls back on the mod's shared {@code weapon.impact} and then on the game's anvil being set
+ *     down — the duller of its two anvil sounds, because the use of a strike is telling it from a
+ *     ricochet by ear. See {@link Impact}.
  * <li>{@code weapon.load}, the ground crew at work, falls back on the game's own metal-on-metal.
  * <li>{@code weapon.gun} and {@code weapon.launch} fall back on nothing: the mod ships both, and a
  *     pack that has taken them away has said what it wants.
@@ -89,6 +94,15 @@ public final class WeaponSounds {
      */
     private static final ResourceLocation RICOCHET_FALLBACK =
             ResourceLocation.withDefaultNamespace("block.anvil.land");
+
+    /**
+     * And a hit that went in: the game's own anvil being set down, which is the nearest thing it has
+     * to something heavy arriving in metal and staying there. Deliberately the duller of the two
+     * anvil sounds, since the whole use of a strike is being able to tell it from a ricochet by ear;
+     * {@link Impact#PITCH} drops it further still.
+     */
+    private static final ResourceLocation IMPACT_FALLBACK =
+            ResourceLocation.withDefaultNamespace("block.anvil.place");
 
     /**
      * How loud the ground crew are. The same figures the server asked for, taken from the one place
@@ -152,7 +166,7 @@ public final class WeaponSounds {
         WeaponDefinition firing = weaponFor(id);
         // Whether the server put a reach in the volume slot rather than a loudness, which is the one
         // thing deciding how this has to be played. See instance.
-        boolean carried = firing != null || isRicochet(id);
+        boolean carried = firing != null || isRicochet(id) || isImpact(id);
 
         if (ModSounds.exists(sounds, id)) {
             // The recording is there; only how loud it should be at this distance is wrong, and only
@@ -243,6 +257,13 @@ public final class WeaponSounds {
             return null;
         }
 
+        if (weapon == null && isImpact(id)) {
+            // The same arrangement a ricochet gets, and it has to be kept out of the switch below for
+            // the same reason: an impact that fell through to weapon.gun would be the cannon firing
+            // a second time, at the far end of the shot.
+            return ModSounds.firstPresent(sounds, ModSounds.IMPACT, IMPACT_FALLBACK);
+        }
+
         if (weapon == null && isRicochet(id)) {
             // One weapon's clang, then the mod's shared one, then the game's. Never the switch below:
             // a ricochet that fell through to weapon.gun would be the cannon firing a second time.
@@ -268,6 +289,16 @@ public final class WeaponSounds {
         return id.getPath().endsWith("." + ModSounds.RICOCHET_ROLE);
     }
 
+    /**
+     * Whether this is one weapon's hit on a machine, or the shared one everything falls back on.
+     *
+     * <p>Named for the role rather than for the weapon, exactly as a ricochet is —
+     * {@code weapon.120mm_cannon.impact} and {@code weapon.impact} — so the tail is the whole test.
+     */
+    private static boolean isImpact(ResourceLocation id) {
+        return id.getPath().endsWith("." + ModSounds.IMPACT_ROLE);
+    }
+
     /** How loud and at what pitch: the weapon's own figures, or the ones whoever asked for it used. */
     private static WeaponDefinition.SoundSetup setupFor(ResourceLocation id, @Nullable WeaponDefinition weapon) {
         if (weapon != null) {
@@ -278,6 +309,12 @@ public final class WeaponSounds {
         // are the ones both ends of it were written against.
         if (isRicochet(id)) {
             return Ricochet.SOUND_SETUP;
+        }
+
+        // And a strike is not the gun going off either, and carries its own distance for the same
+        // reason: the gunner it matters to is at the other end of the shot.
+        if (isImpact(id)) {
+            return Impact.SOUND_SETUP;
         }
 
         if (id.equals(ModSounds.LOAD)) {

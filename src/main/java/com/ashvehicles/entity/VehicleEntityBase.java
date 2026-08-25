@@ -277,7 +277,11 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         // got -- which at this point in the tick is nowhere, every tick. What the delta holds here is
         // what last tick left it at, which is exactly how the wreck is falling.
         Vec3 velocity = this.getDeltaMovement();
-        boolean falling = velocity.lengthSqr() > WreckEffects.FALLING;
+        // Still coming down, which is not the same as still moving. A write-off carries its speed
+        // into the ground and ploughs along it, so a wreck that touched down at the top of a field
+        // can still be travelling at the bottom of it — and the plume belongs where it first hit,
+        // not where the skid ran out.
+        boolean falling = velocity.lengthSqr() > WreckEffects.FALLING && !this.onGround();
         double reach = this.reach();
 
         if (falling) {
@@ -383,6 +387,27 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      */
     protected Quaternionf attitude = new Quaternionf();
     protected Quaternionf attitudeO = new Quaternionf();
+
+    /**
+     * Puts a machine nobody is flying or driving into a given pose, for the instruments that draw
+     * one.
+     *
+     * <p>There is a copy of every machine the mod has that exists only to be drawn: the hit readout
+     * needs a picture of whatever a round arrived on, and at the range these are fired at that thing
+     * is usually well outside the client's own world. So one is made from the entity type, never
+     * added to anything, and posed from what the server said — which is this.
+     *
+     * <p>Both the current attitude and the previous one, because a machine that is never ticked has
+     * no previous one and the renderer interpolates between the two. Setting only the first would
+     * draw it halfway back to whatever it was built at.
+     *
+     * @param turret where the turret is laid, ignored by anything that has none
+     * @param gun how far the gun is elevated, ignored by anything that has none
+     */
+    public void poseForDrawing(Quaternionf hull, float turret, float gun) {
+        this.attitude = new Quaternionf(hull);
+        this.attitudeO = new Quaternionf(hull);
+    }
 
     public Quaternionf getAttitude() {
         return this.attitude;

@@ -224,12 +224,6 @@
         "size": [2.466, 0.302, 0.403]
       },
       {
-        "name": "basnia_6",
-        "offset": [0.0, 5.455, -2.297],
-        "size": [1.183, 2.39, 0.088],
-        "mount": "turret"
-      },
-      {
         "name": "whert",
         "offset": [0.0, 0.688, 4.055],
         "size": [2.8, 0.305, 0.287]
@@ -255,14 +249,14 @@
         "offset": [0.881, 3.863, -0.806],
         "size": [0.226, 0.226, 2.768],
         "rotation": [0.0, 0.0, -45.0],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "mashingun_3",
         "offset": [-0.881, 3.863, -0.806],
         "size": [0.226, 0.226, 2.768],
         "rotation": [0.0, 0.0, -45.0],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "whert_4",
@@ -301,13 +295,13 @@
     "rolling_resistance": 0.004,
     "steer_rate": 2.3,
     "pivot_rate": 0,
-    "grade_resistance": 0.5
+    "grade_resistance": 0.05
   },
   "suspension": {
-    "climb_height": 0.75,
+    "climb_height": 1.25,
     "slope_limit": 50,
-    "settle_rate": 0.22,
-    "grip": 0.75,
+    "settle_rate": 0.25,
+    "grip": 0.9,
     "wheel_radius": 0.7,
     "contact_length": 7.75,
     "contact_width": 2.5
