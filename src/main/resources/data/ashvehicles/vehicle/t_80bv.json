@@ -191,7 +191,7 @@
         "name": "puska",
         "offset": [0.0, 1.97, -1.552],
         "size": [0.536, 0.385, 2.151],
-        "mount": "turret"
+        "mount": "gun"
       },
       {
         "name": "corpus_7",

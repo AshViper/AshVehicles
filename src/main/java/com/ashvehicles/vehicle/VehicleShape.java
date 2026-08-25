@@ -54,7 +54,10 @@ public record VehicleShape(List<Box> boxes) {
      *              here has to say so; a tank has a turret, and a box on it is swung about the
      *              turret ring by however far the turret is traversed. A gun barrel whose box stayed
      *              pointing over the bow while the turret was laid abeam would be a shield in one
-     *              place and a hole in another
+     *              place and a hole in another. The barrel itself is a further case: it rides the
+     *              turret round in traverse the same as any turret box, but it also rocks in
+     *              elevation about the trunnion as the gun is laid up or down, which a plain turret
+     *              box does not
      */
     public record Box(String name, Vec3 offset, Vec3 size, Vec3 rotation, Mount mount) {
         public static final Codec<Box> CODEC = RecordCodecBuilder.create(instance -> instance.group(
@@ -83,7 +86,13 @@ public record VehicleShape(List<Box> boxes) {
         /** Part of the machine itself, and where the file says it is. Everything on an aircraft. */
         HULL("hull"),
         /** Carried round by the turret, swung about its ring. */
-        TURRET("turret");
+        TURRET("turret"),
+        /**
+         * Carried round by the turret the same as {@link #TURRET}, and also rocked in elevation
+         * about the trunnion by however far the gun is laid up or down. For the barrel itself, and
+         * anything bolted to it rather than to the turret roof.
+         */
+        GUN("gun");
 
         public static final Codec<Mount> CODEC = StringRepresentable.fromEnum(Mount::values);
 
