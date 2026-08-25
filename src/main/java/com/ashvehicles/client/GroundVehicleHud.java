@@ -34,10 +34,11 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
  *
  * <p><b>The sight is a different instrument depending on what is selected</b>, for the same reason
  * an aeroplane's is: a weapon is shown the way it is aimed. A gun is aimed by laying the turret, so
- * it gets a mark on the ground where the round will land and, against something moving, a second one
- * where the barrel has to be for the round to arrive — see {@link GunSight}, which is the aeroplane's
- * own sight asked about a turret instead. Missiles are not aimed at all; they are <em>given</em>
- * something, so what is drawn is the seeker's cone and a box round whatever it has taken.
+ * it gets a mark on the ground where the round will land and — on a vehicle whose file gives it a
+ * radar, and only there — a second one against something moving, where the barrel has to be for the
+ * round to arrive. See {@link GunSight}, which is the aeroplane's own sight asked about a turret
+ * instead. Missiles are not aimed at all; they are <em>given</em> something, so what is drawn is the
+ * seeker's cone and a box round whatever it has taken.
  *
  * <p><b>The gun mark is deliberately not the crosshair.</b> The crew look wherever they please and
  * the turret follows at a couple of degrees a tick, so for the first second of any traverse the two
@@ -167,11 +168,14 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
      * The lead: a diamond on the point the target will have reached by the time a round fired now
      * arrives, raised by the round's own drop. Put the gun mark on the diamond and fire.
      *
-     * <p>This is what an anti-aircraft mounting is for and what a tank almost never needs. An
-     * aeroplane crossing at a few hundred blocks is most of a second's flight away, and a gunner
-     * laying the barrel on the aeroplane itself is laying it where the aeroplane <em>was</em>. Dim
-     * while the target is beyond what the round can reach, green inside it, and amber — with the
-     * word — once the barrel is close enough that firing now would hit.
+     * <p>This is what an anti-aircraft mounting is for and what a tank does not get. An aeroplane
+     * crossing at a few hundred blocks is most of a second's flight away, and a gunner laying the
+     * barrel on the aeroplane itself is laying it where the aeroplane <em>was</em> — but knowing
+     * where it will be is a set measuring the range and the rate, so only a vehicle with a radar is
+     * offered one at all. {@code GunSight.leads} is where that is decided; nothing is needed here
+     * beyond drawing whatever it hands back, which for a tank is no target. Dim while the target is
+     * beyond what the round can reach, green inside it, and amber — with the word — once the barrel
+     * is close enough that firing now would hit.
      */
     private static void drawLead(GuiGraphics graphics, Minecraft minecraft, GunSight.Solution sight,
             float partialTick, float focal, Vec3 camera, int centreX, int centreY) {

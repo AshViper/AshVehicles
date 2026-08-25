@@ -342,7 +342,7 @@
   "camera": {
     "pos": [0.0, 3.12, -15.0],
     "tilt": 5,
-    "cockpit": [-0.2, 4.5, -1.5]
+    "cockpit": [-0.2, 4.5, -0.5]
   },
   "sound": {
     "engine": "ashvehicles:engine.tank",

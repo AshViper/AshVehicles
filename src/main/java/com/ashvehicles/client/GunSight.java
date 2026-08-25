@@ -319,7 +319,7 @@ public final class GunSight {
 
         double flown = flight.last().distanceTo(muzzle);
 
-        Entity target = chooseTarget(vehicle, nose, Math.min(TARGET_REACH, flown));
+        Entity target = leads(vehicle) ? chooseTarget(vehicle, nose, Math.min(TARGET_REACH, flown)) : null;
         Vec3 leadOffset = Vec3.ZERO;
         double targetRange = 0.0;
         boolean inRange = false;
@@ -507,6 +507,30 @@ public final class GunSight {
         }
 
         return carried > 0 ? carriedSum.scale(1.0 / carried) : Vec3.ZERO;
+    }
+
+    /**
+     * Whether this machine is offered a lead at all.
+     *
+     * <p><b>On the ground, only what has a radar.</b> A lead mark is fire control: it says where
+     * something will be in a second's time, which is a thing you know because a set is measuring the
+     * range and the rate, not because a gunner is looking through a telescope. An anti-aircraft
+     * mounting has that set and is useless without it — the whole of engaging an aeroplane is
+     * shooting at where it is going — and a tank has neither the set nor anything to use it on. So
+     * the mark follows the aerial: {@code pantsir_s1} and {@code zumwalt} lead, and every tank lays
+     * its gun on what it can see and no further.
+     *
+     * <p>An aircraft always leads, whatever its file says about a radar. A fighter's gunsight is
+     * ranged off the same set, but there is no aeroplane in the mod that has a gun and no set to go
+     * with it, and a pilot with a gun and no lead has no way of hitting anything at all — there is
+     * nothing in the sky to lay the pipper against instead, which is exactly what the tank has.
+     *
+     * <p>It also saves the sweep. Finding something to lead means asking the level for a box a
+     * thousand blocks across every few ticks, and that cost is the size of the box rather than what
+     * is in it — see {@link #SWEEP_TICKS}. A tank never pays it now.
+     */
+    private static boolean leads(VehicleEntityBase vehicle) {
+        return !(vehicle instanceof GroundVehicleEntity) || vehicle.radar().fitted();
     }
 
     /**

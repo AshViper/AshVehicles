@@ -7,7 +7,7 @@
     "spread": 0.2
   },
   "projectile": {
-    "damage": 100.0,
+    "damage": 150.0,
     "speed": 4.0,
     "thrust": 0.34,
     "burn_ticks": 70,

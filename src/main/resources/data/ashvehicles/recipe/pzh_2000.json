@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_vehicle",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "N": {
+      "tag": "c:ingots/netherite"
+    },
+    "Q": {
+      "tag": "c:storage_blocks/diamond"
+    },
+    "T": {
+      "item": "minecraft:tnt"
+    },
+    "H": {
+      "item": "minecraft:chain"
+    }
+  },
+  "pattern": ["T#T", "NQN", "HHH"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:pzh_2000"
+  }
+}
