@@ -323,6 +323,10 @@
     "recoil_ticks": 6,
     "kick": 0.03
   },
+  "coaxial": {
+    "gun": "ashvehicles:mg3",
+    "muzzle": [-0.32, 3.05, 0.33]
+  },
   "hull": {
     "health": 300,
     "explosion_power": 4,

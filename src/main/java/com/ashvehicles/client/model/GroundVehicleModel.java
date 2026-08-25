@@ -132,6 +132,12 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
         // geometry, so neither of them knows or needs to know which way the turret is pointing.
         turnAboutX(model, setup.bone(GroundVehicleDefinition.Bone.GUN), GUN_SIGN * pose.gunPitch());
         turnAboutX(model, setup.bone(GroundVehicleDefinition.Bone.MANTLET), GUN_SIGN * pose.gunPitch());
+        // And the machine gun with them, which is what makes it a coaxial: a barrel clamped to the
+        // gun looks where the gun looks. Every model here hangs it off the turret rather than off
+        // the gun bone, so it is elevated here rather than coming round for nothing — and it has to
+        // be, or the rounds would leave a barrel lying level while going where the cannon points.
+        // See GroundVehicleDefinition.Coaxial, which is where they come from.
+        turnAboutX(model, setup.bone(GroundVehicleDefinition.Bone.MG), GUN_SIGN * pose.gunPitch());
 
         // The barrel runs back. Slid rather than rotated, and slid in the turret's axes rather than
         // the gun's, since a bone's offset is applied before its own elevation. The travel is

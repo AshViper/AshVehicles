@@ -12,12 +12,18 @@ import net.minecraft.util.Mth;
  * letting go means slowing down. {@code steer} is positive to the right.
  *
  * <p>{@code brake} is the parking brake as much as the service brake: held on, it stops the vehicle
- * and holds it on a slope. {@code fire} is the trigger.
+ * and holds it on a slope.
+ *
+ * <p><b>Two triggers, not one.</b> {@code fire} is whichever armament the crew have selected — the
+ * main gun, or the missiles on a vehicle that carries both. {@code coax} is the machine gun clamped
+ * beside the gun, which is never selected and is always there: a gunner holding a target may put a
+ * burst into it without putting the main armament away, and a tank that had to choose between its
+ * cannon and its machine gun would be a tank with one weapon.
  */
-public record GroundVehicleInput(float drive, float steer, boolean brake, boolean fire) {
+public record GroundVehicleInput(float drive, float steer, boolean brake, boolean fire, boolean coax) {
 
     /** Controls centred, and nothing held. */
-    public static final GroundVehicleInput NONE = new GroundVehicleInput(0.0F, 0.0F, false, false);
+    public static final GroundVehicleInput NONE = new GroundVehicleInput(0.0F, 0.0F, false, false, false);
 
     /**
      * What an empty driver's seat does: the brake on.
@@ -27,7 +33,7 @@ public record GroundVehicleInput(float drive, float steer, boolean brake, boolea
      * a quarter of a minute — long enough to leave the crew standing in a field watching their tank
      * drive away. Anybody getting out of one leaves the brake on, and so does this.
      */
-    public static final GroundVehicleInput PARKED = new GroundVehicleInput(0.0F, 0.0F, true, false);
+    public static final GroundVehicleInput PARKED = new GroundVehicleInput(0.0F, 0.0F, true, false, false);
 
     public GroundVehicleInput {
         drive = Mth.clamp(drive, -1.0F, 1.0F);
@@ -39,9 +45,11 @@ public record GroundVehicleInput(float drive, float steer, boolean brake, boolea
         buf.writeFloat(this.steer);
         buf.writeBoolean(this.brake);
         buf.writeBoolean(this.fire);
+        buf.writeBoolean(this.coax);
     }
 
     public static GroundVehicleInput read(FriendlyByteBuf buf) {
-        return new GroundVehicleInput(buf.readFloat(), buf.readFloat(), buf.readBoolean(), buf.readBoolean());
+        return new GroundVehicleInput(buf.readFloat(), buf.readFloat(), buf.readBoolean(), buf.readBoolean(),
+                buf.readBoolean());
     }
 }

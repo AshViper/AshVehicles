@@ -32,7 +32,7 @@ import net.minecraft.world.phys.Vec3;
  * second, a speed of 0.35 is seven blocks a second, or about 25 km/h. Rates are degrees per tick.
  */
 public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Model model, Powertrain powertrain,
-        Suspension suspension, Turret turret, Armament armament, Launcher launcher, Hull hull,
+        Suspension suspension, Turret turret, Armament armament, Coaxial coaxial, Launcher launcher, Hull hull,
         VehicleChassis.CameraMount camera, VehicleChassis.Sound sound, VehicleChassis.Radar radar,
         VehicleType type, Buoyancy buoyancy) {
 
@@ -44,6 +44,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
                     .forGetter(GroundVehicleDefinition::suspension),
             Turret.CODEC.optionalFieldOf("turret", Turret.NONE).forGetter(GroundVehicleDefinition::turret),
             Armament.CODEC.optionalFieldOf("armament", Armament.NONE).forGetter(GroundVehicleDefinition::armament),
+            Coaxial.CODEC.optionalFieldOf("coaxial", Coaxial.NONE).forGetter(GroundVehicleDefinition::coaxial),
             Launcher.CODEC.optionalFieldOf("launcher", Launcher.NONE).forGetter(GroundVehicleDefinition::launcher),
             Hull.CODEC.fieldOf("hull").forGetter(GroundVehicleDefinition::hull),
             VehicleChassis.CameraMount.CODEC.optionalFieldOf("camera", VehicleChassis.CameraMount.DEFAULT).forGetter(GroundVehicleDefinition::camera),
@@ -76,6 +77,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
             Suspension.DEFAULT,
             Turret.NONE,
             Armament.NONE,
+            Coaxial.NONE,
             Launcher.NONE,
             new Hull(Hull.DEFAULT_HEALTH, 3.0F, 0, 0.0F,
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 1.0, 0.0)))),
@@ -274,6 +276,47 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
         /** Whether there is anything to fire at all. */
         public boolean exists() {
             return this.main.isPresent();
+        }
+    }
+
+    /**
+     * The machine gun bolted alongside the main armament, and fired on its own trigger.
+     *
+     * <p><b>Why it is not simply a second {@link Armament}.</b> The main gun is the thing the whole
+     * turret is built round: it recoils, it shoves the hull about when it goes off, it is what the
+     * sight is harmonised for, and it is what the crew are cycling between when a vehicle also
+     * carries missiles. A coaxial is none of that. It is a barrel clamped to the side of the mantlet
+     * with a belt running into it, it does not move the tank, and it is never <em>selected</em> —
+     * it is simply there, and a gunner engaging infantry with it has not put the main armament away
+     * to do so. So it has its own trigger, its own belt and its own count, and nothing here about
+     * recoil or kick, because there is nothing worth drawing.
+     *
+     * <p><b>Coaxial means what it says</b>: the barrel is clamped to the gun and looks exactly where
+     * the gun looks. So there is no aim of its own to describe and none is offered — it fires along
+     * the bore, which is what makes laying the main gun on something also lay this on it. All the
+     * file says is where the rounds leave from.
+     *
+     * <p>How hard the rounds hit, how fast they leave and how quickly they come is not here either.
+     * That is the weapon's own file under {@code data/ashvehicles/weapon/}, exactly as it is for the
+     * main gun and for anything hung on a wing.
+     *
+     * @param gun the weapon the belt feeds, or empty for a vehicle that carries no machine gun
+     * @param muzzle where the rounds leave, in the vehicle's own axes, with the turret at dead ahead
+     *               and the gun level. Carried round the ring with the turret and rocked about the
+     *               trunnion with the gun, since that is what it is bolted to
+     */
+    public record Coaxial(Optional<ResourceLocation> gun, Vec3 muzzle) {
+        /** A vehicle with no machine gun, which is what a file saying nothing gets. */
+        public static final Coaxial NONE = new Coaxial(Optional.empty(), Vec3.ZERO);
+
+        public static final Codec<Coaxial> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                ResourceLocation.CODEC.optionalFieldOf("gun").forGetter(Coaxial::gun),
+                Vec3.CODEC.optionalFieldOf("muzzle", Vec3.ZERO).forGetter(Coaxial::muzzle)
+        ).apply(instance, Coaxial::new));
+
+        /** Whether there is a machine gun aboard at all. */
+        public boolean exists() {
+            return this.gun.isPresent();
         }
     }
 

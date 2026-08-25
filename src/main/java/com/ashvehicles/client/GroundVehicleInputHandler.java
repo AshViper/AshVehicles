@@ -18,8 +18,10 @@ import net.neoforged.neoforge.network.PacketDistributor;
 /**
  * Turns the driver's controls into vehicle input once a tick.
  *
- * <p>Two axes, a brake and a trigger. The mouse is not part of driving at all: it is where the crew
- * are looking, and where the crew are looking is what the turret is laid on — see
+ * <p>Two axes, a brake and two triggers — the attack button for whichever armament is selected, and
+ * a key of its own for the coaxial machine gun, which is never selected. The mouse is not part of
+ * driving at all: it is where the crew are looking, and where the crew are looking is what the
+ * turret is laid on — see
  * {@code GroundVehicleEntity.tickTurret}. That is why a tank needs so much less of this than an
  * aeroplane: the only things taken away from vanilla are the two mouse buttons, the attack button
  * being the trigger now and the use button the sight — see {@link AimZoom}, which reads it for
@@ -67,7 +69,8 @@ public final class GroundVehicleInputHandler {
                 axis(ModKeyMappings.DRIVE_FORWARD, ModKeyMappings.DRIVE_BACK),
                 axis(ModKeyMappings.STEER_RIGHT, ModKeyMappings.STEER_LEFT),
                 ModKeyMappings.VEHICLE_BRAKE.isDown(),
-                minecraft.options.keyAttack.isDown());
+                minecraft.options.keyAttack.isDown(),
+                ModKeyMappings.FIRE_COAXIAL.isDown());
 
         vehicle.setInput(input);
         // The hull, the speed and the turret go with it because the server cannot see any of them:

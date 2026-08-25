@@ -14,7 +14,7 @@ import net.minecraft.world.item.TooltipFlag;
  * What a gun is loaded out of: a shell for a main armament, or a belt for an autocannon.
  *
  * <p>Put them in a vehicle's hold and its crew load them while it is standing still; see
- * {@code MainGun.resupply}. A vehicle with none in the hold goes out with whatever is already in the
+ * {@code BuiltInGun.resupply}. A vehicle with none in the hold goes out with whatever is already in the
  * magazine and comes home empty, which is the whole point of the thing — what a tank can fire is
  * what somebody put aboard it, exactly as it already is for what an aeroplane carries under its
  * wings.

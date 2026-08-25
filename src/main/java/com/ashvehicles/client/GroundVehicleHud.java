@@ -320,6 +320,17 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         String gear = speed < -0.001F ? " R" : "";
         AircraftHud.value(graphics, font, kmh + " km/h" + gear, left, bottom - 42);
 
+        // The machine gun, which belongs to neither of the lines below. It is never selected — it is
+        // simply there — so it is shown whatever the trigger is on, and it is shown in the second
+        // column so that it does not read as a third thing the crew could be firing instead. Amber
+        // once the belt is out, which is the only thing about it worth a second glance.
+        if (vehicle.hasCoaxial()) {
+            int belt = vehicle.getCoaxRounds();
+
+            AircraftHud.value(graphics, font, String.format("MG %d/%d", belt, vehicle.getCoaxCapacity()),
+                    left + 84, bottom - 20, belt > 0 ? AircraftHud.GREEN : AircraftHud.WARNING);
+        }
+
         boolean missiles = vehicle.isMissileMode();
 
         if (missiles) {

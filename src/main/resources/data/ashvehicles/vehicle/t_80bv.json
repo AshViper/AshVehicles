@@ -347,6 +347,10 @@
     "recoil_ticks": 18,
     "kick": 0.08
   },
+  "coaxial": {
+    "gun": "ashvehicles:kord",
+    "muzzle": [1.18, 2.77, -0.58]
+  },
   "hull": {
     "health": 490,
     "explosion_power": 6,

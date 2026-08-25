@@ -26,7 +26,7 @@ import net.minecraft.world.phys.Vec3;
 /**
  * The missiles in a launcher's tubes: a seeker, a magazine, and a wait between launches.
  *
- * <p>The same relationship to {@link WeaponMounts} that {@link MainGun} has, and for the same
+ * <p>The same relationship to {@link WeaponMounts} that {@link BuiltInGun} has, and for the same
  * reason. A pylon is a place a store is <em>hung</em>, and most of that class is about which station
  * is selected, what somebody loaded onto it, and putting it back on again out of the hold. A
  * launcher's tubes are none of those things: they are built in, they all hold the same round, and
@@ -115,7 +115,7 @@ public final class TurretLauncher {
      * which for a launcher that holds two dozen is a round every few seconds. Long enough that
      * emptying the tubes is a decision rather than a formality.
      *
-     * <p>The same shape as {@code MainGun.resupply}, one floor apart from it because the two count
+     * <p>The same shape as {@code BuiltInGun.resupply}, one floor apart from it because the two count
      * different things: rounds and a reload against tubes and a wait, each in their own synched
      * fields. What they share — the hold, the rate, the standing-still rule — is the arrangement
      * rather than the code, and the arrangement is worth more than the half-dozen lines.
@@ -232,7 +232,7 @@ public final class TurretLauncher {
         GroundVehicleDefinition.Launcher tubes = this.vehicle.getStats().launcher();
         Vec3 rail = this.vehicle.turretToWorld(tubes.rail(), 1.0F);
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
-        Vec3 right = MainGun.across(bore);
+        Vec3 right = BuiltInGun.across(bore);
         Vec3 up = right.cross(bore).normalize();
         LivingEntity crew = this.vehicle.getControllingPassenger();
         RandomSource random = this.vehicle.getRandom();

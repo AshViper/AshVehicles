@@ -11,7 +11,7 @@ import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 import com.ashvehicles.vehicle.VehicleChassis;
-import com.ashvehicles.weapon.MainGun;
+import com.ashvehicles.weapon.BuiltInGun;
 import com.ashvehicles.weapon.TargetLock;
 import com.ashvehicles.weapon.TurretLauncher;
 
@@ -109,9 +109,20 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * <p>Sent because every side needs it and none of them could work it out. It is the gauge the
      * crew fire on, it is what the barrel's recoil is drawn from — and a counter that has just
      * jumped up from nothing <em>is</em> the news that the gun has fired, so it does the work of an
-     * event as well without being one. See {@link com.ashvehicles.weapon.MainGun}.
+     * event as well without being one. See {@link com.ashvehicles.weapon.BuiltInGun}.
      */
     private static final EntityDataAccessor<Integer> DATA_RELOAD =
+            SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
+    /**
+     * The coaxial's belt and its own wait between rounds.
+     *
+     * <p>A second pair rather than a share of the first. The two barrels are loaded separately, are
+     * fired separately and run out separately, and a machine gun that went quiet because the loader
+     * was busy with a shell would be a machine gun nobody could rely on.
+     */
+    private static final EntityDataAccessor<Integer> DATA_COAX_ROUNDS =
+            SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> DATA_COAX_RELOAD =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     /** Missiles left in the tubes, and the wait before the next one may go. */
     private static final EntityDataAccessor<Integer> DATA_MISSILES =
@@ -225,7 +236,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
 
     /** The gun in the turret, if this vehicle has one. Fired on the server and nowhere else. */
-    private final MainGun gun = new MainGun(this);
+    private final BuiltInGun gun = new BuiltInGun(this, BuiltInGun.Mount.MAIN);
+    /**
+     * The machine gun clamped to it, if it carries one. The same class as the gun above and on the
+     * same terms — loaded out of the same hold, fired on the server — but on a trigger of its own,
+     * because a coaxial is never <em>selected</em>: it is there whatever the crew have the main
+     * armament doing.
+     */
+    private final BuiltInGun coax = new BuiltInGun(this, BuiltInGun.Mount.COAXIAL);
     /** The missiles in the tubes, if it carries any. Also the seeker, which looks all the time. */
     private final TurretLauncher launcher = new TurretLauncher(this);
     /**
@@ -304,7 +322,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.buildParts();
         // A new vehicle is a whole one, and an empty one: the gun and the tubes are both loaded out
         // of the hold by the vehicle's own crew and out of nothing else, so one put down with
-        // nothing aboard it has nothing to fire until somebody loads it. See MainGun and
+        // nothing aboard it has nothing to fire until somebody loads it. See BuiltInGun and
         // TurretLauncher. One read back out of the world overwrites this from its tag, and a client
         // is told the real figures with the rest of the synched data.
         this.setHealth(this.getMaxHealth());
@@ -338,6 +356,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         builder.define(DATA_GUN_PITCH, 0.0F);
         builder.define(DATA_ROUNDS, 0);
         builder.define(DATA_RELOAD, 0);
+        builder.define(DATA_COAX_ROUNDS, 0);
+        builder.define(DATA_COAX_RELOAD, 0);
         builder.define(DATA_MISSILES, 0);
         builder.define(DATA_MISSILE_RELOAD, 0);
         builder.define(DATA_MISSILE_MODE, false);
@@ -377,6 +397,39 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     /** How many rounds a full magazine holds. */
     public int getRoundCapacity() {
         return this.gun.capacity();
+    }
+
+    /** Whether this vehicle carries a machine gun at all. */
+    public boolean hasCoaxial() {
+        return this.coax.exists();
+    }
+
+    /** Rounds left on the coaxial's belt. */
+    public int getCoaxRounds() {
+        return this.entityData.get(DATA_COAX_ROUNDS);
+    }
+
+    public void setCoaxRounds(int rounds) {
+        this.entityData.set(DATA_COAX_ROUNDS, Math.max(rounds, 0));
+    }
+
+    /** Ticks until the coaxial may fire again; zero is ready. */
+    public int getCoaxReload() {
+        return this.entityData.get(DATA_COAX_RELOAD);
+    }
+
+    public void setCoaxReload(int ticks) {
+        this.entityData.set(DATA_COAX_RELOAD, Math.max(ticks, 0));
+    }
+
+    /** Whether the machine gun has a round on the belt and may be fired. */
+    public boolean isCoaxLoaded() {
+        return this.getCoaxReload() <= 0 && this.getCoaxRounds() > 0;
+    }
+
+    /** How many rounds a full belt holds. */
+    public int getCoaxCapacity() {
+        return this.coax.capacity();
     }
 
     /** Missiles left in the tubes. */
@@ -653,6 +706,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     public Vec3 turretToWorld(Vec3 offset, float partialTick) {
         return this.toWorld(this.getStats().turret().exists() ? this.onTurret(offset, partialTick) : offset,
                 partialTick);
+    }
+
+    /**
+     * A point on the gun, in the world: rocked about the trunnion by the elevation, then swung about
+     * the ring by the traverse, then out through the hull's attitude. What {@link #turretToWorld}
+     * is for anything bolted to the turret, this is for anything bolted to the barrel — the coaxial
+     * machine gun's muzzle, which is the whole of why it is coaxial.
+     */
+    public Vec3 gunToWorld(Vec3 offset, float partialTick) {
+        return this.turretToWorld(this.onGun(offset, partialTick), partialTick);
     }
 
     /**
@@ -933,6 +996,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
                 this.gun.tick(this.input.fire() && !missiles);
                 this.launcher.tick(this.input.fire() && missiles);
+                // The coaxial is not one of the two and never was. It has its own trigger and is
+                // laid by the same mounting, so a gunner already on a target can put a burst into
+                // it without putting the main armament away first — which is the whole of what one
+                // is for.
+                this.coax.tick(this.input.coax());
                 this.reportSeeker();
                 this.getSensors().tick();
             }
@@ -2020,6 +2088,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.turretYawO = this.turretYaw;
         this.gunPitchO = this.gunPitch;
         this.gun.load(tag);
+        this.coax.load(tag);
         this.launcher.load(tag);
         this.entityData.set(DATA_MISSILE_MODE, tag.getBoolean("MissileMode"));
         this.reloadWas = this.getReload();
@@ -2035,6 +2104,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         tag.putFloat("TurretYaw", this.turretYaw);
         tag.putFloat("GunPitch", this.gunPitch);
         this.gun.save(tag);
+        this.coax.save(tag);
         this.launcher.save(tag);
         tag.putBoolean("MissileMode", this.isMissileMode());
     }

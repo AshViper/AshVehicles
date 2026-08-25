@@ -8,7 +8,7 @@
     "spread": 0.3
   },
   "projectile": {
-    "damage": 95.0,
+    "damage": 160.0,
     "speed": 24.0,
     "gravity": 0.0045,
     "range": 1500.0,

@@ -1,5 +1,7 @@
 package com.ashvehicles.weapon;
 
+import java.util.Optional;
+
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.entity.BulletEntity;
@@ -8,7 +10,6 @@ import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.entity.VehicleHold;
 import com.ashvehicles.item.AmmoItem;
 import com.ashvehicles.registry.ModEntities;
-import com.ashvehicles.vehicle.GroundVehicleDefinition;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -21,22 +22,31 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The gun built into a vehicle's turret: a barrel, a magazine, and a wait between rounds.
+ * A gun built into a vehicle rather than hung on it: a barrel, a magazine, and a wait between
+ * rounds. There are two of them on a tank — the main armament in the turret and the machine gun
+ * clamped beside it — and this is both.
  *
  * <p>Deliberately not {@link WeaponMounts}. A pylon is a place a store is hung and taken off again,
  * and most of that class is about which station is selected, what is on it, and what the seeker is
- * holding. A tank's main armament is none of those things: it is built in, there is one of it, and
- * the only questions are whether it is loaded and where it is pointing. What the two do share is the
+ * holding. A tank's guns are none of those things: they are built in, there is one of each, and the
+ * only questions are whether one is loaded and where it is pointing. What the two do share is the
  * weapon files — how hard a round hits, how fast it leaves and how often one can be fired are read
  * from {@code data/ashvehicles/weapon/} exactly as an aircraft reads them, so a gun is described in
  * one place whether it is bolted into a turret or hung under a wing.
  *
+ * <p><b>Why one class for both barrels.</b> Everything below is the same for either: rounds come out
+ * of the same hold, the wait between them is the same figure read from the same file, the round
+ * leaves the same way and scatters about the same cone. What differs is four things — which weapon
+ * it is, which pair of counters it keeps, where its muzzle is, and what its rounds are called in the
+ * save — and those four are the whole of {@link Mount}. Written twice instead, the pair would have
+ * drifted the first time either was fixed.
+ *
  * <p><b>Whether one press is one round is the weapon's to say.</b> A tank gun is read on the
  * trigger's rising edge: a loader takes several seconds, and one that let go the moment they were
- * finished is not how anybody fires one and takes the aiming out of it entirely. An autocannon in
- * the same sort of turret is the opposite — it is a thing you hold down, and a burst is the whole of
- * how it is aimed. Both are this class; which one a vehicle has is
- * {@link WeaponDefinition#isAutomatic()}, read from the weapon's own file.
+ * finished is not how anybody fires one and takes the aiming out of it entirely. A machine gun or an
+ * autocannon is the opposite — it is a thing you hold down, and a burst is the whole of how it is
+ * aimed. Both are this class; which one a barrel is is {@link WeaponDefinition#isAutomatic()}, read
+ * from the weapon's own file.
  *
  * <p><b>What it fires is what somebody loaded.</b> The magazine is filled out of the vehicle's own
  * hold, a shell or a belt at a time, and only while the vehicle is standing still — see
@@ -45,11 +55,125 @@ import net.minecraft.world.phys.Vec3;
  * had.
  *
  * <p><b>Where the state lives.</b> Rounds and the reload counter are synched data on the vehicle
- * rather than fields here, because the client needs both: the reload counter is what the barrel's
- * recoil is drawn from, and it is enough on its own — a counter that has just jumped to its maximum
- * <em>is</em> the news that the gun has fired, so nothing else has to be sent to say so.
+ * rather than fields here, because the client needs both: the main gun's reload counter is what the
+ * barrel's recoil is drawn from, and it is enough on its own — a counter that has just jumped to its
+ * maximum <em>is</em> the news that the gun has fired, so nothing else has to be sent to say so.
  */
-public final class MainGun {
+public final class BuiltInGun {
+    /**
+     * Which of a vehicle's two built-in guns this is: what it fires, what it keeps its count in, and
+     * where its rounds leave from.
+     *
+     * <p>Everything a barrel does is the same barrel to barrel. Everything a barrel <em>is</em> is
+     * here, and it is four questions long.
+     */
+    public enum Mount {
+        /**
+         * The main armament: the gun the turret is built round, the one that recoils and shoves the
+         * hull about, and the one the crew put away when they select missiles instead.
+         */
+        MAIN {
+            @Override
+            Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle) {
+                return vehicle.getStats().armament().main();
+            }
+
+            @Override
+            int rounds(GroundVehicleEntity vehicle) {
+                return vehicle.getRounds();
+            }
+
+            @Override
+            void rounds(GroundVehicleEntity vehicle, int rounds) {
+                vehicle.setRounds(rounds);
+            }
+
+            @Override
+            int reload(GroundVehicleEntity vehicle) {
+                return vehicle.getReload();
+            }
+
+            @Override
+            void reload(GroundVehicleEntity vehicle, int ticks) {
+                vehicle.setReload(ticks);
+            }
+
+            @Override
+            Vec3 muzzle(GroundVehicleEntity vehicle) {
+                return vehicle.getMuzzle(1.0F);
+            }
+
+            @Override
+            String tag() {
+                return "";
+            }
+        },
+        /**
+         * The machine gun clamped to the main gun, laid wherever it is laid and fired on a trigger
+         * of its own. Its muzzle is a fixed point on the gun rather than a length down a barrel:
+         * there is no recoil to slide it back and nothing that needs the barrel's length, so where
+         * the rounds leave is simply where the file says they do — see
+         * {@link com.ashvehicles.vehicle.GroundVehicleDefinition.Coaxial}.
+         */
+        COAXIAL {
+            @Override
+            Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle) {
+                return vehicle.getStats().coaxial().gun();
+            }
+
+            @Override
+            int rounds(GroundVehicleEntity vehicle) {
+                return vehicle.getCoaxRounds();
+            }
+
+            @Override
+            void rounds(GroundVehicleEntity vehicle, int rounds) {
+                vehicle.setCoaxRounds(rounds);
+            }
+
+            @Override
+            int reload(GroundVehicleEntity vehicle) {
+                return vehicle.getCoaxReload();
+            }
+
+            @Override
+            void reload(GroundVehicleEntity vehicle, int ticks) {
+                vehicle.setCoaxReload(ticks);
+            }
+
+            @Override
+            Vec3 muzzle(GroundVehicleEntity vehicle) {
+                return vehicle.gunToWorld(vehicle.getStats().coaxial().muzzle(), 1.0F);
+            }
+
+            @Override
+            String tag() {
+                return "Coax";
+            }
+        };
+
+        /** Which weapon file this barrel is, or empty for a vehicle that has not got one. */
+        abstract Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle);
+
+        abstract int rounds(GroundVehicleEntity vehicle);
+
+        abstract void rounds(GroundVehicleEntity vehicle, int rounds);
+
+        abstract int reload(GroundVehicleEntity vehicle);
+
+        abstract void reload(GroundVehicleEntity vehicle, int ticks);
+
+        /** Where this barrel's rounds leave, in the world, as of this tick. */
+        abstract Vec3 muzzle(GroundVehicleEntity vehicle);
+
+        /**
+         * What this barrel's counters are called in the vehicle's tag. Empty for the main gun, whose
+         * keys were written before there was a second barrel and are left exactly as they were, so
+         * that a tank saved by an older world comes back with its shells.
+         */
+        abstract String tag();
+    }
+
     /**
      * Rounds between muzzle flashes on an automatic gun.
      *
@@ -71,13 +195,15 @@ public final class MainGun {
     private static final float STANDING = 1.0E-4F;
 
     private final GroundVehicleEntity vehicle;
+    private final Mount mount;
     /** Whether the trigger was down last tick, so that holding it does not empty the magazine. */
     private boolean triggerWasDown;
     /** Rounds until the next muzzle flash. See {@link #FLASH_EVERY}. */
     private int untilFlash;
 
-    public MainGun(GroundVehicleEntity vehicle) {
+    public BuiltInGun(GroundVehicleEntity vehicle, Mount mount) {
         this.vehicle = vehicle;
+        this.mount = mount;
     }
 
     /**
@@ -85,22 +211,22 @@ public final class MainGun {
      * whether or not anybody is aboard.
      */
     public void tick(boolean trigger) {
-        int reload = this.vehicle.getReload();
+        int reload = this.mount.reload(this.vehicle);
 
         if (reload > 0) {
-            this.vehicle.setReload(reload - 1);
+            this.mount.reload(this.vehicle, reload - 1);
         }
 
         boolean wasDown = this.triggerWasDown;
         this.triggerWasDown = trigger;
 
-        GroundVehicleDefinition.Armament armament = this.vehicle.getStats().armament();
+        Optional<ResourceLocation> fitted = this.mount.weapon(this.vehicle);
 
-        if (!armament.exists() || !(this.vehicle.level() instanceof ServerLevel level)) {
+        if (fitted.isEmpty() || !(this.vehicle.level() instanceof ServerLevel level)) {
             return;
         }
 
-        ResourceLocation weaponId = armament.main().orElseThrow();
+        ResourceLocation weaponId = fitted.get();
         WeaponDefinition weapon = Definitions.weapon(weaponId);
 
         // The crew at work on a vehicle that is standing still: shells and belts out of the hold and
@@ -114,11 +240,11 @@ public final class MainGun {
         // this class's. A tank gun is a thing you press — a loader takes several seconds and letting
         // go the instant they finish is not how anybody fires one — and that is still what a weapon
         // file gets by leaving the field out and naming a rate of a fraction of a round a second.
-        // An autocannon on a launcher is the same class of thing bolted into the same sort of
-        // turret, and is a thing you hold down. See WeaponDefinition.isAutomatic.
+        // A machine gun in the same mantlet is the same class of thing, and is a thing you hold
+        // down. See WeaponDefinition.isAutomatic.
         boolean pressed = trigger && (weapon.isAutomatic() || !wasDown);
 
-        if (!pressed || reload > 0 || this.vehicle.getRounds() <= 0) {
+        if (!pressed || reload > 0 || this.mount.rounds(this.vehicle) <= 0) {
             return;
         }
 
@@ -146,7 +272,7 @@ public final class MainGun {
         int capacity = weapon.ammo();
         int perItem = kind.roundsPerItem();
 
-        if (capacity - this.vehicle.getRounds() < perItem) {
+        if (capacity - this.mount.rounds(this.vehicle) < perItem) {
             return;
         }
 
@@ -156,7 +282,7 @@ public final class MainGun {
             return;
         }
 
-        this.vehicle.setRounds(this.vehicle.getRounds() + perItem);
+        this.mount.rounds(this.vehicle, this.mount.rounds(this.vehicle) + perItem);
     }
 
     /**
@@ -178,16 +304,21 @@ public final class MainGun {
         return false;
     }
 
+    /** Whether this barrel is fitted at all. */
+    public boolean exists() {
+        return this.mount.weapon(this.vehicle).isPresent();
+    }
+
     /** How many rounds a full magazine holds, from the weapon's own file. */
     public int capacity() {
-        return this.vehicle.getStats().armament().main()
+        return this.mount.weapon(this.vehicle)
                 .map(id -> Definitions.weapon(id).ammo())
                 .orElse(0);
     }
 
     /** How long the loader takes, in ticks, from the weapon's rate of fire. */
     public int reloadTicks() {
-        return this.vehicle.getStats().armament().main()
+        return this.mount.weapon(this.vehicle)
                 .map(id -> ticksFor(Definitions.weapon(id).firing().roundsPerSecond()))
                 .orElse(1);
     }
@@ -201,11 +332,13 @@ public final class MainGun {
      *
      * <p>The round leaves along the bore rather than along the hull: where a tank is pointing and
      * where its gun is pointing are different questions, and the second one is the whole reason a
-     * turret exists. The scatter is a cone about that, built across the bore rather than across the
-     * world, so a gun laid straight up scatters no differently from one laid flat.
+     * turret exists. A coaxial is clamped to that same gun and so leaves along the same line — which
+     * is the whole of what makes it coaxial. The scatter is a cone about that, built across the bore
+     * rather than across the world, so a gun laid straight up scatters no differently from one laid
+     * flat.
      */
     private void fire(ServerLevel level, ResourceLocation weaponId, WeaponDefinition weapon) {
-        Vec3 muzzle = this.vehicle.getMuzzle(1.0F);
+        Vec3 muzzle = this.mount.muzzle(this.vehicle);
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
         Vec3 right = across(bore);
         Vec3 up = right.cross(bore).normalize();
@@ -241,8 +374,8 @@ public final class MainGun {
 
         this.playFireSound(weapon, weaponId);
 
-        this.vehicle.setRounds(this.vehicle.getRounds() - 1);
-        this.vehicle.setReload(ticksFor(weapon.firing().roundsPerSecond()));
+        this.mount.rounds(this.vehicle, this.mount.rounds(this.vehicle) - 1);
+        this.mount.reload(this.vehicle, ticksFor(weapon.firing().roundsPerSecond()));
     }
 
     /**
@@ -283,15 +416,17 @@ public final class MainGun {
     }
 
     public void load(CompoundTag tag) {
+        String rounds = this.mount.tag() + "Rounds";
+
         // A vehicle written to the world before this was a gun comes back with a full magazine
         // rather than an empty one, which is the kinder of the two guesses.
-        this.vehicle.setRounds(tag.contains("Rounds") ? tag.getInt("Rounds") : this.capacity());
-        this.vehicle.setReload(tag.getInt("Reload"));
+        this.mount.rounds(this.vehicle, tag.contains(rounds) ? tag.getInt(rounds) : this.capacity());
+        this.mount.reload(this.vehicle, tag.getInt(this.mount.tag() + "Reload"));
     }
 
     public void save(CompoundTag tag) {
-        tag.putInt("Rounds", this.vehicle.getRounds());
-        tag.putInt("Reload", this.vehicle.getReload());
+        tag.putInt(this.mount.tag() + "Rounds", this.mount.rounds(this.vehicle));
+        tag.putInt(this.mount.tag() + "Reload", this.mount.reload(this.vehicle));
     }
 
 }

@@ -99,6 +99,19 @@ public final class ModKeyMappings {
     public static final KeyMapping STEER_RIGHT = create("steer_right", GLFW.GLFW_KEY_D);
     /** Holds the vehicle still, and holds it on a slope. */
     public static final KeyMapping VEHICLE_BRAKE = create("vehicle_brake", GLFW.GLFW_KEY_SPACE);
+    /**
+     * The coaxial machine gun's trigger, on a vehicle that carries one.
+     *
+     * <p>Its own key rather than a place in the weapon cycle, because a coaxial is not one of the
+     * things a crew choose between: it is clamped to the main gun, it is laid wherever the main gun
+     * is laid, and the whole use of one is a burst into something the gunner is already holding
+     * without putting the cannon away to do it. The attack button stays what it was — whichever
+     * armament is selected — and this is the other barrel in the same mantlet.
+     *
+     * <p>{@code Z} is clear of vanilla's in-game keys and falls under the hand already on the
+     * driving keys, which is the hand that is not on the mouse laying the turret.
+     */
+    public static final KeyMapping FIRE_COAXIAL = create("fire_coaxial", GLFW.GLFW_KEY_Z);
 
     /**
      * The way out of anything in the mod, cockpit or driver's seat, front seat or back.
@@ -136,7 +149,7 @@ public final class ModKeyMappings {
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
             AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_VTOL, CYCLE_WEAPON, RELEASE_FLARE, RELEASE_CHAFF,
             FREE_LOOK, TOGGLE_MOUSE_AIM, AIM,
-            DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE,
+            DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,
             DISMOUNT, OPEN_HOLD, SWITCH_SEAT};
 
     private static KeyMapping create(String name, int key) {
