@@ -10,6 +10,7 @@ import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
+import com.ashvehicles.vehicle.Ride;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.weapon.BuiltInGun;
 import com.ashvehicles.weapon.TargetLock;
@@ -163,6 +164,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final EntityDataAccessor<Float> DATA_STEER =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.FLOAT);
 
+
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
 
     /** Blocks a tick squared. Vanilla's figure, applied by us because we move the vehicle ourselves. */
@@ -186,6 +188,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     private static final double PROBE_ABOVE = 2.0;
     private static final double PROBE_BELOW = 3.0;
+
+    /**
+     * How near the top of the probe a reading has to be to count as the probe's own ceiling rather
+     * than a surface, in blocks.
+     *
+     * <p>A trace that begins inside a block comes back a thousandth of its own length below where it
+     * began — see {@code VoxelShape.clip}, which nudges the start before asking whether it is inside
+     * — so the reading sits a hair under {@link #PROBE_ABOVE} rather than exactly on it. A
+     * centimetre of allowance covers that and is far below anything terrain is measured in.
+     */
+    private static final double PROBE_CEILING_SLACK = 0.05;
 
     /** Speeds below this are nothing: the vehicle is standing still and should be left standing. */
     private static final float STANDSTILL = 1.0E-4F;
@@ -219,6 +232,27 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * slope — would come down to which way that bit happened to fall.
      */
     private static final double CLIMB_SLACK = 1.0E-3;
+
+    /**
+     * How much further above the hull than a step the crushing starts, in blocks.
+     *
+     * <p>The floor of the volume a vehicle breaks its way through is a step above the plane its own
+     * suspension is lying along — the same line the climb test draws, so that what stops the vehicle
+     * and what it clears are the one set of blocks. That plane is <em>eased</em> towards the ground
+     * rather than taken from it, though, and a hull that has just met a slope is a tick or two
+     * behind the slope: for those ticks the plane is under the hillside, and taken strictly the
+     * vehicle would break the riser it is about to drive over instead of driving over it. Half a
+     * block covers the lag and costs nothing that matters — a wall it can break is broken from its
+     * second course up rather than its first, and the first is driven over the way a kerb is.
+     */
+    private static final double CRUSH_CLEARANCE = 0.5;
+
+    /**
+     * The steepest the hull's plane is taken to be when the crushing volume is laid along it, in
+     * degrees. Past the vertical the slope of a plane is not a number, and a hull that has been
+     * thrown onto its side by a shell should not be reaching a mile into the ground.
+     */
+    private static final float CRUSH_SLOPE_CAP = 60.0F;
 
     /** How far clear of the vehicle somebody getting out is put down, in blocks. */
     private static final double DISMOUNT_MARGIN = 0.2;
@@ -305,6 +339,18 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     /** How far the steered wheels are turned, in degrees, and what it was a tick ago. */
     private float steerAngle;
     private float steerAngleO;
+
+    /**
+     * The body on its springs: how far it has been thrown about by the going, and by what the
+     * drivetrain and the driver have been doing with it.
+     *
+     * <p>Run on every side rather than sent, because everything that drives it — the speed, the
+     * heading, the height, the way the hull is lying — every side already has. See {@link Ride},
+     * which is also where the case for keeping it out of the collision boxes and the gun's aim is
+     * made.
+     */
+    private final Ride.Springs springs = new Ride.Springs();
+
 
     private GroundVehicleInput input = GroundVehicleInput.NONE;
 
@@ -577,6 +623,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     public float getSteerAngle(float partialTick) {
         return Mth.lerp(partialTick, this.steerAngleO, this.steerAngle);
+    }
+
+    /**
+     * How far the body has moved on its springs at a moment between two ticks.
+     *
+     * <p>Read by whatever draws the vehicle and by the crew's own eyes, and by nothing else: see
+     * {@link Ride} for why the boxes, the aim and where the vehicle is standing are all worked out
+     * from the rigid hull and cannot see this.
+     */
+    public Ride getRide(float partialTick) {
+        return this.springs.at(partialTick);
     }
 
     /** How hard the engine is working, in [0, 1]: what the engine note is pitched from. */
@@ -860,11 +917,25 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return this.getStats().isShip() ? VehicleShape.Mount.HULL : VehicleShape.Mount.TURRET;
     }
 
+    /**
+     * Where a crew member sees the world from — and the one place the body's springs are allowed out
+     * of the drawing.
+     *
+     * <p>A head is bolted to the body and not to the running gear, so it goes wherever the body
+     * goes: down as the nose dips under the brakes, sideways as the hull leans out of a corner, and
+     * up and down over every bump. That is by a distance rather than by a rotation, which means the
+     * view is shaken about without the crew's <em>aim</em> being shaken with it. Deliberately: the
+     * gun is laid by where they are looking, and a sight thrown off its target by the ground would
+     * have them fighting the suspension instead of the enemy. What they see moves; what they are
+     * pointing at does not.
+     */
     @Override
     protected Vec3 eyeToWorld(VehicleShape.Mount mount, Vec3 eye, float partialTick) {
-        return mount == VehicleShape.Mount.TURRET
-                ? this.turretToWorld(eye, partialTick)
-                : this.toWorld(eye, partialTick);
+        Vec3 seated = mount == VehicleShape.Mount.TURRET && this.getStats().turret().exists()
+                ? this.onTurret(eye, partialTick)
+                : eye;
+
+        return this.toWorld(this.getRide(partialTick).carry(seated), partialTick);
     }
 
     /**
@@ -938,6 +1009,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
             VehicleShape.Box box = shape.get(i);
 
+
             part.place(this.hitbox(box));
         }
 
@@ -963,9 +1035,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.trackDistanceO = this.trackDistance;
 
         if (this.isControlledByLocalInstance()) {
-            // Nobody in the seat: the brake goes on and the vehicle stops where it is. A wreck is the
-            // same case for good — there is no seat left to be in — and it coasts to a halt on its
-            // own tracks rather than stopping dead where it was hit.
+            // Nobody in the seat: the brake goes on and the vehicle rolls to a halt on it, carrying
+            // whatever it was doing when the driver climbed out rather than stopping dead underneath
+            // them. A wreck is the same case for good — there is no seat left to be in — and it comes
+            // to rest on its own tracks rather than where it was hit.
             if (this.isWrecked() || !(this.getControllingPassenger() instanceof Player)) {
                 this.input = GroundVehicleInput.PARKED;
             }
@@ -1031,7 +1104,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         }
 
         this.windSteering();
+        // After everything that could have moved the hull, and on every side: what the springs are
+        // doing is worked out from how the hull has just changed, and a side reading last tick's
+        // hull would draw the body answering a bump it has not met yet.
+        this.springs.tick(this.getStats(), this.speed, this.heading, this.getY(), this.onGround());
 
+        // After everything that could have moved the hull, so that what is broken is what the hull
+        // is standing in now rather than what it was standing in a tick ago.
+        this.crushBlocks();
         this.tickParts();
         this.checkInsideBlocks();
     }
@@ -1348,15 +1428,117 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             }
 
             if (!Double.isNaN(before[i]) && ground - before[i] > climb + CLIMB_SLACK) {
-                return false;
+                return this.crushesThrough(step);
             }
 
-            if (!this.hasHeadroom(to, ground, footprint.top(), climb)) {
-                return false;
+            // The headroom is only worth asking about where the probe actually found a surface. A
+            // reading capped by PROBE_ABOVE is not one: it says "the ground here is at least this
+            // high", and measuring a gap up from a floor that is really several blocks further up
+            // looks into the hillside itself and reports it as something hanging over the vehicle.
+            // That is what used to stop a tank dead in front of a bank of one-block steps — and stop
+            // it on flat ground, several blocks short of the first of them, since it is the corner
+            // out at the vehicle's nose that reads the hill. Nothing is lost by leaving it: ground
+            // that high is ground the climb test above has already refused, on the tick the corner
+            // first met it.
+            if (!this.isProbeCeiling(ground) && !this.hasHeadroom(to, ground, footprint.top(), climb)) {
+                return this.crushesThrough(step);
             }
         }
 
         return true;
+    }
+
+    /**
+     * Whether everything standing in the vehicle's way one step from here is soft enough to be
+     * driven through rather than stopped against.
+     *
+     * <p>Asked only of a step something has already refused, and it is the last word on that
+     * refusal: a wall of earth or a stand of trees stops nothing on tracks, and the vehicle is let
+     * on into it. Nothing is broken here. What breaks it is {@link #crushBlocks}, on the server,
+     * from where the vehicle actually gets to — the same volume asked the same question, so a step
+     * allowed on the strength of this is a step whose obstruction is gone within the tick. See
+     * {@link BlockCrusher}, which is where both halves of that live.
+     *
+     * <p>The volume is the whole hull rather than the corner that objected. Which is the safe way
+     * round: a vehicle let into a space holding one thing it can never clear would be a vehicle
+     * parked inside a wall for good.
+     */
+    private boolean crushesThrough(Vec3 step) {
+        return BlockCrusher.opens(this.level(), this.body(this.position().add(step)),
+                this.getStats().crush().resistance());
+    }
+
+    /**
+     * The volume the hull takes up at a position, for the two questions {@link BlockCrusher} asks of
+     * it.
+     *
+     * <p>Laid along the plane the hull is lying along rather than levelled, which is the whole of
+     * what keeps this from being a machine that digs. The pitch and roll here are the ones the
+     * suspension read off the ground under the tracks, so on a hillside the floor of this volume is
+     * the hillside and there is nothing inside it to break; on the flat it is the flat, and a bank
+     * of earth taller than a step is inside it and goes.
+     */
+    private BlockCrusher.Body body(Vec3 at) {
+        Footprint footprint = this.footprint();
+        double climb = this.getStats().suspension().climbHeight();
+        double rise = Math.tan(Math.toRadians(Mth.clamp(this.hullPitch, -CRUSH_SLOPE_CAP, CRUSH_SLOPE_CAP)));
+        // Bank is written positive with the left side high, and the sideways axis runs to the right.
+        double tilt = -Math.tan(Math.toRadians(Mth.clamp(this.hullBank, -CRUSH_SLOPE_CAP, CRUSH_SLOPE_CAP)));
+
+        return new BlockCrusher.Body(at, this.headingVector(), footprint.halfWidth(), footprint.front(),
+                footprint.back(), rise, tilt, climb + CRUSH_CLEARANCE, footprint.top());
+    }
+
+    /**
+     * Breaks whatever the hull has driven into, on the server and nowhere else.
+     *
+     * <p>Every tick the vehicle is moving, and from where it now is rather than from where it is
+     * going. That is what makes this work for a vehicle with a driver in it, which is the case that
+     * matters: such a vehicle is simulated on the driver's own client and the server never runs its
+     * movement at all, so there is no step here to ask about — only a position that has arrived, and
+     * a hull standing in whatever the client decided it could drive into. Sweeping that hull breaks
+     * exactly those blocks, without the client having been trusted with the question.
+     *
+     * <p>A vehicle standing still on the ground with nothing pressed is left alone. Not for the cost
+     * of it, though it is not free, but because a machine parked against something should sit there
+     * rather than slowly eat it. A driver leaning on the throttle is a different matter and is not
+     * left alone, however little the vehicle is managing to move: something the movement stopped
+     * against and the crushing would have cleared is only ever a tick from clearing itself, and
+     * reading the speed alone would have the vehicle grind to a halt against it and stay there,
+     * since a vehicle that got nowhere this tick is a vehicle whose speed the ground has just taken
+     * away.
+     */
+    private void crushBlocks() {
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        if (Math.abs(this.speed) < STANDSTILL && this.input.drive() == 0.0F && this.onGround()) {
+            return;
+        }
+
+        Footprint footprint = this.footprint();
+
+        if (footprint.isEmpty()) {
+            return;
+        }
+
+        GroundVehicleDefinition.Crush crush = this.getStats().crush();
+
+        BlockCrusher.crush(this.level(), this, this.body(this.position()), crush.resistance(), crush.drops());
+    }
+
+    /**
+     * Whether a ground reading is the top of the probe rather than a surface it found.
+     *
+     * <p>{@link #groundUnder} starts its trace {@link #PROBE_ABOVE} over the vehicle, and a trace
+     * that starts inside a block comes straight back at the point it started — so ground higher than
+     * that reads as exactly that height however far above it really is. Which is the safe way round
+     * for the climb test and is worth nothing at all to anything that wants to know where the
+     * surface is.
+     */
+    private boolean isProbeCeiling(double ground) {
+        return ground >= this.getY() + PROBE_ABOVE - PROBE_CEILING_SLACK;
     }
 
     /** Whether the gap above the ground at a point is tall enough for the vehicle to pass through. */
@@ -1377,10 +1559,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * ahead and behind, and how tall it is.
      *
      * <p>Taken from the collision boxes rather than from the plain box, so the corners the movement
-     * is measured at are the corners of the thing itself. The turret counts towards the height and
-     * not towards the rest of it: a gun laid abeam is not something a driver expects to be stopped
-     * by, and a barrel that could catch on scenery would leave a tank wedged every time the crew
-     * traversed near a wall.
+     * is measured at are the corners of the thing itself. Only the boxes on the <em>hull</em> shape
+     * it, though every box counts towards the height: a gun laid abeam is not something a driver
+     * expects to be stopped by, and a barrel that could catch on scenery would leave a tank wedged
+     * every time the crew traversed near a wall.
+     *
+     * <p>That means the barrel as much as the turret, and it used not to. The barrel is a box of its
+     * own mounted on the gun rather than on the turret, so leaving out the turret's boxes left it
+     * in, and the corners the whole of the movement was measured at were the corners of a shape nine
+     * blocks long in front of a hull that is four and a half — a Leopard stopping four blocks short
+     * of everything, and reading the ground for its climb test out in the middle of the next hill.
      *
      * @param front how far the shape reaches over the bow, which for a tank is the glacis rather
      *              than the muzzle
@@ -1397,7 +1585,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 Vec3 half = box.size().scale(0.5);
                 top = Math.max(top, box.offset().y + half.y);
 
-                if (box.mount() == VehicleShape.Mount.TURRET) {
+                if (box.mount() != VehicleShape.Mount.HULL) {
                     continue;
                 }
 
@@ -1937,32 +2125,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * time the driver touched the sticks, which is precisely what the stabiliser in {@link #steer}
      * exists to prevent.
      */
-    /**
-     * The last of the crew getting out leaves the vehicle where it stands.
-     *
-     * <p>Not braking to a halt: stopped. A tank's rolling resistance is a rounding error and even
-     * its brakes take a second and a half to pull it up from sixty-five kilometres an hour, which is
-     * thirteen blocks of hull sailing off across the field while the driver stands watching it. That
-     * is not what anybody means by getting out, and the vehicle turning up somewhere other than
-     * where it was left is a bug however faithfully it was simulated.
-     *
-     * <p>The brake stays on afterwards as well — see {@link GroundVehicleInput#PARKED} — so it holds
-     * on a slope rather than rolling away once gravity has had a moment to work on it.
-     */
-    @Override
-    protected void removePassenger(Entity passenger) {
-        super.removePassenger(passenger);
-
-        if (this.getPassengers().isEmpty()) {
-            this.speed = 0.0F;
-            this.setDeltaMovement(0.0, this.getDeltaMovement().y, 0.0);
-
-            if (!this.level().isClientSide) {
-                this.entityData.set(DATA_SPEED, 0.0F);
-            }
-        }
-    }
-
     @Override
     protected void positionRider(Entity passenger, Entity.MoveFunction moveFunction) {
         super.positionRider(passenger, moveFunction);

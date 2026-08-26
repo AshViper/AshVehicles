@@ -149,8 +149,12 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
      * alone. That is a model to fix in Blockbench, not here.
      */
     protected static void turnAboutX(GeoModel<?> model, String bone, float degrees) {
-        pose(model, bone, found -> found.setRotX(
-                rest(found).getRotX() + machineSignX(found) * degrees * DEG_TO_RAD));
+        pose(model, bone, found -> turnAboutX(found, degrees));
+    }
+
+    /** The same, given the bone rather than its name. @see #slideAlongY */
+    protected static void turnAboutX(GeoBone bone, float degrees) {
+        bone.setRotX(rest(bone).getRotX() + machineSignX(bone) * degrees * DEG_TO_RAD);
     }
 
     /** @see #turnAboutX */
@@ -161,9 +165,35 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
 
     /** @see #turnAboutX */
     protected static void slideAlongZ(GeoModel<?> model, String bone, float units) {
-        pose(model, bone, found -> found.setPosZ(
-                rest(found).getOffsetZ() + machineSignZ(found) * units));
+        pose(model, bone, found -> slideAlongZ(found, units));
     }
+
+    /** The same, given the bone rather than its name. @see #slideAlongY */
+    protected static void slideAlongZ(GeoBone bone, float units) {
+        bone.setPosZ(rest(bone).getOffsetZ() + machineSignZ(bone) * units);
+    }
+
+    /**
+     * As {@link #slideAlongZ}, along the machine's vertical, and given the bone rather than its name.
+     *
+     * <p>The bone rather than the name because the callers for this one — a road wheel being put
+     * back down on the ground as the body moves above it — have to know where the bone is before
+     * they can know how far to move it, and looking the same bone up twice a frame for every wheel
+     * on the vehicle is not free.
+     */
+    protected static void slideAlongY(GeoBone bone, float units) {
+        bone.setPosY(rest(bone).getOffsetY() + machineSignYSlide(bone) * units);
+    }
+
+
+    /**
+     * As {@link #machineSignZ}, for a slide along Y. None of the bone's own turns come into it, for
+     * the same reason: an offset happens in the parent's axes and not in the bone's.
+     */
+    private static float machineSignYSlide(GeoBone bone) {
+        return sign(intoMachine(bone, new Vector3f(0.0F, 1.0F, 0.0F)).y());
+    }
+
 
     /**
      * Whether a turn about this bone's X comes out as a turn the same way about the machine's.

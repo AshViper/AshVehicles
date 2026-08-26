@@ -97,7 +97,8 @@
     "climb_height": 0.8,
     "grip": 0.45,
     "contact_length": 60,
-    "contact_width": 22
+    "contact_width": 22,
+    "travel": 0.0
   },
   "turret": {
     "traverse_rate": 0.9,

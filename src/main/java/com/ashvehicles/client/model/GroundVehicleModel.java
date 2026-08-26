@@ -1,12 +1,11 @@
 package com.ashvehicles.client.model;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import org.joml.Vector3f;
 
 import com.ashvehicles.vehicle.VehicleChassis;
-import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
+import com.ashvehicles.vehicle.Ride;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -68,9 +67,27 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
             AnimationState<GroundVehicleEntity> animationState) {
         super.setCustomAnimations(animatable, instanceId, animationState);
 
-        float partialTick = animationState.getPartialTick();
-        applyPose(this, animatable.getStats().model(), Pose.of(animatable, partialTick),
-                animatable.getStats().armament().recoil());
+        applyPose(this, Setup.of(animatable.getStats()),
+                Pose.of(animatable, animationState.getPartialTick()));
+    }
+
+    /**
+     * The figures out of a vehicle's file that decide how its model is posed, taken from the file
+     * once and carried about together.
+     *
+     * <p>They come from four different blocks of the file and are wanted in one place, and a ghost —
+     * which has no vehicle left to ask — has to carry the lot along with its photograph. Gathered
+     * here rather than passed one by one, which is how {@link #applyPose} came to be taking four
+     * loose floats behind the thing they all describe.
+     *
+     * @param recoilTravel how far the barrel runs back when the gun fires, in blocks
+     * @param wheelTravel how far a road wheel moves on its springs, in blocks. Nothing pins the
+     *                    running gear to the body, which is a vehicle with no suspension to draw
+     */
+    public record Setup(VehicleChassis.Model model, float recoilTravel, float wheelTravel) {
+        public static Setup of(GroundVehicleDefinition stats) {
+            return new Setup(stats.model(), stats.armament().recoil(), stats.suspension().travel());
+        }
     }
 
     /**
@@ -82,15 +99,19 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
      * @param wheelAngle how far the road wheels have gone round, in degrees
      * @param steerAngle how far the steered wheels are turned, in degrees, positive to the right
      * @param recoil how far the barrel has run back, from nothing to one
+     * @param ride how far the body has moved on its springs, which the running gear is put back down
+     *             by so that it stays on the ground while the hull above it moves
      */
-    public record Pose(float turretYaw, float gunPitch, float wheelAngle, float steerAngle, float recoil) {
+    public record Pose(float turretYaw, float gunPitch, float wheelAngle, float steerAngle, float recoil,
+            Ride ride) {
         public static Pose of(GroundVehicleEntity vehicle, float partialTick) {
             return new Pose(
                     vehicle.getTurretYaw(partialTick),
                     vehicle.getGunPitch(partialTick),
                     vehicle.getWheelAngle(partialTick),
                     vehicle.getSteerAngle(partialTick),
-                    vehicle.getRecoil(partialTick));
+                    vehicle.getRecoil(partialTick),
+                    vehicle.getRide(partialTick));
         }
 
         /**
@@ -115,18 +136,17 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
                     Mth.lerp(partialTick, previous.gunPitch(), now.gunPitch()),
                     Mth.lerp(partialTick, previous.wheelAngle(), now.wheelAngle()),
                     Mth.lerp(partialTick, previous.steerAngle(), now.steerAngle()),
-                    Mth.lerp(partialTick, previous.recoil(), now.recoil()));
+                    Mth.lerp(partialTick, previous.recoil(), now.recoil()),
+                    Ride.between(previous.ride(), now.ride(), partialTick));
         }
     }
 
-    /**
-     * Poses any model of a ground vehicle.
-     *
-     * @param recoilTravel how far the barrel runs back when the gun fires, in blocks
-     */
-    public static void applyPose(GeoModel<?> model, VehicleChassis.Model setup, Pose pose,
-            float recoilTravel) {
-        turnAboutY(model, setup.bone(GroundVehicleDefinition.Bone.TURRET), TURRET_SIGN * pose.turretYaw());
+    /** Poses any model of a ground vehicle. */
+    public static void applyPose(GeoModel<?> model, Setup figures, Pose pose) {
+        VehicleChassis.Model setup = figures.model();
+        String turretBone = setup.bone(GroundVehicleDefinition.Bone.TURRET);
+
+        turnAboutY(model, turretBone, TURRET_SIGN * pose.turretYaw());
 
         // The gun and the mantlet elevate together, and both are children of the turret in the
         // geometry, so neither of them knows or needs to know which way the turret is pointing.
@@ -143,7 +163,8 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
         // the gun's, since a bone's offset is applied before its own elevation. The travel is
         // written in blocks like everything else in these files and the bone wants model units,
         // which are sixteen to the block before the vehicle's own scale is applied.
-        float travel = RECOIL_SIGN * pose.recoil() * recoilTravel * 16.0F / Math.max(setup.scale(), 0.01F);
+        float travel = RECOIL_SIGN * pose.recoil() * figures.recoilTravel() * BakedGeometry.UNITS
+                / Math.max(setup.scale(), 0.01F);
         slideAlongZ(model, setup.bone(GroundVehicleDefinition.Bone.GUN), travel);
 
         // Any further mounts laid on the same target as the main one — a warship's second turret,
@@ -160,6 +181,7 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
         // wheel down the same side.
         for (String wheel : setup.roadWheels()) {
             turnAboutX(model, wheel, WHEEL_SIGN * pose.wheelAngle());
+            plant(model, wheel, pose.ride(), setup.scale(), figures.wheelTravel());
         }
 
         // And the ones that steer, turned about their own upright. A wheel is usually in both lists,
@@ -173,4 +195,44 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
         }
     }
 
+
+    /**
+     * Puts one road wheel back on the ground after the body above it has moved.
+     *
+     * <p>The suspension is drawn by rocking the <em>whole</em> model on the pose stack — see
+     * {@code GroundVehicleRenderer.applyRotations} — which is the only way to do it on models that
+     * have no one bone for the hull: on the vehicles here the hull, the turret, the stowage and the
+     * wheels are all children of the same root, so there is nothing to move that is not everything.
+     * That carries the running gear up and down with the body, which is precisely backwards. So each
+     * wheel is moved down by exactly what the body's movement lifted it, and the two cancel: the
+     * wheels stay where they were on the ground and the hull moves above them, which is what a
+     * suspension looks like.
+     *
+     * <p>Held inside the wheel's own travel. Past that the wheel is against its bump stops and the
+     * whole vehicle really does move — which is right, and is what makes a hard landing throw a tank
+     * about rather than being swallowed silently by its springs.
+     *
+     * <p>Written on every frame, including the frames where the body has not moved. A bone is one
+     * object shared by every vehicle of the kind on the screen and by every pass over each of them,
+     * so a wheel left displaced because there was nothing to do this frame is a wheel displaced for
+     * the next vehicle drawn — which is the same reason the run of track puts its link back.
+     */
+    private static void plant(GeoModel<?> model, String bone, Ride ride, float scale, float travel) {
+        if (bone.isEmpty()) {
+            return;
+        }
+
+        model.getBone(bone).ifPresent(found -> {
+            float lift = 0.0F;
+
+            if (travel > 0.0F && !ride.isLevel()) {
+                Vector3f centre = BakedGeometry.centreOf(found);
+                float stop = travel / Math.max(scale, 0.01F);
+
+                lift = Mth.clamp(ride.liftOf(centre.x(), centre.z(), scale), -stop, stop);
+            }
+
+            slideAlongY(found, -lift * BakedGeometry.UNITS);
+        });
+    }
 }

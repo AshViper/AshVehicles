@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * What an adapter is handed when it is asked to draw a ghost, plus the one thing the game's own
@@ -21,16 +22,18 @@ public final class GhostRenderContext {
     private final PoseStack poseStack;
     private final MultiBufferSource buffers;
     private final Camera camera;
+    private final Vec3 fromCamera;
     private final float partialTick;
     private final int packedLight;
     private final boolean ghostStyle;
     private final double distanceSq;
 
-    GhostRenderContext(PoseStack poseStack, MultiBufferSource buffers, Camera camera, float partialTick,
-            int packedLight, boolean ghostStyle, double distanceSq) {
+    GhostRenderContext(PoseStack poseStack, MultiBufferSource buffers, Camera camera, Vec3 fromCamera,
+            float partialTick, int packedLight, boolean ghostStyle, double distanceSq) {
         this.poseStack = poseStack;
         this.buffers = buffers;
         this.camera = camera;
+        this.fromCamera = fromCamera;
         this.partialTick = partialTick;
         this.packedLight = packedLight;
         this.ghostStyle = ghostStyle;
@@ -48,6 +51,18 @@ public final class GhostRenderContext {
 
     public Camera camera() {
         return this.camera;
+    }
+
+    /**
+     * The ghost as seen from the eye: where it really is, less where the camera is.
+     *
+     * <p>Before the far-plane pull rather than after it, which is the useful one and also the same
+     * direction either way -- a pulled ghost slides along this very line, so only its length
+     * changes. What wants it is anything that has to be turned to face the viewer; see
+     * {@code Tracer.streak}.
+     */
+    public Vec3 fromCamera() {
+        return this.fromCamera;
     }
 
     public float partialTick() {

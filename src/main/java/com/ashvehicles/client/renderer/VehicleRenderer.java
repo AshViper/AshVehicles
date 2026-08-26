@@ -100,7 +100,20 @@ public abstract class VehicleRenderer<T extends VehicleEntityBase & GeoEntity> e
     protected void applyRotations(T animatable, PoseStack poseStack, float ageInTicks, float rotationYaw,
             float partialTick, float nativeScale) {
         poseStack.mulPose(animatable.getAttitude(partialTick));
+        this.applyBodyMotion(animatable, poseStack, partialTick);
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
+    }
+
+    /**
+     * Anything the machine's body does relative to the hull the attitude describes, applied in the
+     * hull's own frame — where +Z runs over the bow, +Y is up and +X is therefore out to the left.
+     *
+     * <p>Nothing, for a machine whose body is bolted to it. An airframe is one; a hull sitting on
+     * torsion bars is not, and a ground vehicle puts its suspension here. It is between the attitude
+     * and the model's half turn so that it is measured against the machine rather than against the
+     * world: a tank that dips its nose under the brakes does it relative to the hillside it is on.
+     */
+    protected void applyBodyMotion(T animatable, PoseStack poseStack, float partialTick) {
     }
 
     @Override

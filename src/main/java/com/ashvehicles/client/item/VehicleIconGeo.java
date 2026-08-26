@@ -9,6 +9,7 @@ import org.joml.Vector3f;
 import com.ashvehicles.client.model.TrackBelt;
 import com.ashvehicles.client.model.VehicleGeoModel;
 import com.ashvehicles.data.Definitions;
+import com.ashvehicles.vehicle.Ride;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -168,7 +169,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
         BakedGeoModel model = this.drawing;
 
         if (model != null && TrackBelt.isLink(animatable.chassis(), bone)
-                && TrackBelt.draw(model, animatable.chassis(), bone, 0.0F,
+                && TrackBelt.draw(model, animatable.chassis(), bone, 0.0F, Ride.LEVEL, 0.0F,
                         link -> super.renderRecursively(poseStack, animatable, link, renderType, bufferSource,
                                 buffer, isReRender, partialTick, packedLight, packedOverlay, colour))) {
             return;

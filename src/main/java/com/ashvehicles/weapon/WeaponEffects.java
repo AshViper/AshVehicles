@@ -37,22 +37,46 @@ public final class WeaponEffects {
     private static final int RICOCHET_SMOKE = 4;
     private static final float RICOCHET_SMOKE_SIZE = 0.5F;
 
+    /** How big a scatter of sparks a round going <em>in</em> makes, on {@link Effects#sparks}'s scale. */
+    private static final float STRIKE_SPARKS = 2.4F;
+    /** And how many are thrown back out of the hole rather than scattered about it. */
+    private static final int STRIKE_SPATTER = 10;
+    /**
+     * How fast those come back out, in blocks a tick. Slower than a ricochet, and that difference is
+     * deliberate: a round thrown off carries most of what it arrived with and goes somewhere, and
+     * this is the little that came back out of a round that did not.
+     */
+    private static final double STRIKE_THROW = 0.5;
+    /** And how wide a cone they come back in. Wide: nothing about this is aimed at anything. */
+    private static final double STRIKE_FAN = 0.4;
+    /** A shade upwards with it, so the spray arcs off the plate rather than lying flat against it. */
+    private static final double STRIKE_LIFT = 0.14;
+    /** The flash at the plate itself, on the same scale a blast is drawn at. */
+    private static final float STRIKE_FLASH = 0.6F;
+    private static final int STRIKE_SMOKE = 5;
+    private static final float STRIKE_SMOKE_SIZE = 0.45F;
+
     /**
      * Everything that happens where a round lands: the blast if it carries one, the sparks either
      * way, and a scatter of whatever it went into.
      *
      * @param at where it went off
+     * @param along the line it arrived on
      * @param round the round that did it, for its size and its colour
      * @param struck the block it hit, if it hit one
+     * @param onPlate whether what it went into was armour rather than the ground or a bystander,
+     *                which is the one case worth a flash of its own. See {@link #strike}
      */
-    public static void detonation(ServerLevel level, Vec3 at, WeaponDefinition.Projectile round,
-            @Nullable BlockState struck) {
+    public static void detonation(ServerLevel level, Vec3 at, Vec3 along,
+            WeaponDefinition.Projectile round, @Nullable BlockState struck, boolean onPlate) {
         float power = Mth.clamp(round.explosion(), 0.0F, Effects.BIGGEST);
 
         if (power > 0.0F) {
             Effects.fireball(level, at, power, round.tracer());
             Effects.boom(level, at, power);
             Effects.wave(level, at, power);
+        } else if (onPlate) {
+            strike(level, at, along, round);
         } else {
             Effects.sparks(level, at, round.tracer(), 1.0F);
         }
@@ -127,6 +151,50 @@ public final class WeaponEffects {
 
         Effects.send(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, RICOCHET_SMOKE_SIZE),
                 RICOCHET_SMOKE, 0.08, 0.04);
+    }
+
+    /**
+     * A round going into armour: a white flash at the plate and a spray of sparks back out of it.
+     *
+     * <p>The other half of {@link #ricochet}, and until now the half with almost nothing to show.
+     * A hit that went in got the same handful of sparks a round into a hillside gets, which at the
+     * ranges these are fought at is a hit the gunner cannot see they scored. What tells them is that
+     * something bright happened <em>on the tank</em>, and it wants to be as loud to the eye as the
+     * ricochet it has to be told apart from.
+     *
+     * <p>Which is why it is shaped the other way round. A ricochet throws its sparks off along the
+     * line the round left on — away, in one direction, in a stream. This throws them <em>back</em>,
+     * into a wide cone about the way the round came in, because nothing left: what comes back out of
+     * the hole is the little that the plate would not keep, and it comes out at the shot rather than
+     * past it. A gunner watching sparks come towards them has hit something; a gunner watching them
+     * go somewhere else has not.
+     *
+     * @param at where it struck the plate
+     * @param along the line the round arrived on
+     * @param round the round that did it, for its colour
+     */
+    public static void strike(ServerLevel level, Vec3 at, Vec3 along, WeaponDefinition.Projectile round) {
+        Vec3 back = along.lengthSqr() < 1.0E-8 ? Vec3.ZERO : along.normalize().reverse();
+        RandomSource random = level.getRandom();
+
+        // The flash: the round's own colour, since what is glowing at the plate is the round.
+        Effects.send(level, at, ModParticles.BLAST.get().of(round.tracer(), STRIKE_FLASH),
+                2, 0.05, 0.02);
+        Effects.sparks(level, at, Effects.EMBER, STRIKE_SPARKS);
+
+        for (int i = 0; i < STRIKE_SPATTER; i++) {
+            // Each thrown a little off the others, or ten particles given the same velocity from the
+            // same point are one particle drawn ten times over.
+            Vec3 thrown = back.scale(STRIKE_THROW).add(
+                    random.nextGaussian() * STRIKE_FAN,
+                    random.nextGaussian() * STRIKE_FAN + STRIKE_LIFT,
+                    random.nextGaussian() * STRIKE_FAN);
+
+            Effects.aimed(level, at, ModParticles.SPARK.get().of(Effects.EMBER, 1.0F), thrown);
+        }
+
+        Effects.send(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, STRIKE_SMOKE_SIZE),
+                STRIKE_SMOKE, 0.08, 0.05);
     }
 
     /** Chips of whatever was hit, in the colour of the block they came off. */

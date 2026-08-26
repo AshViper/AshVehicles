@@ -34,7 +34,7 @@ import net.minecraft.world.phys.Vec3;
 public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Model model, Powertrain powertrain,
         Suspension suspension, Turret turret, Armament armament, Coaxial coaxial, Launcher launcher, Hull hull,
         VehicleChassis.CameraMount camera, VehicleChassis.Sound sound, VehicleChassis.Radar radar,
-        VehicleType type, Buoyancy buoyancy) {
+        VehicleType type, Buoyancy buoyancy, Crush crush) {
 
     public static final Codec<GroundVehicleDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             VehicleChassis.Hitbox.CODEC.optionalFieldOf("hitbox", VehicleChassis.Hitbox.DEFAULT).forGetter(GroundVehicleDefinition::hitbox),
@@ -57,7 +57,8 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
             // default trim, a "buoyancy" block to go with it.
             VehicleType.CODEC.optionalFieldOf("type", VehicleType.GROUND_VEHICLE)
                     .forGetter(GroundVehicleDefinition::type),
-            Buoyancy.CODEC.optionalFieldOf("buoyancy", Buoyancy.DEFAULT).forGetter(GroundVehicleDefinition::buoyancy)
+            Buoyancy.CODEC.optionalFieldOf("buoyancy", Buoyancy.DEFAULT).forGetter(GroundVehicleDefinition::buoyancy),
+            Crush.CODEC.optionalFieldOf("crush", Crush.DEFAULT).forGetter(GroundVehicleDefinition::crush)
     ).apply(instance, GroundVehicleDefinition::new));
 
     /** Whether this vehicle is a ship, floated on the water rather than resting on the ground. */
@@ -85,7 +86,8 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
             VehicleChassis.Sound.DEFAULT,
             VehicleChassis.Radar.NONE,
             VehicleType.GROUND_VEHICLE,
-            Buoyancy.DEFAULT);
+            Buoyancy.DEFAULT,
+            Crush.DEFAULT);
 
 
 
@@ -175,11 +177,34 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      *                      which way the hull is lying
      * @param contactWidth the distance between the two tracks, in blocks, across which the roll is
      *                     read for the same reason
+     * @param travel how far a road wheel moves up and down from where the model was built, in
+     *               blocks, and so how far the body above it can move on its springs. This is the
+     *               one figure that decides whether a vehicle has a suspension at all: nothing bolts
+     *               the body to the running gear and the hull slides over the landscape as it always
+     *               did. Drawing only — see {@link Ride}, which is where the whole of it lives — so
+     *               a generous figure costs nothing but a livelier-looking vehicle. Torsion bars are
+     *               deep: a third of a block is a tank, less is a hull sitting on its stops
+     * @param stiffness how hard the springs pull the body back to where it sits at rest, per tick.
+     *                  What this sets is how quickly the body answers: a fifth is a heavy hull that
+     *                  takes most of a second to come back, and half is a light one that snaps
+     * @param damping the fraction of the body's own speed the dampers take out each tick, in [0, 1].
+     *                Low and the vehicle wallows for several seconds after every bump; high and it
+     *                is over before it is seen. A third is a hull that rocks once and settles
+     * @param dive how far the nose lifts, in degrees, at the hardest this vehicle can pull away —
+     *             and drops by, at the hardest it can stop. Read against the vehicle's own
+     *             acceleration and braking, so the figure means the same thing on a scout car and on
+     *             sixty tonnes
+     * @param lean how far the body leans away from a corner, in degrees, at the hardest corner this
+     *             vehicle can turn at its own top speed. Away from it: a body thrown outwards leans
+     *             onto its outer springs, and a hull that leaned into its turns would read as an
+     *             aeroplane
      */
     public record Suspension(float climbHeight, float slopeLimit, float settleRate, float grip,
-            float wheelRadius, float contactLength, float contactWidth) {
+            float wheelRadius, float contactLength, float contactWidth, float travel, float stiffness,
+            float damping, float dive, float lean) {
         public static final Suspension DEFAULT =
-                new Suspension(1.0F, 45.0F, 0.2F, 0.85F, 0.4F, 4.0F, 2.5F);
+                new Suspension(1.0F, 45.0F, 0.2F, 0.85F, 0.4F, 4.0F, 2.5F,
+                        0.22F, 0.22F, 0.32F, 2.2F, 3.0F);
 
         public static final Codec<Suspension> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("climb_height", DEFAULT.climbHeight()).forGetter(Suspension::climbHeight),
@@ -190,7 +215,12 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
                 Codec.FLOAT.optionalFieldOf("contact_length", DEFAULT.contactLength())
                         .forGetter(Suspension::contactLength),
                 Codec.FLOAT.optionalFieldOf("contact_width", DEFAULT.contactWidth())
-                        .forGetter(Suspension::contactWidth)
+                        .forGetter(Suspension::contactWidth),
+                Codec.FLOAT.optionalFieldOf("travel", DEFAULT.travel()).forGetter(Suspension::travel),
+                Codec.FLOAT.optionalFieldOf("stiffness", DEFAULT.stiffness()).forGetter(Suspension::stiffness),
+                Codec.FLOAT.optionalFieldOf("damping", DEFAULT.damping()).forGetter(Suspension::damping),
+                Codec.FLOAT.optionalFieldOf("dive", DEFAULT.dive()).forGetter(Suspension::dive),
+                Codec.FLOAT.optionalFieldOf("lean", DEFAULT.lean()).forGetter(Suspension::lean)
         ).apply(instance, Suspension::new));
     }
 
@@ -429,5 +459,41 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
         ).apply(instance, Buoyancy::new));
     }
 
+    /**
+     * What the vehicle drives through rather than stops against.
+     *
+     * <p>Sixty tonnes does not wait for a hedge, and it does not wait for the wall of a shed either.
+     * What it does wait for is masonry, and the game already knows which is which: a block's
+     * explosion resistance is the one number in Minecraft that says how stoutly the thing is built,
+     * and it separates the two exactly where a driver would. Leaves are a fifth of a point, glass a
+     * third, soil and sand a half, wool most of one, timber two or three; stone, brick and iron are
+     * six, and everything meant to stand up to anything is in the thousands. So the vehicle is given
+     * a figure and drives through everything at or under it.
+     *
+     * <p>It is not a hole through the world. Only what stands in the <em>hull</em> is broken — the
+     * body of the vehicle, from a step above whatever it is lying on up to the top of the turret —
+     * so ground under the tracks is still ground and a hillside is still climbed rather than
+     * tunnelled through. What is left is the thing this is for: a bank of earth taller than the
+     * vehicle can climb loses the top of itself and the vehicle drives over the rest.
+     *
+     * <p>Growing things are a separate question and are not asked this one. See
+     * {@link com.ashvehicles.entity.BlockCrusher#CRUSHABLE}: anything in that tag goes down under
+     * any vehicle, however little this figure is, because a tank stopped by a sapling is not a tank.
+     *
+     * @param resistance the greatest explosion resistance the vehicle breaks through. Three is the
+     *                   default and is roughly "timber and terrain yes, masonry no", which is what
+     *                   these machines look like they ought to do. Nought leaves it with nothing but
+     *                   the undergrowth; a figure over six lets it through stonework as well
+     * @param drops whether what is broken leaves anything to pick up. Off by default, and
+     *              deliberately: a tank crossing a forest is several hundred blocks, and every one
+     *              of them as an item on the ground is a lag spike with saplings in it
+     */
+    public record Crush(float resistance, boolean drops) {
+        public static final Crush DEFAULT = new Crush(3.0F, false);
 
+        public static final Codec<Crush> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("resistance", DEFAULT.resistance()).forGetter(Crush::resistance),
+                Codec.BOOL.optionalFieldOf("drops", DEFAULT.drops()).forGetter(Crush::drops)
+        ).apply(instance, Crush::new));
+    }
 }

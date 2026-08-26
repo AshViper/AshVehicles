@@ -268,7 +268,12 @@
     "grip": 0.9,
     "wheel_radius": 0.39,
     "contact_length": 6.04,
-    "contact_width": 3.53
+    "contact_width": 3.53,
+    "travel": 0.28,
+    "stiffness": 0.21,
+    "damping": 0.31,
+    "dive": 2.6,
+    "lean": 2.6
   },
   "turret": {
     "traverse_rate": 1.5,

@@ -5,6 +5,7 @@ import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.culling.Frustum;
@@ -59,14 +60,21 @@ public class BulletRenderer extends EntityRenderer<BulletEntity> {
         // The step being drawn rather than the next one, so the streak lies along the line the round
         // is actually travelling down this frame.
         Vec3 travel = bullet.travel(partialTick);
+        Camera camera = this.entityRenderDispatcher.camera;
 
-        if (travel.lengthSqr() < 1.0E-6) {
+        if (travel.lengthSqr() < 1.0E-6 || camera == null) {
             return;
         }
 
+        // Where the round is being seen from, which is what the streak is turned to face. The
+        // interpolated position rather than the tick one: it is the point the pose stack has already
+        // been put at, and a direction taken from anywhere else would turn the quad to face
+        // somewhere the round is not.
+        Vec3 fromCamera = bullet.getPosition(partialTick).subtract(camera.getPosition());
+
         // Drawn by the same code the ghost pass draws it with, measured against the same camera
         // distance, so that nothing about a round changes as it crosses the hand-over. See Tracer.
-        Tracer.streak(bufferSource.getBuffer(RenderType.lightning()), poseStack.last().pose(), travel,
+        Tracer.streak(poseStack, bufferSource.getBuffer(RenderType.lightning()), camera, fromCamera, travel,
                 this.entityRenderDispatcher.distanceToSqr(bullet), 0xFF000000 | round.tracer());
     }
 

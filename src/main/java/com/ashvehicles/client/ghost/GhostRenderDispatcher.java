@@ -352,7 +352,7 @@ public final class GhostRenderDispatcher {
 
             EntityGhost drawing = this.ghost;
             Vec3 to = this.position.subtract(eye);
-            GhostRenderContext context = new GhostRenderContext(poseStack, buffers, camera, partialTick,
+            GhostRenderContext context = new GhostRenderContext(poseStack, buffers, camera, to, partialTick,
                     this.light, this.ghostStyle, this.distanceSq);
 
             poseStack.pushPose();

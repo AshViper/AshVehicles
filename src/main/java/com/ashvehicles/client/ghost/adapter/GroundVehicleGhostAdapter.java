@@ -16,6 +16,7 @@ import com.ashvehicles.client.renderer.VehicleRenderer;
 import com.ashvehicles.client.model.VehicleGeoModel;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
+import com.ashvehicles.vehicle.Ride;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
@@ -65,8 +66,8 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
         // VehicleEntityBase.getBoundingBoxForCulling. Culled against a hull-sized box, a
         // seven-metre tank blinks out at the edge of the screen the moment the ghost pass has it.
         AABB bounds = vehicle.getBoundingBoxForCulling().move(position.reverse());
-        Payload payload = new Payload(id, setup, GroundVehicleModel.Pose.of(vehicle, 1.0F),
-                stats.armament().recoil());
+        Payload payload = new Payload(id, GroundVehicleModel.Setup.of(stats),
+                GroundVehicleModel.Pose.of(vehicle, 1.0F));
 
         return new GhostSnapshot(
                 vehicle.getUUID(),
@@ -124,10 +125,37 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
         // Into the hull's own frame. The half turn is the model's: geometry faces north, and a
         // machine is described from the front down +Z.
         poseStack.mulPose(attitude(ghost, context.partialTick()));
+
+        // And the body on its springs, the same way and in the same order the vehicle's own
+        // renderer applies it — but only when the running gear is being posed, since the wheels and
+        // the track are what put themselves back on the ground underneath it.
+        if (GhostConfig.animation()) {
+            Ride ride = ride(ghost, context.partialTick());
+
+            poseStack.translate(0.0F, ride.heave(), 0.0F);
+            poseStack.mulPose(Axis.XP.rotationDegrees(-ride.pitch()));
+            poseStack.mulPose(Axis.ZP.rotationDegrees(ride.lean()));
+        }
+
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
 
         EntityGhostRenderer.drawModel(ghost, snapshot, context, GhostConfig.animation() ? POSER : null);
         poseStack.popPose();
+    }
+
+    /** How far the body has moved on its springs: between the last two snapshots, as everything is. */
+    private static Ride ride(EntityGhost ghost, float partialTick) {
+        Payload now = payload(ghost.current());
+
+        if (now == null) {
+            return Ride.LEVEL;
+        }
+
+        Payload then = payload(ghost.previous());
+
+        return then == null
+                ? now.pose().ride()
+                : Ride.between(then.pose().ride(), now.pose().ride(), partialTick);
     }
 
     /** The attitude to draw at: the short way round between the last two snapshots. */
@@ -166,7 +194,7 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
                 ? now.pose()
                 : GroundVehicleModel.Pose.between(then.pose(), now.pose(), partialTick);
 
-        GroundVehicleModel.applyPose(model, now.setup(), pose, now.recoilTravel());
+        GroundVehicleModel.applyPose(model, now.setup(), pose);
     };
 
     // ------------------------------------------------------------------
@@ -181,10 +209,9 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
     /**
      * Everything ground-vehicle-specific a snapshot carries.
      *
-     * @param recoilTravel how far the barrel runs back when the gun fires, in blocks, which the
-     *        pose needs and the ghost has no vehicle left to ask for
+     * @param setup the figures out of the vehicle's file that the pose is applied against, which
+     *        the ghost has no vehicle left to ask for
      */
-    record Payload(ResourceLocation vehicleId, VehicleChassis.Model setup, GroundVehicleModel.Pose pose,
-            float recoilTravel) {
+    record Payload(ResourceLocation vehicleId, GroundVehicleModel.Setup setup, GroundVehicleModel.Pose pose) {
     }
 }

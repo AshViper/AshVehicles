@@ -5,8 +5,10 @@ import javax.annotation.Nullable;
 import com.ashvehicles.client.model.GroundVehicleModel;
 import com.ashvehicles.client.model.TrackBelt;
 import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.vehicle.Ride;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.math.Axis;
 
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -30,6 +32,34 @@ public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> 
     @Override
     protected float scaleOf(GroundVehicleEntity animatable) {
         return animatable.getStats().model().scale();
+    }
+
+    /**
+     * Rocks the body on its springs.
+     *
+     * <p>Applied to the whole model rather than to a hull bone, because on these models there is no
+     * hull bone to apply it to: hull, turret, stowage and running gear all hang off one root, so
+     * there is nothing to move that is not everything. What that costs is that the wheels and the
+     * track are carried with it, and they are put back down on the ground one by one afterwards —
+     * see {@code GroundVehicleModel.plant} and {@link TrackBelt#draw}.
+     *
+     * <p>Nothing but the picture moves. The collision boxes, the gun's aim and where the vehicle is
+     * standing are all worked out from the rigid hull and never see this; see {@link Ride}.
+     */
+    @Override
+    protected void applyBodyMotion(GroundVehicleEntity animatable, PoseStack poseStack, float partialTick) {
+        Ride ride = animatable.getRide(partialTick);
+
+        if (ride.isLevel()) {
+            return;
+        }
+
+        // A turn about X takes the bow down, so lifting it wants the negative; a turn about Z drops
+        // the right-hand side, which is the sign the hull's own bank is written in, so the body and
+        // the ground read the same way round. See Attitude, whose frame this is.
+        poseStack.translate(0.0F, ride.heave(), 0.0F);
+        poseStack.mulPose(Axis.XP.rotationDegrees(-ride.pitch()));
+        poseStack.mulPose(Axis.ZP.rotationDegrees(ride.lean()));
     }
 
     @Override
@@ -61,7 +91,8 @@ public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> 
 
         if (model != null && TrackBelt.isLink(animatable.getStats().model(), bone)
                 && TrackBelt.draw(model, animatable.getStats().model(), bone,
-                        animatable.getWheelAngle(partialTick),
+                        animatable.getWheelAngle(partialTick), animatable.getRide(partialTick),
+                        animatable.getStats().suspension().travel(),
                         link -> super.renderRecursively(poseStack, animatable, link, renderType, bufferSource,
                                 buffer, isReRender, partialTick, packedLight, packedOverlay, colour))) {
             return;

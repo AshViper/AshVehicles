@@ -9,8 +9,15 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 @EventBusSubscriber(modid = AshVehicles.MODID)
 public final class ModNetwork {
-    /** Bump this whenever a payload's wire format changes. */
-    private static final String PROTOCOL_VERSION = "11";
+    /**
+     * Bump this whenever a payload's wire format changes.
+     *
+     * <p>Including the spawn data an entity of the mod's own writes for itself: that rides on
+     * NeoForge's own payload rather than one of the ones registered below, but a client reading it
+     * to a different recipe than the server wrote it is the same broken connection. See
+     * {@link com.ashvehicles.entity.VehicleProjectile#writeSpawnData}.
+     */
+    private static final String PROTOCOL_VERSION = "12";
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {

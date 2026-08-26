@@ -10,14 +10,13 @@ import java.util.WeakHashMap;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
+import com.ashvehicles.vehicle.Ride;
 import com.ashvehicles.vehicle.VehicleChassis;
 
+import net.minecraft.util.Mth;
 import software.bernie.geckolib.animation.state.BoneSnapshot;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.cache.object.GeoBone;
-import software.bernie.geckolib.cache.object.GeoCube;
-import software.bernie.geckolib.cache.object.GeoQuad;
-import software.bernie.geckolib.cache.object.GeoVertex;
 
 /**
  * Builds a tracked vehicle's run of track out of one link, and lays it round the wheels the vehicle
@@ -69,9 +68,6 @@ public final class TrackBelt {
      * road wheel and nothing at all against the thickness of a link.
      */
     private static final int ARC_STEPS = 24;
-
-    /** Model units to the block, which is what everything in a geometry file is written in. */
-    private static final float UNITS = 16.0F;
 
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
 
@@ -173,15 +169,26 @@ public final class TrackBelt {
      * vehicle of the kind on the screen and by every pass over each of them, and a bone left out on
      * the run would be the next pass's starting point.
      *
+     * <p>The run stays on the ground while the body moves above it. The whole model is rocked on the
+     * pose stack by whatever the suspension is doing — see {@link Ride} — and the band is a child of
+     * the model like everything else, so left alone it would be carried up and down with the hull
+     * and the tracks would lift clear of the ground every time the vehicle crossed a bump. Each
+     * point of the run is therefore put back down by exactly what the body's movement lifted it, the
+     * same as each road wheel is; the band then flexes along its length, which is what a real run of
+     * track does over wheels moving on their torsion bars.
+     *
      * @param wheelAngle how far the road wheels have gone round, in degrees. The run is scrolled by
      *                   the distance those wheels have rolled through, so that a link is never seen
      *                   to slip on a wheel. It starts again every revolution, which the run survives
      *                   only because of the rounding in {@link #rollRadius}
+     * @param ride how far the body has moved on its springs
+     * @param wheelTravel how far a road wheel is allowed to move, in blocks, which is as far as the
+     *                    run is put back down by before it is against the stops with them
      * @return whether there was a run to draw. False leaves the caller to draw the bone as it was
      *         built, which is the honest answer for a model with no wheels to lay a band round
      */
     public static boolean draw(BakedGeoModel model, VehicleChassis.Model setup, GeoBone link,
-            float wheelAngle, LinkDrawer drawer) {
+            float wheelAngle, Ride ride, float wheelTravel, LinkDrawer drawer) {
         Shape shape = shapeOf(model, setup, link);
 
         if (shape.belts().isEmpty()) {
@@ -193,6 +200,7 @@ public final class TrackBelt {
         Vector3f pivot = new Vector3f();
         Vector3f fromPivot = new Vector3f();
         Matrix4f turn = new Matrix4f();
+        boolean sprung = !ride.isLevel() && wheelTravel > 0.0F;
 
         for (Belt belt : shape.belts()) {
             float travel = TRAVEL_SIGN * shape.travelSign() * wheelAngle * DEG_TO_RAD * belt.rollRadius();
@@ -202,6 +210,12 @@ public final class TrackBelt {
 
                 belt.pointAt(along, here);
                 belt.pointAt(along + belt.pitch(), next);
+
+                if (sprung) {
+                    here.y -= plant(shape, belt, here.x(), ride, setup.scale(), wheelTravel);
+                    next.y -= plant(shape, belt, next.x(), ride, setup.scale(), wheelTravel);
+                }
+
                 place(link, shape.linkCentre(), belt.x(), here, next, pivot, fromPivot, turn);
                 drawer.draw(link);
             }
@@ -213,6 +227,24 @@ public final class TrackBelt {
     }
 
     /**
+     * How far the body's movement has lifted one point of the run, in the model's blocks, so that
+     * the caller can put it back down by the same amount.
+     *
+     * <p>The band is laid out in the link bone's parent's axes rather than the model's, and half
+     * these models hang everything off a root bone turned half round — which is exactly what
+     * {@link Shape#travelSign} already measures for the run's direction of travel. The same figure
+     * carries a point of the band back into the axes {@link Ride#liftOf} works in.
+     *
+     * @param z where along the run the point is, in the band's own axes
+     */
+    private static float plant(Shape shape, Belt belt, float z, Ride ride, float scale, float wheelTravel) {
+        float lift = ride.liftOf(shape.travelSign() * belt.x(), shape.travelSign() * z, scale);
+        float stop = wheelTravel / Math.max(scale, 0.01F);
+
+        return Mth.clamp(lift, -stop, stop);
+    }
+
+    /**
      * Puts the link between two points on the band: turned to lie along the run between them, and
      * moved so that the middle of its own geometry is the middle of that stretch.
      *
@@ -221,7 +253,7 @@ public final class TrackBelt {
      */
     private static void place(GeoBone link, Vector3f centre, float x, Vector3f here, Vector3f next,
             Vector3f pivot, Vector3f fromPivot, Matrix4f turn) {
-        BoneSnapshot rest = rest(link);
+        BoneSnapshot rest = BakedGeometry.rest(link);
         float dz = next.x() - here.x();
         float dy = next.y() - here.y();
 
@@ -231,7 +263,7 @@ public final class TrackBelt {
 
         link.updateRotation(rotX, rest.getRotY(), rest.getRotZ());
 
-        pivot.set(link.getPivotX(), link.getPivotY(), link.getPivotZ()).div(UNITS);
+        pivot.set(link.getPivotX(), link.getPivotY(), link.getPivotZ()).div(BakedGeometry.UNITS);
         fromPivot.set(centre).sub(pivot);
         turn.identity().rotateZ(rest.getRotZ()).rotateY(rest.getRotY()).rotateX(rotX)
                 .transformPosition(fromPivot);
@@ -244,14 +276,14 @@ public final class TrackBelt {
         float wantY = (here.y() + next.y()) * 0.5F;
 
         link.updatePosition(
-                -(x - pivot.x() - fromPivot.x()) * UNITS,
-                (wantY - pivot.y() - fromPivot.y()) * UNITS,
-                (wantZ - pivot.z() - fromPivot.z()) * UNITS);
+                -(x - pivot.x() - fromPivot.x()) * BakedGeometry.UNITS,
+                (wantY - pivot.y() - fromPivot.y()) * BakedGeometry.UNITS,
+                (wantZ - pivot.z() - fromPivot.z()) * BakedGeometry.UNITS);
     }
 
     /** Puts the link bone back exactly where the geometry file left it. */
     private static void restore(GeoBone link) {
-        BoneSnapshot rest = rest(link);
+        BoneSnapshot rest = BakedGeometry.rest(link);
 
         link.updateRotation(rest.getRotX(), rest.getRotY(), rest.getRotZ());
         link.updatePosition(rest.getOffsetX(), rest.getOffsetY(), rest.getOffsetZ());
@@ -281,7 +313,7 @@ public final class TrackBelt {
      */
     private static Shape build(BakedGeoModel model, VehicleChassis.Model setup,
             VehicleChassis.Track track, GeoBone link) {
-        Bounds linkBox = bounds(link, new Matrix4f());
+        BakedGeometry.Bounds linkBox = BakedGeometry.bounds(link, new Matrix4f());
 
         if (linkBox == null) {
             return Shape.NONE;
@@ -290,7 +322,7 @@ public final class TrackBelt {
         // The link's own size, seen the way round the geometry file leaves it: how long it is along
         // the run, which is the pitch, and how thick it is, which is how far off the wheel the band
         // has to stand for the inside face of a link to touch the rim.
-        Bounds asBuilt = bounds(link, restTransform(link));
+        BakedGeometry.Bounds asBuilt = BakedGeometry.bounds(link, BakedGeometry.restTransform(link));
         float pitch = (track.pitch() > 0.0F ? track.pitch() : asBuilt.sizeZ()) * track.spacing();
         float outset = track.outset().orElse(asBuilt.sizeY() * 0.5F);
 
@@ -301,7 +333,7 @@ public final class TrackBelt {
         // The axes the whole band is described in: the link bone's parent's, so that a link can be
         // put on the band without further conversion. Which way round they are against the vehicle
         // is what a run travelling backwards hangs on, so it is read off here with them.
-        Matrix4f intoLink = toRoot(link.getParent()).invert();
+        Matrix4f intoLink = BakedGeometry.toRoot(link.getParent()).invert();
         float travelSign = handedness(intoLink);
         List<Wheel> wheels = wheels(model, track.wheelsOr(setup.roadWheels()), intoLink);
 
@@ -347,7 +379,8 @@ public final class TrackBelt {
                 continue;
             }
 
-            Bounds box = bounds(bone, new Matrix4f(intoLink).mul(toRoot(bone)));
+            BakedGeometry.Bounds box =
+                    BakedGeometry.bounds(bone, new Matrix4f(intoLink).mul(BakedGeometry.toRoot(bone)));
 
             if (box == null) {
                 continue;
@@ -563,114 +596,4 @@ public final class TrackBelt {
         return (px[a] - px[origin]) * (py[b] - py[origin]) - (py[a] - py[origin]) * (px[b] - px[origin]);
     }
 
-    // ------------------------------------------------------------------
-    // Reading the baked model
-    // ------------------------------------------------------------------
-
-    /** How far a bone's geometry reaches, in blocks, once {@code into} has been applied to it. */
-    private record Bounds(Vector3f min, Vector3f max) {
-        Vector3f centre() {
-            return new Vector3f(this.min).add(this.max).mul(0.5F);
-        }
-
-        float sizeY() {
-            return this.max.y() - this.min.y();
-        }
-
-        float sizeZ() {
-            return this.max.z() - this.min.z();
-        }
-    }
-
-    /**
-     * The box a bone's own cubes fill, put through {@code into}.
-     *
-     * <p>Taken from the corners the cubes are actually drawn with rather than from the sizes written
-     * in the file, because a cube is turned about its own pivot before it is drawn and a wheel is
-     * usually built lying down and stood up. The box of the turned corners is the box that is on the
-     * screen.
-     *
-     * @return null for a bone with no geometry of its own, which cannot be a wheel or a link
-     */
-    private static Bounds bounds(GeoBone bone, Matrix4f into) {
-        Vector3f min = new Vector3f(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
-        Vector3f max = new Vector3f(-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE);
-        boolean any = false;
-
-        for (GeoCube cube : bone.getCubes()) {
-            Matrix4f matrix = new Matrix4f(into)
-                    .translate((float) cube.pivot().x() / UNITS, (float) cube.pivot().y() / UNITS,
-                            (float) cube.pivot().z() / UNITS)
-                    .mul(rotation((float) cube.rotation().x(), (float) cube.rotation().y(),
-                            (float) cube.rotation().z()))
-                    .translate((float) -cube.pivot().x() / UNITS, (float) -cube.pivot().y() / UNITS,
-                            (float) -cube.pivot().z() / UNITS);
-
-            for (GeoQuad quad : cube.quads()) {
-                if (quad == null) {
-                    continue;
-                }
-
-                for (GeoVertex vertex : quad.vertices()) {
-                    Vector3f corner = matrix.transformPosition(new Vector3f(vertex.position()));
-
-                    min.min(corner);
-                    max.max(corner);
-                    any = true;
-                }
-            }
-        }
-
-        return any ? new Bounds(min, max) : null;
-    }
-
-    /**
-     * The matrix taking a bone's own axes into the model's, from the pose the geometry file settles
-     * on rather than the one an animation has the bone in this frame.
-     */
-    private static Matrix4f toRoot(GeoBone bone) {
-        if (bone == null) {
-            return new Matrix4f();
-        }
-
-        return toRoot(bone.getParent()).mul(restTransform(bone));
-    }
-
-    /**
-     * One bone's own step of that, laid out exactly as GeckoLib lays it out when it draws the bone —
-     * offset, out to the pivot, turn, scale, back off the pivot. See {@code RenderUtil}.
-     */
-    private static Matrix4f restTransform(GeoBone bone) {
-        BoneSnapshot rest = rest(bone);
-        float pivotX = bone.getPivotX() / UNITS;
-        float pivotY = bone.getPivotY() / UNITS;
-        float pivotZ = bone.getPivotZ() / UNITS;
-
-        return new Matrix4f()
-                .translate(-rest.getOffsetX() / UNITS, rest.getOffsetY() / UNITS, rest.getOffsetZ() / UNITS)
-                .translate(pivotX, pivotY, pivotZ)
-                .mul(rotation(rest.getRotX(), rest.getRotY(), rest.getRotZ()))
-                .scale(rest.getScaleX(), rest.getScaleY(), rest.getScaleZ())
-                .translate(-pivotX, -pivotY, -pivotZ);
-    }
-
-    /** Z, then Y, then X, which is the order GeckoLib turns both a bone and a cube in. */
-    private static Matrix4f rotation(float x, float y, float z) {
-        return new Matrix4f().rotateZ(z).rotateY(y).rotateX(x);
-    }
-
-    /**
-     * Where the geometry file left a bone. A bone GeckoLib has not taken its snapshot of yet is
-     * asked where it is instead, which for a bone nothing has moved is the same answer.
-     */
-    private static BoneSnapshot rest(GeoBone bone) {
-        BoneSnapshot rest = bone.getInitialSnapshot();
-
-        if (rest == null) {
-            bone.saveInitialSnapshot();
-            rest = bone.getInitialSnapshot();
-        }
-
-        return rest;
-    }
 }

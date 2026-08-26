@@ -132,6 +132,59 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     private static final double LOST = 96.0;
 
     /**
+     * How far a round may be carried to put it back on the muzzle it left, in blocks.
+     *
+     * <p>The figure is a sanity limit rather than a tuning knob: see {@link #anchorToMuzzle}, where
+     * the distance is the machine's own travel over one round trip and is a few tens of blocks for
+     * an aeroplane and a few for a tank. Anything past this is not lag — it is a machine that has
+     * been teleported, or a round paired to a client a long while after it was fired — and a round
+     * is better left where the server put it than thrown a quarter of a mile to meet it.
+     */
+    private static final double ANCHOR_LIMIT = 256.0;
+
+    /**
+     * How old a round may be, in ticks, and still be put back on its muzzle.
+     *
+     * <p>Everyone who can already see the machine is paired to what it fires on the tracker's next
+     * pass, which is the top of the tick after it left — see {@code ServerLevel.tick}, where the
+     * chunk source runs before the entities do. So the clients this is for meet the round at an age
+     * of nought or one. A client that a round flies <em>into</em> range of is paired to it whenever
+     * that happens, and for that one the machine's position at the muzzle is ancient history that
+     * has nothing to do with where the round is now. Two ticks is the case that matters and a tick
+     * of slack, and is nowhere near the tens of ticks the other case arrives with.
+     */
+    private static final int ANCHOR_AGE = 2;
+
+    /**
+     * How much of the muzzle offset is worked off each tick, as a fraction of what is left.
+     *
+     * <p>Worked off at all because the offset is only wanted at one end of the flight. Leaving the
+     * gun it is the whole point — see {@link #anchorToMuzzle} — but carried the whole way it puts
+     * the round ahead of the one the server is flying, and it is the server's that decides where the
+     * blast goes: a bomb held forward the whole way down would vanish a good distance short of its
+     * own explosion. Eased off over the second or so after it leaves, the round starts where the
+     * crew fired it and ends where it really lands, and neither end is wrong.
+     */
+    private static final double ANCHOR_RATE = 0.15;
+
+    /**
+     * And the most of the round's own step that may go into working it off, as a fraction of it.
+     *
+     * <p>Without a cap the first tick of a fast round pays off most of the offset at once, which
+     * takes that much off the distance it covers: a tracer that stalls for a tick on its way out of
+     * the barrel is a worse thing to look at than the offset it is paying for. A fifth of the step
+     * is a round flying a fifth slow for as long as it takes, which is not something anybody can
+     * see on a tracer.
+     */
+    private static final double ANCHOR_MOST = 0.2;
+
+    /**
+     * The least it is worked off by in a tick, in blocks. A share of what is left is a share that
+     * never arrives; this is what finishes the last of it and lets the offset be put down for good.
+     */
+    private static final double ANCHOR_LEAST = 0.05;
+
+    /**
      * How much a target's box is grown by before a round is measured against it, in blocks.
      *
      * <p>Not a figure of our own. It is what {@code ProjectileUtil.getEntityHitResult} inflates every
@@ -169,6 +222,14 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     @Nullable
     private Entity firedFrom;
     private int firedFromId = -1;
+    /**
+     * Where the machine that fired this was standing at the moment it did.
+     *
+     * <p>Sent with the spawn and used for one thing only: putting the round back on the muzzle it
+     * came out of, on whichever side is drawing that muzzle somewhere else. See
+     * {@link #anchorToMuzzle}.
+     */
+    private Vec3 firedFromAt = Vec3.ZERO;
     /** Ticks since it left, which is what its lifetime is measured against. */
     protected int age;
     /**
@@ -191,6 +252,17 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     /** What is left of the last correction to work off, in blocks. Client only; see {@link #settle}. */
     private Vec3 owed = Vec3.ZERO;
 
+    /**
+     * How far forward of the server's own copy this one is being flown, in blocks. Client only.
+     *
+     * <p>Laid on once, at the muzzle, and worked back off over the second or so afterwards: it is
+     * the offset between the machine as <em>this</em> side is drawing it and the machine as the
+     * server had it when the trigger went. See {@link #anchorToMuzzle} for why a round wants
+     * carrying by it, {@link #mergeAnchor} for why it does not want carrying by it for long, and
+     * {@link #lerpTo}, which has to take it off before it can measure anything the server says.
+     */
+    private Vec3 anchor = Vec3.ZERO;
+
     protected VehicleProjectile(EntityType<? extends VehicleProjectile> type, Level level) {
         super(type, level);
     }
@@ -204,6 +276,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         this.entityData.set(DATA_WEAPON, weapon.toString());
         this.firedFrom = vehicle;
         this.firedFromId = vehicle.getId();
+        this.firedFromAt = vehicle.position();
         this.setOwner(crew);
     }
 
@@ -328,11 +401,76 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     @Override
     public void writeSpawnData(RegistryFriendlyByteBuf buffer) {
         buffer.writeVarInt(this.age);
+        // And what fired it, and where that was standing at the time. Neither reaches a client any
+        // other way -- the owner is the crew rather than the machine, and nothing sends a machine's
+        // position as of some earlier tick -- and between them they are the whole of what puts the
+        // round back on its muzzle. See anchorToMuzzle.
+        buffer.writeInt(this.firedFromId);
+        buffer.writeDouble(this.firedFromAt.x);
+        buffer.writeDouble(this.firedFromAt.y);
+        buffer.writeDouble(this.firedFromAt.z);
     }
 
     @Override
     public void readSpawnData(RegistryFriendlyByteBuf buffer) {
         this.age = buffer.readVarInt();
+        this.firedFromId = buffer.readInt();
+        this.firedFromAt = new Vec3(buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
+        // Read on the client with the entity already in the world and standing where the server put
+        // it, which is the one moment at which this can be done at all.
+        this.anchorToMuzzle();
+    }
+
+    /**
+     * Puts the round back on the muzzle it left, as this side is drawing that muzzle.
+     *
+     * <p>Nothing is fired on a client. A round is spawned on the server, from the machine's position
+     * <em>there</em>, and the client is told about it a round trip later — so by the time one appears
+     * it is standing where the machine was when the trigger went, and the client has been drawing
+     * that machine somewhere further on ever since. For the crew firing it that gap is the whole of
+     * their own travel over the round trip: a tank a few blocks, an aeroplane at three hundred knots
+     * the better part of a hundred. The round therefore appeared behind the machine and flew off
+     * from there, which from the cockpit reads as a stream leaving at an angle to the nose, and for
+     * a bomb — which leaves with the aircraft's speed and nothing else — as one thrown backwards out
+     * of the bay.
+     *
+     * <p>The fix is to carry the round by exactly that gap: the machine's position now, less the
+     * position it was fired from. The offset is measured on each side for itself and needs no figure
+     * from anywhere. On the crew's own client it is the round trip's travel and the round leaves the
+     * gun; on everyone else's it comes out at very nearly nothing, because an onlooker is drawing the
+     * machine from the same packets that carried the round and the two are late by the same amount.
+     * Nothing has to know whose round it is looking at.
+     *
+     * <p><b>And then given back.</b> The offset is wanted at the muzzle and nowhere else: it is the
+     * server's copy that decides where the round goes off, so one held forward the whole way would
+     * end its flight some distance short of its own explosion. {@link #mergeAnchor} eases it off
+     * over the second or so after the round leaves, by which time the departure everybody was
+     * looking at is over. While any of it is still on, {@link #lerpTo} takes it back off before
+     * measuring anything, so the correction machinery goes on comparing like with like.
+     */
+    private void anchorToMuzzle() {
+        Entity vehicle = this.firedFrom();
+
+        if (vehicle == null || this.age > ANCHOR_AGE) {
+            return;
+        }
+
+        Vec3 moved = vehicle.position().subtract(this.firedFromAt);
+        double far = moved.length();
+
+        // Nothing to do for an onlooker, and nothing sensible to do for a round whose machine has
+        // been put somewhere else entirely since. See ANCHOR_LIMIT.
+        if (far < 1.0E-4 || far > ANCHOR_LIMIT) {
+            return;
+        }
+
+        Vec3 at = this.position().add(moved);
+
+        this.anchor = moved;
+        this.setPos(at.x, at.y, at.z);
+        // Or the first frame draws it as a streak from where the server put it to where it has just
+        // been carried, which is the whole of the gap in one line.
+        this.setOldPosAndRot();
     }
 
     /**
@@ -356,12 +494,20 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      */
     @Override
     public void lerpTo(double x, double y, double z, float yRot, float xRot, int steps) {
-        Vec3 gap = new Vec3(x, y, z).subtract(this.position());
+        // Measured against where this round would be had it not been carried onto its muzzle, which
+        // is the only position the server has ever heard of. Measured against the carried one, the
+        // offset would read as a disagreement on every packet for the whole flight, and the round
+        // would be dragged straight back off the muzzle it was just put on. See anchorToMuzzle.
+        Vec3 gap = new Vec3(x, y, z).subtract(this.position().subtract(this.anchor));
         double off = gap.length();
 
         if (off > LOST) {
-            // Not a late packet: somewhere else entirely, so go there and have done with it.
-            this.setPos(x, y, z);
+            // Not a late packet: somewhere else entirely, so go there and have done with it. Carried
+            // by the muzzle offset like everything else, or the next packet would read the offset
+            // itself as another disagreement of exactly the same size.
+            Vec3 at = new Vec3(x, y, z).add(this.anchor);
+
+            this.setPos(at.x, at.y, at.z);
             this.owed = Vec3.ZERO;
 
             return;
@@ -402,6 +548,42 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         this.setPos(at.x, at.y, at.z);
         this.lastTravel = this.lastTravel.add(step);
         this.owed = this.owed.subtract(step);
+    }
+
+    /**
+     * Hands back a share of whatever the round is still being carried forward by, a share of it a
+     * tick.
+     *
+     * <p>The other half of {@link #anchorToMuzzle}. The round was put on the muzzle it came out of
+     * because that is where a crew watch one leave from; the server is flying the same round from
+     * where it really left, and everything the server decides — what it hits, where the blast goes —
+     * happens there. So the offset is given back over the ticks that follow and the two end up
+     * flying the same round again.
+     *
+     * <p>Never at more than a fraction of the round's own step, which is what keeps this out of
+     * sight: see {@link #ANCHOR_MOST}. The step is counted into the travel for the same reason
+     * {@link #settle} counts its own in — the round is drawn along the line it is actually being
+     * carried down, and a nose pointed anywhere else is a round drawn crabbing through the air.
+     */
+    private void mergeAnchor() {
+        double far = this.anchor.length();
+
+        if (far < 1.0E-4) {
+            this.anchor = Vec3.ZERO;
+
+            return;
+        }
+
+        // A share of what is left, capped by the round's own speed and floored so that the last of
+        // it is actually paid off rather than halved for ever.
+        double pace = Math.min(far * ANCHOR_RATE, this.getDeltaMovement().length() * ANCHOR_MOST);
+        double take = Math.min(far, Math.max(pace, ANCHOR_LEAST));
+        Vec3 step = this.anchor.scale(take / far);
+        Vec3 at = this.position().subtract(step);
+
+        this.setPos(at.x, at.y, at.z);
+        this.lastTravel = this.lastTravel.subtract(step);
+        this.anchor = this.anchor.subtract(step);
     }
 
     /** One tick of flying, before the move. Whatever this leaves in the delta movement is taken. */
@@ -500,9 +682,11 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         this.fly();
 
         // Anything the server has said about where this really is, eased in behind the flight rather
-        // than jumped to. See settle.
+        // than jumped to. See settle. And a share back of whatever the round was carried by to put
+        // it on its muzzle in the first place, which is wanted at the muzzle and nowhere after it.
         if (this.level().isClientSide) {
             this.settle();
+            this.mergeAnchor();
         }
 
         // Last, so the claim is made from where the round has got to rather than from where it was.
@@ -775,7 +959,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         HitReportPayload.report(this.getOwner(), hit.getEntity(), hit.getLocation(),
                 this.getDeltaMovement(), damage, false);
         this.struck(hit);
-        this.burst(hit.getLocation(), null);
+        this.burst(hit.getLocation(), null, hit.getEntity());
     }
 
     /**
@@ -902,10 +1086,26 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * watch it go off, and a bang with nothing to show for it is the same as a miss.
      */
     protected void burst(Vec3 where, @Nullable BlockState struck) {
+        this.burst(where, struck, null);
+    }
+
+    /**
+     * The same, told what it went into.
+     *
+     * <p>Which matters to exactly one thing: a round with no blast of its own arriving on armour
+     * gets a flash and a spray of sparks off the plate rather than the handful it would get going
+     * into a hillside — see {@link WeaponEffects#strike}. It is the same case, and the same
+     * reasoning, as the noise in {@link #struck}: the two rounds a tank actually fires carry nothing
+     * that goes off, so without this the hit that decides the fight is the quietest and dimmest
+     * thing on the screen.
+     *
+     * @param into what it arrived in, or null for a round that met the ground or ran out of fuse
+     */
+    protected void burst(Vec3 where, @Nullable BlockState struck, @Nullable Entity into) {
         WeaponDefinition.Projectile round = this.getRound();
 
         if (this.level() instanceof ServerLevel level) {
-            WeaponEffects.detonation(level, where, round, struck);
+            WeaponEffects.detonation(level, where, this.getDeltaMovement(), round, struck, isMachine(into));
 
             if (round.explosion() > 0.0F && level.hasChunkAt(BlockPos.containing(where))) {
                 WeaponEffects.blast(level, this, where, round);

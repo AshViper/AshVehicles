@@ -90,7 +90,8 @@ public final class BulletGhostAdapter implements GhostAdapter<BulletEntity> {
             return;
         }
 
-        Tracer.streak(buffer, context.poseStack().last().pose(), travel, context.distanceSq(), colour);
+        Tracer.streak(context.poseStack(), buffer, context.camera(), context.fromCamera(), travel,
+                context.distanceSq(), colour);
     }
 
     /**
