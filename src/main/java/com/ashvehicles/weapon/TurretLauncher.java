@@ -225,8 +225,18 @@ public final class TurretLauncher {
      * is where the gun is laid: the barrels and the tubes are bolted to one mounting, so laying the
      * gun on a target lays the tubes on it too. The rail itself is a point on the turret and comes
      * round the ring with it, but it does not rise with the barrels — a tube is a box on the side of
-     * the mounting rather than something that recoils, and the missile is steering within a tick of
-     * leaving it in any case.
+     * the mounting rather than something that recoils.
+     *
+     * <p><b>Unless something is already locked.</b> The seeker takes a target well outside the
+     * bore now that a radar-cued one is held to the set's own arc rather than to its narrow head —
+     * see {@link TargetLock#bestCandidate} — so a tube that only ever fired down the bore would
+     * launch a locked missile pointed nowhere near what it is locked onto, and count on
+     * {@code turn_rate} to close a gap of tens of degrees before the seeker's own {@code
+     * track_angle} gives up on it, which for a wide lock it may never manage even once
+     * {@code turn_rate} starts working on it. A real rail does the same: the round is caged onto
+     * the designated track before it ever leaves, and comes off already pointed close to where it
+     * is going, with the fine work left to its own fins. Nothing about an unguided tube changes —
+     * one with nothing locked still leaves along the bore, exactly as it always did.
      */
     private void fire(ServerLevel level, ResourceLocation missileId, WeaponDefinition missile) {
         GroundVehicleDefinition.Launcher tubes = this.vehicle.getStats().launcher();
@@ -237,12 +247,13 @@ public final class TurretLauncher {
         LivingEntity crew = this.vehicle.getControllingPassenger();
         RandomSource random = this.vehicle.getRandom();
         Entity locked = missile.isGuided() && this.lock.isLocked() ? this.lock.target() : null;
+        Vec3 caged = cagedAim(locked, rail, bore);
 
         double scatter = Math.tan(Math.toRadians(missile.firing().spread())) * 0.5;
         double spread = Math.tan(Math.toRadians(missile.firing().salvoSpread())) * 0.5;
 
         for (int i = 0; i < Math.max(1, missile.firing().salvo()); i++) {
-            Vec3 direction = bore
+            Vec3 direction = caged
                     .add(right.scale(random.nextGaussian() * (scatter + spread)))
                     .add(up.scale(random.nextGaussian() * (scatter + spread)))
                     .normalize();
@@ -270,6 +281,22 @@ public final class TurretLauncher {
 
         this.vehicle.setMissiles(this.vehicle.getMissiles() - 1);
         this.vehicle.setMissileReload(ticksFor(missile.firing().roundsPerSecond()));
+    }
+
+    /**
+     * Where a caged round leaves from: at whatever is locked, if anything is, and along the bore
+     * otherwise — which is every unguided tube, and a guided one fired with nothing held. Falls
+     * back to the bore too on the one case a direction cannot be built from, which is a target
+     * standing exactly on the rail.
+     */
+    private static Vec3 cagedAim(@Nullable Entity locked, Vec3 rail, Vec3 bore) {
+        if (locked == null) {
+            return bore;
+        }
+
+        Vec3 toTarget = locked.position().add(0.0, locked.getBbHeight() * 0.5, 0.0).subtract(rail);
+
+        return toTarget.lengthSqr() > 1.0E-6 ? toTarget.normalize() : bore;
     }
 
     /**
