@@ -322,8 +322,8 @@
     "span": 8.1
   },
   "handling": {
-    "pitch_rate": 2.7,
-    "roll_rate": 3.2,
+    "pitch_rate": 3.65,
+    "roll_rate": 4.32,
     "yaw_rate": 1.3,
     "control_lag": 0.14,
     "weathervane": 2.5,
@@ -402,6 +402,11 @@
     {
       "name": "centreline",
       "pos": [0.0, 0.9, 0.0]
+    },
+    {
+      "name": "gun",
+      "pos": [-1.0, 1.4, 1.8],
+      "fixed": "ashvehicles:bk_27"
     }
   ]
 }

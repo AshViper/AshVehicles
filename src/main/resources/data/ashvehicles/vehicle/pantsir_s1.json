@@ -324,7 +324,17 @@
     "barrel_length": 3.12,
     "recoil": 0.1,
     "recoil_ticks": 1,
-    "kick": 0
+    "kick": 0,
+    "barrels": [
+      {
+        "trunnion": [-1.42, 3.75, -2.87],
+        "barrel_length": 3.45
+      },
+      {
+        "trunnion": [1.42, 3.75, -2.87],
+        "barrel_length": 3.45
+      }
+    ]
   },
   "launcher": {
     "missile": "ashvehicles:57e6",

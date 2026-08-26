@@ -1,0 +1,21 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 500,
+  "firing": {
+    "rounds_per_second": 60.0,
+    "spread": 0.55
+  },
+  "projectile": {
+    "damage": 5.0,
+    "speed": 26.0,
+    "gravity": 0.00125,
+    "range": 1000.0,
+    "ricochet": 45.0,
+    "tracer": "FFE29A"
+  },
+  "sound": {
+    "volume": 1.6,
+    "pitch": 1.3
+  }
+}

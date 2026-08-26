@@ -327,8 +327,8 @@
     "span": 14.2
   },
   "handling": {
-    "pitch_rate": 1.8,
-    "roll_rate": 2.8,
+    "pitch_rate": 2.43,
+    "roll_rate": 3.78,
     "yaw_rate": 1.4,
     "control_lag": 0.15,
     "weathervane": 2.5,
@@ -425,6 +425,11 @@
     {
       "name": "pylon4_right",
       "pos": [-4.0, 2.2, -2.5]
+    },
+    {
+      "name": "gun",
+      "pos": [1.8, 2.6, 2.6],
+      "fixed": "ashvehicles:gsh_30_1"
     }
   ]
 }
