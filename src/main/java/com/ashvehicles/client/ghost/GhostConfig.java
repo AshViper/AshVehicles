@@ -30,7 +30,7 @@ public final class GhostConfig {
 
     public static final ModConfigSpec.DoubleValue GHOST_END_DISTANCE = BUILDER
             .comment("Distance in blocks beyond which nothing is drawn at all.")
-            .defineInRange("ghostEndDistance", 2048.0, 16.0, 65536.0);
+            .defineInRange("ghostEndDistance", 4000.0, 16.0, 65536.0);
 
     public static final ModConfigSpec.DoubleValue BILLBOARD_DISTANCE = BUILDER
             .comment("Distance in blocks beyond which a ghost becomes a flat billboard (only if enableBillboardLOD is on).")

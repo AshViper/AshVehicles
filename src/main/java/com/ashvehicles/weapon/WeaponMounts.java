@@ -576,8 +576,14 @@ public final class WeaponMounts {
         }
 
         // A missile takes whatever the seeker had when it left the rail, and nothing afterwards: it
-        // is the missile's own problem to keep up with it.
+        // is the missile's own problem to keep up with it. Which is why it does not leave along the
+        // bare nose when something is locked -- a radar-cued lock is held to the set's own arc now,
+        // not to the round's narrow head (see TargetLock#bestCandidate), and a pylon that only ever
+        // fired down the nose would hand a wide-angle lock a gap of tens of degrees to keep up with
+        // before its own track_angle gives up on it. Caged onto the target instead, the same way a
+        // real rail cages the round onto whatever is designated before letting it go.
         Entity locked = weapon.isGuided() && this.lock.isLocked() ? this.lock.target() : null;
+        Vec3 caged = cagedAim(locked, muzzle, nose);
         RandomSource random = this.aircraft.getRandom();
 
         // A cone about the nose: two gaussians across it, scaled so the file's half-angle holds most
@@ -587,7 +593,7 @@ public final class WeaponMounts {
         double spread = Math.tan(Math.toRadians(weapon.firing().salvoSpread())) * 0.5;
 
         for (int i = 0; i < Math.max(1, weapon.firing().salvo()); i++) {
-            Vec3 direction = nose
+            Vec3 direction = caged
                     .add(right.scale(random.nextGaussian() * (scatter + spread)))
                     .add(up.scale(random.nextGaussian() * (scatter + spread)))
                     .normalize();
@@ -635,6 +641,22 @@ public final class WeaponMounts {
 
             level.addFreshEntity(shot);
         }
+    }
+
+    /**
+     * Where a caged round leaves from: at whatever is locked, if anything is, and along the nose
+     * otherwise — which is every unguided store, and a guided one fired with nothing held. Falls
+     * back to the nose too on the one case a direction cannot be built from, which is a target
+     * standing exactly on the pylon.
+     */
+    private static Vec3 cagedAim(@Nullable Entity locked, Vec3 muzzle, Vec3 nose) {
+        if (locked == null) {
+            return nose;
+        }
+
+        Vec3 toTarget = locked.position().add(0.0, locked.getBbHeight() * 0.5, 0.0).subtract(muzzle);
+
+        return toTarget.lengthSqr() > 1.0E-6 ? toTarget.normalize() : nose;
     }
 
     /**

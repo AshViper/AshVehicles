@@ -361,9 +361,14 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      * @param trackAngle how far off its own nose the missile will still follow a target, in degrees.
      *                   Past this it has lost it and flies on ballistically
      * @param proximity how close it must get before it goes off, in blocks. A missile need not hit
+     * @param navGain the navigation constant proportional navigation is named for: how many times
+     *                over the missile turns to null the line of sight's own rotation rather than
+     *                merely matching it. Three to five is what a real seeker head is built around;
+     *                much past that and a missile answers every flicker in the tracking as though
+     *                the target had actually moved, which is its own kind of miss
      */
     public record Guidance(float turnRate, float lockAngle, float lockRange, int lockTicks,
-            float trackAngle, float proximity, Seeker seeker) {
+            float trackAngle, float proximity, float navGain, Seeker seeker) {
 
         /**
          * What the seeker is looking at, and so what will fool it.
@@ -404,6 +409,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 Codec.INT.optionalFieldOf("lock_ticks", 20).forGetter(Guidance::lockTicks),
                 Codec.FLOAT.optionalFieldOf("track_angle", 75.0F).forGetter(Guidance::trackAngle),
                 Codec.FLOAT.optionalFieldOf("proximity", 2.5F).forGetter(Guidance::proximity),
+                Codec.FLOAT.optionalFieldOf("nav_gain", 3.5F).forGetter(Guidance::navGain),
                 Seeker.CODEC.optionalFieldOf("seeker", Seeker.HEAT).forGetter(Guidance::seeker)
         ).apply(instance, Guidance::new));
     }

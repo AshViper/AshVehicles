@@ -176,30 +176,50 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     protected void steer() {
         WeaponDefinition.Projectile round = this.getRound();
         Vec3 velocity = this.getDeltaMovement();
-
-        if (!this.isBurning() || !round.hasMotor()) {
-            return;
-        }
-
         Vec3 heading = this.axis();
 
         if (heading.lengthSqr() < 1.0E-8) {
             return;
         }
 
+        boolean burning = this.isBurning() && round.hasMotor();
+        // Whether there is still something to chase, not merely whether the weapon is the kind
+        // that can be. One fired with nothing locked, or that has since lost what it had -- see
+        // {@link #lose}, which clears the target the same way this checks for -- is exactly a
+        // rocket once its motor is out: nothing is left holding its nose up, so it should fall
+        // away under gravity rather than hold a heading dead straight for ever, which is what
+        // asking only the weapon's file would have done.
+        boolean guided = this.getWeapon().guidance().isPresent() && this.getTarget() != null;
+
+        // An unguided rocket only ever points where its motor left it: once that motor is out there
+        // is nothing left to hold the nose up, and gravity is left to arc the trajectory on its own,
+        // which is what makes a rocket a rocket. A guided round is a different machine entirely --
+        // its fins go on answering the seeker long after the motor does, which is the whole of what
+        // makes an unpowered coast phase an intercept rather than a ballistic drop. Cutting guidance
+        // off at burnout, as if a missile were a rocket that happened to be able to steer for a few
+        // seconds, is why one fired at any real range flew straight and true for its burn and then
+        // fell away from a target it had not yet reached.
+        if (!burning && !guided) {
+            return;
+        }
+
         // Where a seeker wants the nose, which for anything not chasing something is where the nose
         // already is. This is the only thing that ever turns a rocket, and it turns it by no more
         // than the file's turn_rate a tick.
-        Vec3 wanted = this.guidedHeading(heading);
+        Vec3 wanted = guided ? this.guidedHeading(heading) : heading;
 
         // The motor pushes along the way it is pointing, up to the speed it will hold: a rocket motor
         // moves its own nose, it does not slide the rocket sideways. So the whole of this tick's
         // speed goes down the axis, and what gravity did to the velocity last tick is left as what it
         // is — a change of speed, not a change of heading. Which is why a rocket under power flies
-        // the line it was fired on, and only begins to arc once the motor is out and there is nothing
-        // holding the nose up any more.
-        double speed = Math.min(velocity.length() + this.thrustNow(round),
-                round.topSpeed() > 0.0F ? round.topSpeed() : Double.MAX_VALUE);
+        // the line it was fired on. Coasting, there is no thrust to add and the speed is simply
+        // whatever it already was -- gravity's drop from last tick's fly() is still folded into
+        // that, and putting it down the new heading rather than leaving it standing in the old one
+        // is the fins working against it, exactly as a real coast-phase missile does.
+        double speed = burning
+                ? Math.min(velocity.length() + this.thrustNow(round),
+                        round.topSpeed() > 0.0F ? round.topSpeed() : Double.MAX_VALUE)
+                : velocity.length();
 
         this.axis = wanted;
         this.setDeltaMovement(wanted.scale(speed));
@@ -255,10 +275,16 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     }
 
     /**
-     * Where the missile should be pointing this tick: at most {@code turn_rate} degrees off where it
-     * is pointing now, bent towards the target. Anything with nothing to chase — an unguided rocket,
-     * a missile fired with nothing locked, or one that has lost what it was chasing — simply keeps
-     * its heading, and keeps it for good.
+     * Where the missile should be pointing this tick, by true proportional navigation rather than
+     * by chasing a predicted point. What a real seeker nulls is the <em>rotation</em> of the sight
+     * line to the target, not any particular position along it: a course on which that line never
+     * turns at all is a collision course, whatever the range or the closing speed, so a missile
+     * that succeeds in holding the line still is on one. Turning at {@code nav_gain} times that
+     * rotation rate, in whichever direction it is happening, is the whole of the law — no lead
+     * point, no time-to-go, nothing predicted or assumed about where the target is headed.
+     *
+     * <p>Anything with nothing to chase — an unguided rocket, a missile fired with nothing locked,
+     * or one that has lost what it was chasing — simply keeps its heading, and keeps it for good.
      */
     private Vec3 guidedHeading(Vec3 heading) {
         WeaponDefinition.Guidance guidance = this.getWeapon().guidance().orElse(null);
@@ -285,23 +311,24 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
             }
         }
 
-        // Aim at the middle of it rather than its feet, and lead it: where it will be by the time
-        // this arrives, not where it is now. A missile aimed at where something was always trails it.
+        // The sight line itself: the middle of the target rather than its feet, and the straight
+        // line to it rather than any predicted point — proportional navigation has no use for one.
         Vec3 middle = chasing.position().add(0.0, chasing.getBbHeight() * 0.5, 0.0);
-        Vec3 gap = middle.subtract(this.position());
-        double flightTicks = gap.length() / Math.max(this.getDeltaMovement().length(), 1.0E-3);
-        Vec3 lead = middle.add(velocityOf(chasing).scale(Math.min(flightTicks, 40.0)));
-        Vec3 wanted = lead.subtract(this.position());
+        Vec3 los = middle.subtract(this.position());
+        double range = los.length();
 
-        if (wanted.lengthSqr() < 1.0E-8) {
+        if (range < 1.0E-3) {
             return heading;
         }
 
-        wanted = wanted.normalize();
+        Vec3 losDirection = los.scale(1.0 / range);
 
         // Anything it can no longer see ahead of it is gone for good. A seeker that could look
         // backwards would make the missile impossible to shake, which is not the intention.
-        double off = Math.toDegrees(Math.acos(Math.min(1.0, Math.max(-1.0, wanted.dot(heading)))));
+        // Measured against the sight line itself, since that is what a real gimbal is limited by --
+        // a lead point well inside the seeker's cone is no use if the target it was built from is
+        // hanging off the edge of it.
+        double off = Math.toDegrees(Math.acos(Mth.clamp(losDirection.dot(heading), -1.0, 1.0)));
 
         if (off > guidance.trackAngle()) {
             this.lose();
@@ -309,12 +336,41 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
             return heading;
         }
 
-        if (off <= guidance.turnRate()) {
-            return wanted;
+        // How fast the sight line is turning, as a vector: its direction is the axis the rotation
+        // is about and its length is the rate itself, in radians a tick. (LOS x relative velocity)
+        // / |LOS|^2 is the closed form of that -- the standard identity for the angular velocity of
+        // a rotating position vector -- and needs no memory of the tick before to arrive at, which
+        // matters on a client that is only ever handed one figure of the target's motion at a time.
+        Vec3 relativeVelocity = velocityOf(chasing).subtract(this.getDeltaMovement());
+        Vec3 losRate = los.cross(relativeVelocity).scale(1.0 / (range * range));
+        double rate = losRate.length();
+
+        if (rate < 1.0E-9) {
+            // Nothing turning to null: already dead ahead on a steady bearing, which is a collision
+            // course as it stands and wants nothing done to it.
+            return heading;
         }
 
-        // Too far to reach this tick: turn as far as it can towards the target and no further.
-        return this.turnTowards(heading, wanted, guidance.turnRate());
+        // Close in, the rate this asks for can run far past anything the file allows -- the same
+        // closed form that has no singularity to speak of everywhere else has one at zero range,
+        // which a missile is headed for by design. Held to turn_rate the same as ever, which is
+        // also what a real seeker's own authority runs out at, so the terminal seconds pull
+        // whatever the missile has left rather than a number this would otherwise ask for and
+        // nothing built could ever deliver.
+        double commanded = Math.min(guidance.navGain() * rate, Math.toRadians(guidance.turnRate()));
+
+        return rotateAbout(heading, losRate.scale(1.0 / rate), commanded);
+    }
+
+    /** {@code vector} turned {@code radians} about {@code axis}, which is taken to already be a unit one. */
+    private static Vec3 rotateAbout(Vec3 vector, Vec3 axis, double radians) {
+        double cos = Math.cos(radians);
+        double sin = Math.sin(radians);
+
+        return vector.scale(cos)
+                .add(axis.cross(vector).scale(sin))
+                .add(axis.scale(axis.dot(vector) * (1.0 - cos)))
+                .normalize();
     }
 
     /**
@@ -333,20 +389,6 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
 
         this.lost = true;
         this.setTarget(null);
-    }
-
-    /** {@code heading} rotated {@code degrees} of the way towards {@code wanted}, in their own plane. */
-    private Vec3 turnTowards(Vec3 heading, Vec3 wanted, float degrees) {
-        Vec3 across = wanted.subtract(heading.scale(wanted.dot(heading)));
-
-        if (across.lengthSqr() < 1.0E-10) {
-            return heading;
-        }
-
-        across = across.normalize();
-        double angle = Math.toRadians(degrees);
-
-        return heading.scale(Math.cos(angle)).add(across.scale(Math.sin(angle))).normalize();
     }
 
     /**
