@@ -1249,7 +1249,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * cannot conjure them or claim a hit.
      */
     private void tickWeapons() {
-        this.weapons.tick(this.input.fire());
+        this.weapons.tick(this.input.fire(), this.input.lock());
 
         if (this.weapons.consumeDirty()) {
             this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
@@ -1581,14 +1581,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // fast aircraft wallows instead of stiffening up the way a real one does.
         float damping = 1.0F + handling.aeroDamping() * (float) pressure;
 
-        // A lift system does not care about any of that: what flies a hovering aeroplane is jets of
-        // its own, and without them the pilot would have the controls of a brick from the moment the
-        // wing stopped working.
+        // A lift system does not care about the wing: what flies a hovering aeroplane is jets of its
+        // own, and without them the pilot would have the controls of a brick from the moment the
+        // wing stopped working. But those jets are still the engine's, and an engine idled back to
+        // nothing is not bleeding them any thrust to vector — so this is scaled by the same spooled
+        // thrust the forces below are, and a hover cannot be held, let alone spun on the spot, on a
+        // throttle sitting at the bottom of its travel.
         if (vtol != null) {
-            authority = Math.max(authority, (float) (lifting * vtol.authority()));
+            authority = Math.max(authority, (float) (lifting * vtol.authority()) * this.thrustLevel);
         }
         float previousYRot = this.getYRot();
         float weathervaneYaw = 0.0F;
+        float weathervanePitch = 0.0F;
 
         // Commanded rates, reached over a few ticks rather than at once: a control surface has to
         // work against the mass of the aircraft. These are rates about the aircraft's own axes, not
@@ -1632,12 +1636,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // fin, so this bypasses the authority the airflow grants and answers at once rather than
         // through the control lag. It lets go as the rudder takes over, because a nosewheel that
         // still bit at speed would throw the aircraft off the runway rather than track it down one.
+        //
+        // It still wants the engine, though: what steers it is hydraulic or electric power drawn
+        // off the same engine as everything else aboard, and an aircraft sitting dead cold with the
+        // throttle at the bottom of its travel has none to spare — so this is scaled by the same
+        // spooled thrust the flight controls are, and a parked aircraft cannot pivot on the spot on
+        // a throttle that is doing nothing.
         float nosewheel = 0.0F;
 
         if (rolling) {
             float grip = (float) Mth.clamp(1.0 - speed / Math.max(gear.steerFade(), 1.0E-3F), 0.0, 1.0);
 
-            nosewheel = this.input.yaw() * gear.steerRate() * grip;
+            nosewheel = this.input.yaw() * gear.steerRate() * grip * this.thrustLevel;
         }
 
         Vec3 nose = this.getNoseVector();
@@ -1700,7 +1710,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             double parasitic = wing.drag() * (1.0
                     + this.gearProgress * this.getGearDragPenalty()
                     + this.flapsProgress * this.getFlapsDragPenalty())
-                    * (this.input.brake() ? 4.0 : 1.0);
+                    * (this.input.brake() ? wing.airBrakeDrag() : 1.0);
             double drag = parasitic + wing.inducedDrag() * liftCoefficient * liftCoefficient;
             forces = forces.add(flow.scale(-drag * speed * speed * density));
             this.checkStructuralLoad(motion);
@@ -1713,6 +1723,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             if (!rolling) {
                 weathervaneYaw = (float) (flow.dot(right) * handling.weathervane() * authority / damping);
 
+                // And the tailplane does the same about the aircraft's own lateral axis, dragging the
+                // nose down out of a high angle of attack the same way the fin drags it out of a
+                // sideslip. This is bypassed by the alpha limiter entirely -- it is not the limiter,
+                // it is what the limiter is standing in front of -- so it goes on pulling the nose
+                // back towards the airflow deep past the stall, where {@link #limitToWing} has
+                // already faded the pilot's own stick out to nothing. Without it a stalled aircraft
+                // points wherever the stick last left it and stays there while gravity alone decides
+                // where it actually goes, which is a tailslide with no way out of it but to wait.
+                weathervanePitch = (float) (flow.dot(up) * handling.weathervane() * authority / damping);
+
                 // And the fuselage refuses to fly sideways.
                 motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()));
             }
@@ -1724,7 +1744,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // is what makes the end of a takeoff roll go light instead of gripping to the last instant.
         this.weightOnWheels = (float) Mth.clamp(1.0 - lift / GRAVITY, 0.0, 1.0);
 
-        this.applyBodyRotation(this.rollVelocity, this.pitchVelocity, this.yawVelocity + weathervaneYaw + nosewheel);
+        this.applyBodyRotation(this.rollVelocity, this.pitchVelocity + weathervanePitch,
+                this.yawVelocity + weathervaneYaw + nosewheel);
         this.deltaRotation = Mth.wrapDegrees(this.getYRot() - previousYRot);
         motion = motion.add(forces);
 
@@ -1850,13 +1871,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.yawVelocity += (commandedYaw - this.yawVelocity) * lag;
 
         // A steerable tail wheel, which is the same thing a nosewheel is and is here for the same
-        // reason: rolling along the ground, the pedals turn a wheel rather than a rotor.
+        // reason: rolling along the ground, the pedals turn a wheel rather than a rotor. And the
+        // same reason it wants the engine, too: nothing steers it with the collective bottomed out
+        // and no power going anywhere.
         float nosewheel = 0.0F;
 
         if (rolling) {
             float grip = (float) Mth.clamp(1.0 - speed / Math.max(gear.steerFade(), 1.0E-3F), 0.0, 1.0);
 
-            nosewheel = this.input.yaw() * gear.steerRate() * grip;
+            nosewheel = this.input.yaw() * gear.steerRate() * grip * this.thrustLevel;
         }
 
         Vec3 up = this.getLiftVector();
@@ -1912,7 +1935,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             // the machine would reach its forward top speed flying backwards.
             double bluff = Mth.lerp((1.0 - Mth.clamp(flow.dot(nose), -1.0, 1.0)) * 0.5,
                     1.0, Math.max(rotor.bluffDrag(), 1.0F));
-            double drag = wing.drag() * bluff * (this.input.brake() ? 4.0 : 1.0)
+            double drag = wing.drag() * bluff * (this.input.brake() ? wing.airBrakeDrag() : 1.0)
                     + wing.inducedDrag() * liftCoefficient * liftCoefficient;
 
             forces = forces.add(flow.scale(-drag * speed * speed * density));
@@ -2091,7 +2114,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private float limitToWing(float commanded, double lifting) {
         AircraftDefinition.Handling handling = this.getStats().handling();
-        float limit = this.getStats().wing().stallAngle() * handling.alphaLimit();
+        AircraftDefinition.Wing wing = this.getStats().wing();
 
         // Not on the runway. Rolling along the ground the angle of attack is simply the angle the
         // aircraft is sitting at, and the rotation needed to leave the ground is most of the stalling
@@ -2102,7 +2125,33 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return commanded;
         }
 
-        if (limit <= 0.0F || handling.alphaLimit() >= 1.0F || commanded * this.angleOfAttack <= 0.0F) {
+        // The angle that stalls the wing, for a file that wants that held to. Left unset -- an
+        // {@code alpha_limit} of one -- an airframe with nothing else limiting it flies past the
+        // stall exactly as it always could.
+        float limit = handling.alphaLimit() < 1.0F
+                ? wing.stallAngle() * handling.alphaLimit()
+                : Float.MAX_VALUE;
+
+        // The other half of a fly-by-wire limiter: not just the angle that stalls the wing, but the
+        // angle that overstresses it. Load climbs with the square of speed at a fixed angle of
+        // attack, so the angle worth flying at falls the faster the aircraft goes -- worked out here
+        // by solving the load equation {@link #getLoadFactor} uses backwards for the angle that
+        // reaches {@code maxG} at the current speed, and holding to whichever of the two limits is
+        // tighter. Without this the alpha limiter alone lets a pilot pull the same angle at any
+        // speed at all, which the wing cannot survive doing at three times what it was stressed for.
+        float maxG = this.getStats().airframe().maxG();
+
+        if (maxG > 0.0F) {
+            double speed = this.getDeltaMovement().length();
+            double denom = wing.lift() * wing.liftSlope() * speed * speed;
+
+            if (denom > 1.0E-9) {
+                float gLimit = (float) Math.toDegrees(maxG * GRAVITY / denom);
+                limit = Math.min(limit, gLimit);
+            }
+        }
+
+        if (limit >= Float.MAX_VALUE || limit <= 0.0F || commanded * this.angleOfAttack <= 0.0F) {
             return commanded;
         }
 

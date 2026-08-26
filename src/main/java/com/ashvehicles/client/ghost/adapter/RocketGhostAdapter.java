@@ -31,6 +31,19 @@ import net.minecraft.world.phys.Vec3;
  * plane and keeps it out of the fog.
  */
 public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
+    /**
+     * Unlike an aircraft or a ground vehicle, a rocket is not sent to every client wherever it is —
+     * see {@code EntityTrackingMixin}, which gives it the finite range its entity type was
+     * registered with rather than an unlimited one. A missile at the edge of that range, still
+     * flying, is exactly the case this ghost exists for: kept and drawn on from its last snapshot
+     * rather than dropped the instant the client stops hearing about it, so the far half of a
+     * long shot is not silently cut off.
+     */
+    @Override
+    public boolean keepAfterLeave(RocketEntity entity) {
+        return true;
+    }
+
     @Override
     public GhostSnapshot snapshot(RocketEntity rocket, @Nullable GhostSnapshot previous, long gameTime) {
         Vec3 position = rocket.position();

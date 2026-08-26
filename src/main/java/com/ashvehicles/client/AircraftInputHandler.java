@@ -120,7 +120,8 @@ public final class AircraftInputHandler {
                 // Held rather than clicked: a dispenser lets go of one at a time for as long as the
                 // handle is pulled, and its own interval decides how fast that is.
                 ModKeyMappings.RELEASE_FLARE.isDown(),
-                ModKeyMappings.RELEASE_CHAFF.isDown());
+                ModKeyMappings.RELEASE_CHAFF.isDown(),
+                ModKeyMappings.RADAR_LOCK.isDown());
 
         aircraft.setInput(input);
         // The velocity goes with it because the server cannot see it: an aircraft flown from here is

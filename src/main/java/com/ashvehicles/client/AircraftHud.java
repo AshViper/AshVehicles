@@ -5,6 +5,7 @@ import java.util.List;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.sensor.Contact;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -110,7 +111,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
         drawNumbers(graphics, minecraft.font, aircraft, attitude, velocity, speed);
         drawStatus(graphics, minecraft.font, aircraft, attitude, velocity, speed);
         drawStores(graphics, minecraft.font, aircraft, centreX, centreY);
-        drawLock(graphics, minecraft, aircraft, centreX, centreY);
+        drawLock(graphics, minecraft, aircraft, partialTick, centreX, centreY);
+        drawHMDCues(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
         drawCrew(graphics, minecraft.font, aircraft);
         // What the last few rounds did, if any of them have landed lately. The same instrument the
@@ -129,7 +131,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * is also how the pilot finds a target they have not spotted yet.
      */
     private static void drawLock(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
-            int centreX, int centreY) {
+            float partialTick, int centreX, int centreY) {
         WeaponDefinition weapon = aircraft.getWeapons().selectedWeapon();
 
         if (weapon == null || weapon.guidance().isEmpty()) {
@@ -147,7 +149,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
         }
 
         boolean locked = aircraft.getWeapons().lock().isLocked();
-        Vec3 middle = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0);
+        Vec3 middle = target.getPosition(partialTick).add(0.0, target.getBbHeight() * 0.5, 0.0);
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
         int[] at = project(minecraft, middle.subtract(camera).normalize(), focalLength(minecraft, graphics),
                 centreX, centreY);
@@ -170,10 +172,93 @@ public final class AircraftHud implements LayeredDraw.Layer {
         graphics.drawString(minecraft.font, status, centreX - minecraft.font.width(status) / 2,
                 centreY + 54, colour, true);
 
-        int range = (int) Math.round(aircraft.position().distanceTo(target.position()));
+        int range = (int) Math.round(aircraft.getPosition(partialTick).distanceTo(target.getPosition(partialTick)));
         String reach = range + " m";
         graphics.drawString(minecraft.font, reach, centreX - minecraft.font.width(reach) / 2,
                 centreY + 64, DIM, true);
+    }
+
+    /** The sweep this aircraft's cues were last rebuilt from, so a new one is noticed by identity. */
+    private static List<Contact> cuedFrom = List.of();
+    /** Where each of {@link #cuedFrom} was worked out to be standing, in the same order. */
+    private static Vec3[] cuedAt = new Vec3[0];
+
+    /**
+     * The wider picture: every contact the radar is currently holding, marked where it actually
+     * sits on the screen rather than only on the scope in the corner. Unlike {@link #drawLock}'s
+     * box, which exists only for whatever the seeker itself has taken, this is drawn for everything
+     * the radar has found — so a pilot sees a contact the moment it is painted, long before turning
+     * the nose onto it closes anything. The look of a helmet-mounted cue rather than a scope: what
+     * matters is which way to look, not the bearing and range a scope would spell out.
+     *
+     * <p>Worked out from the same bearing, range and altitude the scope itself draws from — see
+     * {@link Contact} for why that is all a client necessarily has for most of what is on it, and
+     * not the world position of an entity it may never have been told about. The reconstruction
+     * mirrors {@code Sensors.sweep} exactly: a flat bearing off the aim direction with the climb
+     * taken out of it, and the height made up again from the raw difference it was sent as.
+     *
+     * <p><b>Fixed once a sweep, not chased every frame.</b> The radar does not see continuously —
+     * see {@code Radar.sweepTicks} — so a bearing this old is only honest against where this
+     * aircraft was standing and pointing when it arrived. Rebuilding the reconstruction from the
+     * <em>current</em> position and heading on every frame instead would drag every cue across the
+     * sky by however far this aircraft has since flown or turned, which on a fighter in the middle
+     * of using the thing is most of the point of a sweep interval's worth of motion. So the world
+     * point is worked out once, the moment a new sweep is noticed by {@link #cuedFrom} no longer
+     * matching what {@link RadarReadout} is holding, and held there — exactly as stale, and exactly
+     * as honestly, as the scope itself already is.
+     */
+    private static void drawHMDCues(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
+            float partialTick, int centreX, int centreY) {
+        List<Contact> contacts = RadarReadout.contacts();
+
+        if (contacts.isEmpty()) {
+            cuedFrom = List.of();
+            cuedAt = new Vec3[0];
+
+            return;
+        }
+
+        if (contacts != cuedFrom) {
+            Vec3 along = flatAim(aircraft, partialTick);
+            Vec3 right = new Vec3(-along.z, 0.0, along.x);
+            Vec3 origin = aircraft.getPosition(partialTick);
+            Vec3[] rebuilt = new Vec3[contacts.size()];
+
+            for (int i = 0; i < contacts.size(); i++) {
+                Contact contact = contacts.get(i);
+                double range = contact.range();
+                double climb = contact.altitude();
+                double horizontal = Math.sqrt(Math.max(0.0, range * range - climb * climb));
+                double bearing = Math.toRadians(contact.bearing());
+
+                rebuilt[i] = origin.add(along.scale(Math.cos(bearing)).add(right.scale(Math.sin(bearing)))
+                        .scale(horizontal)
+                        .add(0.0, climb, 0.0));
+            }
+
+            cuedFrom = contacts;
+            cuedAt = rebuilt;
+        }
+
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        float focal = focalLength(minecraft, graphics);
+
+        for (int i = 0; i < cuedFrom.size(); i++) {
+            Contact contact = cuedFrom.get(i);
+            int[] at = project(minecraft, cuedAt[i].subtract(camera).normalize(), focal, centreX, centreY);
+
+            if (at != null) {
+                diamond(graphics, at[0], at[1], contact.locked() ? 7 : 5, contact.locked() ? WARNING : DIM);
+            }
+        }
+    }
+
+    /** The aim direction with the climb taken out of it, for turning a flat bearing back into a world one. */
+    private static Vec3 flatAim(AircraftEntity aircraft, float partialTick) {
+        Vec3 direction = aircraft.getAimDirection(partialTick);
+        Vec3 level = new Vec3(direction.x, 0.0, direction.z);
+
+        return level.lengthSqr() < 1.0E-8 ? new Vec3(0.0, 0.0, 1.0) : level.normalize();
     }
 
     /**
@@ -200,9 +285,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
         }
 
         if (type == WeaponDefinition.Type.MISSILE && weapon.guidance().isPresent()) {
-            // The seeker's cone, drawn at the size it really is. Put a target inside this ring and
-            // the lock will take; outside it, nothing will happen however long the pilot waits.
-            int radius = Math.round((float) Math.tan(Math.toRadians(weapon.guidance().get().lockAngle())) * focal);
+            WeaponDefinition.Guidance guidance = weapon.guidance().get();
+
+            // The cone this particular round is actually held to. A heat-seeker seeing for itself
+            // is the round's own narrow head; a radar-homing one is cued by the set before it ever
+            // leaves the rail, so what is drawn is the set's own, much wider arc instead — see
+            // TargetLock#bestCandidate, which is the same choice made the same way.
+            boolean radarCued = guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR
+                    && aircraft.radar().fitted();
+            float angle = radarCued ? aircraft.radar().arc() : guidance.lockAngle();
+            int radius = Math.round((float) Math.tan(Math.toRadians(angle)) * focal);
             boolean locked = aircraft.getWeapons().lock().isLocked();
 
             circle(graphics, x, y, Mth.clamp(radius, 10, 220), locked ? WARNING : DIM);

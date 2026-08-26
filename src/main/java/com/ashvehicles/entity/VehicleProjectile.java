@@ -128,8 +128,20 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * <p>A missile that took a different turn, or one whose client copy lost track of its target,
      * does not want easing back onto the path -- it wants putting where it actually is. Working a gap
      * of that size off gently would draw a missile flying through the air sideways for a second.
+     *
+     * <p>The floor a slow round never needs to grow past, but a guided one does: a missile chasing a
+     * target it only ever knows the reported, slightly-lagged position of steers a little differently
+     * on each side every single tick, and that ordinary jitter -- nobody having actually taken a
+     * different turn -- covers more ground the faster the round is going and the longer between the
+     * packets that would otherwise pull it back in line (see {@code ROCKET}'s {@code updateInterval}
+     * in {@code ModEntities}). Scaled by the round's own speed for the same reason the tolerance in
+     * {@link #lerpTo} is, so a round that would have been well inside the old fixed figure at the
+     * speeds this design was first tuned against goes on reading the same way once it is flying
+     * several times as fast.
      */
-    private static final double LOST = 96.0;
+    private static final double LOST_TICKS = 16.0;
+
+    private static final double LOST_FLOOR = 96.0;
 
     /**
      * How far a round may be carried to put it back on the muzzle it left, in blocks.
@@ -486,8 +498,8 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * Inside a tick or two of the round's own flight, nothing: that gap is how long the packet took
      * to arrive and not a disagreement about anything. Beyond that, the gap is worked off over the
      * ticks that follow rather than jumped -- see {@link #settle}, which is the whole of the fix for
-     * a round that used to lurch forward every time one of these landed. Beyond {@link #LOST} it is
-     * put there outright, because at that distance the two are no longer flying the same round.
+     * a round that used to lurch forward every time one of these landed. Beyond {@link #LOST_TICKS}
+     * it is put there outright, because at that distance the two are no longer flying the same round.
      *
      * <p>The rotation is left alone entirely: it is worked out afresh from the flight path every
      * tick, on both sides, so there is nothing the server can usefully say about it.
@@ -500,8 +512,9 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         // would be dragged straight back off the muzzle it was just put on. See anchorToMuzzle.
         Vec3 gap = new Vec3(x, y, z).subtract(this.position().subtract(this.anchor));
         double off = gap.length();
+        double lost = Math.max(LOST_FLOOR, this.getDeltaMovement().length() * LOST_TICKS);
 
-        if (off > LOST) {
+        if (off > lost) {
             // Not a late packet: somewhere else entirely, so go there and have done with it. Carried
             // by the muzzle offset like everything else, or the next packet would read the offset
             // itself as another disagreement of exactly the same size.

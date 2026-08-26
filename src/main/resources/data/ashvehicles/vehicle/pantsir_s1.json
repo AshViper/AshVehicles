@@ -323,7 +323,7 @@
     "trunnion": [-0.19, 3.66, -2.52],
     "barrel_length": 3.12,
     "recoil": 0.1,
-    "recoil_ticks": 2,
+    "recoil_ticks": 1,
     "kick": 0
   },
   "launcher": {

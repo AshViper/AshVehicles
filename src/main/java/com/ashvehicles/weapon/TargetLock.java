@@ -9,6 +9,7 @@ import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.sensor.Contact;
+import com.ashvehicles.vehicle.VehicleChassis;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
@@ -122,13 +123,30 @@ public final class TargetLock {
     }
 
     /**
-     * One tick of looking. Keeps the current target if it is still there and still ahead, otherwise
-     * finds the best thing in the cone and starts on that.
+     * One tick of looking, free to take a new target whenever it likes. What a launcher's crew have
+     * always done: traverse onto something and the seeker takes it, with nothing standing between
+     * looking and locking.
      *
      * @param guidance the seeker of the weapon currently selected, or null if it has none
      * @return true if anything changed that the clients ought to hear about
      */
     public boolean tick(@Nullable WeaponDefinition.Guidance guidance) {
+        return this.tick(guidance, true);
+    }
+
+    /**
+     * One tick of looking. Keeps the current target if it is still there and still ahead; whether it
+     * may take up a new one instead is somebody else's to say.
+     *
+     * @param guidance the seeker of the weapon currently selected, or null if it has none
+     * @param wantsLock whether the seeker may take up a target it is not already tracking. An
+     *                  existing lock, closing or already held, is never affected by this — it is
+     *                  only the first bite that is gated, the same as a real set does not paint a
+     *                  fresh track just because something crossed the antenna. See
+     *                  {@code ModKeyMappings#RADAR_LOCK}.
+     * @return true if anything changed that the clients ought to hear about
+     */
+    public boolean tick(@Nullable WeaponDefinition.Guidance guidance, boolean wantsLock) {
         Entity was = this.target;
         boolean wasLocked = this.locked;
 
@@ -136,6 +154,10 @@ public final class TargetLock {
             this.clear();
 
             return was != null || wasLocked;
+        }
+
+        if (this.target == null && !wantsLock) {
+            return false;
         }
 
         Entity best = this.bestCandidate(guidance);
@@ -223,8 +245,19 @@ public final class TargetLock {
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
         Vec3 from = this.vehicle.position();
         double seeker = guidance.lockRange();
-        double widest = Math.cos(Math.toRadians(guidance.lockAngle()));
-        Aim aim = new Aim(from, bore, widest);
+        double ownAngle = Math.cos(Math.toRadians(guidance.lockAngle()));
+
+        // A radar-homing round has no cone of its own to speak of before it leaves the rail — it
+        // sees nothing at all until it is close enough to go active, and everything before that is
+        // the set's business rather than the round's. So what widens the search for one of these is
+        // the radar's own arc, the same way {@code lock_range} already widens by range rather than
+        // the round reaching that far unaided; a heat-seeker, cued by nobody's radar, keeps to its
+        // own head's narrow cone regardless of what the set can see.
+        VehicleChassis.Radar radar = this.vehicle.radar();
+        double radarAngle = guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR && radar.fitted()
+                ? Math.cos(Math.toRadians(radar.arc()))
+                : ownAngle;
+        Aim aim = new Aim(from, bore, Math.min(ownAngle, radarAngle));
 
         // Close in, the seeker finds things for itself, and it finds everything: an aeroplane, a
         // player, anything alive that wandered into the cone. Every tick, because this is the range
@@ -232,25 +265,27 @@ public final class TargetLock {
         AABB box = this.vehicle.getBoundingBox().inflate(Math.min(seeker, NEAR_REACH));
 
         for (Entity candidate : this.vehicle.level().getEntities(this.vehicle, box, this::couldTarget)) {
-            aim.consider(candidate, reachAgainst(guidance, candidate, seeker));
+            aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle);
         }
 
         // And further out, from the last sweep rather than from a fresh one. See SWEEP_TICKS.
         for (Entity candidate : this.candidates(seeker)) {
             if (this.couldTarget(candidate)) {
-                aim.consider(candidate, reachAgainst(guidance, candidate, seeker));
+                aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle);
             }
         }
 
         // Further out it takes what the radar hands it, and only that. Asked as a list of contacts
         // rather than as another sweep of the sky, which at these ranges matters: the radar's reach
         // is measured in kilometres and this runs every tick, so a box that size would be walked
-        // twenty times a second for the sake of a dozen things the radar has already found.
+        // twenty times a second for the sake of a dozen things the radar has already found. Held to
+        // the radar's own arc rather than the round's cone -- see above -- which for a radar-homing
+        // weapon is the whole reason a contact well off the nose can be taken at all.
         for (Contact contact : this.vehicle.getSensors().contacts()) {
             Entity candidate = this.vehicle.level().getEntity(contact.id());
 
             if (candidate != null && this.couldTarget(candidate)) {
-                aim.consider(candidate, Double.MAX_VALUE);
+                aim.consider(candidate, Double.MAX_VALUE, radarAngle);
             }
         }
 
@@ -326,7 +361,13 @@ public final class TargetLock {
             this.bestAlignment = widest;
         }
 
-        private void consider(Entity candidate, double reach) {
+        /**
+         * @param minAlignment the narrowest this particular candidate is allowed in by, which is
+         *                     not necessarily {@link #bestAlignment}'s own floor — a source with a
+         *                     wider cone than another offered to the same {@code Aim} is still held
+         *                     to its own, tighter one. See {@link #bestCandidate}.
+         */
+        private void consider(Entity candidate, double reach, double minAlignment) {
             Vec3 middle = candidate.position().add(0.0, candidate.getBbHeight() * 0.5, 0.0);
             Vec3 gap = middle.subtract(this.from);
             double distance = gap.length();
@@ -337,7 +378,7 @@ public final class TargetLock {
 
             double alignment = gap.scale(1.0 / distance).dot(this.nose);
 
-            if (alignment > this.bestAlignment) {
+            if (alignment >= minAlignment && alignment > this.bestAlignment) {
                 this.bestAlignment = alignment;
                 this.best = candidate;
             }

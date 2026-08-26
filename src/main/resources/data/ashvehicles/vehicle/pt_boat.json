@@ -65,7 +65,7 @@
     "trunnion": [0.0, 1.9, -1.0],
     "barrel_length": 2.7,
     "recoil": 0.12,
-    "recoil_ticks": 6,
+    "recoil_ticks": 4,
     "kick": 0.0
   },
   "hull": {

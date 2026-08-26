@@ -11,13 +11,15 @@ import net.minecraft.util.Mth;
  * {@code fire} is the trigger, held or not; what it fires is whatever the aircraft has selected.
  * {@code flare} and {@code chaff} are the two countermeasure handles, which are separate because
  * they answer different threats; see {@link com.ashvehicles.weapon.Dispenser}.
+ * {@code lock} is the seeker's own trigger: held to let it take a new target, and nothing to do
+ * with keeping one it already has. See {@link com.ashvehicles.weapon.TargetLock#tick}.
  */
 public record AircraftInput(float pitch, float roll, float yaw, float throttle, boolean brake, boolean fire,
-        boolean flare, boolean chaff) {
+        boolean flare, boolean chaff, boolean lock) {
 
     /** Controls centred, engine left where it is. Also what an empty cockpit does. */
     public static final AircraftInput NONE =
-            new AircraftInput(0.0F, 0.0F, 0.0F, 0.0F, false, false, false, false);
+            new AircraftInput(0.0F, 0.0F, 0.0F, 0.0F, false, false, false, false, false);
 
     public AircraftInput {
         pitch = Mth.clamp(pitch, -1.0F, 1.0F);
@@ -35,10 +37,11 @@ public record AircraftInput(float pitch, float roll, float yaw, float throttle, 
         buf.writeBoolean(this.fire);
         buf.writeBoolean(this.flare);
         buf.writeBoolean(this.chaff);
+        buf.writeBoolean(this.lock);
     }
 
     public static AircraftInput read(FriendlyByteBuf buf) {
         return new AircraftInput(buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
-                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean());
+                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean());
     }
 }

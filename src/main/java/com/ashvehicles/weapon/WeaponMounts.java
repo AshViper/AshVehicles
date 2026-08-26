@@ -465,15 +465,17 @@ public final class WeaponMounts {
      * aircraft.
      *
      * @param trigger whether the pilot is holding the trigger this tick
+     * @param wantsLock whether the pilot is holding the seeker's own trigger this tick, so it may
+     *                  take up a target it is not already tracking. See {@link TargetLock#tick}.
      */
-    public void tick(boolean trigger) {
+    public void tick(boolean trigger, boolean wantsLock) {
         this.ensureLayout();
         this.reselect();
 
         WeaponDefinition selectedWeapon = this.selected == null ? null : Definitions.weapon(this.selected);
 
         // The seeker only looks while something that can use a lock is selected.
-        if (this.lock.tick(selectedWeapon == null ? null : selectedWeapon.guidance().orElse(null))) {
+        if (this.lock.tick(selectedWeapon == null ? null : selectedWeapon.guidance().orElse(null), wantsLock)) {
             this.dirty = true;
         } else if (this.lock.isClosing()) {
             // Nothing has changed that a target or a lock would show, and yet something has: how far

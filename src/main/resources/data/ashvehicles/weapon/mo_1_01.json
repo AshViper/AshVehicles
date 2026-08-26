@@ -12,9 +12,9 @@
   "projectile": {
     "damage": 45.0,
     "speed": 1.0,
-    "thrust": 0.062,
+    "thrust": 0.53,
     "burn_ticks": 95,
-    "top_speed": 4.6,
+    "top_speed": 38.9,
     "gravity": 0.0016,
     "range": 2500.0,
     "explosion": 7.0,

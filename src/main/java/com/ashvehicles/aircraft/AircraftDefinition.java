@@ -95,7 +95,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             VehicleChassis.Hitbox.DEFAULT,
             VehicleChassis.Model.DEFAULT,
             new Engine(0.02F, 0.02F, 0.06F, 1.0F, Optional.empty()),
-            new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 0.02F, 0.15F, 0.28F, 6.0F, 0.0F),
+            new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 20.0F, 0.02F, 0.15F, 0.28F, 6.0F, 0.0F),
             new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F),
             new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0,
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0)))),
@@ -283,6 +283,12 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * @param stallAngle angle of attack, in degrees, past which the airflow separates and the lift
      *                   falls away instead of growing
      * @param drag parasitic drag: what the shape costs, against the square of the airspeed
+     * @param airBrakeDrag the multiplier {@code drag} is put through with the air brake out. A
+     *                     board stood up in the airflow rather than anything the wing is doing, so
+     *                     it is a multiplier on the shape's own drag and not a thing of its own —
+     *                     and has to be sized against how slippery {@code drag} already says this
+     *                     airframe is: a board worth four times the drag of a draggy old shape is
+     *                     lost in the noise held out behind a clean one
      * @param inducedDrag drag that comes with lift, against the square of the lift coefficient. This
      *                    is what makes a hard turn bleed speed
      * @param lateralDrag how quickly a sideways slip is killed. A fuselage does not fly sideways
@@ -297,8 +303,8 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      *                    catch up. Zero derives it from the stalling speed
      */
     public record Wing(float maxSpeed, float stallSpeed, float lift, float liftSlope, float stallAngle,
-            float drag, float inducedDrag, float lateralDrag, float groundEffect, float span,
-            float rotateSpeed) {
+            float drag, float airBrakeDrag, float inducedDrag, float lateralDrag, float groundEffect,
+            float span, float rotateSpeed) {
 
         /**
          * Fraction of the stalling speed the nose comes up at, for a file that names no figure.
@@ -323,6 +329,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.FLOAT.optionalFieldOf("lift_slope", 5.5F).forGetter(Wing::liftSlope),
                 Codec.FLOAT.optionalFieldOf("stall_angle", 15.0F).forGetter(Wing::stallAngle),
                 Codec.FLOAT.fieldOf("drag").forGetter(Wing::drag),
+                Codec.FLOAT.optionalFieldOf("air_brake_drag", 20.0F).forGetter(Wing::airBrakeDrag),
                 Codec.FLOAT.optionalFieldOf("induced_drag", 0.02F).forGetter(Wing::inducedDrag),
                 Codec.FLOAT.optionalFieldOf("lateral_drag", 0.15F).forGetter(Wing::lateralDrag),
                 Codec.FLOAT.optionalFieldOf("ground_effect", 0.28F).forGetter(Wing::groundEffect),

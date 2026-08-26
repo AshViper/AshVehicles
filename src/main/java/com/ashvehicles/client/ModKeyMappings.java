@@ -60,6 +60,17 @@ public final class ModKeyMappings {
     public static final KeyMapping RELEASE_CHAFF = create("release_chaff", GLFW.GLFW_KEY_V);
 
     /**
+     * Held to let the seeker take a target, rather than merely hold whichever it has already got.
+     *
+     * <p>Without this a radar-guided weapon would lock onto whatever sits in the cone the moment it
+     * is selected, with nothing for the pilot to do about it — which is neither how a radar works
+     * nor much of a decision to hand somebody. Held rather than tapped, because a lock the pilot
+     * lets go of before it closes is a lock that was never taken; once it has closed the seeker
+     * holds it on its own and the key can be let go. See {@link com.ashvehicles.weapon.TargetLock}.
+     */
+    public static final KeyMapping RADAR_LOCK = create("radar_lock", GLFW.GLFW_KEY_L);
+
+    /**
      * Held to stop the mouse flying the aeroplane and let it look around instead.
      *
      * <p>On the middle mouse button, where the hand already is. Flying by pointing costs the pilot
@@ -148,7 +159,7 @@ public final class ModKeyMappings {
     public static final KeyMapping[] ALL = {PITCH_UP, PITCH_DOWN, ROLL_LEFT, ROLL_RIGHT,
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
             AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_VTOL, CYCLE_WEAPON, RELEASE_FLARE, RELEASE_CHAFF,
-            FREE_LOOK, TOGGLE_MOUSE_AIM, AIM,
+            RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,
             DISMOUNT, OPEN_HOLD, SWITCH_SEAT};
 

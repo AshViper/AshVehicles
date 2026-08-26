@@ -318,12 +318,12 @@
     }
   },
   "wing": {
-    "max_speed": 16,
+    "max_speed": 35.8,
     "stall_speed": 1.55,
     "lift": 0.0056,
     "lift_slope": 5.5,
     "stall_angle": 17,
-    "drag": 0.000155,
+    "drag": 0.0000334,
     "induced_drag": 0.00036,
     "lateral_drag": 0.15,
     "ground_effect": 0.3,
@@ -351,7 +351,7 @@
     "cycle_ticks": 40,
     "drag_penalty": 0.6,
     "rolling_friction": 0.999,
-    "brake_friction": 0.94,
+    "brake_friction": 0.986,
     "lateral_friction": 0.5,
     "steer_rate": 1,
     "steer_fade": 1.3

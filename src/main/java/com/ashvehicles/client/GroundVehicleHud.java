@@ -251,8 +251,14 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
                 focal, centreX, centreY);
 
         if (boresight != null && missile.guidance().isPresent()) {
-            int radius = Math.round(
-                    (float) Math.tan(Math.toRadians(missile.guidance().get().lockAngle())) * focal);
+            WeaponDefinition.Guidance guidance = missile.guidance().get();
+            // The set's own arc rather than the round's head, for a radar-homing missile cued by it
+            // before launch — see TargetLock#bestCandidate, which is the same choice made the same
+            // way and is what this ring is meant to be honest about.
+            boolean radarCued = guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR
+                    && vehicle.radar().fitted();
+            float angle = radarCued ? vehicle.radar().arc() : guidance.lockAngle();
+            int radius = Math.round((float) Math.tan(Math.toRadians(angle)) * focal);
             int colour = locked ? AircraftHud.WARNING : loaded ? AircraftHud.GREEN : AircraftHud.DIM;
 
             AircraftHud.circle(graphics, boresight[0], boresight[1], Mth.clamp(radius, 10, 220), colour);

@@ -9,10 +9,10 @@
   "projectile": {
     "damage": 150.0,
     "speed": 4.0,
-    "thrust": 0.34,
+    "thrust": 0.99,
     "burn_ticks": 70,
     "spool_ticks": 12,
-    "top_speed": 18.0,
+    "top_speed": 50.0,
     "gravity": 0.0005,
     "range": 18600.0,
     "explosion": 3.5,
@@ -28,7 +28,7 @@
     "turn_rate": 5.0,
     "lock_angle": 30.0,
     "lock_range": 2400.0,
-    "lock_ticks": 30,
+    "lock_ticks": 8,
     "track_angle": 85.0,
     "proximity": 6.0,
     "seeker": "radar"
