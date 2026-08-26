@@ -278,6 +278,9 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * turret; the muzzle is that far along whichever way the gun is currently laid. Written as a
      * single point it would be right at one elevation and wrong at every other.
      *
+     * <p>A mount with more than one barrel says so in {@code barrels}, and fires out of them in
+     * turn: see {@link Barrel}.
+     *
      * @param main the weapon fired by the trigger, or empty for a vehicle with nothing to fire
      * @param trunnion where the gun pivots in elevation, in the vehicle's own axes. Swung about the
      *                 turret ring with everything else on the turret
@@ -287,12 +290,16 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * @param kick how hard firing shoves the vehicle backwards, in blocks per tick. A hundred and
      *             twenty millimetres against sixty tonnes is not much, but it is not nothing, and a
      *             tank that fires and does not move at all reads as a tank that fired a blank
+     * @param barrels every barrel this mount fires out of, for anything with more than the one.
+     *                Left out, the mount is the single barrel the {@code trunnion} and
+     *                {@code barrel_length} above describe, which is what every file said before
+     *                there was a second one
      */
     public record Armament(Optional<ResourceLocation> main, Vec3 trunnion, float barrelLength,
-            float recoil, int recoilTicks, float kick) {
+            float recoil, int recoilTicks, float kick, List<Barrel> barrels) {
         /** A vehicle with nothing to fire. */
         public static final Armament NONE =
-                new Armament(Optional.empty(), Vec3.ZERO, 0.0F, 0.0F, 1, 0.0F);
+                new Armament(Optional.empty(), Vec3.ZERO, 0.0F, 0.0F, 1, 0.0F, List.of());
 
         public static final Codec<Armament> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("main").forGetter(Armament::main),
@@ -300,12 +307,72 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
                 Codec.FLOAT.optionalFieldOf("barrel_length", 0.0F).forGetter(Armament::barrelLength),
                 Codec.FLOAT.optionalFieldOf("recoil", 0.35F).forGetter(Armament::recoil),
                 Codec.INT.optionalFieldOf("recoil_ticks", 14).forGetter(Armament::recoilTicks),
-                Codec.FLOAT.optionalFieldOf("kick", 0.06F).forGetter(Armament::kick)
+                Codec.FLOAT.optionalFieldOf("kick", 0.06F).forGetter(Armament::kick),
+                Barrel.CODEC.listOf().optionalFieldOf("barrels", List.of()).forGetter(Armament::barrels)
         ).apply(instance, Armament::new));
 
         /** Whether there is anything to fire at all. */
         public boolean exists() {
             return this.main.isPresent();
+        }
+
+        /** How many barrels the mount fires out of. Never fewer than one: a gun has a barrel. */
+        public int barrelCount() {
+            return Math.max(this.barrels.size(), 1);
+        }
+
+        /**
+         * One barrel of the mount, with whatever it leaves out taken from the mount as a whole.
+         *
+         * <p>A file that lists none is a single-barrelled mount, and its one barrel is what the
+         * trunnion and the length above describe. An index past the end is the last barrel rather
+         * than a thrown exception: a file that is wrong about how many barrels it has should fire
+         * out of the wrong one, not stop the vehicle firing at all.
+         */
+        public Barrel barrel(int index) {
+            if (this.barrels.isEmpty()) {
+                return new Barrel(this.trunnion, Optional.of(this.barrelLength), Optional.empty());
+            }
+
+            return this.barrels.get(Math.min(Math.max(index, 0), this.barrels.size() - 1));
+        }
+    }
+
+    /**
+     * One barrel of a mount that has more than one: a twin thirty-millimetre, a warship's after
+     * turret laid by the same fire control, anything that fires out of more than one hole.
+     *
+     * <p><b>Barrels rather than rounds.</b> A weapon file can already put several rounds into the
+     * air at once — that is {@code salvo}, and it is what a shell full of buckshot does. This is the
+     * other thing entirely: one round at a time, out of a different hole each time. The rate of
+     * fire, the magazine and the loading are exactly what they were, and all that changes is where
+     * the round comes out. A twin mount that fired twice as fast would be a different weapon file,
+     * not a second barrel.
+     *
+     * <p><b>Its own ring, if it has one.</b> A pair of barrels in the same mounting come round with
+     * the mounting and say nothing here. A warship's after turret is a different mounting on the
+     * same fire control: it is laid at the same target but traverses about its own barbette, and it
+     * says where that is. Left out, the barrel rides the turret ring the whole vehicle uses.
+     *
+     * @param trunnion where this barrel pivots in elevation, in the vehicle's own axes
+     * @param length from that trunnion to the muzzle, in blocks. Left out, the mount's own
+     * @param ring the ring this barrel traverses about. Left out, the vehicle's turret ring
+     */
+    public record Barrel(Vec3 trunnion, Optional<Float> length, Optional<Vec3> ring) {
+        public static final Codec<Barrel> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Vec3.CODEC.fieldOf("trunnion").forGetter(Barrel::trunnion),
+                Codec.FLOAT.optionalFieldOf("barrel_length").forGetter(Barrel::length),
+                Vec3.CODEC.optionalFieldOf("ring").forGetter(Barrel::ring)
+        ).apply(instance, Barrel::new));
+
+        /** How long this barrel is, or the mount's own length for one that does not say. */
+        public float lengthOr(float fallback) {
+            return this.length.orElse(fallback);
+        }
+
+        /** The ring this barrel comes round about, or the vehicle's own for one that does not say. */
+        public Vec3 ringOr(Vec3 fallback) {
+            return this.ring.orElse(fallback);
         }
     }
 

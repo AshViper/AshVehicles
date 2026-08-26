@@ -713,19 +713,49 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Where the muzzle is, in the world.
+     * Where the muzzle is, in the world. The first barrel, for anything that only wants one point —
+     * the gunner's sight, most of all, which is laid down one bore and cannot be laid down two.
+     */
+    public Vec3 getMuzzle(float partialTick) {
+        return this.getMuzzle(0, partialTick);
+    }
+
+    /**
+     * Where one of the mount's muzzles is, in the world.
      *
      * <p>Built from the trunnion and a length rather than from a fixed point, because the barrel
      * swings: the trunnion is a place on the turret and rides round with it, and the muzzle is a
      * barrel's length from there along whichever way the gun is currently laid. A single point would
      * be right at one elevation and wrong at every other.
+     *
+     * <p>Every barrel of a mount is laid the same way — that is what makes them one mount — so they
+     * differ only in where they start from and how far along that line they end. See
+     * {@link GroundVehicleDefinition.Barrel}, and note the two arrangements it covers:
+     *
+     * <p>A pair of barrels in one mounting sit either side of the trunnion the mounting elevates
+     * about, and are carried up and down by it — so they are rocked about it here, exactly as the
+     * coaxial is, and a barrel sitting above the bore stays above it at every elevation rather than
+     * sliding off the gun as the mounting comes up.
+     *
+     * <p>A second mounting on the same fire control — a warship's after turret — elevates about a
+     * trunnion of its own, which is the one it is described by. There is nothing to rock it about,
+     * and rocking it about the forward turret's trunnion would swing it the length of the ship. So a
+     * barrel that names a ring of its own is left where it is and merely comes round about that.
      */
-    public Vec3 getMuzzle(float partialTick) {
+    public Vec3 getMuzzle(int barrel, float partialTick) {
         GroundVehicleDefinition.Armament armament = this.getStats().armament();
-        Vec3 trunnion = this.position().add(
-                Attitude.toWorld(this.getAttitude(partialTick), this.onTurret(armament.trunnion(), partialTick)));
+        GroundVehicleDefinition.Barrel one = armament.barrel(barrel);
+        Vec3 seat = one.ring().isPresent() ? one.trunnion() : this.onGun(one.trunnion(), partialTick);
+        Vec3 ring = one.ringOr(this.getStats().turret().ring());
+        Vec3 trunnion = this.position().add(Attitude.toWorld(this.getAttitude(partialTick),
+                this.onRing(seat, ring, partialTick)));
 
-        return trunnion.add(this.getAimDirection(partialTick).scale(armament.barrelLength()));
+        return trunnion.add(this.getAimDirection(partialTick).scale(one.lengthOr(armament.barrelLength())));
+    }
+
+    /** How many barrels the main armament fires out of, one at a time and in turn. */
+    public int getBarrelCount() {
+        return this.getStats().armament().barrelCount();
     }
 
     /**
@@ -736,7 +766,18 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * the turret right carries a point that was ahead of the ring round towards the right-hand side.
      */
     private Vec3 onTurret(Vec3 offset, float partialTick) {
-        Vec3 ring = this.getStats().turret().ring();
+        return this.onRing(offset, this.getStats().turret().ring(), partialTick);
+    }
+
+    /**
+     * The same, about a ring the caller names rather than the vehicle's own.
+     *
+     * <p>Which every mount but one uses the vehicle's own for. What wants a different one is a
+     * second mounting laid by the same fire control — a warship's after turret comes round to the
+     * bearing the forward one is laid at, but about its own barbette, and a point on it swung about
+     * the forward turret's ring would describe a barrel bolted to the wrong end of the ship.
+     */
+    private Vec3 onRing(Vec3 offset, Vec3 ring, float partialTick) {
         Vec3 local = offset.subtract(ring);
         float radians = this.getTurretYaw(partialTick) * DEG_TO_RAD;
         double sin = Mth.sin(radians);

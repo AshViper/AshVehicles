@@ -324,8 +324,8 @@
     "span": 14
   },
   "handling": {
-    "pitch_rate": 1.6,
-    "roll_rate": 3.5,
+    "pitch_rate": 2.16,
+    "roll_rate": 4.73,
     "yaw_rate": 3,
     "control_lag": 0.25,
     "weathervane": 2,
@@ -437,6 +437,11 @@
     {
       "name": "pylon1_copy_copy_copy_copy_copy_copy_copy",
       "pos": [-1.3, 0.7, 1.95]
+    },
+    {
+      "name": "gun",
+      "pos": [0.0, 0.7, 4.0],
+      "fixed": "ashvehicles:m230"
     }
   ],
   "type": "helicopter"

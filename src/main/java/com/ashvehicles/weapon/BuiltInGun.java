@@ -34,12 +34,12 @@ import net.minecraft.world.phys.Vec3;
  * from {@code data/ashvehicles/weapon/} exactly as an aircraft reads them, so a gun is described in
  * one place whether it is bolted into a turret or hung under a wing.
  *
- * <p><b>Why one class for both barrels.</b> Everything below is the same for either: rounds come out
+ * <p><b>Why one class for both guns.</b> Everything below is the same for either: rounds come out
  * of the same hold, the wait between them is the same figure read from the same file, the round
- * leaves the same way and scatters about the same cone. What differs is four things — which weapon
- * it is, which pair of counters it keeps, where its muzzle is, and what its rounds are called in the
- * save — and those four are the whole of {@link Mount}. Written twice instead, the pair would have
- * drifted the first time either was fixed.
+ * leaves the same way and scatters about the same cone. What differs is five things — which weapon
+ * it is, which pair of counters it keeps, where its muzzles are, how many of them it has, and what
+ * its rounds are called in the save — and those five are the whole of {@link Mount}. Written twice
+ * instead, the pair would have drifted the first time either was fixed.
  *
  * <p><b>Whether one press is one round is the weapon's to say.</b> A tank gun is read on the
  * trigger's rising edge: a loader takes several seconds, and one that let go the moment they were
@@ -64,8 +64,8 @@ public final class BuiltInGun {
      * Which of a vehicle's two built-in guns this is: what it fires, what it keeps its count in, and
      * where its rounds leave from.
      *
-     * <p>Everything a barrel does is the same barrel to barrel. Everything a barrel <em>is</em> is
-     * here, and it is four questions long.
+     * <p>Everything a gun does is the same gun to gun. Everything a gun <em>is</em> is here, and it
+     * is five questions long.
      */
     public enum Mount {
         /**
@@ -99,8 +99,13 @@ public final class BuiltInGun {
             }
 
             @Override
-            Vec3 muzzle(GroundVehicleEntity vehicle) {
-                return vehicle.getMuzzle(1.0F);
+            Vec3 muzzle(GroundVehicleEntity vehicle, int barrel) {
+                return vehicle.getMuzzle(barrel, 1.0F);
+            }
+
+            @Override
+            int barrels(GroundVehicleEntity vehicle) {
+                return vehicle.getBarrelCount();
             }
 
             @Override
@@ -142,7 +147,7 @@ public final class BuiltInGun {
             }
 
             @Override
-            Vec3 muzzle(GroundVehicleEntity vehicle) {
+            Vec3 muzzle(GroundVehicleEntity vehicle, int barrel) {
                 return vehicle.gunToWorld(vehicle.getStats().coaxial().muzzle(), 1.0F);
             }
 
@@ -163,8 +168,16 @@ public final class BuiltInGun {
 
         abstract void reload(GroundVehicleEntity vehicle, int ticks);
 
-        /** Where this barrel's rounds leave, in the world, as of this tick. */
-        abstract Vec3 muzzle(GroundVehicleEntity vehicle);
+        /** Where one of this gun's rounds leaves, in the world, as of this tick. */
+        abstract Vec3 muzzle(GroundVehicleEntity vehicle, int barrel);
+
+        /**
+         * How many barrels this gun fires out of in turn. One, unless the file says otherwise, and
+         * a machine gun clamped to a mantlet has never had two.
+         */
+        int barrels(GroundVehicleEntity vehicle) {
+            return 1;
+        }
 
         /**
          * What this barrel's counters are called in the vehicle's tag. Empty for the main gun, whose
@@ -198,6 +211,14 @@ public final class BuiltInGun {
     private final Mount mount;
     /** Whether the trigger was down last tick, so that holding it does not empty the magazine. */
     private boolean triggerWasDown;
+    /**
+     * Which barrel the next round comes out of, for a mount with more than one. Kept here rather
+     * than on the vehicle because nothing but this class has ever needed to know: the flash and the
+     * round are both put where they belong by the server, and what the clients draw of the mount
+     * itself — the recoil — is the whole thing running back, not one barrel of it. A gun that comes
+     * back from a save starting at its first barrel again is a gun nobody can tell was interrupted.
+     */
+    private int barrel;
     /** Rounds until the next muzzle flash. See {@link #FLASH_EVERY}. */
     private int untilFlash;
 
@@ -338,7 +359,17 @@ public final class BuiltInGun {
      * flat.
      */
     private void fire(ServerLevel level, ResourceLocation weaponId, WeaponDefinition weapon) {
-        Vec3 muzzle = this.mount.muzzle(this.vehicle);
+        // Round about the barrels, one round each. Every barrel of a mount is laid the same way and
+        // loaded off the same magazine at the same rate -- a twin mounting is two holes for the
+        // rounds to leave by, not two guns -- so the whole of being one is which muzzle this round
+        // comes out of. What a file wants instead when it wants two rounds at once is the weapon's
+        // own salvo, a few lines below.
+        int barrels = Math.max(this.mount.barrels(this.vehicle), 1);
+        int firing = this.barrel % barrels;
+
+        this.barrel = (firing + 1) % barrels;
+
+        Vec3 muzzle = this.mount.muzzle(this.vehicle, firing);
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
         Vec3 right = across(bore);
         Vec3 up = right.cross(bore).normalize();

@@ -345,8 +345,8 @@
     "span": 8.8
   },
   "handling": {
-    "pitch_rate": 2.5,
-    "roll_rate": 2.5,
+    "pitch_rate": 3.38,
+    "roll_rate": 3.38,
     "yaw_rate": 1.2,
     "control_lag": 0.18,
     "weathervane": 3,
@@ -414,6 +414,11 @@
     {
       "name": "pylon1_copy_copy_copy",
       "pos": [0.62, 1.43, -0.22]
+    },
+    {
+      "name": "gun",
+      "pos": [1.9, 2.5, 0.6],
+      "fixed": "ashvehicles:m61"
     }
   ]
 }
