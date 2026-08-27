@@ -3133,10 +3133,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         // The pylons are bare by the time this is reached; the hold is not, and an airframe folded
         // up with a load still inside it would take the load with it.
-        this.spillHold();
-        this.destroy(this.getDropItem());
-
-        return InteractionResult.CONSUME;
+        return this.foldAway(player);
     }
 
     /**

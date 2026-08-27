@@ -2281,10 +2281,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         // Whatever is in the hold stays the player's, and a vehicle folded up with a load inside it
         // would take the load with it.
-        this.spillHold();
-        this.destroy(this.getDropItem());
-
-        return InteractionResult.CONSUME;
+        return this.foldAway(player);
     }
 
     /**

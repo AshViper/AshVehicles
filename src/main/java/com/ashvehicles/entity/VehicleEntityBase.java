@@ -777,6 +777,37 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
+     * Folds a serviceable machine back into its item and hands it to the player who asked for it.
+     *
+     * <p>This is what a wrench click comes to when there is nothing left to strip: the hold is tipped
+     * out, the machine is removed, and its item is put straight into the player's inventory rather
+     * than dropped at the machine's feet — folded transport is meant to be carried, and a click that
+     * meant "pack it up" should end with the thing in your hands, not lying under a fuselage that is
+     * no longer there. If the player is full the item falls out beside them instead, which is a
+     * detail of inventory and nothing to do with where the machine was standing.
+     */
+    protected InteractionResult foldAway(Player player) {
+        this.spillHold();
+
+        // The machine is taken out in the same spirit as the rest of the wrench: the item that
+        // places it is the player's to carry. Under the gamerule that turns entity drops off, a
+        // machine folded up yields nothing, exactly as its wreck would have.
+        if (this.level().getGameRules().getBoolean(GameRules.RULE_DOENTITYDROPS)) {
+            ItemStack folded = new ItemStack(this.getDropItem());
+
+            this.discard();
+
+            if (!player.addItem(folded)) {
+                player.drop(folded, false);
+            }
+        } else {
+            this.discard();
+        }
+
+        return InteractionResult.CONSUME;
+    }
+
+    /**
      * Tips the hold out on to the ground, for a machine that is about to stop existing.
      *
      * <p>Whatever is inside is the player's and has to go somewhere. Folding an aeroplane away with

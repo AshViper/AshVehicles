@@ -36,35 +36,93 @@ public class AshVehicles {
     public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MODID);
 
     /**
-     * The mod's tab: the aeroplanes, the stores that go on them, and the tool for taking them apart.
+     * The mod's five tabs, one per sort of thing there is to carry: the machines that fly, the
+     * machines that drive, the ships that float, everything a machine is fed — shells, belts,
+     * rockets, bombs and the gun pods that hang under a wing — and the one remaining thing, the
+     * wrench that takes a machine apart again.
      *
-     * <p>Ordered as a hangar would be rather than as the registry happens to be: the wrench first,
-     * because everything else needs it eventually, then the airframes, then what hangs on them, and
-     * last what goes inside them.
+     * <p>Each tab is drawn as one of its own, so a wall of aeroplanes looks like an aeroplane and a
+     * page of shells looks like a shell; the fallback for any that is somehow emptied is the wrench.
+     *
+     * <p>They are told to sit <em>after</em> the vanilla Spawn Eggs tab rather than before Combat,
+     * so the mod's pages collect at the end of the bar and leave the game's own tabs exactly where
+     * they were — a mod tab sitting where Spawn Eggs should be is what this replaced.
      */
-    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> TAB = CREATIVE_MODE_TABS.register("vehicles",
+    /** The aeroplanes. */
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> AIRCRAFT_TAB = CREATIVE_MODE_TABS.register("aircraft",
             () -> CreativeModeTab.builder()
-                    .title(Component.translatable("itemGroup.ashvehicles"))
-                    .withTabsBefore(CreativeModeTabs.COMBAT)
-                    .icon(AshVehicles::tabIcon)
+                    .title(Component.translatable("itemGroup.ashvehicles.aircraft"))
+                    .withTabsBefore(CreativeModeTabs.SPAWN_EGGS)
+                    .icon(AshVehicles::aircraftIcon)
+                    .displayItems((parameters, output) ->
+                            ModItems.aircraft().values().forEach(item -> output.accept(item.get())))
+                    .build());
+
+    /** The cars and the tanks. */
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> VEHICLES_TAB = CREATIVE_MODE_TABS.register("vehicles",
+            () -> CreativeModeTab.builder()
+                    .title(Component.translatable("itemGroup.ashvehicles.vehicles"))
+                    .withTabsBefore(AIRCRAFT_TAB.getKey())
+                    .icon(AshVehicles::vehiclesIcon)
+                    .displayItems((parameters, output) ->
+                            ModItems.landVehicles().values().forEach(item -> output.accept(item.get())))
+                    .build());
+
+    /** The boats. */
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> SHIPS_TAB = CREATIVE_MODE_TABS.register("ships",
+            () -> CreativeModeTab.builder()
+                    .title(Component.translatable("itemGroup.ashvehicles.ships"))
+                    .withTabsBefore(VEHICLES_TAB.getKey())
+                    .icon(AshVehicles::shipsIcon)
+                    .displayItems((parameters, output) ->
+                            ModItems.ships().values().forEach(item -> output.accept(item.get())))
+                    .build());
+
+    /** The shells, the belts, the rockets and bombs, and the gun pods that hang under a wing. */
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> AMMO_TAB = CREATIVE_MODE_TABS.register("ammo",
+            () -> CreativeModeTab.builder()
+                    .title(Component.translatable("itemGroup.ashvehicles.ammo"))
+                    .withTabsBefore(SHIPS_TAB.getKey())
+                    .icon(AshVehicles::ammoIcon)
                     .displayItems((parameters, output) -> {
-                        output.accept(ModItems.WRENCH.get());
-                        ModItems.aircraft().values().forEach(item -> output.accept(item.get()));
-                        ModItems.vehicles().values().forEach(item -> output.accept(item.get()));
-                        ModItems.weapons().values().forEach(item -> output.accept(item.get()));
                         ModItems.ammo().values().forEach(item -> output.accept(item.get()));
+                        ModItems.explosiveStores().values().forEach(item -> output.accept(item.get()));
+                        ModItems.gunPods().values().forEach(item -> output.accept(item.get()));
                     }).build());
 
-    /**
-     * What the tab is drawn as: the first aeroplane there is, since a tab full of aeroplanes should
-     * look like one. The wrench stands in for a pack that has removed every aircraft, which is not a
-     * thing anybody is likely to do but is not worth crashing over either.
-     */
-    private static ItemStack tabIcon() {
-        return ModItems.aircraft().values().stream()
-                .findFirst()
-                .map(item -> item.get().getDefaultInstance())
-                .orElseGet(() -> ModItems.WRENCH.get().getDefaultInstance());
+    /** The wrench, which is the one thing nobody needs a shelf of. */
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> ITEMS_TAB = CREATIVE_MODE_TABS.register("items",
+            () -> CreativeModeTab.builder()
+                    .title(Component.translatable("itemGroup.ashvehicles.items"))
+                    .withTabsBefore(AMMO_TAB.getKey())
+                    .icon(AshVehicles::itemsIcon)
+                    .displayItems((parameters, output) -> {
+                        output.accept(ModItems.WRENCH.get());
+                    }).build());
+
+    /** What the aeroplane tab is drawn as: its own picture. */
+    private static ItemStack aircraftIcon() {
+        return ModItems.TAB_AIR.get().getDefaultInstance();
+    }
+
+    /** What the ground tab is drawn as: its own picture. */
+    private static ItemStack vehiclesIcon() {
+        return ModItems.TAB_TANK.get().getDefaultInstance();
+    }
+
+    /** What the ships tab is drawn as: its own picture. */
+    private static ItemStack shipsIcon() {
+        return ModItems.TAB_SHIP.get().getDefaultInstance();
+    }
+
+    /** What the ammunition tab is drawn as: its own picture. */
+    private static ItemStack ammoIcon() {
+        return ModItems.TAB_AMMO.get().getDefaultInstance();
+    }
+
+    /** What the items tab is drawn as: its own picture. */
+    private static ItemStack itemsIcon() {
+        return ModItems.TAB_ITEM.get().getDefaultInstance();
     }
 
     // The constructor for the mod class is the first code that is run when your mod is loaded.

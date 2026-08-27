@@ -13,6 +13,7 @@ import com.ashvehicles.item.GroundVehicleItem;
 import com.ashvehicles.item.WeaponItem;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.weapon.AmmoKind;
+import com.ashvehicles.weapon.WeaponDefinition;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -29,6 +30,18 @@ public final class ModItems {
     /** The one item that is not an aircraft or a weapon: what aircraft are taken apart with. */
     public static final DeferredItem<WrenchItem> WRENCH =
             ITEMS.registerItem("wrench", WrenchItem::new, new Item.Properties().stacksTo(1));
+
+    /**
+     * The creative tabs are drawn as their own pictures rather than as one of their machines:
+     * five little icons, one per tab. Each is a plain item whose model is nothing but a texture,
+     * kept out of every tab's {@code displayItems} so it never turns up in the game — it exists
+     * only to be what a tab looks like.
+     */
+    public static final DeferredItem<Item> TAB_AIR = ITEMS.registerItem("tab_air", Item::new, new Item.Properties());
+    public static final DeferredItem<Item> TAB_TANK = ITEMS.registerItem("tab_tank", Item::new, new Item.Properties());
+    public static final DeferredItem<Item> TAB_SHIP = ITEMS.registerItem("tab_ship", Item::new, new Item.Properties());
+    public static final DeferredItem<Item> TAB_AMMO = ITEMS.registerItem("tab_ammo", Item::new, new Item.Properties());
+    public static final DeferredItem<Item> TAB_ITEM = ITEMS.registerItem("tab_item", Item::new, new Item.Properties());
 
     private static final Map<ResourceLocation, DeferredItem<AircraftItem>> AIRCRAFT = registerAircraft();
     private static final Map<ResourceLocation, DeferredItem<GroundVehicleItem>> VEHICLES = registerVehicles();
@@ -124,9 +137,65 @@ public final class ModItems {
         return VEHICLES;
     }
 
+    /** The land vehicles only, which is everything that is not a ship. */
+    public static Map<ResourceLocation, DeferredItem<GroundVehicleItem>> landVehicles() {
+        return filterVehicles(false);
+    }
+
+    /** The ships only, for the tab that is theirs. */
+    public static Map<ResourceLocation, DeferredItem<GroundVehicleItem>> ships() {
+        return filterVehicles(true);
+    }
+
+    /** The vehicles of one kind or the other, kept in the order they were registered in. */
+    private static Map<ResourceLocation, DeferredItem<GroundVehicleItem>> filterVehicles(boolean ship) {
+        Map<ResourceLocation, DeferredItem<GroundVehicleItem>> result = new LinkedHashMap<>();
+
+        for (Map.Entry<ResourceLocation, DeferredItem<GroundVehicleItem>> entry : VEHICLES.entrySet()) {
+            if (Definitions.VEHICLES.get(entry.getKey()).isShip() == ship) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        return Collections.unmodifiableMap(result);
+    }
+
     /** Every weapon item, by the id of the weapon it is. */
     public static Map<ResourceLocation, DeferredItem<WeaponItem>> weapons() {
         return WEAPONS;
+    }
+
+    /**
+     * The weapon stores that are a gun pod, which is a weapon that is not also ammunition in the
+     * sense of a round: it is the whole gun. Still, it is what a machine is fed, so it lives with the
+     * shells and the belts in the tab of what a machine is fed.
+     */
+    public static Map<ResourceLocation, DeferredItem<WeaponItem>> gunPods() {
+        return filterWeapons(WeaponDefinition.Type.GUN);
+    }
+
+    /**
+     * The weapon stores that are rockets, missiles or bombs: ammunition that hangs on a pylon, so it
+     * lives with the shells and the belts in the tab of what a machine is fed.
+     */
+    public static Map<ResourceLocation, DeferredItem<WeaponItem>> explosiveStores() {
+        return filterWeapons(WeaponDefinition.Type.ROCKET, WeaponDefinition.Type.MISSILE, WeaponDefinition.Type.BOMB);
+    }
+
+    /** The weapons of one or another sort, kept in the order they were registered in. */
+    private static Map<ResourceLocation, DeferredItem<WeaponItem>> filterWeapons(WeaponDefinition.Type... kinds) {
+        Map<ResourceLocation, DeferredItem<WeaponItem>> result = new LinkedHashMap<>();
+
+        for (Map.Entry<ResourceLocation, DeferredItem<WeaponItem>> entry : WEAPONS.entrySet()) {
+            for (WeaponDefinition.Type kind : kinds) {
+                if (Definitions.WEAPONS.get(entry.getKey()).type() == kind) {
+                    result.put(entry.getKey(), entry.getValue());
+                    break;
+                }
+            }
+        }
+
+        return Collections.unmodifiableMap(result);
     }
 
     /** The ammunition items, by the kind of gun each one feeds. */
