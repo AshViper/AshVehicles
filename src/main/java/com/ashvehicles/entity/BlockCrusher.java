@@ -60,6 +60,16 @@ public final class BlockCrusher {
             ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "crushable"));
 
     /**
+     * Things that no vehicle should ever crush: logs, dirt, and other solid terrain blocks that
+     * would be unreasonable for a vehicle to destroy.
+     *
+     * <p>Checked before the resistance test, so anything in this tag is protected regardless of
+     * how low its explosion resistance is.
+     */
+    public static final TagKey<Block> NOT_CRUSHABLE = TagKey.create(Registries.BLOCK,
+            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "not_crushable"));
+
+    /**
      * How near the edge of the hull a block has to come before it counts as only touching it rather
      * than standing in it, in blocks.
      *
@@ -240,6 +250,10 @@ public final class BlockCrusher {
             return false;
         }
 
+        if (state.is(NOT_CRUSHABLE)) {
+            return false;
+        }
+
         // The block's own figure rather than the one a blast would be told, because there is no
         // blast: the state-and-explosion form of the question expects an explosion to ask it about,
         // and there are mods that read the one they are handed.
@@ -248,7 +262,7 @@ public final class BlockCrusher {
 
     /** Whether one block is the sort of thing tracks flatten however little else they can. */
     private static boolean growing(Level level, BlockPos pos, BlockState state) {
-        return breakable(level, pos, state) && state.is(CRUSHABLE);
+        return breakable(level, pos, state) && state.is(CRUSHABLE) && !state.is(NOT_CRUSHABLE);
     }
 
     /**
