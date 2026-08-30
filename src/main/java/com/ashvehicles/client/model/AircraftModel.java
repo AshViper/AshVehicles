@@ -161,15 +161,13 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_LEFT, pose.flaps() * FLAP_TRAVEL);
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_RIGHT, pose.flaps() * FLAP_TRAVEL);
 
-        // 可変翼。翼根で機体の鉛直軸周りに回し、両翼端を尾部へ運ぶ。左右で符号が逆になるのは、同じ「後ろ」が
-        // 鉛直軸周りでは互いに逆回りだからで、補助翼のような操縦上の左右差ではない。
-        //
-        // ここだけ turnAboutY を使う——上の舵面と違い、翼はモデルによってはルートボーンの半回転の下にあり、
-        // 生の Y 回転では機体の半分で翼が前へ出てしまう。符号をボーンごとにジオメトリから判断させる。
-        // VehicleGeoModel#turnAboutX 参照。角度は0〜1の作動量ではなく度で届いている。全開後退が何度かは
-        // 機体ファイルの数値であって、ここの定数ではないからだ。
-        turnAboutY(model, setup, AircraftDefinition.Bone.WING_LEFT, -pose.wingSweep());
-        turnAboutY(model, setup, AircraftDefinition.Bone.WING_RIGHT, pose.wingSweep());
+        // 可変翼。翼根で機体の鉛直軸周りに回し、両翼端を尾部へ運ぶ。どちら回りが「後ろ」かは左右で逆になる
+        // が、その左右をロール名で決めない——駆動方向はボーン自身の立ち位置（ピボットの X）と機体後方の向き
+        // から sweepAboutY が導く。以前はロール名に固定符号を付けており、GeckoLib のベイク（X 鏡映と回転の
+        // 負号）を通すと F-14 の両翼が加速で前へ出た。角度は0〜1の作動量ではなく度で届いている。全開後退が
+        // 何度かは機体ファイルの数値であって、ここの定数ではないからだ。VehicleGeoModel#sweepAboutY 参照。
+        sweepAboutY(model, setup, AircraftDefinition.Bone.WING_LEFT, pose.wingSweep());
+        sweepAboutY(model, setup, AircraftDefinition.Bone.WING_RIGHT, pose.wingSweep());
 
         // ノズルは舵面のような数度ではなく下まで一杯に振れる。アニメーションではなくここでポーズを付けるのは、
         // これが手順ではなく1つの角度だからだ。機体は転換がどこまで進んだか既に知っているし、それに伴って開く扉は
@@ -205,6 +203,10 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
 
     private static void turnAboutY(GeoModel<?> model, VehicleChassis.Model setup, String role, float degrees) {
         turnAboutY(model, setup.bone(role), degrees);
+    }
+
+    private static void sweepAboutY(GeoModel<?> model, VehicleChassis.Model setup, String role, float degrees) {
+        sweepAboutY(model, setup.bone(role), degrees);
     }
 
     /** 角速度を舵面の偏向へ写す。機体が限界の角速度で回っているとき舵一杯になる。 */

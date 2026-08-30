@@ -5,6 +5,7 @@ import java.util.Set;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.DesignationEntity;
+import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
 
@@ -67,10 +68,12 @@ public abstract class EntityTrackingMixin {
         if (this.entity instanceof VehicleEntityBase machine) {
             callback.cancel();
             this.ashvehicles$report(player, withinGhostRange(machine, player));
-        } else if (this.entity instanceof VehicleProjectile || this.entity instanceof DesignationEntity) {
+        } else if (this.entity instanceof VehicleProjectile || this.entity instanceof DesignationEntity
+                || this.entity instanceof TargetDroneEntity) {
             callback.cancel();
             // エンティティ型に登録された距離をブロック単位にしただけ。外すべきはプレイヤーの描画距離
-            // による頭打ちであって、距離そのものではない。
+            // による頭打ちであって、距離そのものではない。標的ドローンが並ぶのはミサイルと同じ理由——
+            // 輪の半分はロード済み範囲の外で、そこで消える的は撃てない。
             this.ashvehicles$report(player,
                     this.ashvehicles$within(player, this.entity.getType().clientTrackingRange() * 16.0));
         }

@@ -1055,7 +1055,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 boolean missiles = this.isMissileMode();
 
                 this.gun.tick(this.input.fire() && !missiles);
-                this.launcher.tick(this.input.fire() && missiles);
+                this.launcher.tick(this.input.fire() && missiles, this.input.lock());
                 // 同軸機銃は2択のどちらでもない。独自のトリガーを持ち同じ砲架で据えられるので、既に目標へ
                 // 照準している砲手は主兵装を仕舞わずに掃射できる——同軸機銃の存在理由そのものだ。
                 this.coax.tick(this.input.coax());

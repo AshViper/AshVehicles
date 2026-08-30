@@ -69,6 +69,13 @@ public final class BulletGhostAdapter implements GhostAdapter<BulletEntity> {
     public void render(EntityGhost ghost, GhostLOD lod, GhostRenderContext context) {
         GhostSnapshot snapshot = ghost.current();
         int colour = snapshot.payload() instanceof Integer tracer ? tracer : DEFAULT_TRACER;
+
+        // DH の霧の分だけ暗く・薄く。この描画タイプの混合では色を縮めることが光量を絞ることなので、
+        // アルファの扱いがどうであれ曳光は霧に沈む。
+        if (context.fog() > 0.0F) {
+            colour = faded(colour, 1.0F - context.fog());
+        }
+
         // 照明も陰影も無し。この描画タイプは光を完全に無視する。下に光源となる世界があろうと無かろうと、
         // 曳光にはそれが正しい。
         VertexConsumer buffer = context.buffers().getBuffer(RenderType.lightning());
@@ -87,6 +94,16 @@ public final class BulletGhostAdapter implements GhostAdapter<BulletEntity> {
 
         Tracer.streak(context.poseStack(), buffer, context.camera(), context.fromCamera(), travel,
                 context.distanceSq(), colour);
+    }
+
+    /** ARGB の4成分全部を等しく縮める。どの混合方式でもこれで薄くなる。 */
+    private static int faded(int colour, float keep) {
+        int a = (int) (((colour >>> 24) & 0xFF) * keep);
+        int r = (int) (((colour >> 16) & 0xFF) * keep);
+        int g = (int) (((colour >> 8) & 0xFF) * keep);
+        int b = (int) ((colour & 0xFF) * keep);
+
+        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     /**

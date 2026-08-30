@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "C": {
+      "item": "ashvehicles:circuit_board"
+    },
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "M": {
+      "item": "ashvehicles:machine_parts"
+    }
+  },
+  "pattern": [
+    " C ",
+    "SMS"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:target_drone"
+  }
+}

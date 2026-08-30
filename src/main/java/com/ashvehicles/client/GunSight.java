@@ -9,6 +9,7 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.weapon.GunStations;
@@ -649,6 +650,11 @@ public final class GunSight {
 
         if (candidate instanceof VehicleEntityBase machine) {
             return !machine.isWrecked();
+        }
+
+        // 標的ドローンは撃たれるために飛んでいる。シーカー（TargetLock）と同じ1行。
+        if (candidate instanceof TargetDroneEntity) {
+            return true;
         }
 
         return candidate instanceof LivingEntity;

@@ -11,6 +11,7 @@ import com.ashvehicles.registry.ModItems;
 import com.ashvehicles.registry.ModMenus;
 import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.registry.ModRecipes;
+import com.ashvehicles.registry.ModRegisters;
 import com.mojang.logging.LogUtils;
 
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -99,12 +100,14 @@ public class AshVehicles {
                             }).build());
 
     /**
-     * ばらす道具と注ぐ燃料。機体にも車両にも要るものなので、機体のタブと車両のタブの両方に出す。
-     * バニラでも道具は行き先の数だけ顔を出す。
+     * ばらす道具と注ぐ燃料、そして撃つ的。機体にも車両にも要るものなので、機体のタブと車両のタブの
+     * 両方に出す。バニラでも道具は行き先の数だけ顔を出す。
      */
     private static void tools(CreativeModeTab.Output output) {
         output.accept(ModItems.WRENCH.get());
         output.accept(ModItems.FUEL_CAN.get());
+        output.accept(ModItems.TARGET_DRONE.get());
+        output.accept(ModItems.BLAST_WAND.get());
     }
 
     /**
@@ -148,6 +151,10 @@ public class AshVehicles {
     // MOD クラスのコンストラクタは読み込み時に最初に走る。IEventBus や ModContainer のような
     // 引数型は FML が認識して自動で渡してくる。
     public AshVehicles(IEventBus modEventBus, ModContainer modContainer) {
+        // 何よりも先に。コンテンツパックの名前空間ごとのレジスタはこの後の registry パッケージの初期化中
+        // に作られ、その場でこのバスへ繋がれる。ModRegisters 参照。
+        ModRegisters.bind(modEventBus);
+
         // MOD 読み込み用に commonSetup を登録
         modEventBus.addListener(this::commonSetup);
 

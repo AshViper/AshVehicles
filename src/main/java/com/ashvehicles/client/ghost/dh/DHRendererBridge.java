@@ -3,7 +3,12 @@ package com.ashvehicles.client.ghost.dh;
 import javax.annotation.Nullable;
 
 import com.seibel.distanthorizons.api.DhApi;
+import com.seibel.distanthorizons.api.enums.rendering.EDhApiFogDrawMode;
+import com.seibel.distanthorizons.api.enums.rendering.EDhApiFogFalloff;
 import com.seibel.distanthorizons.api.interfaces.config.IDhApiConfig;
+import com.seibel.distanthorizons.api.interfaces.config.client.IDhApiFarFogConfig;
+import com.seibel.distanthorizons.api.interfaces.config.client.IDhApiFogConfig;
+import com.seibel.distanthorizons.api.interfaces.config.client.IDhApiGraphicsConfig;
 import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataCache;
 import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataRepo;
 import com.seibel.distanthorizons.api.interfaces.world.IDhApiLevelWrapper;
@@ -119,6 +124,65 @@ final class DHRendererBridge {
             return chunks == null ? 0.0 : chunks * 16.0;
         } catch (RuntimeException e) {
             return 0.0;
+        }
+    }
+
+    /**
+     * DH の遠方霧の現在の設定。霧を描いていなければ {@code null}。
+     *
+     * <p>読むのは DH が自分のシェーダーへ渡すのと同じ値だ（{@code FogRenderParamFactory} と
+     * {@code GlDhFogShader} が組む uniform: 距離スケールは {@code 1 / (chunkRenderDistance × 16)}、
+     * length は end−start、range は max−min）。falloff は API 列挙の {@code value} をそのまま持ち出す。
+     * シェーダーが比較するのもその数字なので。
+     *
+     * <p>{@code enableDhFog} が偽か、描画モードが {@code FOG_DISABLED} なら霧は無い。設定値のどれかが
+     * まだ null（DH 初期化中）でも同じ答えにする。半端な霧より無い霧の方がまし。
+     */
+    @Nullable
+    static DHFog fog() {
+        IDhApiConfig configs = DhApi.Delayed.configs;
+
+        if (configs == null) {
+            return null;
+        }
+
+        try {
+            IDhApiGraphicsConfig graphics = configs.graphics();
+
+            if (!Boolean.TRUE.equals(graphics.renderingEnabled().getValue())) {
+                return null;
+            }
+
+            Integer chunks = graphics.chunkRenderDistance().getValue();
+
+            if (chunks == null || chunks <= 0) {
+                return null;
+            }
+
+            IDhApiFogConfig fog = graphics.fog();
+
+            if (Boolean.FALSE.equals(fog.enableDhFog().getValue())
+                    || fog.drawMode().getValue() == EDhApiFogDrawMode.FOG_DISABLED) {
+                return null;
+            }
+
+            IDhApiFarFogConfig far = fog.farFog();
+            Float start = far.farFogStartDistance().getValue();
+            Float end = far.farFogEndDistance().getValue();
+            Float least = far.farFogMinThickness().getValue();
+            Float most = far.farFogMaxThickness().getValue();
+            Float density = far.farFogDensity().getValue();
+            EDhApiFogFalloff falloff = far.farFogFalloff().getValue();
+
+            if (start == null || end == null || least == null || most == null
+                    || density == null || falloff == null) {
+                return null;
+            }
+
+            return new DHFog(chunks * 16.0, falloff.value, start, end - start,
+                    least, most - least, density);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

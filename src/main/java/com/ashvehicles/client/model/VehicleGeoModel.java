@@ -82,8 +82,13 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
                 file("animations/entity/", name, ".animation.json")));
     }
 
+    /**
+     * その機体のファイル。名前空間は機体自身の物を使う——MOD 本体の機体なら {@code ashvehicles}、
+     * コンテンツパックの機体ならそのパックの名前空間で、モデルとテクスチャはパックの
+     * {@code assets/<名前空間>/} から読まれる。
+     */
     private static ResourceLocation file(String directory, ResourceLocation id, String suffix) {
-        return ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, directory + id.getPath() + suffix);
+        return ResourceLocation.fromNamespaceAndPath(id.getNamespace(), directory + id.getPath() + suffix);
     }
 
     /**
@@ -196,6 +201,32 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
     protected static void turnAboutY(GeoModel<?> model, String bone, float degrees) {
         pose(model, bone, found -> found.setRotY(
                 rest(found).getRotY() + machineSignY(found) * degrees * DEG_TO_RAD));
+    }
+
+    /**
+     * 可変翼専用の鉛直軸回転。正の角度が、そのボーンがどちら側の翼でも<em>翼端を機体後方へ</em>運ぶ。
+     *
+     * <p>{@link #turnAboutY} では足りない。あちらが直すのは回転<em>軸</em>の反転だけで、鉛直軸は親が半回転
+     * していようと鉛直のままだから常に「反転無し」と答える。だが翼で決め手になるのは軸ではなく<em>立ち位置</em>
+     * だ——同じ向きの鉛直回転が、右翼では翼端を後ろへ、左翼では前へ運ぶ。左右はロール名から信じない
+     * （L と名の付いたボーンが右側にあるのはこの MOD では実績のある事故だし、ミラーで作った模型は名前ごと
+     * 写る）。代わりにジオメトリに訊く:
+     *
+     * <ul>
+     * <li>どちら側の翼か——ピボットの X の符号。翼のピボットは翼根、つまり必ず自分の側にある。</li>
+     * <li>機体後方が局所でどちらか——{@link #machineSignZ}。半回転したルートの下では側と後方が同時に
+     *     裏返るので、積は物理的に正しい向きへ戻る。</li>
+     * </ul>
+     *
+     * <p>回転で傾いた親の下のピボット符号までは追わない（GeckoLib のピボットはモデル絶対座標）。翼は胴体
+     * 直下に付く物で、そうでないモデルはまず翼から Blockbench で見直すべき物だ。
+     */
+    protected static void sweepAboutY(GeoModel<?> model, String bone, float degrees) {
+        pose(model, bone, found -> {
+            float direction = -sign(found.getPivotX()) * machineSignZ(found);
+
+            found.setRotY(rest(found).getRotY() + direction * degrees * DEG_TO_RAD);
+        });
     }
 
     /** @see #turnAboutX */

@@ -288,10 +288,39 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     public record Projectile(float damage, float speed, float thrust, int burnTicks,
             int spoolTicks, float topSpeed,
             float gravity, float range, float explosion, int tracer, float ricochet,
+            float drag, float turnDrag,
             Optional<Trail> trail, Optional<Boolean> chunkLoading) {
 
+        /**
+         * モーターが切れた後に空気が奪う速さの係数。失う量は {@code drag × 速さ²}（1tickあたり）。
+         *
+         * <p>2乗なのは実際にそうだからで、そこが効く。燃焼終了直後の最も速い瞬間に最も激しく削られ、
+         * 遅くなるほど緩む。既定値は、Mach 4 で燃え尽きたミサイルが20秒ほどで Mach 1.5 付近まで落ちる
+         * 値。惰性区間を持たない弾——モーターが目標まで燃え続ける短射程弾——では一度も効かない。
+         *
+         * <p><b>燃焼中は効かない。</b> ファイルの {@code thrust} と {@code top_speed} は既に「空気の中で
+         * その機体が出せる性能」として書かれた値であり、そこへさらに抗力を足せば全ミサイルの最高速が黙って
+         * 下がる。足りていなかったのは燃焼<em>後</em>で、そこだけを足す。
+         */
+        public static final float DEFAULT_DRAG = 0.00006F;
+
+        /**
+         * 舵を切った分だけ余分に奪われる速さの係数。失う量は {@code turn_drag × 速さ × 旋回角}
+         * （1tickあたり、角はラジアン）。
+         *
+         * <p>誘導弾が機動で振り切れるのはこれがあるからだ。旋回は無料ではない——実物のミサイルは急旋回の
+         * たびに速度を失い、失った速度は二度と戻らない（モーターは既に燃え尽きている）。だから「早く曲げ
+         * させる」ことが防御になり、機動とレバーを引くタイミングの両方に意味が生まれる。
+         *
+         * <p>既定値は、最高速で舵をいっぱいに切り続けたミサイルが1秒で速さの1/4を失う程度。1度の回避
+         * 機動で仕留められはしないが、終末で大きく曲げさせられた弾は目に見えて鈍る。上げすぎると、交差
+         * 目標へ撃った弾が加速する前に自分の舵で失速する——0.35 では実際にそうなった。
+         */
+        public static final float DEFAULT_TURN_DRAG = 0.12F;
+
         public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0,
-                0.0F, 0.02F, 200.0F, 0.0F, 0xFFC864, 0.0F, Optional.empty(), Optional.empty());
+                0.0F, 0.02F, 200.0F, 0.0F, 0xFFC864, 0.0F, DEFAULT_DRAG, DEFAULT_TURN_DRAG,
+                Optional.empty(), Optional.empty());
 
         /**
          * 煙の完全な記述と、かつてはそれが全部だった素の {@code true} の両方を読む。だから古い兵装ファイル
@@ -317,6 +346,8 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 Codec.FLOAT.optionalFieldOf("explosion", 0.0F).forGetter(Projectile::explosion),
                 COLOUR.optionalFieldOf("tracer", 0xFFC864).forGetter(Projectile::tracer),
                 Codec.FLOAT.optionalFieldOf("ricochet", 0.0F).forGetter(Projectile::ricochet),
+                Codec.FLOAT.optionalFieldOf("drag", DEFAULT_DRAG).forGetter(Projectile::drag),
+                Codec.FLOAT.optionalFieldOf("turn_drag", DEFAULT_TURN_DRAG).forGetter(Projectile::turnDrag),
                 TRAIL.optionalFieldOf("trail", Optional.empty()).forGetter(Projectile::trail),
                 Codec.BOOL.optionalFieldOf("chunk_loading").forGetter(Projectile::chunkLoading)
         ).apply(instance, Projectile::new));
@@ -399,9 +430,18 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      *                行くか。実物のシーカーヘッドは3〜5を軸に作られている。それを大きく超えると、ミサイルは
      *                追尾のちらつき一つ一つを「目標が実際に動いた」かのように扱い、それはそれで別種の外れ方
      *                になる
+     * @param armTicks 発射から近接信管が生きるまでの時間（tick）。安全装置。これより前は目標の横を通っても
+     *                 炸裂しないので、レールを離れた瞬間の自機や、密集隊形の僚機の鼻先で破裂することが無い
+     * @param reacquireTicks 失探後、シーカーが視野内を探し続ける時間（tick）。この間に目標（または視野に
+     *                       入った別の有効目標）を捉え直せば追跡を再開し、捉え直せなければ自爆する。
+     *                       0 なら旧来通り——失探は永久で、弾はロケットとして飛び続ける
+     * @param seduction デコイ1つが1tickにこのシーカーを奪う基本確率。実際の確率はここから、デコイの残り
+     *                  寿命で目減りし、目標自身の熱量／反射断面積で割られる——燃え盛るアフターバーナーの
+     *                  横のフレアは、冷えた排気の横の同じフレアより分が悪い
      */
     public record Guidance(float turnRate, float lockAngle, float lockRange, int lockTicks,
-            float trackAngle, float proximity, float navGain, Seeker seeker) {
+            float trackAngle, float proximity, float navGain, Seeker seeker,
+            int armTicks, int reacquireTicks, float seduction) {
 
         /**
          * シーカーが何を見ているか。つまり何に騙されるか。
@@ -459,7 +499,10 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 Codec.FLOAT.optionalFieldOf("track_angle", 75.0F).forGetter(Guidance::trackAngle),
                 Codec.FLOAT.optionalFieldOf("proximity", 2.5F).forGetter(Guidance::proximity),
                 Codec.FLOAT.optionalFieldOf("nav_gain", 3.5F).forGetter(Guidance::navGain),
-                Seeker.CODEC.optionalFieldOf("seeker", Seeker.HEAT).forGetter(Guidance::seeker)
+                Seeker.CODEC.optionalFieldOf("seeker", Seeker.HEAT).forGetter(Guidance::seeker),
+                Codec.INT.optionalFieldOf("arm_ticks", 8).forGetter(Guidance::armTicks),
+                Codec.INT.optionalFieldOf("reacquire_ticks", 40).forGetter(Guidance::reacquireTicks),
+                Codec.FLOAT.optionalFieldOf("seduction", 0.2F).forGetter(Guidance::seduction)
         ).apply(instance, Guidance::new));
     }
 

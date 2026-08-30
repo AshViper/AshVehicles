@@ -16,7 +16,7 @@ public final class ModNetwork {
      * NeoForge 自身のペイロードに乗るが、サーバーが書いた形式と違う形式でクライアントが読めば、結果は
      * 同じ「接続が壊れる」。{@link com.ashvehicles.entity.VehicleProjectile#writeSpawnData} 参照。
      */
-    private static final String PROTOCOL_VERSION = "15";
+    private static final String PROTOCOL_VERSION = "16";
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {

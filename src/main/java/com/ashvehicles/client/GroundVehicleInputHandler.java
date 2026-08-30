@@ -74,7 +74,9 @@ public final class GroundVehicleInputHandler {
                 axis(ModKeyMappings.STEER_RIGHT, ModKeyMappings.STEER_LEFT),
                 ModKeyMappings.VEHICLE_BRAKE.isDown(),
                 minecraft.options.keyAttack.isDown(),
-                ModKeyMappings.FIRE_COAXIAL.isDown());
+                ModKeyMappings.FIRE_COAXIAL.isDown(),
+                // シーカーの引き金。コックピットとまったく同じキーで、まったく同じ意味を持つ
+                ModKeyMappings.RADAR_LOCK.isDown());
 
         vehicle.setInput(input);
         // 車両のtickより前に行う。このイベントが Pre である理由はそれが全てだ。砲塔はそのtick内で据えられるので、

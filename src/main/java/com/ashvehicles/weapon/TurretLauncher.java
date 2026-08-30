@@ -33,11 +33,17 @@ import net.minecraft.world.phys.Vec3;
  * 何に騙されるかは機体と同じく {@code data/ashvehicles/weapon/} から読む。だからミサイルは、翼下に吊ら
  * れていようと筒に入っていようと1箇所で記述される。
  *
- * <p><b>シーカーは発射筒が選択されているかに関わらず見ている。</b> これは意図的で、対空陣地の怖さの大半
- * がそこにある。機体を追尾している発射機はパイロットの警戒受信機を鳴らす
+ * <p><b>ロックの取り方はコックピットと同じ。</b> 砲手がシーカーのキーを押している間だけ、まだ追尾して
+ * いない目標を取る。掴んだ後は離してよく、保持はシーカー自身が行う。以前は砲塔が向いた先の物を無条件に
+ * 掴んでいたが、それは「見ること」と「ロックすること」の間に何も置かないということであり、対空車両だけが
+ * 機体と違う手順で戦う理由は無かった。{@link com.ashvehicles.entity.GroundVehicleInput#lock()} 参照。
+ *
+ * <p><b>ただしシーカーは発射筒が選択されているかに関わらず見ている。</b> これは意図的で、対空陣地の怖さ
+ * の大半がそこにある。機体を追尾している発射機はパイロットの警戒受信機を鳴らす
  * （{@link com.ashvehicles.sensor.Sensors} 参照）ので、機体は何かが発射される遥か前に「見られている」と
  * 告げられる。それがパイロットに打つ手を与える警告になる。乗員がミサイルへ切り替えた時だけ起きるシーカー
- * では、機体は晴天からの発射を食らうことになる。
+ * では、機体は晴天からの発射を食らうことになる。掴むのに手が要るようになっただけで、掴んだ後の振る舞いは
+ * 変わっていない。
  *
  * <p><b>ロック無しでは撃たない。</b> 誘導弾に狙う相手が無ければ捨てるのと同じで、乗員には筒を無駄にさせ
  * るより追尾を続けろと伝える方がよい。ロックをミサイルへ渡す方式は機体と同じ引き継ぎ——発射の瞬間の目標
@@ -151,8 +157,10 @@ public final class TurretLauncher {
      *
      * @param trigger 乗員が引き金を引いており<em>かつ</em>発射筒を選択しているか。引き金がどの兵装を撃つ
      *                かは車両側の判断で、このクラスの管轄ではない
+     * @param wantsLock 砲手がこの tick にシーカーのキーを押しているか。押していれば、まだ追尾していない
+     *                  目標を新たに取ってよい。既に掴んでいる物の保持はこれに左右されない
      */
-    public void tick(boolean trigger) {
+    public void tick(boolean trigger, boolean wantsLock) {
         int reload = this.vehicle.getMissileReload();
 
         if (reload > 0) {
@@ -185,8 +193,9 @@ public final class TurretLauncher {
             return;
         }
 
-        // シーカーは筒を選択している間だけでなく常に見ている。クラス冒頭の説明参照。
-        this.lock.tick(missile.guidance().orElse(null));
+        // シーカーは筒を選択している間だけでなく常に見ている。新しい目標を取るのは砲手がキーを押している
+        // 間だけ。クラス冒頭の説明参照。
+        this.lock.tick(missile.guidance().orElse(null), wantsLock);
 
         boolean pressed = trigger && (missile.isAutomatic() || !this.triggerWasDown);
         this.triggerWasDown = trigger;
@@ -208,18 +217,17 @@ public final class TurretLauncher {
     /**
      * 1発を送り出す。
      *
-     * <p>筒から出て<em>砲身方向</em>へ飛ぶ。両方積む車両ではそこが砲の指向方向だ——砲身と筒は同じ架台に
-     * 固定されているので、砲を目標に指向すれば筒も指向される。レール自体は砲塔上の点でリング回りに一緒に
-     * 回るが、砲身と一緒に俯仰はしない。筒は後座する物ではなく架台の側面の箱だから。
+     * <p>筒から出て<em>砲身方向</em>へ飛ぶ。ロックしている相手が居ようと居まいと、誘導だろうと無誘導
+     * だろうと、出ていく方向は常に架台が向いている方向だ。両方積む車両ではそこが砲の指向方向でもある
+     * ——砲身と筒は同じ架台に固定されているので、砲を目標に指向すれば筒も指向される。レール自体は砲塔上
+     * の点でリング回りに一緒に回るが、砲身と一緒に俯仰はしない。筒は後座する物ではなく架台の側面の箱
+     * だから。
      *
-     * <p><b>ただし既に何かをロックしている場合は別。</b> レーダー指示のロックが狭いシーカー視野ではなく
-     * レーダー自身の走査範囲で保持されるようになった今、シーカーは砲身方向からかなり外れた目標を捉える
-     * （{@link TargetLock#bestCandidate} 参照）。砲身方向へしか撃たない筒は、ロック対象からまるで外れた
-     * 方向へロック済みミサイルを撃ち出し、シーカー自身の {@code track_angle} が諦める前に数十度の差を
-     * {@code turn_rate} が詰めることに賭けることになる。広いロックでは、{@code turn_rate} が効き始めても
-     * 一度も間に合わないかもしれない。実物のレールも同じことをする。弾は発射前に指定目標へケージングされ、
-     * 出た時点で行き先の近くを向いており、細かい修正は自分の翼に任される。無誘導の筒は何も変わらない——
-     * 何もロックしていなければ従来通り砲身方向へ出る。
+     * <p>一時期、ロック済みの弾だけは目標の方向へケージングして撃ち出していた。シーカーが砲塔の向きと
+     * 無関係に目標を掴めたからで、砲身方向へ撃つと数十度外れた方向へ飛び出すことがあったためだ。ロックを
+     * 取るのに砲手がシーカーのキーで目標を捉えに行くようになった今、掴んだ相手は砲塔が向いている先にいる。
+     * 撃ち出す向きを弾に決めさせる必要はもう無く、決めさせない方が読める——砲身の向きが、そのまま弾の
+     * 出ていく向きだ。
      */
     private void fire(ServerLevel level, ResourceLocation missileId, WeaponDefinition missile) {
         GroundVehicleDefinition.Launcher tubes = this.vehicle.getStats().launcher();
@@ -230,13 +238,12 @@ public final class TurretLauncher {
         LivingEntity crew = this.vehicle.getControllingPassenger();
         RandomSource random = this.vehicle.getRandom();
         Entity locked = missile.isGuided() && this.lock.isLocked() ? this.lock.target() : null;
-        Vec3 caged = cagedAim(locked, rail, bore);
 
         double scatter = Math.tan(Math.toRadians(missile.firing().spread())) * 0.5;
         double spread = Math.tan(Math.toRadians(missile.firing().salvoSpread())) * 0.5;
 
         for (int i = 0; i < Math.max(1, missile.firing().salvo()); i++) {
-            Vec3 direction = caged
+            Vec3 direction = bore
                     .add(right.scale(random.nextGaussian() * (scatter + spread)))
                     .add(up.scale(random.nextGaussian() * (scatter + spread)))
                     .normalize();
@@ -263,21 +270,6 @@ public final class TurretLauncher {
 
         this.vehicle.setMissiles(this.vehicle.getMissiles() - 1);
         this.vehicle.setMissileReload(ticksFor(missile.firing().roundsPerSecond()));
-    }
-
-    /**
-     * ケージングされた弾が出ていく方向。ロックがあればその相手へ、無ければ砲身方向——無誘導の筒すべてと、
-     * 何も保持せず撃った誘導弾がそれ。方向を作れない唯一の場合（目標がレール上にちょうど重なっている）でも
-     * 砲身方向に戻す。
-     */
-    private static Vec3 cagedAim(@Nullable Entity locked, Vec3 rail, Vec3 bore) {
-        if (locked == null) {
-            return bore;
-        }
-
-        Vec3 toTarget = locked.position().add(0.0, locked.getBbHeight() * 0.5, 0.0).subtract(rail);
-
-        return toTarget.lengthSqr() > 1.0E-6 ? toTarget.normalize() : bore;
     }
 
     /**

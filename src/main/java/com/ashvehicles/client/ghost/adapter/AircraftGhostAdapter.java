@@ -17,6 +17,7 @@ import com.ashvehicles.client.ghost.GhostRenderContext;
 import com.ashvehicles.client.ghost.GhostSnapshot;
 import com.ashvehicles.client.ghost.geo.GhostAnimatable;
 import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
+import com.ashvehicles.client.ghost.geo.PlainVertices;
 import com.ashvehicles.client.item.VehicleIcons;
 import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.client.model.AircraftModel;
@@ -239,10 +240,12 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
 
             MountedStore mounted = MountedStore.of(store.folder(), store.weapon());
             ResourceLocation texture = renderer.getTextureLocation(mounted);
-            // ゴーストの兵装もゴーストの一部だ。
-            RenderType type = GhostGeoRenderer.renderType(texture, context.ghostStyle());
+            // ゴーストの兵装もゴーストの一部だ。バッファの覆いも本体と同じ理由で同じ物を挟むし
+            // （PlainVertices 参照）、DH の霧にも機体と同じだけ沈む（MountedStore.StoreRenderer 参照）。
+            RenderType type = GhostGeoRenderer.renderType(texture, context);
 
-            renderer.render(poseStack, mounted, buffers, type, buffers.getBuffer(type),
+            renderer.render(poseStack, mounted, buffers, type,
+                    new PlainVertices(buffers.getBuffer(type)),
                     context.packedLight(), context.partialTick());
             poseStack.popPose();
         }

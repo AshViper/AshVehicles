@@ -16,11 +16,18 @@ import net.minecraft.util.Mth;
  * <p><b>引き金は1つではなく2つ。</b> {@code fire} は乗員が選択している兵装——主砲か、両方積む車両なら
  * ミサイル。{@code coax} は砲の脇に固定された機銃で、選択されることは無く常にそこにある。目標を捉えている
  * 砲手は主砲をしまわずに機銃を撃ち込めるし、主砲と機銃を選ばねばならない戦車は「兵装1つの戦車」になる。
+ *
+ * <p>{@code lock} はシーカー専用の引き金で、押している間だけ新しい目標を取ってよいという意味。機体の
+ * {@link AircraftInput#lock()} とまったく同じ物であり、対空車両の砲手がパイロットと同じ手順を踏むように
+ * するためにここにある。既に捉えている目標の保持とは無関係。
+ * {@link com.ashvehicles.weapon.TargetLock#tick} 参照。
  */
-public record GroundVehicleInput(float drive, float steer, boolean brake, boolean fire, boolean coax) {
+public record GroundVehicleInput(float drive, float steer, boolean brake, boolean fire, boolean coax,
+        boolean lock) {
 
     /** 操作中立、何も押していない状態。 */
-    public static final GroundVehicleInput NONE = new GroundVehicleInput(0.0F, 0.0F, false, false, false);
+    public static final GroundVehicleInput NONE =
+            new GroundVehicleInput(0.0F, 0.0F, false, false, false, false);
 
     /**
      * 無人の運転席が出す入力。ブレーキ ON。
@@ -29,7 +36,8 @@ public record GroundVehicleInput(float drive, float steer, boolean brake, boolea
      * 放棄されると15秒近く走り続ける——乗員が野原に立って自分の戦車が走り去るのを眺めるには十分な長さだ。
      * 降りる者はブレーキを掛けていく。これも同じ。
      */
-    public static final GroundVehicleInput PARKED = new GroundVehicleInput(0.0F, 0.0F, true, false, false);
+    public static final GroundVehicleInput PARKED =
+            new GroundVehicleInput(0.0F, 0.0F, true, false, false, false);
 
     public GroundVehicleInput {
         drive = Mth.clamp(drive, -1.0F, 1.0F);
@@ -42,10 +50,11 @@ public record GroundVehicleInput(float drive, float steer, boolean brake, boolea
         buf.writeBoolean(this.brake);
         buf.writeBoolean(this.fire);
         buf.writeBoolean(this.coax);
+        buf.writeBoolean(this.lock);
     }
 
     public static GroundVehicleInput read(FriendlyByteBuf buf) {
         return new GroundVehicleInput(buf.readFloat(), buf.readFloat(), buf.readBoolean(), buf.readBoolean(),
-                buf.readBoolean());
+                buf.readBoolean(), buf.readBoolean());
     }
 }

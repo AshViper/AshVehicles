@@ -17,6 +17,7 @@ import net.minecraft.world.phys.Vec3;
 public final class GhostRenderContext {
     private static boolean drawingGhost;
     private static boolean translucent;
+    private static float fogThickness;
 
     private final PoseStack poseStack;
     private final MultiBufferSource buffers;
@@ -25,10 +26,11 @@ public final class GhostRenderContext {
     private final float partialTick;
     private final int packedLight;
     private final boolean ghostStyle;
+    private final float fog;
     private final double distanceSq;
 
     GhostRenderContext(PoseStack poseStack, MultiBufferSource buffers, Camera camera, Vec3 fromCamera,
-            float partialTick, int packedLight, boolean ghostStyle, double distanceSq) {
+            float partialTick, int packedLight, boolean ghostStyle, float fog, double distanceSq) {
         this.poseStack = poseStack;
         this.buffers = buffers;
         this.camera = camera;
@@ -36,6 +38,7 @@ public final class GhostRenderContext {
         this.partialTick = partialTick;
         this.packedLight = packedLight;
         this.ghostStyle = ghostStyle;
+        this.fog = fog;
         this.distanceSq = distanceSq;
     }
 
@@ -80,6 +83,15 @@ public final class GhostRenderContext {
         return this.ghostStyle;
     }
 
+    /**
+     * このゴーストの位置での Distant Horizons の霧の濃さ。0が素通し、1が霧に沈み切った状態。DH が霧を
+     * 描いていなければ常に0。アダプタはこの分だけ描く物を透明へ寄せる——背景は既に霧の色をしているので、
+     * それが「霧に混ざる」ことと同じ画になる。{@link com.ashvehicles.client.ghost.dh.DHFog} 参照。
+     */
+    public float fog() {
+        return this.fog;
+    }
+
     public double distanceSq() {
         return this.distanceSq;
     }
@@ -98,13 +110,25 @@ public final class GhostRenderContext {
         return drawingGhost && translucent;
     }
 
-    static void enter(boolean translucentStyle) {
+    /**
+     * 今描いている物の位置の DH の霧の濃さ。ゴーストパスの外では常に0。レンダースレッド限定。
+     *
+     * <p>static で持つのは {@code isTranslucent()} と同じ理由——GeckoLib の {@code getRenderColor} には
+     * コンテキストを渡す隙間が無い。
+     */
+    public static float fogFactor() {
+        return drawingGhost ? fogThickness : 0.0F;
+    }
+
+    static void enter(boolean translucentStyle, float fog) {
         drawingGhost = true;
         translucent = translucentStyle;
+        fogThickness = fog;
     }
 
     static void exit() {
         drawingGhost = false;
         translucent = false;
+        fogThickness = 0.0F;
     }
 }

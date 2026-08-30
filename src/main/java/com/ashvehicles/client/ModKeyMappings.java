@@ -68,6 +68,10 @@ public final class ModKeyMappings {
      * が無い——レーダーの働き方でもなければ、人に委ねる判断としても物足りない。連打ではなく押し続けにしてあるのは、
      * 閉じる前に離したロックは最初から取っていないロックだからだ。閉じた後はシーカーが自力で保持するのでキーは離せる。
      * {@link com.ashvehicles.weapon.TargetLock} 参照。
+     *
+     * <p>コックピット専用ではない。対空車両の砲手も同じキーで同じことをする。発射筒を持つ車両のシーカーは、以前は
+     * 砲塔が向いた先の物を無条件に掴んでいたが、乗る物によってロックの取り方が変わる理由は無かった。
+     * {@link com.ashvehicles.weapon.TurretLauncher} 参照。
      */
     public static final KeyMapping RADAR_LOCK = create("radar_lock", GLFW.GLFW_KEY_L);
 
