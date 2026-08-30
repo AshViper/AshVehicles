@@ -8,69 +8,62 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 
 /**
- * One vehicle's engine, as heard by this client.
+ * このクライアントが聞く、1台の車両のエンジン音。
  *
- * <p>A single recording, looped, played louder and faster as the throttle goes up. The recording is
- * whatever {@link EngineSounds} resolved for the vehicle when this was started; that includes the
- * mod's default for vehicle with no recording of their own.
+ * <p>録音1本をループし、スロットルが上がるにつれて大きく速く鳴らす。録音は開始時に {@link EngineSounds} が
+ * その車両向けに解決した物で、自前の録音を持たない車両には MOD の既定が含まれる。
  *
- * <p>Both volume and pitch chase their targets rather than jumping to them, so opening the throttle
- * sounds like an engine spooling up rather than a switch being thrown, and closing it lets the note
- * die away.
+ * <p>音量もピッチも目標値へ飛ばず追従するので、スロットルを開けばスイッチを入れた音ではなくエンジンがスプール
+ * する音になり、閉じれば音が消えていく。
  *
- * <p>Distance and the giving back of the channel are {@link EntitySoundInstance}'s, but the range is
- * this vehicle's own, out of its file, rather than one the sound engine could have known about.
+ * <p>距離とチャンネル返却は {@link EntitySoundInstance} の担当だが、到達距離はサウンドエンジンが知りえない、
+ * この車両のファイル由来の値を使う。
  */
 public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> {
-    /** Fraction of the gap between the current and target volume closed each tick. */
+    /** 毎tick、現在音量と目標音量の差をどれだけ埋めるか。 */
     private static final float VOLUME_RATE = 0.12F;
-    /** The same for pitch, slower: spooling a turbine takes a moment. */
+    /** ピッチ用の同じ値。より遅い。タービンのスプールには時間がかかる。 */
     private static final float PITCH_RATE = 0.05F;
-    /** Ticks of silence before the sound gives its channel back. */
+    /** チャンネルを返すまでの無音tick数。 */
     private static final int SILENT_TICKS_BEFORE_STOP = 60;
     /**
-     * What full reheat adds to the note, over and above the top of the file's own pitch range.
+     * アフターバーナー全開が、ファイルのピッチ範囲の上限にさらに上乗せする分。
      *
-     * <p>Added rather than folded into the range, because the range is what the engine can do and
-     * this is not the engine. The lever is already against its stop when the burner lights: the
-     * turbine is turning no faster and nothing about the recording should suggest it is. What
-     * changes is that there is now a second fire behind it, and what that sounds like is the same
-     * note with a harder edge on it.
+     * <p>範囲に畳み込まず加算する。範囲はエンジンにできることを表すが、これはエンジンではないからだ。バーナーが
+     * 点火する時点でレバーは既にストッパーに当たっている。タービンはそれ以上速く回らないし、録音がそう示唆しても
+     * ならない。変わるのは背後に2つ目の火が加わったことで、その音は同じ音により硬い縁が付いた物になる。
      */
     private static final float AFTERBURNER_PITCH = 0.18F;
-    /** And what it adds to the loudness, which is the half of it anybody hears from outside. */
+    /** そして音量への上乗せ分。外から聞こえるのはこちらの半分だ。 */
     private static final float AFTERBURNER_GAIN = 0.35F;
 
-    /** Loudness before distance is taken into account, in [0, 1] of the file's volume. */
+    /** 距離を考慮する前の音量。ファイルの volume に対する 0〜1。 */
     private float gain;
     private float currentPitch;
 
     public EngineSoundInstance(VehicleEntityBase vehicle, SoundEvent sound) {
         super(vehicle, sound, SoundSource.NEUTRAL, SILENT_TICKS_BEFORE_STOP);
-        // Start on the right note: a machine that comes into earshot at full throttle should not
-        // sweep up from idle first.
+        // 正しい音から始める。全開状態で可聴範囲に入ってきた機体が、まずアイドルから上がっていくのはおかしい。
         this.currentPitch = targetPitch(vehicle, vehicle.soundSetup());
         this.pitch = this.currentPitch;
     }
 
     /**
-     * Whether the engine is turning: running up on the ground, or in the air at any setting.
+     * エンジンが回っているか。地上での暖機か、空中での任意の設定か。
      *
-     * <p>Read off {@code getEngineNote} rather than off the throttle, so that a helicopter is heard
-     * from the moment its rotor starts to wind up. Its collective is still at the bottom then and
-     * will be for several seconds, and a machine that stayed silent through the whole start-up would
-     * be a strange thing to be standing next to.
+     * <p>スロットルではなく {@code getEngineNote} から読む。ヘリのローターが回り始めた瞬間から音が出るようにする
+     * ためだ。その時点でコレクティブはまだ下限にあり、数秒はそのままだが、始動の間ずっと無音の機体の隣に立つのは
+     * 妙な体験だろう。
      *
-     * <p>A wreck is answered before either of those is asked. Its engine note is already nothing,
-     * but a write-off still on its way down is moving, and movement alone is enough to hold the
-     * sound open — so a burnt-out airframe would go on being heard all the way to the ground.
+     * <p>残骸はそのどちらを問うより先に処理する。残骸のエンジン音は既に0だが、落下中の全損機は動いており、
+     * 動きだけで音を保持し続けるには十分だ——つまり焼けた機体が地面に着くまで聞こえ続けてしまう。
      */
     public static boolean isEngineRunning(VehicleEntityBase vehicle) {
         return !vehicle.isRemoved() && !vehicle.isWrecked()
                 && (vehicle.getEngineNote() > 0.001F || vehicle.getVelocity().lengthSqr() > 0.01);
     }
 
-    /** How much of full volume is left at this distance, over the range the vehicle's file names. */
+    /** この距離で全音量のうちどれだけ残るか。車両ファイルが指定する到達距離を基準にする。 */
     public static float falloff(VehicleEntityBase vehicle, VehicleChassis.Sound setup) {
         return falloff(vehicle, setup.range());
     }
@@ -86,9 +79,9 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
         VehicleChassis.Sound setup = vehicle.soundSetup();
 
         boolean running = isEngineRunning(vehicle);
-        // Past one in reheat, and deliberately. The figure is a multiplier on the file's own
-        // volume rather than a level, and a burner is genuinely louder than the engine it is bolted
-        // to — loud enough to be heard from further off, which is what a volume over one buys.
+        // アフターバーナー時は意図的に1を超える。この値はレベルではなくファイルの volume に対する倍率であり、
+        // バーナーは取り付け元のエンジンより本当に大きい——より遠くから聞こえるほど大きく、1超の音量が買うのは
+        // まさにそれだ。
         float targetGain = running
                 ? Mth.lerp(vehicle.getEngineNote(), setup.idleVolume(), 1.0F)
                         * (1.0F + vehicle.getAfterburner() * AFTERBURNER_GAIN)
@@ -100,8 +93,8 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
         this.volume = setup.volume() * this.gain * falloff;
         this.pitch = this.currentPitch;
 
-        // Nothing to hear once the engine is off and faded out, or once the vehicle is beyond
-        // earshot. EngineSounds will start another when that changes.
+        // エンジンが止まりフェードアウトした後、あるいは車両が可聴範囲を出た後は聞くべき物が無い。状況が変われば
+        // EngineSounds が別の音を開始する。
         this.heard(running ? falloff > 0.0F : this.gain > SILENCE);
     }
 }

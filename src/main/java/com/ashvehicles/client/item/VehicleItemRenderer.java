@@ -15,19 +15,18 @@ import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * Draws a machine's item as one square carrying {@link VehicleIcons the machine's picture}.
+ * 機体アイテムを、{@link VehicleIcons 機体の絵}を貼った正方形1枚として描く。
  *
- * <p>Which is all any flat item is. It is deliberately not the machine itself: see
- * {@link VehicleIcons} for why a model drawn every frame in every slot is not what an item wants to
- * be, and why this ends up cheaper than the vanilla item it replaces rather than dearer.
+ * <p>平坦アイテムとはそもそもそれだけの物だ。意図的に機体そのものは描かない。全スロットで毎フレーム描かれる
+ * モデルがアイテムのあるべき姿でない理由と、これが置き換え元のバニラアイテムより高価ではなく安価になる理由は
+ * {@link VehicleIcons} 参照。
  *
- * <p>The square is a square and not a slab with sides. A vanilla flat item is extruded so that it
- * has a thickness in the hand, which is worth having for a sword and is not worth a hundred quads
- * for a photograph of a tank. Both faces of it are drawn, so the item is still there when it is seen
- * from behind.
+ * <p>正方形は正方形であって、側面のある板ではない。バニラの平坦アイテムは手に持ったとき厚みが出るよう押し出されて
+ * いる。剣には価値があるが、戦車の写真に100枚のクアッドを払う価値は無い。両面を描くので、裏から見てもアイテムは
+ * そこにある。
  */
 public final class VehicleItemRenderer extends BlockEntityWithoutLevelRenderer {
-    /** Where a flat item sits in the block the item transforms are worked out in: down the middle. */
+    /** アイテム変換が計算されるブロック内での平坦アイテムの位置。中央。 */
     private static final float DEPTH = 0.5F;
 
     @Nullable
@@ -39,9 +38,8 @@ public final class VehicleItemRenderer extends BlockEntityWithoutLevelRenderer {
     }
 
     /**
-     * The one of these there is, built the first time an item asks for it rather than when the item
-     * extensions are registered — which happens while the game is still being put together, before
-     * there is a block entity renderer or a model set to hand it.
+     * 唯一のインスタンス。アイテム拡張の登録時ではなく、最初にアイテムから要求されたときに構築する。登録時は
+     * まだゲームの組み立て中で、渡せるブロックエンティティレンダラーもモデルセットも存在しないからだ。
      */
     public static VehicleItemRenderer instance() {
         VehicleItemRenderer built = instance;
@@ -63,14 +61,14 @@ public final class VehicleItemRenderer extends BlockEntityWithoutLevelRenderer {
 
         ResourceLocation icon = VehicleIcons.of(item.vehicle());
 
-        // Not taken yet, or the machine has no model to take one from. Either way there is nothing
-        // to draw and the next frame or two will settle it.
+        // まだ撮影していないか、機体に撮影元のモデルが無い。いずれにせよ描く物は無く、次の1〜2フレームで
+        // 決着する。
         if (icon == null) {
             return;
         }
 
-        // No cull, so that the far side of the square is the near side seen through: an item in the
-        // hand is walked round, and one that vanished from behind would look like a hole.
+        // カリング無し。正方形の裏面は表面の透過として見える。手持ちアイテムは周りを歩かれるし、裏から消える
+        // アイテムは穴に見えてしまう。
         VertexConsumer buffer = buffers.getBuffer(RenderType.entityCutoutNoCull(icon));
         PoseStack.Pose pose = poseStack.last();
 

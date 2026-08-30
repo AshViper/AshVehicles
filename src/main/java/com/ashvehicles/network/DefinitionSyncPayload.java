@@ -15,17 +15,16 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
- * The server's copy of every file it has loaded — aircraft, ground vehicles and weapons — sent to
- * a player on login and after each {@code /reload}.
+ * サーバーが読み込んだ全ファイル（機体・地上車両・兵装）の写し。ログイン時と {@code /reload} のたびに
+ * プレイヤーへ送る。
  *
- * <p>One packet for the lot. The client runs the physics itself, so it needs the same figures the
- * server has, and sending the definitions whole rather than a list of what changed keeps this
- * honest: whatever the server just loaded is what the client will drive and fly with.
+ * <p>全部まとめて1パケット。クライアントは自分で物理計算を回すのでサーバーと同じ数値が要る。差分一覧では
+ * なく定義を丸ごと送ることで話が単純になる——サーバーが今読み込んだ物が、そのままクライアントが運転し
+ * 飛ばす物になる。
  *
- * <p>Each registry writes itself under its own directory name and with its own codec, so what is on
- * the wire says what it is. A name neither side recognises is a protocol mismatch rather than
- * something to skip past — the rest of the stream cannot be read without knowing how long that entry
- * was — so it is refused loudly.
+ * <p>各レジストリは自分のディレクトリ名と自分のコーデックで自分を書くので、通信内容は自分が何かを名乗る。
+ * どちらも知らない名前はプロトコル不一致であって読み飛ばす対象ではない——その項目の長さが分からなければ
+ * 以降のストリームを読めない——ので、はっきり拒否する。
  */
 public record DefinitionSyncPayload(List<DefinitionRegistry.Snapshot<?>> snapshots)
         implements CustomPacketPayload {
@@ -56,7 +55,7 @@ public record DefinitionSyncPayload(List<DefinitionRegistry.Snapshot<?>> snapsho
                 return new DefinitionSyncPayload(snapshots);
             });
 
-    /** Written through the registry's own codec, which is what the type parameter is captured for. */
+    /** レジストリ自身のコーデックで書く。型引数を捕まえているのはそのため。 */
     private static <T> void write(FriendlyByteBuf buf, DefinitionRegistry.Snapshot<T> snapshot) {
         buf.writeUtf(snapshot.registry().directory());
         buf.writeMap(snapshot.values(), FriendlyByteBuf::writeResourceLocation,

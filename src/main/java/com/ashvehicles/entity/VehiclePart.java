@@ -20,45 +20,42 @@ import org.joml.Quaternionf;
 import com.ashvehicles.vehicle.Hitbox;
 
 /**
- * One box of a vehicle's shape: a wing, a tail, a stretch of deck, a glacis plate, a track.
+ * 機体形状を構成する箱1つ。主翼、尾部、甲板の一区画、前面装甲板、履帯など。
  *
- * <p>Minecraft gives an entity a single upright box with a square footprint, which is no shape for
- * an aeroplane and no shape for a tank, and no surface to walk on either. A vehicle is instead made
- * of several of these, each one placed and sized from the boxes in the vehicle's own file, and each one
- * a real obstacle: shots land on them, they collide with the world, and anything standing on one
- * stays standing on it. That last part is what a deck needs.
+ * <p>Minecraft がエンティティに与えるのは底面が正方形の直立した箱1つで、それは飛行機の形でも戦車の形でも
+ * なく、歩ける面でもない。だから機体はこれを複数持ち、それぞれが機体ファイルの箱定義から位置と大きさを
+ * もらい、それぞれが本物の障害物になる。弾が当たり、世界と衝突し、上に立った物は立ったままでいられる。
+ * 最後の点こそ甲板に必要な物。
  *
- * <p><b>The part is not its box.</b> What it really is, is a {@link Hitbox}: a box lying at whatever
- * angle the machine has left it at, of the mod's own making, which nothing of Minecraft's ever sees.
- * A wing banked over is a thin plate on a slant, and a gun laid at forty-five degrees is a barrel.
- * Everything that decides anything — what a shot hits, what a player walks into and stands on, what
- * the world stops the machine against — is measured against that, in {@link Hitboxes}.
+ * <p><b>パーツはその箱ではない。</b> 本体は {@link Hitbox}——機体が残した角度のまま寝ている、この MOD 製の
+ * 箱で、Minecraft 側からは決して見えない。旋回中の主翼は斜めの薄板であり、45度に構えた砲は砲身だ。何かを
+ * 決める処理は全部——弾が何に当たるか、プレイヤーが何にぶつかり何の上に立つか、世界が機体をどこで止めるか
+ * ——それに対して {@link Hitboxes} で測られる。
  *
- * <p>The upright box the game carries the part around in is a search box and nothing else. It is
- * exactly the air the {@code Hitbox} exists to stop treating as machine, so the part is deliberately
- * not something the game collides with — {@link #canBeCollidedWith} says no — and the boxes it would
- * have collided against are laid over the top by the mod itself.
+ * <p>ゲームがパーツを運ぶ直立した箱は検索用でしかない。それは {@code Hitbox} が「機体として扱うのをやめ
+ * る」ために存在している空気そのものなので、パーツは意図的にゲームの衝突対象にしていない
+ * （{@link #canBeCollidedWith} が false）。衝突するはずだった箱は MOD 自身が上から被せる。
  *
- * <p>The parent is held twice over — once as the {@code Entity} the game needs and once as the
- * {@link PartHost} that answers for the shape — because a box belongs equally to an aeroplane and to
- * a tank, and those are different classes with nothing in common but this.
+ * <p>親は2通りで保持する——ゲームが必要とする {@code Entity} として、そして形状について答える
+ * {@link PartHost} として。箱は飛行機にも戦車にも等しく属し、その2つはこれ以外に共通点の無い別クラスだ
+ * から。
  */
 public class VehiclePart extends PartEntity<Entity> {
     private final PartHost host;
     private final String name;
-    /** Which of the file's boxes, or which hardpoint, this one stands for. */
+    /** ファイル内の何番目の箱か、あるいは何番目のハードポイントか。 */
     private final int slot;
     private final boolean pylon;
     private EntityDimensions dimensions;
-    /** What the part really is. Null until the machine has placed it for the first time. */
+    /** パーツの実体。機体が初めて配置するまでは null。 */
     private Hitbox hitbox;
 
-    /** A piece of the vehicle: {@code slot} is which of the file's boxes it is. */
+    /** 機体の一部。{@code slot} はファイル内の何番目の箱か。 */
     public static <T extends Entity & PartHost> VehiclePart airframe(T parent, String name, int slot) {
         return new VehiclePart(parent, name, slot, false);
     }
 
-    /** A place to hang a weapon: {@code slot} is which hardpoint of the vehicle's file it is. */
+    /** 兵装を吊る場所。{@code slot} は機体ファイルの何番目のハードポイントか。 */
     public static <T extends Entity & PartHost> VehiclePart pylon(T parent, String name, int slot) {
         return new VehiclePart(parent, name, slot, true);
     }
@@ -78,72 +75,69 @@ public class VehiclePart extends PartEntity<Entity> {
     }
 
     /**
-     * Where a line first enters this box <em>as it is really lying</em>, or empty if it misses.
+     * 線分が<em>実際に寝ている姿勢の</em>この箱へ最初に入る点。外れていれば空。
      *
-     * @param margin how much to grow the box by first. Whatever is testing has to pass the same
-     *               figure the game would have used, or a graze it would have counted is refused
+     * @param margin 先に箱をどれだけ膨らませるか。判定する側はゲームが使うはずだった値と同じ物を渡す必要
+     *               がある。さもないとゲームなら数えた掠りが弾かれる
      */
     public Optional<Vec3> clip(Vec3 from, Vec3 to, double margin) {
         return this.hitbox == null ? Optional.empty() : this.hitbox.grow(margin).clip(from, to);
     }
 
-    /** The box as it is really lying, or null before the machine has ever placed it. */
+    /** 実際に寝ている姿勢の箱。機体が一度も配置していなければ null。 */
     public Hitbox hitbox() {
         return this.hitbox;
     }
 
     /**
-     * Whether this box is a pylon rather than a piece of the vehicle.
+     * この箱が機体の一部ではなくパイロンか。
      *
-     * <p>A pylon is worth telling apart because it is worth clicking on its own: what hangs there is
-     * a different thing from what hangs on the pylon beside it, and a player reaching for one means
-     * that one.
+     * <p>パイロンを区別する価値があるのは、単独でクリックする価値があるから。そこに吊られている物は隣の
+     * パイロンに吊られている物とは別で、手を伸ばしたプレイヤーはその1本を指している。
      */
     public boolean isPylon() {
         return this.pylon;
     }
 
-    /** Which hardpoint this is, counting as the vehicle's file lists them. */
+    /** 何番目のハードポイントか。機体ファイルの列挙順で数える。 */
     public int getPylon() {
         return this.slot;
     }
 
     /**
-     * Which of the machine's own boxes this is, counting as its file lists them.
+     * 機体自身の何番目の箱か。ファイルの列挙順で数える。
      *
-     * <p>The same number as {@link #getPylon} and a different thing entirely, which is why they are
-     * asked for separately: on a pylon it counts hardpoints and on a piece of the machine it counts
-     * boxes. Ask {@link #isPylon} first, or the answer is an index into the wrong list.
+     * <p>{@link #getPylon} と同じ数値でありながら全く別の物なので、別々に問い合わせる。パイロンなら
+     * ハードポイントを数え、機体の一部なら箱を数える。先に {@link #isPylon} を訊くこと。さもないと答えは
+     * 間違ったリストへの添字になる。
      */
     public int getBox() {
         return this.slot;
     }
 
-    /** A square box of a given size, for a pylon, which is a place on the machine rather than metal. */
+    /** 指定サイズの立方体。パイロン用で、あれは金属ではなく機体上の「場所」なので。 */
     public void place(Vec3 centre, double size) {
         this.place(new Hitbox(centre, new Vec3(size, size, size), new Quaternionf()));
     }
 
     /**
-     * Folds the part away inside the machine, for one the file no longer describes after a
-     * reload that shortened it. It cannot be got rid of — the count is fixed for the machine's life
-     * — so it is made too small to be run into or hit.
+     * パーツを機体の中へ畳み込む。リロードで短くなったファイルがもう記述していないパーツ用。個数は機体の
+     * 生涯を通じて固定なので消せない。だからぶつかることも当たることもできない大きさにする。
      */
     public void fold(Vec3 inside) {
         this.place(inside, 1.0E-3);
     }
 
     /**
-     * Puts the part where the machine has worked out it should be, lying the way the machine is
-     * lying.
+     * 機体が計算した位置へ、機体が寝ているのと同じ姿勢でパーツを置く。
      *
-     * <p>The upright box handed to the game afterwards is the one the {@code Hitbox} fits inside,
-     * and it is only ever used to find the part. Nothing collides with it and nothing is hit by it.
+     * <p>その後ゲームへ渡す直立した箱は {@code Hitbox} が収まる箱で、用途はパーツを見つけることだけ。
+     * それに衝突する物も、それに当たる物も無い。
      */
     public void place(Hitbox box) {
-        // Parts are not in the level's tick list, so nothing else moves their previous position on
-        // for them. Left alone it stays wherever the part was born, and everything that interpolates
-        // between the two - the hitbox overlay included - draws the part streaking in from there.
+        // パーツはレベルの tick リストに入っていないので、前回位置を進めてくれる物が他に無い。放っておく
+        // とパーツが生まれた場所に留まり、2点間を補間する物は全部——当たり判定の表示も含めて——そこから
+        // 尾を引いてくるパーツを描く。
         this.setOldPosAndRot();
 
         AABB reach = box.reach();
@@ -152,23 +146,21 @@ public class VehiclePart extends PartEntity<Entity> {
         this.dimensions = EntityDimensions.scalable(
                 (float) Math.max(reach.getXsize(), reach.getZsize()), (float) reach.getYsize());
         this.setPos(reach.getCenter().x, reach.minY, reach.getCenter().z);
-        // Set last: setPos squares the box off to the entity's own width, which for a part that is
-        // longer one way than the other is not the box it needs to be found in.
+        // 最後に設定する。setPos は箱をエンティティ自身の幅で正方形に均してしまい、一方向に長いパーツ
+        // では「見つけるための箱」として正しくなくなる。
         this.setBoundingBox(reach);
     }
 
     /**
-     * A right-click anywhere on the vehicle is a right-click on the vehicle: climbing in works from
-     * a wing or the tail, not only from the one box Minecraft would otherwise have offered.
+     * 機体のどこを右クリックしても機体への右クリックになる。主翼からでも尾部からでも乗り込めるのであって、
+     * Minecraft が本来提供する1つの箱からだけではない。
      *
-     * <p>A pylon is the exception, because it is the one part of an aeroplane where <em>which</em>
-     * part was reached for is the whole of the meaning. Clicking one loads or unloads that pylon and
-     * no other.
+     * <p>例外はパイロン。機体の中で唯一、<em>どの</em>部位に手を伸ばしたかが意味の全部になる部位だから。
+     * クリックすればそのパイロンだけを積み下ろしする。
      *
-     * <p>Unless the player is crouching, which means the machine rather than the station: the hold,
-     * wherever on the aeroplane the click landed. A pylon's box sits inside a wing's, so most of the
-     * underside of a wing is pylon as far as a click is concerned, and a crouched click there with a
-     * missile in hand would otherwise hang the missile on the wing it was meant to be stowed under.
+     * <p>ただししゃがんでいる場合は別で、それはステーションではなく機体を指す——機体のどこをクリックしても
+     * 弾庫が開く。パイロンの箱は主翼の箱の内側にあるので、クリックの観点では主翼下面の大半がパイロンだ。
+     * そこでミサイルを持ってしゃがみクリックすると、しまうつもりだった主翼にミサイルを吊ってしまう。
      */
     @Override
     public InteractionResult interact(Player player, InteractionHand hand) {
@@ -183,14 +175,12 @@ public class VehiclePart extends PartEntity<Entity> {
     }
 
     /**
-     * A hit anywhere on the <em>vehicle</em> is a hit on the vehicle. A pylon is not part of it in
-     * that sense: it is a place to hang something, and it takes no damage and passes none on.
-     * Letting it would make it a shield — a round that struck the pylon would stop there and never
-     * reach the wing behind it.
+     * <em>機体</em>のどこへの命中も機体への命中になる。その意味でパイロンは機体の一部ではない。物を吊る
+     * 場所であって、ダメージを受けず、渡しもしない。渡させれば盾になってしまう——パイロンに当たった弾が
+     * そこで止まり、後ろの主翼へ届かなくなる。
      *
-     * <p>A bare hand is the one thing a pylon does pass on, because it is not fire and there is
-     * nothing for it to be stopped by. All it is worth is a noise off the airframe, and a fist that
-     * found the rack under the wing should get the same noise as one that found the wing.
+     * <p>素手だけはパイロンも通す。射撃ではないし、止められる理由が何も無いから。値打ちは機体から返る音
+     * だけで、翼下のラックを叩いた拳は主翼を叩いた拳と同じ音を得るべきだ。
      */
     @Override
     public boolean hurt(DamageSource source, float amount) {
@@ -202,12 +192,11 @@ public class VehiclePart extends PartEntity<Entity> {
     }
 
     /**
-     * Nothing fired at the vehicle can hit a pylon: shots go through to the airframe behind it.
+     * 機体に向けて撃たれた物はパイロンに当たらない。弾はその後ろの機体構造へ抜ける。
      *
-     * <p>This is what separates the two jobs. A projectile asks this, and gets no for a pylon. A
-     * player's crosshair asks {@link #isPickable()} instead, and gets yes for a pylon it could hang
-     * something on — so a pylon can be reached for and loaded, and cannot be shot at or hidden
-     * behind.
+     * <p>これが2つの役割を分けている。発射物はこれを訊き、パイロンには false を得る。プレイヤーの十字線は
+     * 代わりに {@link #isPickable()} を訊き、何かを吊れるパイロンには true を得る——つまりパイロンは手を
+     * 伸ばして積める一方、撃たれることも盾にされることも無い。
      */
     @Override
     public boolean canBeHitByProjectile() {
@@ -224,7 +213,7 @@ public class VehiclePart extends PartEntity<Entity> {
         return this.dimensions;
     }
 
-    /** Nor does one part of a vehicle collide with the rest of the same vehicle. */
+    /** 同じ機体のパーツ同士も衝突しない。 */
     @Override
     public boolean canCollideWith(Entity other) {
         if (other == this.getParent()
@@ -236,14 +225,12 @@ public class VehiclePart extends PartEntity<Entity> {
     }
 
     /**
-     * No — and that is the point of the arrangement rather than a piece of it that is not finished.
+     * false を返す。これは未完成な部分ではなく、この仕組みの要点そのもの。
      *
-     * <p>Saying yes here hands the game the upright box the part is carried in and lets it collide
-     * with that, which for anything lying at an angle is a lid of air over the real shape: a player
-     * standing a foot above a sloping deck, and a wing banked over that cannot be walked past
-     * because the slab drawn round it is in the way. Saying no takes the part out of the game's
-     * collision altogether, and {@link Hitboxes} puts the real box back — see
-     * {@code EntityCollisionMixin}, which is where the two meet.
+     * <p>ここで true を返すと、ゲームはパーツを運ぶ直立した箱を受け取ってそれと衝突する。角度の付いた物に
+     * とってそれは実形状の上に被さった空気の蓋だ——傾いた甲板の30cm 上に立つプレイヤー、周りに描かれた板が
+     * 邪魔で横を通れない旋回中の主翼。false を返せばパーツはゲームの衝突から完全に外れ、{@link Hitboxes}
+     * が本物の箱を戻す。両者が出会う場所は {@code EntityCollisionMixin}。
      */
     @Override
     public boolean canBeCollidedWith() {
@@ -251,10 +238,9 @@ public class VehiclePart extends PartEntity<Entity> {
     }
 
     /**
-     * A pylon can only be reached for if there is something to be done with it. One with a weapon
-     * built into the airframe can never be loaded or unloaded, so its box stands aside and lets the
-     * click reach the aeroplane behind — otherwise it would sit invisibly over the nose swallowing
-     * every attempt to climb aboard.
+     * パイロンに手を伸ばせるのは、そこで何かできる場合だけ。機体に内蔵された兵装のパイロンは積み下ろしが
+     * 一切できないので、その箱は脇へ退いてクリックを後ろの機体へ通す——さもないと機首の上に見えない箱が
+     * 居座り、乗り込もうとする操作を全部飲み込む。
      */
     @Override
     public boolean isPickable() {

@@ -8,26 +8,24 @@ import com.ashvehicles.sensor.Threat;
 import net.minecraft.client.Minecraft;
 
 /**
- * The last thing the radar said, held until it says something else.
+ * レーダーが最後に伝えた内容。次を伝えるまで保持する。
  *
- * <p>A radar sweeps rather than watches, so what is on the scope between passes is where things were
- * when the aerial last went by — which is why this is a held picture rather than something worked
- * out afresh each frame, and why it is allowed to be a little out of date.
+ * <p>レーダーは監視ではなく走査するので、走査の合間にスコープに出ているのは、アンテナが最後に通ったときの位置
+ * だ。だからこれは毎フレーム算出し直す物ではなく保持された画であり、多少古くてよい。
  *
- * <p>It is also allowed to be stale, but not indefinitely. Nothing tells a client that the radar has
- * stopped: a pilot who climbs out, or an aircraft that is destroyed, simply stops sending, so the
- * picture is thrown away once it is older than a sweep or two rather than being left frozen on the
- * screen for the rest of the session.
+ * <p>古くなること自体は許すが、無期限にではない。レーダーが停止したことをクライアントへ伝える物は無い。降機した
+ * パイロットや破壊された機体は単に送信をやめるので、走査1〜2回分より古くなった画は破棄する。セッションの残り
+ * ずっと画面に凍り付かせておくのではなく。
  */
 public final class RadarReadout {
-    /** How long a picture is worth drawing after it arrived, in ticks. */
+    /** 到着後、画を描く価値がある時間（tick）。 */
     private static final int KEEPS_FOR = 40;
 
     private static List<Contact> contacts = List.of();
     private static List<Threat> threats = List.of();
     private static long arrived = Long.MIN_VALUE;
 
-    /** A fresh sweep off the wire. */
+    /** 回線から届いた新しい走査結果。 */
     public static void accept(List<Contact> found, List<Threat> warnings) {
         contacts = found;
         threats = warnings;
@@ -42,14 +40,14 @@ public final class RadarReadout {
         return fresh() ? threats : List.of();
     }
 
-    /** The worst thing being done to this aircraft, or null if nobody is doing anything. */
+    /** この機体に対して行われている最悪の行為。誰も何もしていなければ null。 */
     public static Threat.Kind worst() {
         List<Threat> current = threats();
 
         return current.isEmpty() ? null : current.get(0).kind();
     }
 
-    /** Whether the last sweep is recent enough to mean anything. */
+    /** 最後の走査が意味を持つ程度に新しいか。 */
     private static boolean fresh() {
         return age() - arrived < KEEPS_FOR;
     }

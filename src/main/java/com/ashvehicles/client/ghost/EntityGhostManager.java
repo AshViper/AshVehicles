@@ -27,31 +27,29 @@ import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 
 /**
- * Keeps the ghosts: one per registered entity the client knows about, refreshed once a tick from
- * the entity while it is here and kept a little while after it has gone.
+ * ゴーストの保持者。クライアントが知る登録済みエンティティ1つにつき1つ持ち、実体が在る間は毎tick更新し、消えた
+ * 後もしばらく保持する。
  *
- * <p>The manager lives on the game thread. It learns about entities from the join and leave
- * events rather than by searching the level — the level is never scanned, on any thread — and it
- * does its work once a tick: take a snapshot of each entity, decide which tier each ghost is in,
- * and spend a small budget of occlusion checks. The render pass reads the result; it adds nothing
- * and removes nothing.
+ * <p>マネージャはゲームスレッドに居る。エンティティのことはレベルを検索してではなく参加・離脱イベントから知る
+ * ——レベルはどのスレッドからも走査しない——し、仕事は毎tick 1回だ。各エンティティのスナップショットを撮り、
+ * 各ゴーストの階層を決め、少額の遮蔽判定予算を消費する。描画パスは結果を読むだけで、追加も削除もしない。
  *
- * <p>Ghosts are keyed by UUID. Entity ids are reused and a ghost may outlive the entity whose id
- * it was given; a UUID is forever.
+ * <p>ゴーストのキーは UUID。エンティティIDは再利用されるし、ゴーストは自分が受け取ったIDのエンティティより長生き
+ * しうる。UUID は永続だ。
  *
- * <p>Nothing here is allowed to leak. A ghost is removed when its entity dies, when the client
- * stops receiving it (at once, unless its adapter asks for it to be kept, and then after
- * {@link GhostConfig#timeoutTicks()}), and altogether when the level changes.
+ * <p>ここでは何も漏らさない。ゴーストは、エンティティが死んだとき、クライアントが受信をやめたとき（即座に。ただし
+ * アダプタが保持を求めた場合は、そのアダプタの {@link GhostAdapter#orphanTicks()} 後）、そしてレベルが変わった
+ * ときに全部、削除される。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class EntityGhostManager {
-    /** Concurrent so that the render thread may read it while the game thread writes it. */
+    /** ゲームスレッドが書いている間にレンダースレッドが読めるよう並行コレクションにしてある。 */
     private static final Map<UUID, EntityGhost> GHOSTS = new ConcurrentHashMap<>();
-    /** The same, as the read-only view {@link #ghosts()} hands out. Wrapped once, not once a frame. */
+    /** 同じ物を {@link #ghosts()} が渡す読み取り専用ビューとして。毎フレームではなく1度だけラップする。 */
     private static final Collection<EntityGhost> VIEW = Collections.unmodifiableCollection(GHOSTS.values());
-    /** The tick's working list, kept between ticks rather than made fresh. Game thread only. */
+    /** このtickの作業リスト。毎回作らずtickをまたいで保持する。ゲームスレッド限定。 */
     private static final List<EntityGhost> ORDERED = new ArrayList<>();
-    /** Nearest first: the draw budget and the Distant Horizons budget both favour the near. */
+    /** 近い順。描画予算も Distant Horizons の予算も近い物を優先する。 */
     private static final Comparator<EntityGhost> NEAREST_FIRST =
             Comparator.comparingDouble(EntityGhost::distanceSq);
 
@@ -59,7 +57,7 @@ public final class EntityGhostManager {
     private static ClientLevel level;
     private static int occlusionRaysThisTick;
 
-    // Last tick's figures, for the debug overlay.
+    // 前tickの数値。デバッグオーバーレイ用。
     private static int countGhost;
     private static int countBillboard;
     private static int countOccluded;
@@ -69,7 +67,7 @@ public final class EntityGhostManager {
     }
 
     // ------------------------------------------------------------------
-    // What the render pass reads
+    // 描画パスが読む物
     // ------------------------------------------------------------------
 
     public static Collection<EntityGhost> ghosts() {
@@ -86,7 +84,7 @@ public final class EntityGhostManager {
     }
 
     // ------------------------------------------------------------------
-    // Entities arriving and leaving
+    // エンティティの参加と離脱
     // ------------------------------------------------------------------
 
     @SubscribeEvent
@@ -102,19 +100,18 @@ public final class EntityGhostManager {
             return;
         }
 
-        // A change of level is noticed here as well as in the tick, and it has to be. Entities
-        // arrive as their packets are handled, which is between ticks, so the first machines of a
-        // new world join before the tick that would notice the world had changed — and that tick
-        // then clears them along with the old world's. Nothing ever makes those ghosts again: the
-        // manager learns about entities from this event and never scans the level. The machines
-        // they stood for are drawn by nobody from the hand-over distance out.
+        // レベル変更はtickだけでなくここでも検出する。そうせざるを得ない。エンティティはパケット処理時、つまり
+        // tickの合間に届くので、新しいワールドの最初の機体は「ワールドが変わった」と気付くtickより先に参加する
+        // ——そしてそのtickが、古いワールドの物と一緒にそれらを消してしまう。そのゴーストが作り直されることは
+        // 二度と無い。マネージャはこのイベントからしかエンティティを知らず、レベルを走査しないからだ。代役先の
+        // 機体は引き継ぎ距離から先で誰にも描かれなくなる。
         levelChanged(joined);
 
         long now = joined.getGameTime();
         EntityGhost ghost = GHOSTS.get(entity.getUUID());
 
         if (ghost != null) {
-            // The same entity, back again: carry on from where its ghost was.
+            // 同じエンティティが戻ってきた。ゴーストの続きから再開する。
             ghost.attach(entity);
             ghost.update(adapter.snapshot(entity, ghost.current(), now));
             return;
@@ -138,12 +135,12 @@ public final class EntityGhostManager {
         }
     }
 
-    /** The client no longer has this entity: decide whether its ghost stays a while or goes now. */
+    /** クライアントがこのエンティティを失った。ゴーストをしばらく残すか今消すかを決める。 */
     @SuppressWarnings("unchecked")
     private static void entityGone(EntityGhost ghost, Entity entity, long now) {
         GhostAdapter<Entity> adapter = (GhostAdapter<Entity>) ghost.adapter();
 
-        if (adapter.isDead(entity) || !adapter.keepAfterLeave(entity) || GhostConfig.timeoutTicks() <= 0) {
+        if (adapter.isDead(entity) || !adapter.keepAfterLeave(entity) || adapter.orphanTicks() <= 0) {
             remove(ghost);
         } else {
             ghost.orphan(now);
@@ -155,8 +152,8 @@ public final class EntityGhostManager {
     }
 
     /**
-     * Notices that the level has changed, and forgets the one before it. Asked from the tick and
-     * from the join event, since either may be the first to see a new level. Game thread.
+     * レベル変更を検出し、前のレベルを忘れる。tickと参加イベントの両方から呼ばれる。新しいレベルを最初に見るのは
+     * どちらでもありうるからだ。ゲームスレッド。
      */
     private static void levelChanged(@Nullable ClientLevel current) {
         if (current == level) {
@@ -167,7 +164,7 @@ public final class EntityGhostManager {
         level = current;
     }
 
-    /** Forgets everything. Level change, logout, or the system being switched off. */
+    /** 全て忘れる。レベル変更、ログアウト、あるいはシステムの停止時。 */
     public static void clear() {
         GHOSTS.clear();
         ORDERED.clear();
@@ -177,7 +174,7 @@ public final class EntityGhostManager {
     }
 
     // ------------------------------------------------------------------
-    // The tick
+    // tick 処理
     // ------------------------------------------------------------------
 
     @SubscribeEvent
@@ -201,11 +198,10 @@ public final class EntityGhostManager {
 
         long now = current.getGameTime();
         Vec3 eye = minecraft.gameRenderer.getMainCamera().getPosition();
-        int timeout = GhostConfig.timeoutTicks();
         int interval = GhostConfig.occlusionInterval();
         occlusionRaysThisTick = 0;
 
-        // Refreshed from the entity, or timed out, in one pass.
+        // 実体からの更新とタイムアウト処理を1回のパスで行う。
         List<EntityGhost> ordered = ORDERED;
         ordered.clear();
 
@@ -215,7 +211,7 @@ public final class EntityGhostManager {
 
             if (entity != null) {
                 if (entity.isRemoved() || entity.level() != current) {
-                    // Belt and braces: the leave event normally gets here first.
+                    // 念のための二重防御。通常は離脱イベントが先に到達する。
                     entityGone(ghost, entity, now);
 
                     if (!GHOSTS.containsKey(ghost.uuid())) {
@@ -224,7 +220,8 @@ public final class EntityGhostManager {
                 } else {
                     refresh(ghost, entity, now);
                 }
-            } else if (now - ghost.orphanedAt() > timeout) {
+            } else if (now - ghost.orphanedAt() > ghost.adapter().orphanTicks()) {
+                // 寿命はアダプタが型ごとに決める。範囲の縁の弾は数秒、駐機した機体は既定でセッションの間ずっと。
                 it.remove();
                 continue;
             }
@@ -245,14 +242,13 @@ public final class EntityGhostManager {
             GhostLOD lod = ghost.lod();
             boolean inBudget = i < budget;
 
-            // A ghost whose adapter has said it is not worth the ray budget takes none of it.
+            // アダプタが「レイ予算に値しない」と言ったゴーストは予算を一切取らない。
             if (lod.isGhost() && inBudget && ghost.adapter().needsOcclusionCheck()
                     && !ghost.isOcclusionPending()
                     && now - ghost.occlusionCheckedAt() >= interval && occlusionRaysThisTick < maxRays) {
-                // Staggered by the interval: a ghost checked this tick is not checked again for a
-                // while, so the cost spreads itself across ticks without any scheduling. A ghost
-                // inside the built world answers without a ray and takes none of the budget, which
-                // is what leaves the whole of it for the ones out past the world that need it.
+                // 間隔でずらす。このtickで判定したゴーストはしばらく再判定しないので、スケジューリング無しに
+                // コストがtick間へ分散する。構築済みワールド内のゴーストはレイ無しで答え予算を取らないので、
+                // ワールドの外でそれを必要とする物へ予算が丸ごと残る。
                 if (GhostOcclusion.check(current, eye, ghost, now)) {
                     occlusionRaysThisTick++;
                 }
@@ -274,7 +270,7 @@ public final class EntityGhostManager {
             }
         }
 
-        // Nothing is held between ticks: a ghost kept here would outlive its own removal.
+        // tickをまたいで何も保持しない。ここに残したゴーストは自身の削除より長生きしてしまう。
         ordered.clear();
     }
 
@@ -285,7 +281,7 @@ public final class EntityGhostManager {
     }
 
     // ------------------------------------------------------------------
-    // Debug figures
+    // デバッグ用の数値
     // ------------------------------------------------------------------
 
     public static int countGhost() {

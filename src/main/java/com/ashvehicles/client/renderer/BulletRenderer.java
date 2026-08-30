@@ -15,13 +15,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Draws a round as a tracer: a short streak lying along the way it is going, in the colour its
- * weapon file asks for.
+ * 弾を曳光として描く。進行方向に沿った短い筋を、兵器ファイルが指定する色で。
  *
- * <p>A round is a few centimetres across and crossing a hundred blocks a second, so there is nothing
- * to be gained from drawing it as an object. What a gunner actually sees is the streak, and the
- * streak is what says where the rounds are going, so that is what is drawn. Its length is a tick's
- * travel, which is the truth of how far it moves between frames.
+ * <p>弾は差し渡し数センチで毎秒100ブロック進むので、物体として描いても得る物は何も無い。砲手が実際に見るのは筋
+ * であり、弾がどこへ向かっているかを示すのも筋だ。だからそれを描く。長さは1tick分の移動距離で、それがフレーム間に
+ * どれだけ動くかの真実だ。
  */
 public class BulletRenderer extends EntityRenderer<BulletEntity> {
     public BulletRenderer(EntityRendererProvider.Context context) {
@@ -29,9 +27,8 @@ public class BulletRenderer extends EntityRenderer<BulletEntity> {
     }
 
     /**
-     * Stands down beyond the ghost start distance, where the ghost pass takes over and draws the
-     * same streak from a snapshot. The test is the one the pass makes, from the same camera, so a
-     * round is always one or the other's and never both.
+     * ゴースト開始距離を超えたら降板し、ゴーストパスが同じ筋をスナップショットから描く。判定はパスが同じカメラで
+     * 行う物と同一なので、弾は常にどちらか一方の担当であり両方になることはない。
      */
     @Override
     public boolean shouldRender(BulletEntity bullet, Frustum frustum, double camX, double camY, double camZ) {
@@ -43,10 +40,9 @@ public class BulletRenderer extends EntityRenderer<BulletEntity> {
     }
 
     /**
-     * A tracer is not lit — the render type it is drawn with ignores light entirely — so there is
-     * nothing to do here but draw it. Being seen at all over unloaded ground, and being kept out of
-     * the fog that would otherwise swallow a stream of them, belongs to the ghost pass, which draws
-     * the same streak from {@code BulletGhostAdapter} once a round is past the hand-over.
+     * 曳光は照らされない——描画タイプが光を完全に無視する——ので、ここですることは描くこと以外に無い。未ロードの
+     * 地面の上でも見えること、放っておけば曳光の流れを飲み込む霧から外れることは、ゴーストパスの管轄だ。あちらは
+     * 引き継ぎを過ぎた弾に対して {@code BulletGhostAdapter} から同じ筋を描く。
      */
     @Override
     public void render(BulletEntity bullet, float yaw, float partialTick, PoseStack poseStack,
@@ -57,8 +53,8 @@ public class BulletRenderer extends EntityRenderer<BulletEntity> {
     private void drawTracer(BulletEntity bullet, float partialTick, PoseStack poseStack,
             MultiBufferSource bufferSource) {
         WeaponDefinition.Projectile round = bullet.getWeapon().projectile();
-        // The step being drawn rather than the next one, so the streak lies along the line the round
-        // is actually travelling down this frame.
+        // 次のステップではなく描画中のステップを使う。筋が、このフレームで弾が実際に通っている線に沿うように
+        // するためだ。
         Vec3 travel = bullet.travel(partialTick);
         Camera camera = this.entityRenderDispatcher.camera;
 
@@ -66,14 +62,12 @@ public class BulletRenderer extends EntityRenderer<BulletEntity> {
             return;
         }
 
-        // Where the round is being seen from, which is what the streak is turned to face. The
-        // interpolated position rather than the tick one: it is the point the pose stack has already
-        // been put at, and a direction taken from anywhere else would turn the quad to face
-        // somewhere the round is not.
+        // 弾がどこから見られているか。筋はその方向を向く。tick位置ではなく補間後の位置を使う。pose stack が既に
+        // 置かれている点がそれであり、他所から取った方向ではクアッドが弾のいない方を向いてしまう。
         Vec3 fromCamera = bullet.getPosition(partialTick).subtract(camera.getPosition());
 
-        // Drawn by the same code the ghost pass draws it with, measured against the same camera
-        // distance, so that nothing about a round changes as it crosses the hand-over. See Tracer.
+        // ゴーストパスが描くのと同じコードで、同じカメラ距離を基準に描く。引き継ぎを跨いでも弾が何も変わらない
+        // ようにするためだ。Tracer 参照。
         Tracer.streak(poseStack, bufferSource.getBuffer(RenderType.lightning()), camera, fromCamera, travel,
                 this.entityRenderDispatcher.distanceToSqr(bullet), 0xFF000000 | round.tracer());
     }

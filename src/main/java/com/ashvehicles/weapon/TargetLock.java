@@ -18,69 +18,63 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * What the crew have the seeker on, and how far along it is.
+ * 乗員がシーカーで捉えている相手と、その進捗。
  *
- * <p>Locking is the crew's work rather than the missile's: put the boresight on something, inside
- * the seeker's cone and within its reach, and hold it there. Wander off it and the seeker starts
- * again. That makes a missile shot something somebody has to work for, and it gives the target a way
- * out — break the line of sight or get outside the cone before it takes, and nothing is fired at you.
+ * <p>ロックはミサイルの仕事ではなく乗員の仕事だ。シーカーの視野内かつ射程内の何かに照準線を乗せ、そこへ
+ * 保持し続ける。外れればシーカーは最初からやり直す。それがミサイル発射を「働いて得る物」にし、目標には
+ * 逃げ道を与える——成立前に視線を切るか視野外へ出れば、撃たれずに済む。
  *
- * <p><b>Whose boresight is not this class's business.</b> A pilot points the aeroplane; a launcher's
- * crew traverse the turret and never move the hull at all. Both come to the same question — how far
- * off the line the weapons look is the target — so what is asked is
- * {@link VehicleEntityBase#getAimDirection}, and everything below works the same either way.
+ * <p><b>誰の照準線かはこのクラスの関知するところではない。</b> パイロットは機体を向け、発射機の乗員は
+ * 砲塔を旋回させて車体は一切動かさない。どちらも同じ問い——兵装が見ている線から目標がどれだけ外れている
+ * か——に行き着くので、訊く相手は {@link VehicleEntityBase#getAimDirection} であり、以下はどちらでも同じ
+ * ように動く。
  *
- * <p>All of this lives on the server, which is the only side that should be deciding what a weapon
- * is pointed at. The result is copied into the machine's synched data so that the instruments can
- * draw it; a client never chooses a target, it only sees the one the server chose.
+ * <p>全部サーバー側にある。兵装が何を向いているかを決めてよいのはサーバーだけだから。結果は機体の同期
+ * データへ写して計器が描けるようにする。クライアントは目標を選ばず、サーバーが選んだ物を見るだけ。
  */
 public final class TargetLock {
-    /** How long a lost target is held before the seeker gives up on it, in ticks. */
+    /** 見失った目標をシーカーが諦めるまで保持する tick 数。 */
     private static final int GRACE_TICKS = 10;
-    /** How near a decoy has to be to what the seeker is looking at to hide it, in blocks. */
+    /** デコイがシーカーの見ている相手を隠すのに必要な近さ（ブロック）。 */
     private static final double SCREENED = 24.0;
 
     /**
-     * How far out the seeker looks for itself every single tick, in blocks.
+     * シーカーが毎tick自力で見る距離（ブロック）。
      *
-     * <p>Everything within this is found the instant it arrives, which is what a dogfight needs.
-     * Past it the sky is swept every {@link #SWEEP_TICKS} instead — see {@link #candidates}.
+     * <p>この内側の物は到着した瞬間に見つかる。格闘戦に必要なのはそれ。外側は代わりに
+     * {@link #SWEEP_TICKS} ごとに掃引する（{@link #candidates} 参照）。
      */
     private static final double NEAR_REACH = 192.0;
 
     /**
-     * How often the sky beyond {@link #NEAR_REACH} is swept for new candidates, in ticks.
+     * {@link #NEAR_REACH} より外の空を新しい候補について掃引する間隔（tick）。
      *
-     * <p>Not every tick, and this is the whole of why: asking the level for everything inside a box
-     * is paid for by the <em>size of the box</em> rather than by what is in it. The level walks one
-     * strip of entity sections per sixteen blocks of it, so a seeker with a lock range of four and a
-     * half kilometres — which is what an air-to-air missile's file asks for — walks better than five
-     * hundred strips of the world, twenty times a second, for every armed aircraft in the air. That
-     * one line was the most expensive thing on the server.
+     * <p>毎tickではない理由が全部これ。箱の中身をレベルに問い合わせるコストは、中に何があるかではなく
+     * <em>箱の大きさ</em>で決まる。レベルは16ブロックにつき1列のエンティティセクションを歩くので、ロック
+     * 距離4.5km のシーカー——空対空ミサイルのファイルが要求する値——は毎秒20回、世界を500列以上、しかも
+     * 空にいる武装機体1機ごとに歩くことになる。あの1行がサーバーで最も高価な処理だった。
      *
-     * <p>What the sweep does <em>not</em> throttle is the seeker itself. Every candidate it has
-     * found is measured against the boresight afresh every tick, at its position that tick, so a
-     * lock closes, holds and breaks exactly as it always did. Only the moment a distant aircraft is
-     * first noticed moves, by at most half a second — against lock times measured in seconds, and
-     * at a range where the pilot is holding the nose steady rather than snapping onto something.
+     * <p>この掃引が抑制<em>しない</em>のはシーカー自身だ。見つけた候補は毎tick、その tick の位置で照準線
+     * に対して測り直されるので、ロックの成立・保持・喪失は従来通り。動くのは「遠方の機体に最初に気付く
+     * 瞬間」だけで、最大0.5秒——ロック時間が秒単位で測られること、そしてその距離ではパイロットが機首を
+     * 素早く振るのではなく安定させていることを考えれば十分小さい。
      */
     private static final int SWEEP_TICKS = 10;
 
     private final VehicleEntityBase vehicle;
     @Nullable
     private Entity target;
-    /** Ticks the target has been held in the cone. At the weapon's {@code lock_ticks} it is locked. */
+    /** 目標を視野内に保持した tick 数。兵装の {@code lock_ticks} に達したらロック成立。 */
     private int held;
-    /** Ticks since the target was last seen, so a moment's wobble does not throw the lock away. */
+    /** 目標を最後に見てからの tick 数。一瞬のぶれでロックを捨てないため。 */
     private int missing;
     private boolean locked;
     /**
-     * What the last far sweep found, considered again every tick at wherever each has got to. Held
-     * for at most {@link #SWEEP_TICKS} and re-tested against {@link #couldTarget} on every use, so
-     * nothing dead or departed is ever fired at.
+     * 直近の遠距離掃引が見つけた物。毎tick、各自の現在位置で検討し直す。保持は最大 {@link #SWEEP_TICKS}
+     * で、使うたびに {@link #couldTarget} で再判定するので、死んだ物や去った物が撃たれることはない。
      */
     private List<Entity> distant = List.of();
-    /** Ticks since the far sweep, and the reach it was made at: a wider seeker sweeps again at once. */
+    /** 遠距離掃引からの tick 数と、その時の探知距離。より広いシーカーになれば即座に掃引し直す。 */
     private int sinceSweep = Integer.MAX_VALUE / 2;
     private double sweptTo;
 
@@ -93,58 +87,90 @@ public final class TargetLock {
         return this.target;
     }
 
-    /** True once the seeker has held the target long enough for a missile to take it. */
+    /** ミサイルが受け取れるだけの時間、シーカーが目標を保持したか。 */
     public boolean isLocked() {
         return this.locked && this.target != null;
     }
 
     /**
-     * True while the seeker is on something and working on it: the seconds between taking a target
-     * and having it.
+     * シーカーが何かを捉えて作業中——目標を取ってから手に入れるまでの数秒——の間 true。
      *
-     * <p>Which is the one stretch during which {@link #progress} changes without anything else
-     * doing so, and therefore the one stretch a client has to be told about every tick. Neither the
-     * target nor the lock changes while a lock is closing, so a machine that only reported those two
-     * would send nothing at all from the moment the seeker took something until the moment it had
-     * it — and the box on the glass, and the tone in the ear, would both sit still for the whole of
-     * the wait and then jump. See {@code WeaponMounts.tick}.
+     * <p>そこは他に何も変わらないまま {@link #progress} だけが変わる唯一の区間であり、したがって
+     * クライアントへ毎tick伝えなければならない唯一の区間でもある。ロックが閉じる間、目標もロック状態も
+     * 変わらないので、その2つしか報告しない機体は「捉えた瞬間」から「手に入れた瞬間」まで何も送らない。
+     * すると画面上の枠も耳のトーンも、待ち時間の間ずっと静止したまま最後に飛ぶ。
+     * {@code WeaponMounts.tick} 参照。
      */
     public boolean isClosing() {
         return this.target != null && !this.locked;
     }
 
-    /** How far along the lock is, from 0 to 1. What the instruments draw while it is closing. */
+    /** ロックの進捗。0から1まで。閉じていく間に計器が描く値。 */
     public float progress(WeaponDefinition.Guidance guidance) {
         if (this.target == null) {
             return 0.0F;
         }
 
-        return this.locked ? 1.0F : Math.min(1.0F, this.held / (float) Math.max(guidance.lockTicks(), 1));
+        return this.locked ? 1.0F
+                : Math.min(1.0F, this.held / (float) this.lockTicks(guidance, this.target));
     }
 
     /**
-     * One tick of looking, free to take a new target whenever it likes. What a launcher's crew have
-     * always done: traverse onto something and the seeker takes it, with nothing standing between
-     * looking and locking.
+     * この機体がシーカーに捉えさせるまで保持し続ける必要のある tick 数。兵装自身の値を、機体に付いている
+     * 補助装備の分だけ短くし、狙っている相手が積んでいるジャマーの分だけ延ばした物。
      *
-     * @param guidance the seeker of the weapon currently selected, or null if it has none
-     * @return true if anything changed that the clients ought to hear about
+     * <p><b>待ち時間は両側の搭載構成で決まる。</b> 照準ポッドは自分の側から短くし、相手のジャマーは向こう
+     * 側から延ばす。同じミサイル、同じ距離でも、電子妨害を吊った機体を捉え続けるには何倍も長く照準線に
+     * 乗せ続けねばならず、その間に相手は旋回して視野の外へ出られる。妨害が効くのはレーダーシーカーだけ
+     * ——{@link #jamming} 参照。
+     *
+     * <p>1を下回らせない。待ち時間を割り切って消すほど優秀なポッドでも1tickは残すため、そしてここで0除算
+     * を起こさないため。両側で同じ計算をする——クライアントは自機と目標の両方のステーション搭載内容を
+     * 知らされているので、サーバーと同じ値に辿り着き、画面上の枠は実際のロック速度で閉じる。
+     *
+     * @param against 捉えようとしている相手。まだ誰も取っていなければ null で、妨害は掛からない
+     */
+    private int lockTicks(WeaponDefinition.Guidance guidance, @Nullable Entity against) {
+        float gain = Math.max(0.01F, this.vehicle.lockRateGain());
+        float jam = Math.max(0.01F, jamming(guidance, against));
+
+        return Math.max(1, Math.round(Math.max(guidance.lockTicks(), 1) * jam / gain));
+    }
+
+    /**
+     * その相手がこのシーカーのロックをどれだけ遅らせるか。
+     *
+     * <p>妨害するのは電波であって熱でも光でもない。フレアがレーダーシーカーに見えないのと同じ理由で、
+     * ジャマーは熱源追尾ヘッドとレーザー目標指示に対しては何もしない。それが機体1機に複数の対抗手段を
+     * 積む意味であり、正しいレバーを選ぶ意味でもある。
+     */
+    private static float jamming(WeaponDefinition.Guidance guidance, @Nullable Entity against) {
+        return against != null && guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR
+                ? AircraftEntity.lockDelay(against)
+                : 1.0F;
+    }
+
+    /**
+     * 1tick分の捜索。いつでも自由に新しい目標を取ってよい版。発射機の乗員がずっとやってきたこと——何かへ
+     * 旋回すればシーカーがそれを取り、見ることとロックすることの間に何も挟まらない。
+     *
+     * @param guidance 現在選択中の兵装のシーカー。無ければ null
+     * @return クライアントへ伝えるべき変化があったか
      */
     public boolean tick(@Nullable WeaponDefinition.Guidance guidance) {
         return this.tick(guidance, true);
     }
 
     /**
-     * One tick of looking. Keeps the current target if it is still there and still ahead; whether it
-     * may take up a new one instead is somebody else's to say.
+     * 1tick分の捜索。現在の目標がまだそこにいて前方にいるなら保持する。新しい目標を取ってよいかは別の者が
+     * 決める。
      *
-     * @param guidance the seeker of the weapon currently selected, or null if it has none
-     * @param wantsLock whether the seeker may take up a target it is not already tracking. An
-     *                  existing lock, closing or already held, is never affected by this — it is
-     *                  only the first bite that is gated, the same as a real set does not paint a
-     *                  fresh track just because something crossed the antenna. See
-     *                  {@code ModKeyMappings#RADAR_LOCK}.
-     * @return true if anything changed that the clients ought to hear about
+     * @param guidance 現在選択中の兵装のシーカー。無ければ null
+     * @param wantsLock まだ追尾していない目標を取ってよいか。既存のロックは、閉じている途中でも成立済み
+     *                  でもこれに影響されない——制限されるのは最初の一噛みだけで、実物のレーダーも
+     *                  「アンテナの前を何かが横切った」だけで新しい航跡を描いたりしない。
+     *                  {@code ModKeyMappings#RADAR_LOCK} 参照
+     * @return クライアントへ伝えるべき変化があったか
      */
     public boolean tick(@Nullable WeaponDefinition.Guidance guidance, boolean wantsLock) {
         Entity was = this.target;
@@ -162,24 +188,24 @@ public final class TargetLock {
 
         Entity best = this.bestCandidate(guidance);
 
-        // Lost in the decoys: treated exactly as though nothing were there, so the grace period runs
-        // and the lock falls away rather than snapping back the moment the cloud thins.
+        // デコイに紛れて見失った場合。何も無かったのとまったく同じに扱うので猶予時間が走り、雲が薄れた
+        // 瞬間に復帰するのではなくロックが落ちる。
         if (best != null && this.screened(best, guidance)) {
             best = null;
         }
 
         if (best != null && best == this.target) {
-            // Still on it: the lock closes.
+            // まだ捉えている。ロックが進む。
             this.missing = 0;
             this.held++;
-            this.locked = this.held >= guidance.lockTicks();
+            this.locked = this.held >= this.lockTicks(guidance, best);
         } else if (best != null && this.target == null) {
             this.target = best;
             this.held = 1;
             this.missing = 0;
-            this.locked = guidance.lockTicks() <= 1;
+            this.locked = this.lockTicks(guidance, best) <= 1;
         } else if (best != null) {
-            // Something better, or the old one is gone: start again on the new one.
+            // より良い相手が現れたか、前の相手が消えた。新しい相手で最初からやり直す。
             this.target = best;
             this.held = 1;
             this.missing = 0;
@@ -192,15 +218,14 @@ public final class TargetLock {
     }
 
     /**
-     * Whether the seeker has lost the target in whatever the target has just thrown out.
+     * 目標が今放出した物の中で、シーカーが目標を見失ったか。
      *
-     * <p>Countermeasures work before launch as well as after it, and this is the half that decides
-     * whether a shot can be taken at all: a pilot who sees the lock warning and pulls the right
-     * handle denies the shot rather than merely surviving it. The wrong handle denies nothing —
-     * a flare is invisible to a radar seeker and a cloud of foil is invisible to a heat-seeking one.
+     * <p>対抗手段は発射後だけでなく発射前にも効き、こちらは「そもそも撃てるか」を決める半分だ。ロック警報
+     * を見て正しいレバーを引いたパイロットは、生き延びるのではなく発射自体を封じる。間違えたレバーは何も
+     * 封じない——フレアはレーダーシーカーに見えず、金属箔の雲は熱源追尾に見えない。
      *
-     * <p>Only what is near the <em>target</em> counts. Decoys hanging behind somebody else's
-     * aeroplane on the far side of the sky are not between this seeker and what it is looking at.
+     * <p>数えるのは<em>目標</em>の近くにある物だけ。空の反対側で他人の機体の後ろに漂うデコイは、この
+     * シーカーとその見ている相手の間には無い。
      */
     private boolean screened(Entity target, WeaponDefinition.Guidance guidance) {
         AABB box = target.getBoundingBox().inflate(SCREENED);
@@ -210,7 +235,7 @@ public final class TargetLock {
                 .isEmpty();
     }
 
-    /** Forgets whatever it had. Used when the selected weapon cannot lock anything. */
+    /** 捉えていた物を忘れる。選択中の兵装が何もロックできない場合に使う。 */
     public void clear() {
         this.target = null;
         this.held = 0;
@@ -221,66 +246,63 @@ public final class TargetLock {
     }
 
     /**
-     * The most central thing in the seeker's cone: nearest to the boresight rather than nearest to
-     * the machine, since where the crew are pointing is what they mean to shoot at.
+     * シーカー視野の中で最も中央にある物。機体に最も近い物ではなく照準線に最も近い物を採る。乗員が向けて
+     * いる先こそ撃つつもりの相手だから。
      *
-     * <p><b>How far it can reach is two figures, not one.</b> The weapon's own {@code lock_range} is
-     * what its seeker manages unaided, which for a heat-seeking missile is a few hundred blocks and
-     * is the whole story on an aeroplane with no radar. An aeroplane <em>with</em> one can do better:
-     * anything the radar is holding can be taken at the range the radar holds it, because that is
-     * what a radar is for — the seeker is being handed a track rather than finding one.
+     * <p><b>届く距離は1つではなく2つの数値で決まる。</b> 兵装自身の {@code lock_range} はシーカーが単独で
+     * 出せる距離で、熱源追尾ミサイルなら数百ブロック。レーダーの無い機体ではそれが全て。レーダーを積んだ
+     * 機体はもっとできる。レーダーが捉えている物は、レーダーが捉えている距離で取れる。それがレーダーの
+     * 役目だから——シーカーは航跡を「渡されて」おり、自分で見つけているのではない。
      *
-     * <p>Which is what makes the two instruments agree. Without it a pilot watches a contact on the
-     * scope at six hundred blocks, points the nose squarely at it, and is told the seeker can see
-     * nothing — the aircraft knowing perfectly well where something is and refusing to shoot at it.
+     * <p>これが2つの計器を一致させる。無ければ、パイロットは600ブロック先の目標をスコープで見ながら機首を
+     * まっすぐ向け、「シーカーには何も見えない」と告げられる。機体は物のありかを完全に知っていながら撃つ
+     * のを拒む、という状態になる。
      *
-     * <p>None of this has anything to do with what is drawn. Everything here runs on the server,
-     * where an aircraft in the air is loaded wherever it is: it holds its own chunk open, so it is
-     * as findable a thousand blocks away as it is overhead. A client's view distance decides only
-     * whether the pilot can <em>see</em> what the seeker has taken, and an aircraft is drawn as a
-     * ghost long after the ordinary renderer has given up on it.
+     * <p>これは描画とは一切関係ない。全部サーバー側で走り、そこでは空中の機体はどこにいてもロードされて
+     * いる。自分の chunk を開いたまま保持するので、1000ブロック先でも頭上と同じように見つかる。クライアン
+     * トの描画距離が決めるのは「シーカーが捉えた物をパイロットが<em>見られる</em>か」だけで、機体は通常の
+     * レンダラーが諦めたずっと後までゴーストとして描かれる。
      */
     @Nullable
     private Entity bestCandidate(WeaponDefinition.Guidance guidance) {
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
         Vec3 from = this.vehicle.position();
-        double seeker = guidance.lockRange();
+        // 兵装自身の探知距離に、機体が積んでいる補助装備の分を掛ける。照準ポッドの効果はまさにこの数値
+        // だけ——同じミサイルを、より遠くで。
+        double seeker = guidance.lockRange() * Math.max(0.0F, this.vehicle.seekerRangeGain());
         double ownAngle = Math.cos(Math.toRadians(guidance.lockAngle()));
 
-        // A radar-homing round has no cone of its own to speak of before it leaves the rail — it
-        // sees nothing at all until it is close enough to go active, and everything before that is
-        // the set's business rather than the round's. So what widens the search for one of these is
-        // the radar's own arc, the same way {@code lock_range} already widens by range rather than
-        // the round reaching that far unaided; a heat-seeker, cued by nobody's radar, keeps to its
-        // own head's narrow cone regardless of what the set can see.
+        // レーダー追尾弾はレールを離れるまで自前の視野と呼べる物を持たない。アクティブになる距離まで
+        // 近づくまで何も見えず、それ以前は弾ではなくレーダーの仕事だ。だからこの種の弾の捜索範囲を広げる
+        // のはレーダー自身の走査範囲。{@code lock_range} が「弾が単独でそこまで届く」からではなく距離で
+        // 広がるのと同じ理屈。誰のレーダーにも誘導されない熱源追尾は、レーダーに何が見えていようと自分の
+        // 狭い視野を守る。
         VehicleChassis.Radar radar = this.vehicle.radar();
         double radarAngle = guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR && radar.fitted()
                 ? Math.cos(Math.toRadians(radar.arc()))
                 : ownAngle;
         Aim aim = new Aim(from, bore, Math.min(ownAngle, radarAngle));
 
-        // Close in, the seeker finds things for itself, and it finds everything: an aeroplane, a
-        // player, anything alive that wandered into the cone. Every tick, because this is the range
-        // at which things appear suddenly and a box this size costs almost nothing to ask about.
+        // 近距離ではシーカーが自力で、しかも何でも見つける。機体、プレイヤー、視野に迷い込んだ生き物。
+        // 毎tick行う。物が突然現れるのはこの距離だし、この大きさの箱を問い合わせるコストはほぼ無いから。
         AABB box = this.vehicle.getBoundingBox().inflate(Math.min(seeker, NEAR_REACH));
 
         for (Entity candidate : this.vehicle.level().getEntities(this.vehicle, box, this::couldTarget)) {
             aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle);
         }
 
-        // And further out, from the last sweep rather than from a fresh one. See SWEEP_TICKS.
+        // それより遠くは、新規掃引ではなく直近の掃引結果から。SWEEP_TICKS 参照。
         for (Entity candidate : this.candidates(seeker)) {
             if (this.couldTarget(candidate)) {
                 aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle);
             }
         }
 
-        // Further out it takes what the radar hands it, and only that. Asked as a list of contacts
-        // rather than as another sweep of the sky, which at these ranges matters: the radar's reach
-        // is measured in kilometres and this runs every tick, so a box that size would be walked
-        // twenty times a second for the sake of a dozen things the radar has already found. Held to
-        // the radar's own arc rather than the round's cone -- see above -- which for a radar-homing
-        // weapon is the whole reason a contact well off the nose can be taken at all.
+        // さらに遠くではレーダーが渡してくる物だけを取る。空をもう一度掃引するのではなく目標一覧として
+        // 訊くのは、この距離では重要だからだ。レーダーの届く範囲は km 単位で、これは毎tick走る。その大きさ
+        // の箱を、レーダーが既に見つけた十数個のために毎秒20回歩くことになる。判定は弾の視野ではなく
+        // レーダー自身の走査範囲で行う——上記参照——それがレーダー追尾兵装で機首から大きく外れた目標を
+        // 取れる理由の全て。
         for (Contact contact : this.vehicle.getSensors().contacts()) {
             Entity candidate = this.vehicle.level().getEntity(contact.id());
 
@@ -293,11 +315,11 @@ public final class TargetLock {
     }
 
     /**
-     * Everything the seeker could reach beyond {@link #NEAR_REACH}, swept for afresh when the last
-     * sweep is stale and handed back unchanged in between.
+     * {@link #NEAR_REACH} より外でシーカーが届き得る物すべて。直近の掃引が古くなったら掃引し直し、その間
+     * は同じ物をそのまま返す。
      *
-     * <p>The list is only ever a list of <em>candidates</em>. Which of them the seeker is actually
-     * on is decided every tick, from their positions that tick, by the caller.
+     * <p>このリストはあくまで<em>候補</em>のリスト。そのうちどれを実際に捉えるかは、呼び出し側がその tick
+     * の位置から毎tick決める。
      */
     private List<Entity> candidates(double seeker) {
         if (seeker <= NEAR_REACH) {
@@ -306,7 +328,7 @@ public final class TargetLock {
             return List.of();
         }
 
-        // A wider seeker than the sweep was made for has not been swept for at all yet.
+        // 掃引時より広いシーカーになっている場合、その範囲はまだ一度も掃引していない。
         if (++this.sinceSweep < SWEEP_TICKS && seeker <= this.sweptTo) {
             return this.distant;
         }
@@ -323,31 +345,32 @@ public final class TargetLock {
     }
 
     /**
-     * How far this seeker manages against that particular target.
+     * このシーカーがその特定の目標に対して出せる距離。
      *
-     * <p>Each head has the target's own signature against it, and they are not looking for the same
-     * thing. A seeker homing on a radar return is up against the cross-section, the same as the
-     * radar that found it; one homing on heat is up against the exhaust, and shaping an aeroplane
-     * to scatter radar does nothing whatever about how hot that is. Which is the trade a stealth
-     * aeroplane makes — very hard to find at range, no harder to hit once something with a
-     * heat-seeking head is close enough to look at it.
+     * <p>各シーカーは目標自身の被探知性を相手にしており、しかも見ている物が違う。レーダー反射を追う
+     * シーカーが相手にするのは反射断面積で、見つけたレーダーと同じ。熱を追う物が相手にするのは排気で、
+     * レーダーを散らすよう機体を整形してもその熱には何の効果も無い。それがステルス機の取引だ——遠距離では
+     * 極めて見つけにくく、熱源追尾を持つ何かが近づいて見られる距離になれば当たりやすさは変わらない。
      *
-     * <p>What the pilot can still do about the second of those is fly on military power. An
-     * afterburner is worth a great deal of thrust and a great deal of heat, and the heat is visible
-     * from a long way further off than the airframe alone; see
-     * {@link AircraftEntity#infraredSignature}.
+     * <p>後者に対してパイロットにできるのはミリタリー推力で飛ぶこと。アフターバーナーは大きな推力と大きな
+     * 熱を意味し、その熱は機体単体よりずっと遠くから見える。
+     * {@link AircraftEntity#infraredSignature} 参照。
      *
-     * <p>Neither figure is ever more than one, and that is not a taste in numbers: nothing is
-     * <em>considered</em> here that the sweep above did not find, and the sweep is a box the size of
-     * the seeker's own range. A reach past that would be a reach into sky nobody has looked at.
+     * <p>どちらの係数も1を超えない。これは数値の趣味ではない。ここで<em>検討される</em>のは上の掃引が
+     * 見つけた物だけで、その掃引はシーカー自身の探知距離と同じ大きさの箱だ。それを超える距離は、誰も見て
+     * いない空へ手を伸ばすことになる。
      */
     private static double reachAgainst(WeaponDefinition.Guidance guidance, Entity candidate, double seeker) {
-        return guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR
-                ? seeker * AircraftEntity.visibility(candidate)
-                : seeker * AircraftEntity.heatVisibility(candidate);
+        return switch (guidance.seeker()) {
+            case RADAR -> seeker * AircraftEntity.visibility(candidate);
+            case HEAT -> seeker * AircraftEntity.heatVisibility(candidate);
+            // 目標指示は人間がカメラ越しに物を見ること。反射断面積が小さくても排気が冷たくても見えにくく
+            // はならないので、ここでは何も割り引かず、ポッド自身の到達距離が答えの全部になる。
+            case LASER -> seeker;
+        };
     }
 
-    /** Keeps whichever candidate is nearest the boresight as they are offered one at a time. */
+    /** 1つずつ提示される候補のうち、照準線に最も近い物を保持する。 */
     private static final class Aim {
         private final Vec3 from;
         private final Vec3 nose;
@@ -362,10 +385,9 @@ public final class TargetLock {
         }
 
         /**
-         * @param minAlignment the narrowest this particular candidate is allowed in by, which is
-         *                     not necessarily {@link #bestAlignment}'s own floor — a source with a
-         *                     wider cone than another offered to the same {@code Aim} is still held
-         *                     to its own, tighter one. See {@link #bestCandidate}.
+         * @param minAlignment この候補が通ってよい最も狭い一致度。{@link #bestAlignment} 自身の下限とは
+         *                     限らない——同じ {@code Aim} に提示される、より広い視野を持つ供給源があっても、
+         *                     この候補は自分の狭い方の基準で判定される。{@link #bestCandidate} 参照
          */
         private void consider(Entity candidate, double reach, double minAlignment) {
             Vec3 middle = candidate.position().add(0.0, candidate.getBbHeight() * 0.5, 0.0);
@@ -386,9 +408,8 @@ public final class TargetLock {
     }
 
     /**
-     * What a seeker will look at: something alive, or another machine. Not the machine doing the
-     * looking, nor anyone riding it, and not the mod's own projectiles — a missile chasing another
-     * missile is not what anybody asked for.
+     * シーカーが見る対象。生き物か、他の機体。見ている本人の機体、それに乗っている者、そしてこの MOD の
+     * 発射物は対象外——ミサイルがミサイルを追うのは誰も頼んでいない。
      */
     private boolean couldTarget(Entity candidate) {
         if (candidate == this.vehicle || candidate instanceof VehicleProjectile
@@ -400,18 +421,16 @@ public final class TargetLock {
             return false;
         }
 
-        // Somebody sitting in another machine is not a target of their own. A seeker that takes the
-        // crew instead of the machine is pointed at the same patch of sky and says the wrong thing
-        // about it: the scope would show the machine as a plain contact while the missile chased the
-        // people inside it, and letting go of the stick would leave the missile chasing a falling body.
+        // 他の機体に乗っている者は単独の目標ではない。機体ではなく乗員を取ったシーカーは、同じ空域を
+        // 指しながら間違ったことを言う。スコープは機体をただの目標として表示し、ミサイルは中の人間を追う。
+        // 操縦桿から手を離せば、ミサイルは落ちていく体を追うことになる。
         if (candidate.getVehicle() instanceof VehicleEntityBase) {
             return false;
         }
 
-        // A burnt-out airframe is not worth a missile. Left targetable it is the easiest thing in the
-        // sky to lock -- it does not manoeuvre, does not dispense flares and never goes away -- and a
-        // seeker would settle on the aeroplane the pilot has already shot down instead of the one
-        // shooting at them.
+        // 燃え尽きた機体にミサイルを使う価値は無い。目標のままにすれば空で最もロックしやすい物になる
+        // ——機動せず、フレアも出さず、どこへも行かない——ので、シーカーは今撃ってきている機体ではなく
+        // 既に撃墜した機体に落ち着いてしまう。
         if (candidate instanceof VehicleEntityBase machine) {
             return !machine.isWrecked();
         }
@@ -419,7 +438,7 @@ public final class TargetLock {
         return candidate instanceof LivingEntity;
     }
 
-    /** What the instruments need: which entity, and whether the seeker has it yet. */
+    /** 計器が必要とする物。どのエンティティか、そしてシーカーが既に捉えたか。 */
     public void save(CompoundTag tag) {
         if (this.target != null) {
             tag.putInt("Target", this.target.getId());
@@ -429,8 +448,8 @@ public final class TargetLock {
     }
 
     /**
-     * Reads back what the server sent. Only ever used on a client, where the entity is looked up by
-     * the id that came over the wire.
+     * サーバーが送ってきた内容を読み戻す。使われるのはクライアントだけで、エンティティは通信で届いた ID
+     * から引く。
      */
     public void load(CompoundTag tag) {
         if (!tag.contains("Target")) {

@@ -4,60 +4,51 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * How far a ground vehicle's body has moved on its springs, and the springs themselves.
+ * 地上車両の車体がサスペンション上でどれだけ動いたか、およびそのサスペンション自体。
  *
- * <p><b>What this is for.</b> A tank in this mod is held up by four probes: the ground under the
- * corners of its tracks is read, and the hull is laid along the plane they describe. That is a
- * faithful account of where a vehicle <em>ends up</em> and no account at all of how it gets there. A
- * real hull is not bolted to its running gear — it sits on torsion bars a foot or more deep, and
- * everything that makes a moving vehicle look like one happens in that foot: the nose dipping under
- * the brakes, the body leaning out of a turn, the whole machine rocking once and settling after it
- * drops off a kerb. Without it a tank slides over the landscape like a piece on a board.
+ * <p><b>目的。</b> この MOD の戦車は4本の触角で支えられている。履帯の四隅の下の地面を読み、その4点が
+ * 作る平面に沿って車体を寝かせる。これは車両が<em>最終的にどこに落ち着くか</em>の忠実な記述であって、
+ * そこへどう至るかの記述ではまったくない。実車の車体は走行装置に直付けされておらず、30cm 以上のトーション
+ * バーの上に乗っている。走る車両を走る車両らしく見せる要素は全部その30cm の中で起きる——制動での前のめり、
+ * 旋回で外へ傾く車体、縁石から落ちた後に一度揺れて落ち着く動き。これが無いと、戦車は盤上の駒のように地形を
+ * 滑る。
  *
- * <p><b>Where it lives.</b> The body's movement is drawn and nothing else: the collision boxes, the
- * gun's aim and where the vehicle is standing are all worked out from the rigid hull exactly as
- * before, and none of them can see this. That is deliberate. A crew whose rounds went where the body
- * happened to be rocking at the moment of firing would be fighting the suspension rather than the
- * enemy, and a vehicle whose armour moved a few centimetres a tick would make every hit a lottery.
- * What moves is the picture — which is what suspension is <em>for</em>, on a machine whose weight the
- * game is not simulating.
+ * <p><b>効く範囲。</b> 動くのは描画だけ。当たり判定の箱も、砲の照準も、車両の立っている位置も、従来通り
+ * 剛体の車体から計算され、どれもこの値を見ない。これは意図的だ。発射の瞬間に車体が揺れていた方向へ弾が
+ * 飛ぶ乗員は敵ではなくサスペンションと戦うことになるし、装甲が毎tick 数センチ動く車両は命中が毎回くじ引き
+ * になる。動くのは絵——重量をゲームが計算していない機械にとって、それこそがサスペンションの<em>役目</em>。
  *
- * <p><b>Why it needs nothing sent.</b> Every side already knows how fast the vehicle is going, which
- * way it is heading, how high it is and which way the hull is lying: those are either simulated
- * locally by whoever is driving or sent for other reasons. The springs are driven from the
- * <em>changes</em> in those, so each side can run them for itself and arrive at the same picture
- * without a byte on the wire. Two sides that drift a little apart differ by a centimetre of body
- * movement, which is not a thing anybody can see and not a thing anything depends on.
+ * <p><b>通信が一切不要な理由。</b> どの側も既に、車両の速度・進行方位・高さ・車体の姿勢を知っている。
+ * それらは運転者がローカルで計算しているか、別の理由で送られているかのどちらかだ。サスペンションはその
+ * <em>変化</em>で駆動されるので、各側が自前で回して同じ絵に辿り着ける。1バイトも送らずに。多少ずれた2つの
+ * 側の差は数センチの車体変位で、誰にも見えないし何もそれに依存していない。
  *
- * <p>The three figures are the three ways a body can move on its springs that are worth drawing.
- * There is no fourth: sideways and fore-and-aft travel exist on a real vehicle and amount to
- * millimetres, and yaw on the springs is not a thing a tracked hull does.
+ * <p>3つの値は、描く価値のある「車体がサスペンション上で動く3通り」。4つ目は無い。左右・前後の変位は実車
+ * にもあるがミリ単位だし、サスペンション上のヨーは装軌車体には起きない。
  *
- * @param heave how far the body has risen above where it sits at rest, in blocks; negative is the
- *              springs compressed
- * @param pitch how far the nose has risen above the tail, in degrees
- * @param lean how far the right-hand side has dropped below the left, in degrees — the same sign as
- *             the hull's own bank, so that the two read the same way round
+ * @param heave 静止位置から車体が持ち上がった量（ブロック）。負ならサスペンションが縮んでいる
+ * @param pitch 尾部に対して機首がどれだけ上がったか（度）
+ * @param lean 左側に対して右側がどれだけ下がったか（度）。車体自身のバンクと同符号にして、両者が同じ向き
+ *             に読めるようにしてある
  */
 public record Ride(float heave, float pitch, float lean) {
-    /** A body sitting square on its springs, which is what a vehicle with none has for ever. */
+    /** サスペンション上でまっすぐ座った車体。サスペンションを持たない車両は永遠にこの状態。 */
     public static final Ride LEVEL = new Ride(0.0F, 0.0F, 0.0F);
 
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
 
     /**
-     * Whether the body has moved far enough to be worth drawing differently.
+     * 車体が、描き分ける価値があるだけ動いたか。
      *
-     * <p>Worth asking: a vehicle standing still with its springs settled is the common case, and
-     * everything that reads this — the pose stack, every road wheel, every link of track — can be
-     * skipped outright when the answer is no.
+     * <p>訊く価値がある。サスペンションが落ち着いた停止中の車両が最も普通の状態で、この値を読む側——
+     * ポーズスタック、全ての転輪、履帯の全リンク——は「動いていない」なら丸ごと省略できる。
      */
     public boolean isLevel() {
         return Math.abs(this.heave) < 1.0E-4F && Math.abs(this.pitch) < 1.0E-3F
                 && Math.abs(this.lean) < 1.0E-3F;
     }
 
-    /** The body between two of these, for a ghost, which has no springs of its own to ask. */
+    /** 2つの状態の中間。自前のサスペンションを持たないゴースト表示用。 */
     public static Ride between(Ride previous, Ride now, float partialTick) {
         return new Ride(
                 Mth.lerp(partialTick, previous.heave(), now.heave()),
@@ -66,18 +57,15 @@ public record Ride(float heave, float pitch, float lean) {
     }
 
     /**
-     * A point on the vehicle, carried to where the body's movement has put it — in the vehicle's own
-     * axes, where x runs to the right, y up and z over the bow, which is what everything in a
-     * machine's file is written in.
+     * 車両上の点を、車体の変位が運んだ先へ移す。座標は車両自身の軸（x が右、y が上、z が艦首方向）で、
+     * 機体ファイルの記述は全部この軸で書かれている。
      *
-     * <p>The whole movement rather than just the height. A crew member's eye a couple of blocks
-     * above the hull floor and three blocks forward of the middle is thrown backwards as the nose
-     * comes up and sideways as the body leans, and it is that — rather than a hull bobbing up and
-     * down underneath a head that stays put — that reads from inside as being shaken about.
+     * <p>高さだけでなく変位の全成分を使う。車体床から2ブロック上・中心から3ブロック前にある乗員の目は、
+     * 機首が上がれば後ろへ、車体が傾けば横へ振られる。頭が固定されたまま車体だけが上下する絵ではなく、
+     * それこそが内側から見た「揺さぶられている」感覚になる。
      *
-     * <p>The angles are small enough for the small-angle form to be exact to the pixel: at the ten
-     * degrees a badly abused suspension might reach, the error is a percent and a half of a
-     * centimetre-scale movement.
+     * <p>角度は小さいので微小角近似でピクセル単位まで正確。ひどく酷使したサスペンションが達する10度でも、
+     * 誤差はセンチ規模の変位の1.5%。
      */
     public Vec3 carry(Vec3 point) {
         if (this.isLevel()) {
@@ -94,23 +82,18 @@ public record Ride(float heave, float pitch, float lean) {
     }
 
     /**
-     * How far a point built into the model is carried straight up by the body's movement, in the
-     * model's own blocks.
+     * モデル内の点が車体変位によって真上へ運ばれる量（モデル自身のブロック単位）。
      *
-     * <p>What this is for is the running gear, which has to be moved the other way by exactly this
-     * much to stay where it was. The body is rocked on the pose stack, so every bone in the model
-     * goes with it; a road wheel put back down by what this returns is a road wheel that stays on
-     * the ground while the hull above it moves, which is the whole of what a suspension looks like
-     * from outside.
+     * <p>用途は走行装置で、元の位置に留まるにはちょうどこの分だけ逆へ動かす必要がある。車体はポーズ
+     * スタック上で揺らされるのでモデルの全ボーンが一緒に動く。ここが返す量だけ押し下げた転輪は、上の車体が
+     * 動いても地面に留まる——外から見たサスペンションとはそれが全て。
      *
-     * <p><b>The axes are the model's, not the vehicle's.</b> A machine is drawn with its attitude
-     * applied and then turned half round — see {@code VehicleRenderer.applyRotations} — so a point
-     * built at the model's +X is out to the vehicle's left of the screen's reckoning and one at its
-     * +Z is towards the tail. That half turn is the whole of the difference, and it is why both
-     * terms come out negated against {@link #carry}'s.
+     * <p><b>軸は車両ではなくモデルの軸。</b> 機体は姿勢を適用してから半回転させて描かれる
+     * （{@code VehicleRenderer.applyRotations} 参照）ので、モデルの +X にある点は車両の左側、+Z にある点
+     * は尾部側になる。その半回転が違いの全部で、{@link #carry} に対して両項の符号が反転している理由。
      *
-     * @param scale the model's own scale, since the model is drawn inside it and a block of body
-     *              movement is that much less of a block once the model has been scaled down
+     * @param scale モデル自身のスケール。モデルはその中で描かれるので、縮小後は車体変位1ブロックが
+     *              1ブロック分より小さくなる
      */
     public float liftOf(float modelX, float modelZ, float scale) {
         return this.heave / Math.max(scale, 0.01F)
@@ -119,53 +102,45 @@ public record Ride(float heave, float pitch, float lean) {
     }
 
     // ------------------------------------------------------------------
-    // The springs themselves
+    // サスペンション本体
     // ------------------------------------------------------------------
 
     /**
-     * The suspension of one vehicle, ticked by that vehicle and read by whatever draws it.
+     * 1台分のサスペンション。車両が tick し、描画側が読む。
      *
-     * <p>Three damped springs, one per way the body can move, each pulled towards where the forces
-     * on the vehicle say the body should be sitting and each free to overshoot on the way. A spring
-     * rather than an easing towards a target, because the overshoot is the point: a body that
-     * settled straight onto its resting line would dip under the brakes and stay dipped, where a
-     * real one dips, comes back past level and rocks itself still over the next second.
+     * <p>減衰付きバネ3本。車体が動ける方向ごとに1本ずつあり、それぞれ「車両に働く力が示す位置」へ引かれ、
+     * 途中で行き過ぎる自由を持つ。目標へのイージングではなくバネにしたのは、行き過ぎこそが本質だから。
+     * 静止線へまっすぐ収束する車体は制動で沈んだら沈んだままだが、実車は沈み、水平を越えて戻り、次の1秒で
+     * 揺れながら静止する。
      *
-     * <p>What excites them is measured rather than invented, and the measurements are the same on
-     * every side:
+     * <p>バネを励起する量は捏造ではなく実測で、その測定値はどの側でも同じ:
      *
      * <ul>
-     * <li><b>The hull's vertical acceleration.</b> Not how fast it is falling — a vehicle running
-     * steadily down a hillside is not being thrown about — but how sharply that is changing. A hull
-     * dropped a block and stopped dead compresses its springs by what the body was doing at the
-     * moment it landed.
-     * <li><b>The drivetrain.</b> Pulling away lifts the nose and braking drops it, and both in
-     * proportion to what this particular vehicle can manage, so a file does not have to know
-     * anything about blocks per tick squared to say how much its hull moves.
-     * <li><b>The turn.</b> A body thrown outwards by a corner leans away from it, again as a
-     * fraction of the hardest corner this vehicle can turn.
+     * <li><b>車体の鉛直加速度。</b> 落下速度そのものではなく（斜面を一定速度で下る車両は揺さぶられていな
+     * い）、その変化の鋭さ。1ブロック落ちて急停止した車体は、着地の瞬間に車体が持っていた速度の分だけ
+     * バネを縮める。
+     * <li><b>駆動系。</b> 発進で機首が上がり、制動で下がる。どちらもその車両にできる範囲に対する比率で
+     * 効くので、ファイル側は「1tick二乗あたり何ブロック」を知らなくても車体の動く量を書ける。
+     * <li><b>旋回。</b> 曲がりで外へ振られた車体は外側へ傾く。これもその車両が曲がれる最大に対する比率。
      * </ul>
      *
-     * <p><b>And nothing else.</b> There is no running shudder laid over the top of these, from the
-     * engine or from the going, and there deliberately is not. Such a thing cannot be measured: what
-     * the four ground probes describe is the plane the hull lies in, and the difference between that
-     * plane and what each individual road wheel is riding over is not something this vehicle has
-     * ever known — so it would have to be invented, as a wave shaking a body that nothing is
-     * actually shaking. What is here instead is only the vehicle answering things that really
-     * happened to it, and a tank crossing broken ground has plenty of those.
+     * <p><b>そしてそれ以外は無い。</b> エンジンや路面による走行中の細かな振動は上乗せしていないし、意図的
+     * にしていない。それは測定できない量だからだ。4本の触角が記述するのは車体が乗る平面であり、その平面と
+     * 個々の転輪が実際に乗り越えている物との差は、この車両が一度も知ったことのない情報。つまり捏造するしか
+     * なく、何も揺らしていない車体を揺らす波になる。ここにあるのは、実際に起きた事に車両が応答している分
+     * だけ。荒れ地を渡る戦車にはそれが十分たくさんある。
      */
     public static final class Springs {
         /**
-         * How much of a sudden change in the hull's rate of fall the body keeps for itself.
+         * 車体の落下速度の急変のうち、上部車体が自分の分として受け取る割合。
          *
-         * <p>Not all of it. A hull that lands is decelerated by the ground over rather less than a
-         * tick and the body is decelerated by the springs over most of a second, so what the body is
-         * still doing at the end of the tick the hull stopped in is a good part of what it was doing
-         * at the start of it, and not the whole.
+         * <p>全部ではない。着地した車体は1tick足らずで地面に減速させられるが、上部車体はサスペンション
+         * によって1秒近くかけて減速する。だから車体が止まった tick の終わりに上部車体がまだ持っている
+         * 速度は、その tick の始めに持っていた分の相当部分ではあるが全部ではない。
          */
         private static final float IMPACT = 0.4F;
 
-        /** The most one tick of falling is allowed to count for, so a teleport is not a launch. */
+        /** 1tick分の落下として数えてよい上限。テレポートが打ち上げにならないように。 */
         private static final float MAX_JOLT = 1.5F;
 
         private final Axis heave = new Axis();
@@ -173,9 +148,8 @@ public record Ride(float heave, float pitch, float lean) {
         private final Axis lean = new Axis();
 
         /**
-         * Whether there is a previous tick to have changed from. Everything here is a difference, and
-         * the first tick of a vehicle's life — or the first after one is read back out of the
-         * world — has nothing to difference against.
+         * 差分の基準となる前 tick があるか。ここは全部が差分なので、車両の生涯最初の tick——あるいは
+         * ワールドから読み戻された直後の tick——には引く相手が無い。
          */
         private boolean primed;
 
@@ -185,12 +159,12 @@ public record Ride(float heave, float pitch, float lean) {
         private double wasSink;
 
         /**
-         * One tick of the suspension.
+         * サスペンションの1tick分。
          *
-         * @param speed along the hull's nose, in blocks a tick
-         * @param heading the hull's bearing, in degrees
-         * @param y how high the vehicle is standing
-         * @param onGround whether the vehicle has anything under it to be thrown about by
+         * @param speed 車体前方向の速度（1tickあたりブロック）
+         * @param heading 車体の方位（度）
+         * @param y 車両の高さ
+         * @param onGround 揺さぶられる相手となる地面が下にあるか
          */
         public void tick(GroundVehicleDefinition definition, float speed, float heading, double y,
                 boolean onGround) {
@@ -216,9 +190,8 @@ public record Ride(float heave, float pitch, float lean) {
             float travel = Math.max(setup.travel(), 0.0F);
 
             if (travel <= 0.0F) {
-                // A vehicle whose file says its body does not move. Every spring is given nothing to
-                // aim at and no room to move, which pins the lot at rest without a second path
-                // through any of this.
+                // ファイルに「車体は動かない」と書かれた車両。全バネに目標ゼロ・可動域ゼロを渡すことで
+                // 全部を静止に固定する。この処理に2本目の分岐を作らずに済む。
                 this.heave.tick(0.0F, setup, 0.0F);
                 this.pitch.tick(0.0F, setup, 0.0F);
                 this.lean.tick(0.0F, setup, 0.0F);
@@ -226,10 +199,8 @@ public record Ride(float heave, float pitch, float lean) {
                 return;
             }
 
-            // How far each spring may go before the body is against its stops. The two angles are
-            // the same travel read across the vehicle: a wheel at one end of the contact patch that
-            // has used up all of it has tipped the hull by however much that is over the distance
-            // to the middle.
+            // 各バネがストッパーに当たるまでの可動域。2つの角度は同じ可動域を車両を横断して読んだ物で、
+            // 接地長の端の転輪が可動域を使い切ったとき、車体は「その量÷中心までの距離」だけ傾く。
             float halfLength = Math.max(setup.contactLength() * 0.5F, 0.5F);
             float halfWidth = Math.max(setup.contactWidth() * 0.5F, 0.5F);
             float nodLimit = (float) Math.toDegrees(travel / halfLength);
@@ -239,26 +210,25 @@ public record Ride(float heave, float pitch, float lean) {
                 this.heave.kick(-jolt * IMPACT);
             }
 
-            // The body's own resting line is level and level is all it is pulled towards; what puts
-            // it anywhere else is the jolt above. The other two are held wherever the drivetrain and
-            // the corner are holding them, and let go the moment those stop.
+            // 上下動の静止線は水平で、引かれる先も水平だけ。そこから外すのは上の衝撃。他の2つは駆動系
+            // と旋回が押さえている位置に保たれ、それらが止まった瞬間に解放される。
             this.heave.tick(0.0F, setup, travel);
             this.pitch.tick(this.nod(definition, along), setup, nodLimit);
             this.lean.tick(this.heel(definition, speed, turn), setup, heelLimit);
         }
 
-        /** The body a moment between two ticks, which is what anything drawing it wants. */
+        /** 2つの tick の間の任意の瞬間の車体。描画側が欲しいのはこれ。 */
         public Ride at(float partialTick) {
             return new Ride(this.heave.at(partialTick), this.pitch.at(partialTick),
                     this.lean.at(partialTick));
         }
 
         /**
-         * Where the drivetrain is asking the body to sit, in degrees of nose up.
+         * 駆動系が車体に要求している位置。機首上げの度数で。
          *
-         * <p>Against what this vehicle can actually do rather than against a fixed number of blocks
-         * a tick squared, so that {@code dive} says what it means — the nod at the hardest this
-         * machine pulls or stops — whether the machine is a scout car or sixty tonnes.
+         * <p>固定の「1tick二乗あたり何ブロック」ではなくその車両が実際にできる範囲を基準にするので、
+         * {@code dive} は文字通りの意味——この機械が最大加速・最大制動したときの沈み込み——になる。偵察車
+         * でも60トンでも同じ。
          */
         private float nod(GroundVehicleDefinition definition, float along) {
             GroundVehicleDefinition.Powertrain powertrain = definition.powertrain();
@@ -268,12 +238,11 @@ public record Ride(float heave, float pitch, float lean) {
         }
 
         /**
-         * Where the corner is throwing the body, in degrees of right-hand side down.
+         * 旋回が車体を振っている方向。右側下がりの度数で。
          *
-         * <p>Negated, and that is the whole of the physics: a body carried round to the right is
-         * left behind to the left, so a right-hand turn leans the vehicle onto its left-hand
-         * springs. Which is why it is worth drawing at all — a hull that banked <em>into</em> its
-         * turns would read as an aeroplane.
+         * <p>符号が反転しており、そこが物理の全て。右へ回された車体は左へ取り残されるので、右旋回では
+         * 左側のバネへ荷重が乗る。描く価値があるのはまさにそのためで、旋回の<em>内側</em>へバンクする車体
+         * は飛行機に見えてしまう。
          */
         private float heel(GroundVehicleDefinition definition, float speed, float turn) {
             GroundVehicleDefinition.Powertrain powertrain = definition.powertrain();
@@ -286,23 +255,22 @@ public record Ride(float heave, float pitch, float lean) {
 
 
         /**
-         * One spring, and the one thing on it worth drawing.
+         * バネ1本と、その上で描く価値のある唯一の量。
          *
-         * <p>Integrated as a plain damped spring a tick at a time. Nothing here is stiff enough for
-         * that to be a problem — the fastest of these bodies takes half a second to come back to
-         * level, which is ten ticks of a wave rather than one — and a step the size of a tick is
-         * what the rest of the vehicle is worked out in anyway.
+         * <p>素の減衰バネとして1tick刻みで積分する。ここには剛性が問題になるほど硬い物は無い——最速の
+         * 車体でも水平へ戻るのに0.5秒、つまり1tickではなく10tickの波——し、そもそも車両の他の部分も
+         * 1tick刻みで計算されている。
          */
         private static final class Axis {
-            /** Where the body is, where it was at the end of the tick before, and how fast it moves. */
+            /** 現在位置、前 tick 終了時の位置、そして移動速度。 */
             private float value;
             private float previous;
             private float rate;
 
             /**
-             * @param target where the forces on the vehicle are holding the body — level, unless the
-             *               drivetrain or a corner is pulling it somewhere
-             * @param limit how far the body may go before it is against its stops
+             * @param target 車両に働く力が車体を押さえている位置。駆動系や旋回が引っ張っていなければ
+             *               水平
+             * @param limit ストッパーに当たるまでの可動域
              */
             void tick(float target, GroundVehicleDefinition.Suspension setup, float limit) {
                 this.previous = this.value;
@@ -311,9 +279,8 @@ public record Ride(float heave, float pitch, float lean) {
 
                 float moved = this.value + this.rate;
 
-                // The stops. A spring that has run out of travel stops, and stops carrying the speed
-                // that got it there — a body against its bump stops is a body that has just had the
-                // rest of its movement taken out by the vehicle rather than by the spring.
+                // ストッパー。可動域を使い切ったバネは止まり、そこまで運んだ速度も失う。バンプストップ
+                // に当たった車体とは、残りの運動をバネではなく車両本体に取り上げられた車体のこと。
                 if (moved > limit) {
                     moved = limit;
                     this.rate = Math.min(this.rate, 0.0F);

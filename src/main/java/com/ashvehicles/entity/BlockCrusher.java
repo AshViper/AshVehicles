@@ -14,59 +14,50 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * What a vehicle drives through, and the breaking of it.
+ * 車両が突き進む対象と、その破壊。
  *
- * <p>Two questions, and they have to have the same answer or the vehicle either stops in front of
- * something nothing ever clears or drives into something that stays where it is. So they are asked
- * of the same volume by the same rule: {@link #opens} is the one the movement asks before it commits
- * to a step, and {@link #crush} is the one the server asks afterwards about where the vehicle
- * actually got to.
+ * <p>問いは2つあり、両者の答えは一致していなければならない。さもないと車両は「誰も片付けない物の前で止ま
+ * る」か「そのまま残る物へ突っ込む」かのどちらかになる。だから同じ体積に同じ規則で問う。{@link #opens} は
+ * 1歩を確定する前に移動処理が問う物、{@link #crush} は車両が実際にどこまで行ったかについて後からサーバー
+ * が問う物。
  *
- * <p><b>Which of the two sides asks which.</b> A vehicle with a driver in it is simulated on that
- * driver's client — see {@link GroundVehicleEntity} — so {@code opens} is answered there, off block
- * states and tags the client already has, and the vehicle moves on the strength of it. Nothing is
- * broken on that side and nothing is asked of the server about it: the server sweeps the hull's own
- * volume every tick and breaks what it finds, which is the same set of blocks the client decided it
- * could drive into, arrived at without the client being trusted with anything beyond its own
- * position.
+ * <p><b>どちらの側がどちらを問うか。</b> 運転手が乗っている車両はその運転手のクライアントで計算される
+ * （{@link GroundVehicleEntity} 参照）ので、{@code opens} はそこで、クライアントが既に持っているブロック
+ * 状態とタグを使って答え、車両はその結果に基づいて動く。その側では何も壊さず、サーバーへ何も問い合わせない。
+ * サーバーは毎tick車体自身の体積を掃引して見つけた物を壊す。それはクライアントが「進入できる」と判断した
+ * のと同じブロック集合であり、クライアントに自分の位置以上の何かを委ねずに得られている。
  *
- * <p><b>What counts as in the way.</b> The hull, and not the plain box round it: the footprint the
- * vehicle really has, turned to face the way it is facing, lying along the plane its own suspension
- * has lain it along, from a step above that plane up to the top of the turret. Everything under the
- * step is ground — a kerb the vehicle climbs, the hillside it is standing on — and nothing solid
- * there is ever touched, which is the whole of what keeps a tank from trenching its way up every
- * slope it meets.
+ * <p><b>何を「進路上」と数えるか。</b> 素の直方体ではなく車体そのもの。車両が実際に持つ接地形状を、向いて
+ * いる方向へ回し、自身のサスペンションが寝かせた平面に沿わせ、その平面の1段上から砲塔上面まで。その段より
+ * 下は全部「地面」——乗り越える縁石であり、立っている斜面であり——そこの固体には決して触れない。戦車が
+ * 出会う斜面ごとに塹壕を掘っていかない理由の全部がこれ。
  *
- * <p><b>Except what grows there.</b> Undergrowth is the one thing broken below that line as well,
- * right down to the tracks, because undergrowth at track height is the usual case and the whole
- * point: a tank crossing a meadow leaves a track through the meadow. It can only ever be the
- * {@link #CRUSHABLE} tag down there — never the resistance test, which at ground level would have
- * every vehicle in the mod ploughing a trench across the world.
+ * <p><b>ただしそこに生えている物は別。</b> 下草だけはその線より下でも、履帯の高さまで壊す。履帯の高さの
+ * 下草こそ普通の状況であり要点だからだ——草原を横切った戦車は草原に轍を残す。そこで使えるのは
+ * {@link #CRUSHABLE} タグだけで、耐性判定は決して使わない。地面高さでそれをやれば、MOD 内の全車両が世界
+ * に溝を掘って進むことになる。
  */
 public final class BlockCrusher {
     /**
-     * Things that go down under any vehicle whatever its crush strength: grass, crops, leaves,
-     * saplings, the undergrowth of the world.
+     * 破壊力に関わらずどの車両の下でも倒れる物。草、作物、葉、苗木——世界の下草。
      *
-     * <p>Separate from the resistance test because it is a separate idea. Resistance says how
-     * stoutly a thing is built and is the right question to ask of a wall; asked of a hedge it gives
-     * the right answer for the wrong reason, and asked by a light vehicle with little crush strength
-     * it gives the wrong one outright. Nothing that grows should ever stop a machine on tracks, so
-     * nothing that grows is asked.
+     * <p>耐性判定と分けてあるのは別の概念だから。耐性は「どれだけ頑丈に作られているか」を言う値で、壁に問う
+     * には正しい。生垣に問えば正しい答えを間違った理由で返し、破壊力の小さい軽車両が問えば端的に間違った
+     * 答えを返す。生えている物が装軌車を止めるべきではないので、生えている物には問わない。
      *
-     * <p>A tag, so a pack can say what else counts without touching any of this.
+     * <p>タグにしてあるので、パック側はここに一切触れずに「他に何が該当するか」を言える。
      */
     public static final TagKey<Block> CRUSHABLE = TagKey.create(Registries.BLOCK,
             ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "crushable"));
 
     /**
-     * How near the edge of the hull a block has to come before it counts as only touching it rather
-     * than standing in it, in blocks.
+     * ブロックが「車体の中に立っている」ではなく「触れているだけ」と数えられるまでの、車体端からの距離
+     * （ブロック）。
      *
-     * <p>A whisker, and it earns its place. A hull side falls on a block boundary far more often
-     * than chance would have it — these vehicles are laid out in whole and half blocks — and the
-     * column beyond that boundary touches the hull along a line and overlaps it by nothing at all.
-     * Counted, it would have every vehicle clearing a path a block wider on each side than itself.
+     * <p>ごく僅かな値だが、置く価値がある。車体の側面はブロック境界にぴったり乗ることが偶然より遥かに多い
+     * ——この車両群は1ブロックや半ブロック単位で設計されている——し、その境界の向こうの列は車体に線で接する
+     * だけで面積の重なりはゼロだ。それを数えると、全車両が自分より左右1ブロックずつ広い道を切り開くことに
+     * なる。
      */
     private static final double GRAZE = 1.0E-4;
 
@@ -74,46 +65,41 @@ public final class BlockCrusher {
     }
 
     /**
-     * The volume a vehicle's hull occupies, in the shape a ground vehicle is really made of.
+     * 車体が占める体積を、地上車両が本当に持っている形で表した物。
      *
-     * <p>An oriented rectangle rather than a box, and a sloped one: {@code rise} and {@code tilt}
-     * are how far the hull's underside climbs per block forward and per block to the right, which
-     * for a vehicle lying on a hillside is the hillside's own slope. That is what makes the floor of
-     * this volume follow the ground instead of cutting into it — take the slope away and a tank
-     * pointing up a bank would find the bank inside itself and eat it.
+     * <p>箱ではなく向きを持った長方形で、しかも傾いている。{@code rise} と {@code tilt} は車体下面が前へ
+     * 1ブロック進むごと・右へ1ブロック行くごとにどれだけ上がるかで、斜面に乗った車両ではそれが斜面自身の
+     * 勾配になる。これがこの体積の床を「地面に食い込む」のではなく「地面に沿う」ものにしている。勾配を外せ
+     * ば、土手を向いた戦車は土手が自分の中にあることに気付いてそれを食べてしまう。
      *
-     * @param at the vehicle's origin, which for these models is between the tracks at ground level
-     * @param forward its heading, level and of unit length
-     * @param halfWidth half the width of the hull, in blocks
-     * @param front how far the hull reaches ahead of the origin, and {@code back} how far behind,
-     *              written as a negative number
-     * @param rise how far the hull's underside climbs per block forward, and {@code tilt} the same
-     *             per block to the right
-     * @param belly how far above the hull's plane the body of the vehicle starts. A step, plus a
-     *              little: below it is ground the vehicle drives over rather than through
-     * @param roof how far above that plane the volume ends, which is the top of the vehicle
+     * @param at 車両の原点。このモデル群では履帯の間、地面の高さ
+     * @param forward 進行方位。水平で単位長
+     * @param halfWidth 車体幅の半分（ブロック）
+     * @param front 原点から前方へ車体が届く距離、{@code back} は後方へ届く距離（負の数で書く）
+     * @param rise 車体下面が前へ1ブロックあたり上がる量、{@code tilt} は右へ1ブロックあたりの同じ物
+     * @param belly 車体の平面から、車両の胴体が始まる高さ。1段＋少し。これより下は「突き進む」のではなく
+     *              「乗り越える」地面
+     * @param roof その平面から体積が終わる高さ。車両の最上部
      */
     public record Body(Vec3 at, Vec3 forward, double halfWidth, double front, double back,
             double rise, double tilt, double belly, double roof) {
     }
 
     /**
-     * Whether the vehicle can make its own way through whatever is stopping it: something is in the
-     * body of it, and everything that is gives way.
+     * 車両が、自分を止めている物を自力で突破できるか。車体の中に何かがあり、そこにある物が全部壊れる場合に
+     * 限り真。
      *
-     * <p>Asked only of a step the movement has already refused, so both halves of that matter. If
-     * nothing is in the body of the vehicle at all then whatever refused the step was not something
-     * the vehicle could break — a ledge a shade too tall to climb, most often — and the refusal
-     * stands. If something is there but will not give, it stands too.
+     * <p>問われるのは移動が既に拒否した1歩についてだけなので、条件の両方が効く。車体の中に何も無いなら、
+     * その1歩を拒否したのは車両に壊せる物ではなかった——たいていは登るには少し高すぎる段差——ので拒否は
+     * 有効なまま。何かあっても壊れないなら、それも有効なまま。
      *
-     * <p>Only what would actually stop the vehicle is counted. A block with no collision shape —
-     * grass, a flower, a crop — is not in anybody's way whether or not it is soft enough to break,
-     * and counting one would have a vehicle claiming to smash its way through a wheat field it was
-     * never stopped by.
+     * <p>数えるのは実際に車両を止める物だけ。当たり判定形状を持たないブロック——草、花、作物——は壊せるか
+     * どうかに関わらず誰の邪魔にもなっておらず、それを数えると「一度も止められていない麦畑を粉砕して進んだ」
+     * と車両が主張することになる。
      */
     public static boolean opens(Level level, Body body, float limit) {
-        // Set by the walk below, which cannot say two things at once: whether anything gave is the
-        // other half of the answer to whether anything held.
+        // 下の走査から設定される。走査は2つのことを同時に返せないので、「何かが壊れたか」は「何かが持ち
+        // こたえたか」の答えのもう半分になる。
         boolean[] gives = {false};
 
         boolean holds = walk(level, body, (pos, state, inBody) -> {
@@ -134,12 +120,11 @@ public final class BlockCrusher {
     }
 
     /**
-     * Breaks everything soft enough that is standing in the vehicle, and leaves everything else.
+     * 車両の中に立っている物のうち、十分柔らかい物を全部壊し、それ以外は残す。
      *
-     * <p>Through {@code destroyBlock}, so each one makes the noise and the scatter of itself that
-     * anything broken does. It reads like a great many of them and is not: the volume is cleared the
-     * tick the vehicle first reaches into it, and after that a vehicle under way is only ever
-     * entering the thin slice of new ground a tick of its own speed carries it into.
+     * <p>{@code destroyBlock} 経由なので、1つ1つが破壊時の音と破片を出す。膨大な数に見えるが実際は違う。
+     * 体積は車両が最初にそこへ届いた tick で片付き、その後は走行中の車両が1tick分の速度で進入する薄い層
+     * だけが対象になる。
      */
     public static void crush(Level level, Entity by, Body body, float limit, boolean drops) {
         walk(level, body, (pos, state, inBody) -> {
@@ -156,11 +141,10 @@ public final class BlockCrusher {
     }
 
     /**
-     * Asked of every block the vehicle reaches into, until one of them answers yes.
+     * 車両が届く全ブロックに対し、どれかが真を返すまで問う。
      *
-     * <p>{@code inBody} tells the two halves of the volume apart: true for a block inside the body
-     * of the vehicle, false for one under it, down at the height of the tracks, where the only thing
-     * that ever gives is what grows.
+     * <p>{@code inBody} が体積の2つの部分を区別する。車両の胴体の中のブロックなら true、その下——履帯の
+     * 高さ、生えている物しか壊れない領域——なら false。
      */
     @FunctionalInterface
     private interface Test {
@@ -168,12 +152,11 @@ public final class BlockCrusher {
     }
 
     /**
-     * Walks the blocks the vehicle reaches into, and says whether any of them answered the test.
+     * 車両が届くブロックを歩き、いずれかが判定に真を返したかを報告する。
      *
-     * <p>Column by column rather than as one box, because the floor of the volume follows the plane
-     * the hull is lying along and that plane is at a different height over every column. The
-     * horizontal pass is the plain rectangle in the vehicle's own axes: how far up the nose the
-     * column is and how far out to the side, both of which fall straight out of two dot products.
+     * <p>1つの箱としてではなく列ごとに歩く。体積の床は車体が寝ている平面に沿っており、その平面の高さは列ご
+     * とに違うから。水平方向の判定は車両自身の軸での単純な長方形で、その列が前後にどれだけ・左右にどれだけ
+     * 離れているかは2つの内積からそのまま出る。
      */
     private static boolean walk(Level level, Body body, Test test) {
         Vec3 forward = body.forward();
@@ -181,17 +164,14 @@ public final class BlockCrusher {
         Vec3 at = body.at();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
-        // How far a column's middle may lie outside the hull and still be a column the hull is
-        // standing in. A block is a square and the hull's axes are turned, so what has to be allowed
-        // for is the block's width measured along those axes: half a block when the vehicle is
-        // facing along the world, seven tenths when it is facing into the corner between two of
-        // them. Allow only the half and a vehicle driven diagonally leaves blocks standing inside
-        // itself. Both of the vehicle's axes want the same figure, the second being the first
-        // turned a quarter turn.
+        // 列の中心が車体の外へどれだけ出ていても「車体が立っている列」と見なすか。ブロックは正方形で車体
+        // の軸は回っているので、許容すべきはその軸方向で測ったブロックの幅——車両が世界の軸に沿っていれば
+        // 半ブロック、2軸の中間を向いていれば0.7ブロック。半分しか許さないと、斜めに走る車両は自分の中に
+        // ブロックを残す。車両の2軸とも同じ値でよい。2本目は1本目を90度回した物なので。
         double reach = 0.5 * (Math.abs(forward.x) + Math.abs(forward.z)) - GRAZE;
 
-        // The square of world the turned rectangle could possibly be in. Cheap to work out and
-        // cheap to be wrong about: every column in it is asked the exact question below.
+        // 回転した長方形が入り得る世界の正方形。求めるのが安く、間違っていても安い。中の全列に対して下で
+        // 厳密な判定を行うので。
         double span = Math.max(Math.abs(body.front()), Math.abs(body.back())) + body.halfWidth() + reach;
         int fromX = Mth.floor(at.x - span);
         int toX = Mth.floor(at.x + span);
@@ -211,11 +191,10 @@ public final class BlockCrusher {
                 }
 
                 double plane = at.y + along * body.rise() + sideways * body.tilt();
-                // A block owns the metre above its own coordinate, so the first one the body of the
-                // vehicle reaches into is the one its floor is inside and the last is the one below
-                // its ceiling. Written this way round, a body that starts exactly on a block
-                // boundary leaves the block under that boundary alone — which is what lets a vehicle
-                // whose step height is a block drive over a one-block kerb rather than break it.
+                // ブロックは自分の座標から上1mを所有するので、車両の胴体が最初に届くのは「床が入っている
+                // ブロック」、最後は「天井の下のブロック」になる。この向きで書けば、ちょうどブロック境界
+                // から始まる胴体はその境界の下のブロックに触れない——段差乗り越え高さが1ブロックの車両が、
+                // 1ブロックの縁石を壊さずに乗り越えられる理由。
                 int floor = Mth.floor(plane);
                 int belly = Mth.floor(plane + body.belly());
                 int roof = Mth.ceil(plane + body.roof()) - 1;
@@ -234,31 +213,28 @@ public final class BlockCrusher {
         return false;
     }
 
-    /** Whether one block gives way to a vehicle of a given crush strength. */
+    /** そのブロックが、指定の破壊力を持つ車両に対して壊れるか。 */
     private static boolean crushable(Level level, BlockPos pos, BlockState state, float limit) {
         if (!breakable(level, pos, state)) {
             return false;
         }
 
-        // The block's own figure rather than the one a blast would be told, because there is no
-        // blast: the state-and-explosion form of the question expects an explosion to ask it about,
-        // and there are mods that read the one they are handed.
+        // 爆発に対して返す値ではなくブロック自身の値を使う。ここに爆発は無いからだ。状態＋爆発を取る
+        // 形式の問い合わせは「訊いてくる爆発」の存在を前提としており、渡された物を実際に読む MOD もある。
         return state.is(CRUSHABLE) || state.getBlock().getExplosionResistance() <= limit;
     }
 
-    /** Whether one block is the sort of thing tracks flatten however little else they can. */
+    /** そのブロックが、他に何も壊せない履帯でも押し倒す類の物か。 */
     private static boolean growing(Level level, BlockPos pos, BlockState state) {
         return breakable(level, pos, state) && state.is(CRUSHABLE);
     }
 
     /**
-     * Two things a vehicle never breaks whatever the figures say.
+     * 数値が何と言おうと車両が決して壊さない2種類。
      *
-     * <p>Anything with a block entity in it is somebody's furniture — a chest, a furnace, a hopper
-     * with a machine behind it — and a vehicle that broke those would be emptying containers into
-     * nothing, since what is crushed usually leaves no drops. And anything the world has marked
-     * unbreakable stays unbreakable, for the mod that gives a wall a low resistance and leans on its
-     * hardness to keep it standing.
+     * <p>ブロックエンティティを持つ物は誰かの設備——チェスト、かまど、機械に繋がったホッパー——であり、それ
+     * を壊す車両は「コンテナの中身を無に捨てる」ことになる。押し潰した物はたいてい何も落とさないので。そして
+     * 世界が破壊不能と印を付けた物は破壊不能のまま。壁に低い耐性を与えつつ硬度で立たせている MOD のために。
      */
     private static boolean breakable(Level level, BlockPos pos, BlockState state) {
         return !state.hasBlockEntity() && state.getDestroySpeed(level, pos) >= 0.0F;

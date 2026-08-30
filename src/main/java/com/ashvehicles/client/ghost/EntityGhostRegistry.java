@@ -10,12 +10,11 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 
 /**
- * Which entity types are ghosted, and by which adapter.
+ * どのエンティティタイプをゴースト化し、どのアダプタで扱うか。
  *
- * <p>Keyed by entity type, which is both the cheapest thing to look up — one identity hash on the
- * entity's type — and the natural unit: every Su-25 is a ghost or none is. Registration happens
- * during client setup; after that the map is read-only and read from both the game thread and the
- * render thread.
+ * <p>キーはエンティティタイプ。最も安価な検索キー——タイプの identity hash 1回——であると同時に自然な単位でも
+ * ある。Su-25 は全機がゴーストになるか1機もならないかのどちらかだ。登録はクライアント初期化時に行い、以降は
+ * 読み取り専用で、ゲームスレッドとレンダースレッドの双方から読まれる。
  */
 public final class EntityGhostRegistry {
     private static final Map<EntityType<?>, GhostAdapter<?>> ADAPTERS = new IdentityHashMap<>();
@@ -24,13 +23,13 @@ public final class EntityGhostRegistry {
     private EntityGhostRegistry() {
     }
 
-    /** Registers an adapter for an entity type. Client setup only. */
+    /** エンティティタイプにアダプタを登録する。クライアント初期化時のみ。 */
     public static synchronized <T extends Entity> void register(EntityType<? extends T> type, GhostAdapter<T> adapter) {
         ADAPTERS.put(type, adapter);
         view = Collections.unmodifiableMap(new IdentityHashMap<>(ADAPTERS));
     }
 
-    /** The adapter for an entity's type, or {@code null} if the type is not ghosted. */
+    /** そのエンティティのタイプ用アダプタ。ゴースト対象外なら {@code null}。 */
     @Nullable
     @SuppressWarnings("unchecked")
     public static <T extends Entity> GhostAdapter<T> adapterFor(Entity entity) {

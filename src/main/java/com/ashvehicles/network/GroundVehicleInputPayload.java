@@ -12,12 +12,11 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import org.joml.Quaternionf;
 
 /**
- * Sent once a tick by the client at the controls.
+ * 運転しているクライアントが毎tick 送る。
  *
- * <p>Position, yaw and pitch already reach the server through vanilla's vehicle movement packet;
- * this carries the state vanilla knows nothing about — the hull's roll, how fast it is really going,
- * and where the turret is laid. The payload names no entity: the server applies it to whatever the
- * sending player is driving, so it cannot be aimed at somebody else's tank.
+ * <p>位置・ヨー・ピッチはバニラの乗り物移動パケットで既に届くので、こちらはバニラが知らない状態——車体の
+ * ロール、実際の速度、砲塔の向き——を運ぶ。ペイロードはエンティティを名指ししない。サーバーは送信者が
+ * 運転している車両に適用するので、他人の戦車を狙うことはできない。
  */
 public record GroundVehicleInputPayload(GroundVehicleInput input, Quaternionf attitude, float speed,
         float turretYaw, float gunPitch, boolean cycleWeapon) implements CustomPacketPayload {

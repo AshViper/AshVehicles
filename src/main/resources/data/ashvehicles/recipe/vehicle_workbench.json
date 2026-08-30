@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "M": {
+      "item": "ashvehicles:machine_parts"
+    },
+    "T": {
+      "item": "minecraft:crafting_table"
+    },
+    "I": {
+      "tag": "c:ingots/iron"
+    }
+  },
+  "pattern": [
+    "SSS",
+    "MTM",
+    "III"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:vehicle_workbench"
+  }
+}

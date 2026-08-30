@@ -14,12 +14,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Leaves the hitbox overlay to the mod's own drawing.
+ * 当たり判定の表示は MOD 側の描画に任せる。
  *
- * <p>What Minecraft outlines is the upright box it collides against, which for a banked wing is a
- * tall slab nowhere near the wing — and for a tank is a square shed that nothing collides with at
- * all. AshVehicles draws the real boxes instead, tilted and traversed as they are written, so the
- * pair of outlines only obscure each other.
+ * <p>Minecraft が輪郭を描くのは衝突に使う直立した箱で、旋回中の翼に対しては翼のどこにも無い縦長の板、
+ * 戦車に対しては何とも衝突しない四角い小屋になる。AshVehicles は本物の箱を、書かれた通りに傾け配置して
+ * 描くので、両方描けば互いを隠すだけ。
  */
 @Mixin(EntityRenderDispatcher.class)
 public abstract class HitboxMixin {

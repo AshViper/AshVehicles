@@ -21,21 +21,20 @@ import software.bernie.geckolib.renderer.GeoObjectRenderer;
 import software.bernie.geckolib.util.Color;
 
 /**
- * Draws a ghost's GeckoLib model from its snapshot — the geometry and texture the snapshot names,
- * at the snapshot's scale, played and posed as the entity it stands for is.
+ * ゴーストの GeckoLib モデルをスナップショットから描く。スナップショットが指すジオメトリとテクスチャを、その
+ * スケールで、代役先のエンティティと同じ再生・ポーズで描く。
  *
- * <p>It is not the entity's renderer and needs no entity: everything it draws from was copied out
- * when the snapshot was taken, so it draws just as well after the entity has gone. What it does
- * with that is the same in both halves as the entity's own renderer: whatever the adapter has
- * registered controllers for is played from the animation file the snapshot names, and the
- * adapter's poser then sets the bones that follow the flight from moment to moment.
+ * <p>これはエンティティのレンダラーではなく、エンティティを必要としない。描画元は全て撮影時にコピー済みなので、
+ * エンティティが消えた後も同じように描ける。その扱い方は両半分ともエンティティ自身のレンダラーと同じだ。アダプタ
+ * がコントローラを登録した物はスナップショットが指すアニメーションファイルから再生され、その後アダプタの poser が
+ * 飛行に毎瞬追従するボーンを設定する。
  *
- * <p>One renderer and one model serve every ghost, as one serves every entity of a kind; the
- * animatable is the shared {@link GhostAnimatable}, set before each draw, and each ghost's
- * animation state is kept apart by {@link #getInstanceId}.
+ * <p>1つのレンダラーと1つのモデルが全ゴーストに仕える。1つが同種の全エンティティに仕えるのと同じだ。animatable
+ * は共有の {@link GhostAnimatable} で描画ごとに設定し、各ゴーストのアニメーション状態は {@link #getInstanceId}
+ * で分離する。
  */
 public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
-    /** How solid a ghost is. Enough to read against the sky, far too little to mistake for near. */
+    /** ゴーストの不透明度。空を背に読める程度で、近くの物と間違えるにははるかに足りない。 */
     public static final float GHOST_ALPHA = 0.55F;
 
     private static final GhostGeoRenderer INSTANCE = new GhostGeoRenderer();
@@ -45,10 +44,10 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     }
 
     /**
-     * Draws the ghost. The pose stack should already be at the ghost's origin and turned to the
-     * ghost's orientation; this applies only the model's own scale.
+     * ゴーストを描く。pose stack は既にゴーストの原点にあり姿勢も合わせてあるはずで、ここで適用するのはモデル自身
+     * のスケールだけ。
      *
-     * @param poser how to pose the bones, or {@code null} for the authored pose
+     * @param poser ボーンのポーズ付け方法。作成時のポーズのままなら {@code null}
      */
     public static void draw(EntityGhost ghost, GhostSnapshot snapshot, GhostRenderContext context,
             @Nullable GhostAnimatable.GhostPoser poser) {
@@ -66,16 +65,14 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     }
 
     /**
-     * Starts every ghost's animation clock at the same moment, before GeckoLib starts it at the
-     * one the ghost happened to first be drawn at.
+     * 全ゴーストのアニメーション時計を同じ瞬間から始める。GeckoLib が「そのゴーストがたまたま最初に描かれた瞬間」
+     * から始めてしまう前に。
      *
-     * <p>GeckoLib times anything that is not an entity from its own first frame, and then advances
-     * one clock — the model's — by the difference between one draw and the next. That is fine when
-     * a model draws one thing. Ours draws every ghost, and ghosts first appear at different
-     * moments, so left alone the clock would leap back and forth by the difference between their
-     * starting points and every animation with it. Pinning the start of each to zero makes the
-     * figure the same absolute clock for all of them, which is what the game does for entities and
-     * why one model can draw a hundred of those.
+     * <p>GeckoLib はエンティティでない物を自身の最初のフレームから計時し、以後1つの時計——モデルの時計——を描画間の
+     * 差分で進める。モデルが1つの物を描くならそれでよい。こちらのモデルは全ゴーストを描き、ゴーストの初出時刻は
+     * それぞれ違うので、放っておけば時計は各々の開始点の差だけ前後に跳び、アニメーションもそれに引きずられる。
+     * 各ゴーストの開始を0に固定すれば、その値は全ゴーストで同じ絶対時計になる。ゲームがエンティティに対して行って
+     * いることであり、1つのモデルが100体を描ける理由でもある。
      */
     private static void startClock(GhostAnimatable animatable) {
         AnimatableManager<?> manager = animatable.getAnimatableInstanceCache()
@@ -87,9 +84,9 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     }
 
     /**
-     * One ghost, one animation state: GeckoLib files controllers under this, and two aeroplanes
-     * putting their gear down at different times must not share a set. The ghost's UUID is its
-     * identity for the same reason it is everywhere else — entity ids are reused.
+     * ゴースト1つにアニメーション状態1つ。GeckoLib はこれを鍵にコントローラを整理するし、別々の時刻に脚を下ろす
+     * 2機がセットを共有してはならない。ゴーストの同一性が UUID なのは他所と同じ理由だ——エンティティIDは再利用
+     * される。
      */
     @Override
     public long getInstanceId(GhostAnimatable animatable) {
@@ -97,9 +94,8 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     }
 
     /**
-     * A ghost is drawn translucent and emissive when there is nothing behind it: emissive because
-     * there is no light out there to light it by, translucent so that it reads as a contact rather
-     * than as something near. Over drawn terrain it is drawn as what it is, still emissive.
+     * 背後に何も無いゴーストは半透明かつ自発光で描く。自発光なのは、あの距離に照らす光が無いから。半透明なのは、
+     * 近くの物ではなく「接触点」として読ませるためだ。描画済み地形の上では実体として描くが、自発光は保つ。
      */
     public static RenderType renderType(ResourceLocation texture, boolean ghostStyle) {
         return ghostStyle
@@ -109,9 +105,8 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
 
     @Override
     public Color getRenderColor(GhostAnimatable animatable, float partialTick, int packedLight) {
-        // How see-through it is is the distance's business; how dark it is is the entity's. A wreck
-        // is charred at any range, and a ghost drawn in the aeroplane's colours would have one come
-        // back to life the moment the game's own renderer handed it over.
+        // 透過度は距離の管轄、暗さはエンティティの管轄。残骸はどの距離でも焦げているし、機体色で描かれる
+        // ゴーストは、ゲーム自身のレンダラーが引き継いだ瞬間に残骸を生き返らせてしまう。
         int alpha = GhostRenderContext.isTranslucent() ? (int) (GHOST_ALPHA * 255.0F) : 255;
         int level = (int) (255.0F * Mth.clamp(animatable.snapshot().shade(), 0.0F, 1.0F));
 
@@ -119,9 +114,8 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     }
 
     /**
-     * The model's own scale, and GeckoLib's block-shaped assumption taken back out: the object
-     * renderer shifts what it draws by half a block, because the objects it was written for sit in
-     * a block whose origin is a corner. A ghost stands at a point.
+     * モデル自身のスケールと、GeckoLib のブロック前提の打ち消し。オブジェクトレンダラーは描画対象を半ブロック
+     * ずらす。想定していたオブジェクトが、原点を角に持つブロック内に収まるからだ。ゴーストは点に立つ。
      */
     @Override
     public void preRender(PoseStack poseStack, GhostAnimatable animatable, BakedGeoModel model,
@@ -136,11 +130,11 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
         poseStack.translate(-0.5F, -0.51F, -0.5F);
     }
 
-    /** Geometry, texture and animations from the snapshot; pose from the adapter's poser. */
+    /** ジオメトリ・テクスチャ・アニメーションはスナップショットから、ポーズはアダプタの poser から。 */
     private static final class Model extends GeoModel<GhostAnimatable> {
         /**
-         * Stands in for the animation file of a ghost that has none. Nothing asks for an animation
-         * out of it: a ghost with nothing to play has no controllers to ask.
+         * アニメーションファイルを持たないゴーストの代役。ここからアニメーションを要求する物は無い。再生する物が
+         * 無いゴーストには問い合わせるコントローラも無いからだ。
          */
         private static final ResourceLocation NO_ANIMATION =
                 ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "animations/ghost/none.animation.json");
@@ -162,7 +156,7 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
             return animation == null ? NO_ANIMATION : animation;
         }
 
-        /** A bone a poser names and the geometry lacks is skipped, not a crash. */
+        /** poser が指定しジオメトリに無いボーンはスキップする。クラッシュにはしない。 */
         @Override
         public boolean crashIfBoneMissing() {
             return false;

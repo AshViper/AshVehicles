@@ -16,48 +16,41 @@ import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.core.BlockPos;
 
 /**
- * What every particle the mod draws has in common: its colour comes from the option that made it,
- * it can be seen out beyond the loaded world, and it leaves no depth behind it.
+ * MOD が描く全パーティクルの共通点。色は生成元のオプションから来ること、ロード範囲外でも見えること、そして
+ * 深度を残さないこと。
  *
- * <p>The lighting is the reason these exist. Vanilla asks the world what a particle is lit
- * by, and when the chunk under it is not loaded the world's answer is zero — so a particle out there
- * is not merely dim, it is drawn in flat black. An explosion beyond the edge of the loaded world
- * looks, to anyone watching, like a smear of soot appearing in mid-air. Anything with no chunk under
- * it is therefore lit as what it actually is instead: open sky, or its own fire.
+ * <p>これらが存在する理由は照明だ。バニラはパーティクルが何に照らされているかを世界へ問うが、下のチャンクが
+ * 未ロードなら世界の答えは0になる——つまりそこのパーティクルは単に暗いのではなく、真っ黒に描かれる。ロード範囲
+ * の外の爆発は、見ている者には空中に現れた煤の染みに見える。よって下にチャンクが無い物は、実際の姿——開けた空、
+ * あるいは自身の炎——として照らす。
  *
- * <p>The depth is the reason they still needed changing. See {@link #NO_DEPTH_WRITE}.
+ * <p>それでも変更が必要だった理由は深度だ。{@link #NO_DEPTH_WRITE} 参照。
  */
 public abstract class WeaponParticle extends TextureSheetParticle {
-    /** Full sky light and no block light, which is what smoke at altitude is lit by. */
+    /** 空の光が最大でブロック光は0。高高度の煙を照らしているのはそれだ。 */
     private static final int OPEN_AIR = LightTexture.pack(0, 15);
 
     /**
-     * Vanilla's translucent particle sheet with the one thing about it that this mod cannot live
-     * with taken off: it does not write depth.
+     * バニラの半透明パーティクルシートから、この MOD が共存できない1点を取り除いた物。深度を書き込まない。
      *
-     * <p>{@link ParticleRenderType#PARTICLE_SHEET_TRANSLUCENT} begins with
-     * {@code RenderSystem.depthMask(true)}. A puff of smoke is therefore blended over what is behind
-     * it <em>and</em> stamps its own quad into the depth buffer, so anything drawn afterwards at a
-     * greater depth is thrown away — not dimmed by the smoke, not blended with it, simply not drawn.
-     * Vanilla never notices, because vanilla draws nothing worth seeing after its particles.
+     * <p>{@link ParticleRenderType#PARTICLE_SHEET_TRANSLUCENT} は {@code RenderSystem.depthMask(true)} で始まる。
+     * つまり煙の塊は背後の物にブレンドされる<em>と同時に</em>自分のクアッドを深度バッファへ刻むので、その後により
+     * 深い位置に描かれる物は捨てられる——煙で暗くなるのでもブレンドされるのでもなく、単に描かれない。バニラは
+     * 気付かない。バニラはパーティクルの後に見る価値のある物を描かないからだ。
      *
-     * <p>This mod does. The ghost pass runs at
-     * {@code RenderLevelStageEvent.Stage.AFTER_PARTICLES}, and it has to: that is the first stage
-     * past Distant Horizons' vanilla fade, which would otherwise paint over anything drawn earlier
-     * (see {@link com.ashvehicles.client.ghost.GhostRenderDispatcher}). So every machine the ghost
-     * pass draws was being depth-rejected by the mod's own particles — and the mod's particles are
-     * exactly the ones that follow a machine about. A missile past
-     * {@code ghostStartDistance} lays contrail and exhaust at its own tail every tick and was then
-     * hidden behind them; an aeroplane with the burner lit was hidden behind its own plume,
-     * completely so from any angle looking up the pipe. What anybody watching saw was a trail of
-     * smoke with nothing making it.
+     * <p>この MOD は描く。ゴーストパスは {@code RenderLevelStageEvent.Stage.AFTER_PARTICLES} で走るし、そうする
+     * ほかない。そこが Distant Horizons のバニラフェードより後の最初のステージであり、それ以前に描かれた物は
+     * フェードに塗り潰されてしまう（{@link com.ashvehicles.client.ghost.GhostRenderDispatcher} 参照）。結果、
+     * ゴーストパスが描く全機体が MOD 自身のパーティクルに深度で弾かれていた——しかも MOD のパーティクルは、
+     * まさに機体に付いて回る物だ。{@code ghostStartDistance} より遠いミサイルは毎tick自分の尾部に飛行機雲と排気を
+     * 置き、その背後に隠れていた。バーナーを点けた機体は自分のプルームに隠れ、排気管を覗く角度からは完全に見えな
+     * かった。見ている者に見えたのは、発生源の無い煙の筋だけだ。
      *
-     * <p>Dropping the depth write costs nothing that was worth having. These particles still depth
-     * <em>test</em>, so the ground and everything the game drew still hides them; they simply leave
-     * no depth of their own for the ghost pass to fail against. Among themselves they now blend
-     * rather than clip, which is what smoke should have been doing in the first place.
-     * {@code ParticleEngine.render} restores {@code depthMask(true)} when it is done, so nothing
-     * drawn later inherits this.
+     * <p>深度書き込みをやめても失う物は無い。これらのパーティクルは今も深度<em>テスト</em>はするので、地面も
+     * ゲームが描いた物も従来通り隠してくれる。単に、ゴーストパスが弾かれる相手となる自前の深度を残さないだけだ。
+     * パーティクル同士はクリップではなくブレンドするようになり、それは元々煙がそうすべきだった振る舞いだ。
+     * {@code ParticleEngine.render} は終了時に {@code depthMask(true)} を戻すので、後で描かれる物がこれを引き継ぐ
+     * ことはない。
      */
     private static final ParticleRenderType NO_DEPTH_WRITE = new ParticleRenderType() {
         @Override
@@ -90,7 +83,7 @@ public abstract class WeaponParticle extends TextureSheetParticle {
                 : this.lightBeyondTheWorld();
     }
 
-    /** How this is lit when there is no world under it to ask. */
+    /** 問い合わせる世界が下に無いときの照らされ方。 */
     protected int lightBeyondTheWorld() {
         return OPEN_AIR;
     }

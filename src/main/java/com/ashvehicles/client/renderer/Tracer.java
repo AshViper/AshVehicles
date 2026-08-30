@@ -9,72 +9,62 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
 /**
- * What a round in flight is drawn as, at whatever distance it is being drawn from.
+ * 飛翔中の弾を、どの距離から描かれる場合でもどう描くか。
  *
- * <p>One class rather than two because a round is drawn by two different things — its own renderer
- * while it is near, and the ghost pass once it is past the hand-over — and it must not change
- * appearance as it crosses between them. Everything about the shape of a tracer lives here and both
- * of them ask for it.
+ * <p>2つではなく1つのクラスにしてあるのは、弾を描く物が2つある——近距離では弾自身のレンダラー、引き継ぎを過ぎたら
+ * ゴーストパス——うえ、その間を跨いでも見た目が変わってはならないからだ。曳光の形状に関する全てがここにあり、両者が
+ * ここへ問い合わせる。
  *
- * <h2>Why a tracer needs a level of detail at all</h2>
+ * <h2>曳光に詳細度が必要な理由</h2>
  *
- * <p>Nothing about it can be dropped: it is four vertices, and there is no cheaper way to draw a
- * line. What changes with distance is whether it can be seen. A round is a few centimetres across,
- * and a hundredth of a block is a fraction of a pixel by the time it is a couple of hundred blocks
- * off — so the streak thins away to nothing, and what survives of it flickers as the quad falls
- * across the sampling grid or misses it. That is the exact range at which the ghost pass takes over,
- * and it is also the range at which a gunner most needs to read where their rounds are going.
+ * <p>省ける物は何も無い。頂点4つであり、線をこれより安く描く方法は無い。距離とともに変わるのは「見えるかどうか」
+ * だ。弾は差し渡し数センチで、1/100ブロックは数百ブロック離れれば1ピクセル未満になる——だから筋は消えるほど細くなり、
+ * 残った分もクアッドがサンプリング格子に掛かったり外れたりして明滅する。それはゴーストパスが引き継ぐまさにその距離
+ * であり、砲手が弾道を最も読みたい距離でもある。
  *
- * <p>So the streak is held at a width on the <em>screen</em> rather than a width in the world. Close
- * in the world figure is the larger and nothing changes; past the distance at which it would drop
- * below a pixel and a half the drawn width stops shrinking. Which is also what a tracer really does:
- * what the eye is following at that range is not the round but the light it is making, and light
- * does not get thinner than the thing it is being drawn on.
+ * <p>そこで筋の幅は、ワールド上の幅ではなく<em>画面上</em>の幅で保つ。近距離ではワールド側の値の方が大きいので何も
+ * 変わらない。1.5ピクセルを下回る距離を超えると、描画幅はそれ以上縮まなくなる。それは曳光が実際にやっていることでも
+ * ある。その距離で目が追っているのは弾ではなく弾が出している光であり、光は描かれる媒体より細くはならない。
  *
- * <p>{@link #dot} is the streak given up entirely for the point of light it has become. It is the
- * furthest tier, for a ghost the pass has put in {@code BILLBOARD} — which at the ranges a round is
- * actually sent to a client, sixteen chunks, is never reached — but it is also what any streak too
- * short on the screen to read as a line is drawn as, at whatever range that happens. Which is not a
- * matter of distance at all: a streak lies along the round's own flight, so one flying away down the
- * line of sight is a line seen end-on however near it is, and end-on a line is a point. That is the
- * view from the gunner's own seat, looking down the bore of the gun they are firing.
+ * <p>{@link #dot} は筋を完全に諦め、そこで既になっている光点にした物だ。パスが {@code BILLBOARD} に置いたゴースト
+ * 用の最遠階層——弾が実際にクライアントへ送られる16チャンクの範囲では到達しない——だが、画面上で線として読めないほど
+ * 短い筋も、距離を問わずこれで描く。そしてそれは距離の問題ですらない。筋は弾自身の飛翔に沿うので、視線方向へ遠ざかる
+ * 弾はどれだけ近くても端から見た線であり、端から見た線は点だ。それは砲手自身の座席から、撃っている砲の砲腔を覗く
+ * 視点そのものである。
  */
 public final class Tracer {
-    /** How much of a tick's travel the streak covers. */
+    /** 1tick分の移動距離のうち、筋が覆う割合。 */
     public static final float LENGTH = 0.9F;
     /**
-     * Longest the streak is ever drawn, in blocks. A cannon round crosses forty blocks in a tick,
-     * and a forty-block streak reads as a beam rather than a tracer.
+     * 筋を描く最大長（ブロック）。機関砲弾は1tickで40ブロック進むが、40ブロックの筋は曳光ではなくビームに見える。
      */
     public static final double MAX_LENGTH = 8.0;
-    /** Half-width of the streak in the world, in blocks. What is drawn close in. */
+    /** ワールド上での筋の半幅（ブロック）。近距離で描かれる幅。 */
     public static final float HALF_WIDTH = 0.05F;
 
-    /** The thinnest a streak is ever drawn, in screen pixels, however far away it is. */
+    /** どれだけ遠くても筋を描く最小幅（画面ピクセル）。 */
     private static final double MIN_PIXELS = 1.5;
-    /** How wide the furthest tier's point of light is drawn, in screen pixels. */
+    /** 最遠階層の光点を描く幅（画面ピクセル）。 */
     private static final double DOT_PIXELS = 2.0;
 
     /**
-     * The shortest a streak is worth drawing as a streak, in screen pixels.
+     * 筋として描く価値のある最短長（画面ピクセル）。
      *
-     * <p>Not about distance: it is about what is drawing it from where. A streak lies along the
-     * round's own flight, so a round travelling away down the line of sight is a line seen end-on,
-     * and end-on a line of any length is a point. That is the gunner's view exactly — down the bore
-     * of their own gun, which is where a tracer matters most — and there is no width that rescues
-     * it, because there is nothing there to be wide. Under this it is drawn as the point of light it
-     * has become instead, and the round can be followed out to its target rather than disappearing
-     * off the muzzle. See {@link #dot}.
+     * <p>距離の話ではなく、「どこから何が描いているか」の話だ。筋は弾自身の飛翔に沿うので、視線方向へ遠ざかる弾は
+     * 端から見た線であり、端から見た線はどんな長さでも点になる。それはまさに砲手の視点——自分の砲の砲腔越しであり、
+     * 曳光が最も重要になる場所だ——で、幅で救うこともできない。幅を持たせる対象がそこに無いからだ。これを下回ると、
+     * 代わりにそこで既になっている光点として描く。おかげで弾は銃口の先で消えるのではなく目標まで追える。
+     * {@link #dot} 参照。
      */
     private static final double MIN_STREAK_PIXELS = 3.0;
 
-    /** Below this, two directions are the same direction and there is no plane between them. */
+    /** これを下回ると2つの方向は同一方向であり、その間に平面は存在しない。 */
     private static final double PARALLEL = 1.0E-6;
 
     private Tracer() {
     }
 
-    /** Where the streak's tail sits, relative to the round: back along the path, within reason. */
+    /** 弾に対する筋の尾の位置。経路に沿って後方だが、程度をわきまえた範囲で。 */
     public static Vec3 tail(Vec3 travel) {
         Vec3 tail = travel.scale(-LENGTH);
 
@@ -82,32 +72,28 @@ public final class Tracer {
     }
 
     /**
-     * A quad from the round back down its path, bright at the head and gone at the tail. Drawn at
-     * the pose stack's current origin, which both callers have already put at the round.
+     * 弾から経路を遡るクアッド。先端が明るく尾で消える。pose stack の現在の原点に描くが、両方の呼び出し元が既に
+     * そこを弾の位置に置いている。
      *
-     * <p><b>Turned to face whoever is looking.</b> The quad has to be spun about the streak's own
-     * axis until its face is square to the eye, and that is the whole of why the camera is wanted
-     * here. Built against the world's vertical instead — which is what this used to do — the quad
-     * lies in one fixed plane, and two things go wrong with it at once. Seen at a shallow angle to
-     * that plane it is foreshortened to nothing, and no floor on the width can save it, because the
-     * floor is a width in the world and what collapses is what survives the projection. Worse, a
-     * quad has a front and a back and the render type culls the back: laid flat by the world's
-     * vertical, a level shot faces <em>upwards</em>, so it could be seen from a camera above the
-     * flight path and not at all from one on it. Between them that is a tracer that reads perfectly
-     * from the chase camera and cannot be seen from the cockpit — which is the one view a gunner
-     * fires from. Turned to the eye, the width means what it says from every angle and the face is
-     * always the front one.
+     * <p><b>見ている者の方へ向ける。</b>クアッドは、その面が視点に対して正対するまで筋自身の軸周りに回す必要がある。
+     * ここでカメラが要る理由はそれが全てだ。代わりにワールドの鉛直を基準に組むと——以前はそうだった——クアッドは1つの
+     * 固定平面に寝ることになり、同時に2つの不具合が起きる。その平面に対して浅い角度から見ると短縮されて消えるし、幅の
+     * 下限では救えない。下限はワールド上の幅であり、潰れるのは投影後に残る分だからだ。さらに悪いことに、クアッドには
+     * 表と裏があり描画タイプは裏を切る。ワールドの鉛直で寝かせると、水平射撃の筋は<em>上</em>を向くので、飛行経路の
+     * 上のカメラからは見えても経路上のカメラからはまったく見えない。合わせると、三人称カメラからは完璧に読めるのに
+     * コックピットからは見えない曳光になる——砲手が撃つ唯一の視点なのに、だ。視点へ向ければ、幅はどの角度でも書いて
+     * ある通りの意味を持ち、面は常に表になる。
      *
-     * @param fromCamera the round as seen from the eye: its position less the camera's
-     * @param travel this tick's step, which is the line the streak lies along
-     * @param distanceSq how far the round is from the camera, squared; what decides the width
+     * @param fromCamera 視点から見た弾。弾の位置からカメラ位置を引いた値
+     * @param travel このtickのステップ。筋が沿う線
+     * @param distanceSq 弾とカメラの距離の2乗。幅を決める値
      */
     public static void streak(PoseStack poseStack, VertexConsumer buffer, Camera camera, Vec3 fromCamera,
             Vec3 travel, double distanceSq, int colour) {
         Vec3 tail = tail(travel);
         Vec3 view = fromCamera.lengthSqr() < PARALLEL ? travel.normalize() : fromCamera.normalize();
-        // What is left of the streak once the projection has had it: the part of it lying across the
-        // line of sight. A round going straight away from the eye has none. See MIN_STREAK_PIXELS.
+        // 投影を通した後に残る筋の分。視線を横切る成分だ。視点から真っ直ぐ遠ざかる弾にはそれが無い。
+        // MIN_STREAK_PIXELS 参照。
         Vec3 sideways = tail.subtract(view.scale(tail.dot(view)));
 
         if (sideways.length() < blocksPerPixel(Math.sqrt(distanceSq)) * MIN_STREAK_PIXELS) {
@@ -116,8 +102,7 @@ public final class Tracer {
             return;
         }
 
-        // The eye first and the flight second, in that order: it puts the quad's front face towards
-        // the camera rather than away from it, which is what keeps it out of the back-face cull.
+        // 視点が先、飛翔方向が後。この順序がクアッドの表面をカメラ側へ向け、裏面カリングから外す。
         Vec3 across = across(view, travel).scale(halfWidth(distanceSq));
         Matrix4f pose = poseStack.last().pose();
 
@@ -128,12 +113,10 @@ public final class Tracer {
     }
 
     /**
-     * A unit vector across the streak and across the line of sight, which is the direction the quad
-     * is widened along.
+     * 筋にも視線にも直交する単位ベクトル。クアッドはこの方向へ幅を持つ。
      *
-     * <p>The fallbacks are for a round seen exactly end-on, which cannot happen here — a streak that
-     * near the line of sight has already been drawn as a dot — and are kept only so that no
-     * arrangement of the two can hand back a vector of no length to be normalised.
+     * <p>フォールバックは弾をちょうど端から見た場合のためだが、ここでは起こりえない——視線にそこまで近い筋は既に点
+     * として描かれている——ので、2つのどんな配置でも長さ0のベクトルを正規化に渡さないための保険として残してある。
      */
     private static Vec3 across(Vec3 view, Vec3 travel) {
         Vec3 across = view.cross(travel.normalize());
@@ -146,8 +129,7 @@ public final class Tracer {
     }
 
     /**
-     * The furthest tier: a square of light facing the camera, at the round's head, with no length
-     * and no direction left in it.
+     * 最遠階層。カメラを向いた光の正方形を弾の先端に置く。長さも方向も残さない。
      */
     public static void dot(PoseStack poseStack, VertexConsumer buffer, Camera camera, double distanceSq,
             int colour) {
@@ -158,7 +140,7 @@ public final class Tracer {
         }
 
         poseStack.pushPose();
-        // Faces the camera exactly as a particle does.
+        // パーティクルとまったく同じようにカメラを向く。
         poseStack.mulPose(camera.rotation());
         Matrix4f pose = poseStack.last().pose();
 
@@ -170,8 +152,7 @@ public final class Tracer {
     }
 
     /**
-     * Half the width to draw the streak at, in blocks: the world figure, or whatever comes to a
-     * pixel and a half at this distance, whichever is the wider.
+     * 筋を描く半幅（ブロック）。ワールド上の値と、この距離で1.5ピクセルに相当する値の、広い方。
      */
     public static float halfWidth(double distanceSq) {
         double floor = blocksPerPixel(Math.sqrt(distanceSq)) * MIN_PIXELS * 0.5;
@@ -180,17 +161,15 @@ public final class Tracer {
     }
 
     /**
-     * How many blocks one screen pixel covers at that distance.
+     * その距離で1画面ピクセルが覆うブロック数。
      *
-     * <p>From the projection the game is actually using: the top of the frustum is
-     * {@code distance × tan(fov / 2)} above the line of sight and half the window's pixels away
-     * from the middle of it. Measured against the framebuffer rather than the interface scale,
-     * since it is real pixels a quad is rasterised onto.
+     * <p>ゲームが実際に使っている投影から求める。視錐台の上端は視線から {@code distance × tan(fov / 2)} 上にあり、
+     * 画面中央からウィンドウのピクセル数の半分だけ離れている。UI スケールではなくフレームバッファを基準に測る。
+     * クアッドがラスタライズされる先は実ピクセルだからだ。
      *
-     * <p>The far-plane pull the ghost pass applies does not come into it. That slides a ghost in
-     * and shrinks it by exactly as much, so a ghost covers the same pixels either way — which is
-     * the whole point of it — and a width worked out from the true distance is drawn at the width
-     * it was asked for.
+     * <p>ゴーストパスが適用する遠方面への引き寄せは関与しない。あれはゴーストを手前へ滑らせ、まったく同じ分だけ縮める
+     * ので、ゴーストが覆うピクセル数はどちらでも同じ——それがあの処理の要点だ——であり、真の距離から求めた幅は要求
+     * された通りの幅で描かれる。
      */
     private static double blocksPerPixel(double distance) {
         Minecraft minecraft = Minecraft.getInstance();

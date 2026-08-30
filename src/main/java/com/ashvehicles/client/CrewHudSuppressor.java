@@ -16,39 +16,32 @@ import net.neoforged.neoforge.client.event.RenderHandEvent;
 import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 
 /**
- * Takes the hotbar and the held item off the screen for as long as anyone is aboard a vehicle.
+ * 誰かが乗り物に搭乗している間、ホットバーと手持ちアイテムを画面から消す。
  *
- * <p>A crew member is not carrying what is in their hotbar; they are sitting in a machine that has
- * its own weapons, its own selection key and its own instruments — see {@link AircraftHud} and
- * {@link GroundVehicleHud} — and a row of item slots underneath all of that is a second, contradictory
- * answer to the question of what firing does. The arm holding a pickaxe in front of the windscreen is
- * the same mistake in the world instead of on the screen, and in the cockpit view it sits between the
- * pilot and the ground.
+ * <p>乗員はホットバーの中身を携行しているのではない。自前の兵装・選択キー・計器を持つ機体に座っている——
+ * {@link AircraftHud} と {@link GroundVehicleHud} 参照——のであり、その下に並ぶアイテムスロットは「発砲すると
+ * 何が起きるか」への2つ目の、矛盾した答えだ。風防の前でツルハシを握る腕も、画面ではなく世界で起きる同じ誤りで
+ * あり、コックピット視点ではパイロットと地面の間に居座る。
  *
- * <p>The status bars go with it. Health, hunger, armour and the experience bar are all readings of
- * the body sitting in the seat, and while the seat is what matters the thing the crew need to be
- * watching is the state of the machine, which is what the instruments already say. Only the air
- * gauge stays, because it appears solely when the crew are drowning and that is the one moment
- * nothing on the panel would tell them.
+ * <p>ステータスバーも一緒に消す。体力・空腹・防具・経験値バーはいずれも座席に座る肉体の値であり、座席が主役で
+ * ある間、乗員が見るべきなのは機体の状態だ。それは計器が既に伝えている。残すのは空気ゲージだけ。溺れているとき
+ * にしか出ないし、それは計器盤の何も伝えてくれない唯一の瞬間だからだ。
  *
- * <p>The crosshair goes too, and for the sharpest form of the same reason. A machine in this mod has
- * a sight of its own — the ring on the point the round will reach, see {@link GroundVehicleHud} and
- * {@link AircraftHud} — and vanilla's cross is a second mark answering the same question differently.
- * It is not merely redundant: whichever mark sits in the middle of the screen is the one anybody will
- * aim with, so leaving it there is an invitation to lay the gun on the wrong one.
+ * <p>十字線も消す。同じ理由の最も鋭い形だ。この MOD の機体は自前の照準を持つ——弾が到達する点に置かれる環。
+ * {@link GroundVehicleHud} と {@link AircraftHud} 参照——のに対し、バニラの十字は同じ問いに別の答えを出す2つ目
+ * のマークだ。単に冗長なのではない。画面中央にあるマークこそ誰もが照準に使う物なので、残しておくのは誤った方に
+ * 砲を据えろという誘いになる。
  *
- * <p>Nothing here changes what the player is holding or what the bars are counting — the items are
- * still there and still selected, the numbers still move, they are merely not drawn — so climbing
- * down puts everything back with no state to restore.
+ * <p>ここでは所持品もバーの数値も変えない——アイテムはそこにあり選択もされたまま、数値も動き続け、単に描かれない
+ * だけ——なので、降りれば復元すべき状態も無く全て元に戻る。
  *
- * <p>The check is on the root vehicle rather than the immediate one, so a seat or any other carrier
- * that ends up between the crew and the machine does not bring the hotbar back.
+ * <p>判定対象は直上ではなくルートの乗り物なので、乗員と機体の間に座席その他の担ぎ手が挟まってもホットバーは
+ * 戻ってこない。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class CrewHudSuppressor {
     /**
-     * The vanilla layers a crew member has no use for: the carried inventory, the body's bars, and
-     * the crosshair the machine's own sight replaces.
+     * 乗員に用の無いバニラのレイヤー。携行インベントリ、肉体のバー、そして機体自身の照準が置き換える十字線。
      */
     private static final Set<ResourceLocation> HIDDEN = Set.of(
             VanillaGuiLayers.CROSSHAIR,
@@ -64,7 +57,7 @@ public final class CrewHudSuppressor {
     private CrewHudSuppressor() {
     }
 
-    /** Drops those layers before they draw, while aboard. */
+    /** 搭乗中、それらのレイヤーを描画前に落とす。 */
     @SubscribeEvent
     public static void onRenderGuiLayer(RenderGuiLayerEvent.Pre event) {
         if (aboard() && HIDDEN.contains(event.getName())) {
@@ -73,8 +66,8 @@ public final class CrewHudSuppressor {
     }
 
     /**
-     * Drops the first-person hands, while aboard. Every hand path in the renderer comes through
-     * here, empty hands and maps included, so there is nothing left over to catch elsewhere.
+     * 搭乗中、一人称の手を落とす。レンダラーの手の描画経路は素手も地図も含め全てここを通るので、他所で拾うべき
+     * 取りこぼしは無い。
      */
     @SubscribeEvent
     public static void onRenderHand(RenderHandEvent event) {

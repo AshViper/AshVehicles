@@ -14,31 +14,29 @@ import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.model.GeoModel;
 
 /**
- * Draws any aircraft. Nothing here is specific to one: the geometry, texture and animation files are
- * found by the aircraft's own name, and which bone is an aileron or a gear leg comes from its file.
+ * あらゆる機体を描く。ここに特定の機体専用の物は無い。ジオメトリ・テクスチャ・アニメーションのファイルは機体自身
+ * の名前で見つかるし、どのボーンが補助翼か脚かは機体のファイルが決める。
  *
- * <p>Everything that moves except the undercarriage is driven from code in
- * {@link #setCustomAnimations}, which GeckoLib calls once per frame after the animation controllers
- * have run, so anything set here overrides them. The gear is the other way round: it is played from
- * the aircraft's animation file, and this only touches it for an aircraft that has no such file.
- * See {@link AircraftAnimations}.
+ * <p>降着装置以外の可動部は全て {@link #setCustomAnimations} のコードで駆動する。GeckoLib はアニメーション
+ * コントローラの実行後に毎フレーム1回これを呼ぶので、ここで設定した物がコントローラを上書きする。脚は逆で、機体の
+ * アニメーションファイルから再生され、ここが触れるのはそのファイルを持たない機体の場合だけだ。
+ * {@link AircraftAnimations} 参照。
  *
- * <p>Control surfaces follow how fast the aircraft is actually rotating rather than the pilot's
- * keys: rotation is synced to every client, so other players see the surfaces move as well. A bone
- * an aircraft does not name, or names wrongly, is skipped rather than crashing; it just sits rigid.
+ * <p>舵面はパイロットのキーではなく機体の実際の角速度に追従する。角速度は全クライアントへ同期されるので、他の
+ * プレイヤーにも舵面が動いて見える。機体が名前を指定していないボーンや指定を誤ったボーンはクラッシュせず飛ばされ、
+ * 単に固定されたままになる。
  */
 public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
     /**
-     * How far the nozzle swings on the model, in degrees.
+     * モデル上でノズルが振れる角度（度）。
      *
-     * <p>Kept here rather than read from the aircraft's {@code vtol.max_angle}, which is a figure
-     * about thrust rather than about geometry. What the physics does with ninety degrees is fixed;
-     * what the model has to do to look like ninety degrees depends on how the nozzle was built, and
-     * flipping the sign here is how a nozzle that swings the wrong way is fixed.
+     * <p>機体の {@code vtol.max_angle} からは読まずここに持つ。あれはジオメトリではなく推力についての値だからだ。
+     * 物理が90度をどう扱うかは決まっているが、90度に見せるためにモデルが何をすべきかはノズルの作り方次第であり、
+     * 逆向きに振れるノズルはここの符号を反転して直す。
      */
     private static final float NOZZLE_TRAVEL = 90.0F;
 
-    // Travel of each moving part, in degrees. Flip a sign here if a part swings the wrong way.
+    // 各可動部の作動量（度）。逆向きに動く部品があればここの符号を反転する。
     private static final float ELEVATOR_TRAVEL = 20.0F;
     private static final float AILERON_TRAVEL = 20.0F;
     private static final float RUDDER_TRAVEL = 18.0F;
@@ -51,7 +49,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         return animatable.getAircraftId();
     }
 
-    /** The same file, for anything that needs to know what is in it before playing from it. */
+    /** 同じファイル。再生前に中身を知る必要がある物のため。 */
     public static ResourceLocation animationFile(AircraftEntity animatable) {
         return animationFile(animatable.getAircraftId());
     }
@@ -66,30 +64,30 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
     }
 
     /**
-     * The bone rotations that make up everything that moves on an aircraft except what its
-     * animation file plays. Taken from the aircraft once, then applied to any model of it — the
-     * live one, or a ghost's copy drawn long after the aircraft itself has gone out of range.
+     * アニメーションファイルが再生する物を除く、機体の可動部すべてを構成するボーン回転。機体から一度取り、
+     * その機体のどのモデルにも適用できる——実体でも、機体が範囲外へ出た後に描かれるゴーストの複製でも。
      *
-     * @param elevator elevator deflection, degrees
-     * @param aileron aileron deflection, degrees; the right one gets the opposite sign
-     * @param rudder rudder deflection, degrees
-     * @param gear undercarriage, 0 up to 1 down
-     * @param flaps flaps, 0 up to 1 down
-     * @param rotor how far round the main rotor has turned, in degrees; 0 for anything without one
-     * @param tailRotor the same for the tail rotor
-     * @param rotorRate how far the main rotor turns in one tick, in degrees. Carried so that a pose
-     *        taken at the end of a tick can be wound on to any moment within the next one: a rotor
-     *        that turns most of a revolution per tick cannot be interpolated from two angles, and
-     *        the angles are wrapped back to a circle in any case
-     * @param tailRotorRate the same for the tail rotor, which turns several times faster again
-     * @param sweepGear whether to swing the gear from here, for an aircraft with no gear cycle in
-     *        its animation file to play it from
+     * @param elevator 昇降舵の偏向（度）
+     * @param aileron 補助翼の偏向（度）。右側は符号が逆になる
+     * @param rudder 方向舵の偏向（度）
+     * @param gear 降着装置。0が上げ、1が下げ
+     * @param flaps フラップ。0が上げ、1が下げ
+     * @param rotor メインローターの現在角（度）。持たない機体では0
+     * @param tailRotor テールローターの同じ値
+     * @param rotorRate メインローターの1tickあたりの回転量（度）。tick終端で取ったポーズを次tick内の任意の瞬間まで
+     *        進められるよう持ち回る。1tickでほぼ1回転するローターは2つの角度から補間できないし、どのみち角度は
+     *        円周内へ折り返される
+     * @param tailRotorRate テールローターの同じ値。こちらはさらに数倍速く回る
+     * @param wingSweep 可変翼の後退角（度）。他の可動部と違って0〜1の作動量ではなく角度そのものを運ぶ。
+     *        全開後退が何度かは機体ごとに違い、ここの定数ではなく機体ファイルの数値だからだ
+     * @param sweepGear ここで脚を振るか。アニメーションファイルに脚サイクルを持たない機体用
      */
     public record Pose(float elevator, float aileron, float rudder, float gear, float flaps, float nozzle,
-            float rotor, float tailRotor, float rotorRate, float tailRotorRate, boolean sweepGear) {
-        /** What the aircraft's surfaces are doing now. */
+            float rotor, float tailRotor, float rotorRate, float tailRotorRate, float wingSweep,
+            boolean sweepGear) {
+        /** 機体の舵面が今どうなっているか。 */
         public static Pose of(AircraftEntity aircraft, float partialTick) {
-            // Pulling the nose up drops the tailplane's trailing edge, hence the negated pitch delta.
+            // 機首を上げると水平尾翼の後縁が下がるので、ピッチ差分を反転している。
             return new Pose(
                     deflection(-aircraft.getPitchDelta(), aircraft.getPitchRate(), ELEVATOR_TRAVEL),
                     deflection(aircraft.getRollDelta(), aircraft.getRollRate(), AILERON_TRAVEL),
@@ -101,24 +99,22 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     aircraft.getTailRotorAngle(partialTick),
                     aircraft.getRotorAngle(1.0F) - aircraft.getRotorAngle(0.0F),
                     aircraft.getTailRotorAngle(1.0F) - aircraft.getTailRotorAngle(0.0F),
+                    aircraft.getWingSweep(partialTick),
                     !AircraftAnimations.hasGearCycle(aircraft));
         }
 
         /**
-         * The pose to draw at a moment between two ticks, from the pose taken at the end of each.
+         * 2tickの間の任意の瞬間に描くポーズを、各tick終端で取ったポーズから求める。
          *
-         * <p>This is the aircraft's own interpolation, done from snapshots instead of from the
-         * aircraft: what the game draws for an entity is always the tick before last blended into
-         * the last one, and a ghost drawn any other way runs a tick ahead of the aeroplane beside
-         * it. Each part is treated as the aircraft treats it. The undercarriage, the flaps and the
-         * nozzle are travelling somewhere and are interpolated. The control surfaces follow how
-         * fast the aircraft turned during a tick, which is one figure for the whole of that tick
-         * and is not interpolated by the aircraft either. The rotors are wound on from the rate
-         * rather than blended between two angles, because they are past a full turn a tick and the
-         * angle is wrapped.
+         * <p>これは機体自身の補間を、機体からではなくスナップショットから行った物だ。ゲームがエンティティに対して
+         * 描くのは常に前々tickを前tickへブレンドした物であり、それ以外の描き方をしたゴーストは隣の機体より1tick
+         * 先行してしまう。各部は機体が扱うのと同じように扱う。降着装置・フラップ・ノズル・可変翼はどこかへ向かう
+         * 途中なので補間する。舵面は1tick中の機体の旋回速度に追従するが、それはそのtick全体で1つの値であり、機体自身も補間
+         * しない。ローターは2角のブレンドではなく角速度から進める。1tickで1回転を超えるうえ、角度は折り返される
+         * からだ。
          *
-         * @param previous the pose at the end of the tick before last
-         * @param now the pose at the end of the last tick
+         * @param previous 前々tick終端でのポーズ
+         * @param now 前tick終端でのポーズ
          */
         public static Pose between(Pose previous, Pose now, float partialTick) {
             float wind = partialTick - 1.0F;
@@ -130,16 +126,16 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     Mth.lerp(partialTick, previous.nozzle(), now.nozzle()),
                     now.rotor() + now.rotorRate() * wind,
                     now.tailRotor() + now.tailRotorRate() * wind,
-                    now.rotorRate(), now.tailRotorRate(), now.sweepGear());
+                    now.rotorRate(), now.tailRotorRate(),
+                    Mth.lerp(partialTick, previous.wingSweep(), now.wingSweep()),
+                    now.sweepGear());
         }
     }
 
     /**
-     * Poses any model of an aircraft. Control surfaces follow the rates the aircraft is turning
-     * at; the undercarriage belongs to the animation file, and is only swung from here — in one
-     * straight sweep, legs up and back, bay doors open whenever the legs are not stowed — for an
-     * aircraft that has no gear cycle to play. It is not what an undercarriage looks like, but it
-     * is a great deal better than a leg through a shut door.
+     * 機体のモデルにポーズを付ける。舵面は機体の角速度に追従する。降着装置はアニメーションファイルの管轄で、ここ
+     * から振るのは再生する脚サイクルを持たない機体の場合だけ——脚は真っ直ぐ後ろへ一続きに引き上げ、脚が格納されて
+     * いない間はベイ扉を開く。降着装置の見た目としては正しくないが、閉じた扉を貫く脚よりははるかにましだ。
      */
     public static void applyPose(GeoModel<?> model, VehicleChassis.Model setup, Pose pose) {
         rotateX(model, setup, AircraftDefinition.Bone.ELEVATOR_LEFT, pose.elevator());
@@ -165,19 +161,34 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_LEFT, pose.flaps() * FLAP_TRAVEL);
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_RIGHT, pose.flaps() * FLAP_TRAVEL);
 
-        // The nozzle swings the whole way down rather than a few degrees like a control surface, and
-        // it is posed from here rather than animated because it is one angle rather than a sequence:
-        // the aircraft already knows how far through the conversion it is, and the doors that open
-        // with it are the animation file's business. See AircraftAnimations.
+        // 可変翼。翼根で機体の鉛直軸周りに回し、両翼端を尾部へ運ぶ。左右で符号が逆になるのは、同じ「後ろ」が
+        // 鉛直軸周りでは互いに逆回りだからで、補助翼のような操縦上の左右差ではない。
+        //
+        // ここだけ turnAboutY を使う——上の舵面と違い、翼はモデルによってはルートボーンの半回転の下にあり、
+        // 生の Y 回転では機体の半分で翼が前へ出てしまう。符号をボーンごとにジオメトリから判断させる。
+        // VehicleGeoModel#turnAboutX 参照。角度は0〜1の作動量ではなく度で届いている。全開後退が何度かは
+        // 機体ファイルの数値であって、ここの定数ではないからだ。
+        turnAboutY(model, setup, AircraftDefinition.Bone.WING_LEFT, -pose.wingSweep());
+        turnAboutY(model, setup, AircraftDefinition.Bone.WING_RIGHT, pose.wingSweep());
+
+        // ノズルは舵面のような数度ではなく下まで一杯に振れる。アニメーションではなくここでポーズを付けるのは、
+        // これが手順ではなく1つの角度だからだ。機体は転換がどこまで進んだか既に知っているし、それに伴って開く扉は
+        // アニメーションファイルの管轄だ。AircraftAnimations 参照。
         rotateX(model, setup, AircraftDefinition.Bone.NOZZLE, pose.nozzle() * NOZZLE_TRAVEL);
 
-        // The rotors, which are the same idea taken all the way round. Posed from here for the same
-        // reason as the nozzle and one more: how fast a rotor turns is a number in the aircraft's
-        // file, and an animation file would have to be retimed by hand every time that number moved.
-        // The main rotor turns about its mast, the tail rotor about the shaft it is on, and both are
-        // an angle the aircraft has already worked out.
+        // ローター。同じ考え方を1回転まで押し進めた物だ。ここでポーズを付ける理由はノズルと同じで、加えてもう
+        // 1つある。ローターの回転速度は機体ファイルの数値であり、その数値が動くたびアニメーションファイルを手作業
+        // でタイミング調整し直す羽目になるからだ。メインローターはマスト周り、テールローターは自身のシャフト周りに
+        // 回り、どちらの角度も機体が既に算出している。
         rotateY(model, setup, AircraftDefinition.Bone.ROTOR, pose.rotor());
         rotateX(model, setup, AircraftDefinition.Bone.TAIL_ROTOR, pose.tailRotor());
+
+        // プロペラ。ローターと同じ角度を、同じ理由でここから使う——1機が両方を持つことはないので、機体が
+        // 既に算出している角度がそのままプロペラの角度だ。回すのは各ボーン自身の中心周りで、それが
+        // {@link #spinZ} の存在理由になる。
+        for (String propeller : setup.propellers()) {
+            spinZ(model, propeller, pose.rotor());
+        }
     }
 
     private static void rotateX(GeoModel<?> model, VehicleChassis.Model setup, String role, float degrees) {
@@ -192,7 +203,11 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         rotateZ(model, setup.bone(role), degrees);
     }
 
-    /** Maps a rotation rate onto a control surface: full travel once the aircraft turns at its limit. */
+    private static void turnAboutY(GeoModel<?> model, VehicleChassis.Model setup, String role, float degrees) {
+        turnAboutY(model, setup.bone(role), degrees);
+    }
+
+    /** 角速度を舵面の偏向へ写す。機体が限界の角速度で回っているとき舵一杯になる。 */
     private static float deflection(float ratePerTick, float maxRatePerTick, float travelDegrees) {
         if (maxRatePerTick <= 0.0F) {
             return 0.0F;

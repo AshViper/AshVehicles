@@ -8,18 +8,15 @@ import org.joml.Vector3f;
 import org.joml.Vector3fc;
 
 /**
- * Which way an aircraft is pointing, held as a rotation rather than as three angles.
+ * 機体の向き。3つの角度ではなく回転（クォータニオン）として保持する。
  *
- * <p>Heading, elevation and bank are how Minecraft describes a mob's facing, and they are fine for
- * something that stays the right way up. An aeroplane does not: at the top of a loop it is inverted
- * and pointing backwards, and going over the vertical the heading jumps by a hundred and eighty
- * degrees while the elevation folds back on itself. A rotation has no such seam, so an aircraft
- * built on one can fly through the vertical and come out the other side without noticing.
+ * <p>方位・仰角・バンクは Minecraft が mob の向きを表す方法で、上下が保たれる物には十分だ。機体はそう
+ * ではない。宙返りの頂点では背面かつ後ろ向きだし、天頂を越える瞬間に方位は180度飛び、仰角は折り返す。
+ * 回転にはその継ぎ目が無いので、回転で組んだ機体は天頂を突き抜けて反対側へ出ても何事も起きない。
  *
- * <p>The body frame is the one Minecraft uses for entities: +Z along the nose, +Y up through the
- * canopy, and therefore +X out to the left. Rotating on the right of the stored value applies the
- * rotation in that frame, which is what makes the controls act on the aircraft rather than on the
- * world.
+ * <p>機体座標系は Minecraft がエンティティに使う物と同じ。+Z が機首方向、+Y がキャノピーを抜ける上方向、
+ * したがって +X は左翼方向。保持している値の右から回転を掛けるとその座標系で回転が適用され、それが操作を
+ * 世界ではなく機体に効かせている仕組み。
  */
 public final class Attitude {
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
@@ -30,17 +27,17 @@ public final class Attitude {
     private Attitude() {
     }
 
-    /** The rotation that points an aircraft along a Minecraft heading and elevation, wings level. */
+    /** Minecraft の方位と仰角へ機体を向け、翼を水平にする回転。 */
     public static Quaternionf of(float yRot, float xRot) {
         return new Quaternionf().rotateY(-yRot * DEG_TO_RAD).rotateX(xRot * DEG_TO_RAD);
     }
 
     /**
-     * Turns the aircraft about its own axes.
+     * 機体を自身の軸回りに回す。
      *
-     * @param rollRate degrees about the nose, positive to the right
-     * @param pitchRate degrees about the wings, positive nose up
-     * @param yawRate degrees about the aircraft's vertical, positive nose right
+     * @param rollRate 機首軸回りの角度（度）。右が正
+     * @param pitchRate 翼軸回りの角度（度）。機首上げが正
+     * @param yawRate 機体の垂直軸回りの角度（度）。機首右が正
      */
     public static Quaternionf rotate(Quaternionf attitude, float rollRate, float pitchRate, float yawRate) {
         return attitude.rotateY(-yawRate * DEG_TO_RAD)
@@ -57,19 +54,19 @@ public final class Attitude {
         return toVec3(attitude.transform(new Vector3f(UP)));
     }
 
-    /** Out along the right wing. */
+    /** 右翼方向。 */
     public static Vec3 right(Quaternionf attitude) {
         return toVec3(attitude.transform(new Vector3f(LEFT))).scale(-1.0);
     }
 
-    /** The compass bearing the nose is on, in Minecraft's terms. */
+    /** 機首が向いている方位を Minecraft の流儀で。 */
     public static float heading(Quaternionf attitude) {
         Vec3 nose = nose(attitude);
 
         return (float) (Mth.atan2(-nose.x, nose.z) * (180.0 / Math.PI));
     }
 
-    /** How far below the horizon the nose is, in Minecraft's terms: positive is nose down. */
+    /** 機首が水平線からどれだけ下を向いているか。Minecraft の流儀で、機首下げが正。 */
     public static float elevation(Quaternionf attitude) {
         Vec3 nose = nose(attitude);
 
@@ -77,17 +74,16 @@ public final class Attitude {
     }
 
     /**
-     * The bank angle, positive with the right wing down: how far the aircraft is rolled about its
-     * own nose, measured against which way is up in the world.
+     * バンク角。右翼下げが正。世界の上方向を基準に、機体が機首軸回りにどれだけロールしているか。
      */
     public static float bank(Quaternionf attitude) {
         Vec3 nose = nose(attitude);
         Vec3 up = up(attitude);
-        // Where the wings would be if the aircraft were not rolled at all.
+        // 機体がまったくロールしていなければ翼があったはずの向き。
         Vec3 levelRight = nose.cross(new Vec3(0.0, 1.0, 0.0));
 
         if (levelRight.lengthSqr() < 1.0E-6) {
-            // Pointing straight up or down: every bank angle is the same picture, so call it level.
+            // 真上か真下を向いている場合。どのバンク角でも見た目は同じなので水平と呼ぶ。
             return 0.0F;
         }
 
@@ -98,9 +94,8 @@ public final class Attitude {
     }
 
     /**
-     * The bank of the aircraft as seen by someone looking along {@code sight}: how far the horizon
-     * is tipped over in their view. Used for the cockpit camera, where the pilot's head is bolted to
-     * the airframe but their eyes can be pointing anywhere.
+     * {@code sight} の方向を見ている者から見た機体のバンク。その視界で水平線がどれだけ傾いているか。
+     * コックピットカメラ用。パイロットの頭は機体に固定されているが、目はどこを向いていてもよいので。
      */
     public static float bankAlong(Quaternionf attitude, Vec3 sight) {
         Vec3 up = up(attitude);
@@ -118,20 +113,17 @@ public final class Attitude {
     }
 
     /**
-     * A rotation written as the axis it turns about, scaled by how far it turns, in radians.
+     * 回転を「回転軸×回転量（ラジアン）」のベクトルとして表したもの。
      *
-     * <p>A turn <em>rate</em> has to be something that can be halved, added to, and decayed towards
-     * nothing, and a quaternion is none of those things. This is the same rotation in the one form
-     * that is: three numbers in the aircraft's own frame, which is exactly the body rate a pilot
-     * reads off a turn indicator — roll about the nose, pitch about the wings, yaw about the fin.
-     * {@link #rotationOf} takes it back the other way, and the two are exact inverses under half a
-     * turn.
+     * <p>回転<em>レート</em>は半分にでき、足せて、ゼロへ減衰できる必要があるが、クォータニオンはその
+     * どれでもない。これは同じ回転を、それができる唯一の形で表した物——機体座標系の3つの数値で、まさに
+     * パイロットが旋回計で読む機体レート（機首軸回りのロール、翼軸回りのピッチ、垂直尾翼回りのヨー）。
+     * {@link #rotationOf} が逆変換で、半回転までの範囲では厳密な逆になる。
      *
-     * <p>The short way round is always taken, so a rotation of three hundred and fifty degrees comes
-     * back as ten the other way rather than as most of a turn. Anything measuring one tick of an
-     * aircraft's turn is asking about the short way round by definition.
+     * <p>常に近い方の回り方を取るので、350度の回転は「大半周」ではなく逆向きの10度として返る。機体の
+     * 1tick 分の回転を測る物は、定義からして近い方の回り方を訊いている。
      *
-     * @param rotation a normalised rotation
+     * @param rotation 正規化済みの回転
      */
     public static Vector3f rotationVector(Quaternionfc rotation) {
         float w = rotation.w();
@@ -139,7 +131,7 @@ public final class Attitude {
         float y = rotation.y();
         float z = rotation.z();
 
-        // A quaternion and its negation are the same rotation; only one of the two is the short way.
+        // クォータニオンとその符号反転は同じ回転を表す。近い方の回り方はそのうち片方だけ。
         if (w < 0.0F) {
             w = -w;
             x = -x;
@@ -149,8 +141,7 @@ public final class Attitude {
 
         float sine = (float) Math.sqrt(Math.max(0.0F, 1.0F - w * w));
 
-        // Below this the axis is lost in the rounding, and the half-angle vector is the answer to
-        // every digit that survives anyway.
+        // これより小さいと軸が丸め誤差に埋もれる。どのみち残る桁の範囲では半角ベクトルが答えになる。
         if (sine < 1.0E-6F) {
             return new Vector3f(x * 2.0F, y * 2.0F, z * 2.0F);
         }
@@ -160,7 +151,7 @@ public final class Attitude {
         return new Vector3f(x * scale, y * scale, z * scale);
     }
 
-    /** The rotation that a scaled axis, as {@link #rotationVector} writes one, describes. */
+    /** {@link #rotationVector} が書く形式の「軸×角度」ベクトルが表す回転。 */
     public static Quaternionf rotationOf(Vector3fc rotation) {
         float angle = rotation.length();
 
@@ -176,16 +167,15 @@ public final class Attitude {
     }
 
     /**
-     * Turns an offset in the aircraft's own axes (x right, y up, z nose) into a world offset.
+     * 機体座標系（x が右、y が上、z が機首）のオフセットをワールド座標のオフセットへ変換する。
      *
-     * <p>One rotation rather than three. The three axes this used to build are the rotation applied
-     * to the three unit vectors, and a rotation is linear, so rotating the whole offset at once is
-     * the same answer for a third of the arithmetic and a tenth of the rubbish. That is worth having
-     * here: every collision box and every pylon of every aircraft is placed through this on every
-     * tick, and each call was three quaternion transforms and a dozen throwaway vectors.
+     * <p>回転は3回ではなく1回。以前組んでいた3本の軸は3つの単位ベクトルに回転を適用した物であり、回転は
+     * 線形なので、オフセット全体を一度に回せば計算量1/3・ゴミ生成1/10で同じ答えになる。ここではそれが
+     * 効く。全機体の全当たり判定と全パイロンが毎tick ここを通り、1回の呼び出しがクォータニオン変換3回と
+     * 使い捨てベクトル十数個だった。
      *
-     * <p>The x is negated on the way in because the body frame's +X runs out along the <em>left</em>
-     * wing — see {@link #LEFT} and {@link #right} — while an offset's x is measured to the right.
+     * <p>入口で x を反転しているのは、機体座標系の +X が<em>左</em>翼方向へ伸びるのに対し
+     * （{@link #LEFT} と {@link #right} 参照）、オフセットの x は右向きに測るから。
      */
     public static Vec3 toWorld(Quaternionf attitude, Vec3 offset) {
         Vector3f world = attitude.transform(
@@ -195,12 +185,11 @@ public final class Attitude {
     }
 
     /**
-     * The other way about: something measured in the world, put back in the machine's own axes.
+     * 逆向きの変換。ワールド座標で測った物を機体座標系へ戻す。
      *
-     * <p>The exact inverse of {@link #toWorld}, negation and all — a unit rotation's conjugate is its
-     * inverse, and the x is crossed back over on the way out for the same reason it is crossed on the
-     * way in. What it answers is where on a machine something is: which side of it, how far up it,
-     * and how far forward, whatever the hull has been left lying at.
+     * <p>符号反転も含め {@link #toWorld} の厳密な逆。単位回転の共役は逆回転であり、出口で x を戻すのは
+     * 入口で反転するのと同じ理由。答えるのは「機体のどこか」——どちら側で、どれだけ上で、どれだけ前か。
+     * 車体がどんな姿勢で寝ていても変わらない。
      */
     public static Vec3 toBody(Quaternionf attitude, Vec3 world) {
         Vector3f body = new Quaternionf(attitude).conjugate().transform(

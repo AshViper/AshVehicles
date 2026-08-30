@@ -12,18 +12,15 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 
 /**
- * The one place the mod's running sounds are wound on, and the one place they are told about a new
- * entity.
+ * MOD の継続音を進める唯一の場所であり、新しいエンティティの到着を伝える唯一の場所。
  *
- * <p>Each family — engines, undercarriages, what a weapon does in the air — keeps its own list and
- * decides for itself what should be playing; see {@link LiveSounds}. All this does is hand every one
- * of them the ticks and the arrivals, so that there is a single tick handler rather than one per
- * family, and so a family is a field somewhere rather than a class the mod has to be told to load.
+ * <p>各系統——エンジン、降着装置、空中の兵器の音——は自前のリストを持ち、何を鳴らすべきか自分で決める。
+ * {@link LiveSounds} 参照。ここがするのは、それら全てへtickと到着を渡すことだけだ。おかげでtickハンドラは系統
+ * ごとではなく1つで済み、系統は「MOD にロードさせる必要のあるクラス」ではなく「どこかのフィールド」で済む。
  *
- * <p>{@link BulletSounds} is fed from here too, and is not a {@link LiveSounds}: what a gun's round
- * makes is one crack as it goes by rather than a sound that runs for as long as the round exists.
- * The bookkeeping is the same — a list of what is in the air, wound on once a tick — which is why it
- * belongs here rather than in a handler of its own.
+ * <p>{@link BulletSounds} もここから供給されるが、{@link LiveSounds} ではない。銃弾が出すのは通過時の1回の
+ * 破裂音であって、弾が存在する限り鳴り続ける音ではないからだ。帳簿の付け方は同じ——空中にある物のリストを
+ * 毎tick進める——であり、だから専用ハンドラではなくここに属する。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class EntitySounds {

@@ -11,131 +11,113 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
- * Flying by pointing: the pilot puts a mark in the sky and the aeroplane goes and puts its nose on
- * it.
+ * ポインティング飛行。パイロットが空にマークを置き、機体がその上へ機首を持っていく。
  *
- * <p>What the mouse moves is not the aircraft. It moves a direction, and a small autopilot underneath
- * works out what the stick would have to do to bring the nose round onto it — which for an aeroplane
- * means banking and pulling, because that is the only way an aeroplane changes where it is going, and
- * for a helicopter means the pedals, because that is how a helicopter points its nose. The keys are
- * still there and still fly the aircraft directly; this only fills in what the pilot is not asking
- * for by hand.
+ * <p>マウスが動かすのは機体ではない。動かすのは方向であり、その下の小さなオートパイロットが「機首をそこへ持って
+ * いくには操縦桿が何をすべきか」を求める。固定翼機ではバンクして引くことを意味する。機体が進路を変える方法はそれ
+ * しか無いからだ。ヘリではペダルを意味する。ヘリが機首を向ける方法がそれだからだ。キー操作は今も存在し、今も機体を
+ * 直接飛ばす。ここが埋めるのはパイロットが手で要求していない分だけだ。
  *
- * <p><b>The mark is held as a world direction, not as an angle off the nose.</b> That is the whole of
- * why it works. An angle stored against the aircraft does not shrink as the aircraft turns towards
- * it — the aeroplane would roll into the turn and go on rolling for ever, since the mark it was
- * chasing came round with it. A direction stays where the pilot put it, the error against the nose
- * closes as the aircraft comes round, and the stick centres itself when it gets there.
+ * <p><b>マークは機首からの角度ではなくワールド方向として保持する。</b>これが機能する理由の全てだ。機体基準で保存
+ * した角度は、機体がそちらへ回っても縮まない——マークが機体と一緒に回るので、機体は旋回へロールし、永久にロールし
+ * 続ける。方向ならパイロットが置いた場所に留まり、機体が回るにつれ機首との誤差が閉じ、到達すれば操縦桿は自ら中立へ
+ * 戻る。
  *
- * <p>It is also why this is not the same thing as {@link CockpitView}, which has to be two clamped
- * angles for reasons set out over there. A head is a rotation and can wind itself up; a direction has
- * no roll to wind and cannot tumble past anything.
+ * <p>これが {@link CockpitView} と別物である理由でもある。あちらは向こうで述べた理由からクランプされた2角でなければ
+ * ならない。頭は回転であり自ら巻き上がりうるが、方向は巻き込むロールを持たず、何かを越えて宙返りすることもない。
  *
- * <p><b>Looking and asking are two different directions.</b> Where the pilot is looking is not
- * limited at all beyond the poles: in the chase view the camera has to be able to go the whole way
- * round, and being able to see behind is half of what that view is for. What the aeroplane is asked
- * for is that direction brought inside a cone about the nose, which is what keeps this a stick rather
- * than an instruction to turn round. Push the mouse hard over and the camera swings past the tail
- * while the aircraft turns after it as hard as it can — which is the right answer to both.
+ * <p><b>「見ること」と「要求すること」は別の方向だ。</b>パイロットの視線は極を除いてまったく制限しない。三人称視点
+ * ではカメラが全周を回れる必要があるし、後ろを見られることがあの視点の存在理由の半分だからだ。機体へ要求されるのは
+ * その方向を機首まわりの円錐内へ収めた物で、それがこれを「向き直れという指示」ではなく「操縦桿」に留めている。マウス
+ * を大きく振れば、カメラが尾部を越えて回る間、機体は全力でその後を追って旋回する——どちらへの答えとしても正しい。
  *
- * <p><b>Which axes the mouse works in depends on the view, and has to.</b> In the cockpit the camera
- * is bolted to the airframe and rolls with the wings, so sideways on the screen is sideways on the
- * aircraft and the mouse is turned about the aircraft's own axes. The chase camera is deliberately
- * left upright, so on that screen sideways is sideways in the <em>world</em> — and a mouse turned
- * about the aircraft's axes there sends the view down the screen the moment the wings are not level,
- * which is precisely what made the chase view unflyable.
+ * <p><b>マウスがどの軸で働くかは視点によるし、そうでなければならない。</b>コックピットではカメラが機体に固定され主翼
+ * と共にロールするので、画面上の横は機体上の横であり、マウスは機体自身の軸周りに回す。三人称カメラは意図的に直立の
+ * ままなので、あの画面での横は<em>ワールド</em>の横だ——そこで機体軸周りに回すマウスは、主翼が水平でなくなった瞬間に
+ * 視界を画面の下へ送る。三人称視点を飛行不能にしていたのはまさにそれだ。
  */
 public final class MouseAim {
     /**
-     * How far off the nose the mark may be taken, in degrees.
+     * マークを機首からどれだけ離せるか（度）。
      *
-     * <p>Small on purpose. This is a stick, not a look-around: a mark that could be put anywhere
-     * would let the pilot ask for a turn the aeroplane will spend ten seconds arriving at, with the
-     * stick hard over the whole way and no feel for what it is doing. Within a cone it behaves like
-     * a stick — how far out the mark is, is how much deflection is being asked for. Looking further
-     * than this is what the free-look key is for, and that does not steer.
+     * <p>意図的に小さい。これは操縦桿であって見回しではない。どこへでも置けるマークは、機体が到達に10秒かける旋回を
+     * 要求できてしまう。その間ずっと操縦桿は一杯のままで、何をしているのかの手応えも無い。円錐内なら操縦桿らしく
+     * 振る舞う——マークがどれだけ外れているかが、要求されている舵の量だ。これより遠くを見るためにフリールックキーが
+     * あり、あちらは操縦しない。
      */
     private static final float CONE = 35.0F;
 
     /**
-     * Degrees of bank asked for per degree the mark is off to one side, and the most that may be
-     * asked for.
+     * マークが横へ1度外れるごとに要求するバンク角と、その要求上限。
      *
-     * <p>An aeroplane changes heading by banking and pulling; the rudder barely comes into it. So a
-     * mark out to the right is not a shove on the rudder, it is an angle of bank to hold while the
-     * wing does the work — which is exactly what a pilot does with the stick, and why an aeroplane
-     * flown this way looks like an aeroplane rather than like a mouse cursor.
+     * <p>機体はバンクして引くことで方位を変える。方向舵はほとんど関与しない。だから右へ外れたマークは方向舵を蹴ること
+     * ではなく、主翼が仕事をする間保つべきバンク角を意味する——それはパイロットが操縦桿でやることそのものであり、
+     * この方式で飛ばす機体がマウスカーソルではなく機体らしく見える理由だ。
      */
     private static final float BANK_PER_DEGREE = 3.0F;
     private static final float MAX_BANK = 75.0F;
 
     /**
-     * How much back-stick to add for the lift a bank costs, as a fraction of full deflection for
-     * each time over its own weight the wing has to pull.
+     * バンクが失う揚力を補うために足す引き量。主翼が自重の何倍を引くべきかにつき、舵一杯に対する割合で表す。
      *
-     * <p>A banked wing does not hold the aircraft up any less hard, it merely holds it up in the
-     * wrong direction: at sixty degrees only half of the lift is still pointing at the sky, and the
-     * aeroplane starts down. What keeps a turn level is somebody pulling, and a pilot supplies it
-     * without thinking about it — so this supplies it too. Without it, holding the mouse over to one
-     * side is not a turn at all but a spiral into the ground, which is exactly what it did.
+     * <p>バンクした主翼は支える力が弱まるのではなく、間違った方向へ支えるだけだ。60度では揚力の半分しか空を向いて
+     * おらず、機体は降下を始める。旋回を水平に保つのは誰かが引くことであり、パイロットは考えずにそれを供給する——だから
+     * ここも供給する。これが無いと、マウスを片側へ倒し続けることは旋回ではなく地面への螺旋降下になる。実際そうなって
+     * いた。
      *
-     * <p>Only a bias. A pilot who puts the mark below the horizon is asking to go down and the error
-     * term says so far louder than this does.
+     * <p>あくまでバイアスにすぎない。水平線より下へマークを置いたパイロットは降下を要求しており、誤差項がこれより
+     * はるかに大きな声でそう言う。
      */
     private static final float TURN_HOLD = 0.8F;
     /**
-     * How far over the wing has to be before the pull is given up on. Past this there is no useful
-     * "up" to pull towards, and hauling back while inverted points the aircraft at the ground.
+     * 主翼がどれだけ倒れたら引くのを諦めるか。これを超えると引くべき有用な「上」が無く、背面で引けば機体は地面を向く。
      */
     private static final double UPRIGHT = 0.1;
 
     /**
-     * How near the vertical the chase camera may look, in degrees.
+     * 三人称カメラが垂直へどこまで近付けるか（度）。
      *
-     * <p>A shade short of straight up, which is the same limit vanilla puts on every other view in
-     * the game: past it a bearing stops meaning anything and the picture slews. The bearing itself is
-     * not limited at all — the camera goes the whole way round, because half of what an outside view
-     * is for is seeing what is behind you.
+     * <p>真上の少し手前で、ゲームの他の全視点にバニラが課すのと同じ制限だ。それを越えると方位が意味を失い、画が滑る。
+     * 方位自体はまったく制限しない——カメラは全周を回る。外部視点の存在理由の半分が後ろを見ることだからだ。
      */
     private static final float POLE = 89.5F;
 
-    /** Stick per degree of error, and stick per degree per tick of the rotation already under way. */
+    /** 誤差1度あたりの舵量と、既に進行中の回転1度/tickあたりの舵量。 */
     private static final float ROLL_GAIN = 0.04F;
     private static final float ROLL_DAMPING = 0.15F;
     private static final float PITCH_GAIN = 0.08F;
     private static final float PITCH_DAMPING = 0.15F;
     /**
-     * The rudder, which on an aeroplane is a trim rather than a way of turning: enough to walk the
-     * nose the last degree or two onto the mark, not enough to skid the aircraft round with.
+     * 方向舵。固定翼機では旋回手段ではなくトリムだ。機首をマークへ最後の1〜2度寄せるには足り、機体を横滑りで回すには
+     * 足りない量。
      */
     private static final float YAW_GAIN = 0.02F;
     /**
-     * And on a helicopter, which is the other way round entirely. A helicopter points its nose with
-     * the tail rotor and does not have to bank to do it, so there the pedals are the whole of it.
+     * ヘリではまったく逆になる。ヘリはテールローターで機首を向け、そのためにバンクする必要が無いので、そこではペダル
+     * が全てだ。
      */
     private static final float ROTOR_YAW_GAIN = 0.05F;
     private static final float YAW_DAMPING = 0.15F;
 
-    /** What the aim is asking the stick to do, each in [-1, 1]. */
+    /** 照準が操縦桿へ要求している内容。各値 -1〜1。 */
     public record Stick(float pitch, float roll, float yaw) {
         public static final Stick NONE = new Stick(0.0F, 0.0F, 0.0F);
     }
 
-    /** The aircraft this pilot is flying, or null when they are not flying one. */
+    /** このパイロットが操縦している機体。操縦していなければ null。 */
     private static AircraftEntity aircraft;
     /**
-     * Where the pilot is looking, as a direction in the world. Free to go anywhere but the poles.
+     * パイロットの視線をワールド方向として。極以外はどこへでも向けられる。
      */
     private static Vec3 look = Vec3.ZERO;
-    /** And what the aeroplane is being asked for: that direction, brought inside the cone. */
+    /** そして機体へ要求されている方向。上記を円錐内へ収めた物。 */
     private static Vec3 aim = Vec3.ZERO;
     /**
-     * Whether the mouse flies the aircraft at all.
+     * そもそもマウスで機体を飛ばすか。
      *
-     * <p>On to begin with, because it is what most people reach for, and switchable because it is a
-     * different way of flying rather than a better one: turned off, the mouse goes back to doing
-     * nothing but look around and the keys have the aircraft entirely to themselves, which is how
-     * this mod flew before there was any of this.
+     * <p>初期状態は有効。大半の人が最初に手を伸ばすのがそれだからだ。切り替え可能なのは、優れた方式ではなく別の方式
+     * だからである。無効にすればマウスは見回すだけに戻り、機体はキーが完全に受け持つ。これが導入される前、この MOD が
+     * 飛んでいた形だ。
      */
     private static boolean enabled = true;
 
@@ -143,11 +125,9 @@ public final class MouseAim {
     }
 
     /**
-     * Called every frame. Takes note of whether this player is at the controls, and starts the mark
-     * on the nose whenever they climb into something.
+     * 毎フレーム呼ばれる。このプレイヤーが操縦席にいるかを記録し、何かに乗り込むたびマークを機首へ置き直す。
      *
-     * <p>Only for whoever is actually flying. A passenger's mouse has nothing to steer with and is
-     * left to look out of the window.
+     * <p>実際に操縦している者のみが対象。搭乗者のマウスには操縦する物が無いので、窓の外を眺めるに任せる。
      */
     public static void follow(AircraftEntity riding) {
         AircraftEntity flying = riding != null
@@ -159,7 +139,7 @@ public final class MouseAim {
         }
     }
 
-    /** True while there is an aircraft under this pilot's hands for the mark to steer. */
+    /** マークが操縦する対象の機体がこのパイロットの手の下にある間 true。 */
     public static boolean isActive() {
         return enabled && aircraft != null && !aircraft.isRemoved();
     }
@@ -168,28 +148,27 @@ public final class MouseAim {
         return enabled;
     }
 
-    /** Switches the whole thing on or off, leaving the mark on the nose either way. */
+    /** 機能全体を切り替える。どちらの場合もマークは機首へ戻す。 */
     public static void setEnabled(boolean on) {
         enabled = on;
         centre();
     }
 
-    /** Where the pilot is looking, as a direction in the world. Not limited to the cone. */
+    /** パイロットの視線をワールド方向として。円錐には制限されない。 */
     public static Vec3 look() {
         return look;
     }
 
-    /** Puts both directions back on the nose: nothing being asked for, nothing being looked away at. */
+    /** 両方の方向を機首へ戻す。何も要求せず、どこへも目を逸らしていない状態。 */
     public static void centre() {
         look = aircraft == null ? Vec3.ZERO : aircraft.getNoseVector();
         aim = look;
     }
 
     /**
-     * Moves where the pilot is looking by a mouse movement, in degrees.
+     * マウス移動の分だけパイロットの視線を動かす（度）。
      *
-     * @param inCockpit whether the camera is bolted to the airframe, which decides the axes the
-     *                  movement is applied in. See the note on the class
+     * @param inCockpit カメラが機体に固定されているか。移動を適用する軸を決める。クラスの注記参照
      */
     public static void turn(double deltaX, double deltaY, boolean inCockpit) {
         if (!isActive()) {
@@ -197,9 +176,8 @@ public final class MouseAim {
         }
 
         if (inCockpit) {
-            // Turned about the aircraft's own up and right, because that is what the screen is
-            // lying along. Negated both times: a rotation about an axis carries a direction the
-            // other way from the way the hand moved.
+            // 機体自身の上方向と右方向の周りに回す。画面がそれに沿っているからだ。どちらも符号を反転する。軸周りの
+            // 回転は、手が動いたのと逆向きに方向を運ぶからだ。
             Quaternionf attitude = aircraft.getAttitude(1.0F);
 
             look = spin(look, Attitude.up(attitude), -deltaX);
@@ -208,9 +186,8 @@ public final class MouseAim {
             return;
         }
 
-        // And outside it, a bearing and an elevation against the world — which is what the mouse is
-        // everywhere else in the game, and what an upright screen wants. The bearing runs the whole
-        // way round; only the elevation stops, where looking up stops.
+        // 外部視点では、ワールドに対する方位と仰角——ゲームの他の場所でのマウスの意味であり、直立した画面が求める物
+        // だ。方位は全周を回る。止まるのは仰角だけで、見上げの限界がその位置だ。
         float heading = (float) (Mth.atan2(-look.x, look.z) * (180.0 / Math.PI) + deltaX);
         float elevation = (float) Mth.clamp(
                 -Math.asin(Mth.clamp(look.y, -1.0, 1.0)) * (180.0 / Math.PI) + deltaY, -POLE, POLE);
@@ -219,11 +196,11 @@ public final class MouseAim {
     }
 
     /**
-     * Points the player's own bearing and elevation where the pilot is looking.
+     * プレイヤー自身の方位と仰角を、パイロットの視線へ向ける。
      *
-     * <p>For the chase view, where nothing else does it: in the cockpit the camera is placed from
-     * {@link CockpitView} and the player's angles follow from there, but a detached camera is put
-     * where the player is facing, so the player's facing is the camera.
+     * <p>三人称視点用。他に誰もやらないからだ。コックピットではカメラが {@link CockpitView} から配置され、プレイヤー
+     * の角度はそこから従う。だが分離カメラはプレイヤーが向いている方へ置かれるので、プレイヤーの向きがカメラそのもの
+     * になる。
      */
     public static void applyToPlayer() {
         LocalPlayer player = Minecraft.getInstance().player;
@@ -238,15 +215,12 @@ public final class MouseAim {
     }
 
     /**
-     * The stick the mark is asking for, and the mark brought back within reach of the nose while we
-     * are here.
+     * マークが要求する操縦桿の量。ついでにマークを機首の届く範囲へ引き戻す。
      *
-     * <p>Called once a tick from the pilot's input, and the one place any of this becomes flying.
+     * <p>パイロットの入力から毎tick1回呼ばれる。これらが飛行になる唯一の場所だ。
      *
-     * <p>Held down, the free-look key leaves the mark where it was and lets the pilot's eyes go on
-     * alone: the aeroplane keeps flying at what it was last asked for while its pilot looks over
-     * their shoulder, which is what a look round is for and would be worth nothing if the aircraft
-     * followed the eyes.
+     * <p>フリールックキーを押している間はマークをその場に残し、パイロットの目だけを動かす。機体は最後に要求された方向
+     * へ飛び続け、その間パイロットは肩越しに振り返る。見回しの目的はそれであり、機体が目に追従したら何の価値も無くなる。
      */
     public static Stick stick() {
         if (!isActive()) {
@@ -264,31 +238,27 @@ public final class MouseAim {
         Vec3 up = Attitude.up(attitude);
         Vec3 right = Attitude.right(attitude);
 
-        // How far off the nose the mark is, split into the two ways an aircraft can be wrong about
-        // it: round to one side, and up or down.
+        // マークが機首からどれだけ外れているかを、機体がそれについて誤りうる2通り——左右方向と上下方向——に分ける。
         float offYaw = (float) Math.toDegrees(Mth.atan2(aim.dot(right), aim.dot(nose)));
         float offPitch = (float) Math.toDegrees(Math.asin(Mth.clamp(aim.dot(up), -1.0, 1.0)));
 
-        // The elevator, on both sorts of aircraft: what raises the nose is the same lever whether
-        // the lift comes from a wing or from a rotor. Damped against the rotation already under way,
-        // or the nose arrives at the mark still turning and sails past it.
+        // 昇降舵。どちらの種類の機体でも同じだ。揚力が主翼由来でもローター由来でも、機首を上げるのは同じレバーで
+        // ある。既に進行中の回転に対して減衰させる。さもないと機首は回転したままマークに到達し、そのまま行き過ぎる。
         float pitch = Mth.clamp(offPitch * PITCH_GAIN - aircraft.getPitchDelta() * PITCH_DAMPING,
                 -1.0F, 1.0F);
 
         if (aircraft.isRotorcraft()) {
-            // A helicopter is pointed, not banked. The pedals swing the nose onto the mark and leave
-            // it there, and the cyclic stays free for the keys — which is what it is wanted for,
-            // since on a helicopter roll is how you go sideways rather than how you turn.
+            // ヘリはバンクではなく指向で向ける。ペダルが機首をマークへ振ってそこに残し、サイクリックはキー用に空けて
+            // おく——それが望まれる形だ。ヘリではロールは旋回手段ではなく横移動の手段だからである。
             float yaw = Mth.clamp(offYaw * ROTOR_YAW_GAIN - aircraft.getYawDelta() * YAW_DAMPING,
                     -1.0F, 1.0F);
 
             return new Stick(pitch, 0.0F, yaw);
         }
 
-        // And an aeroplane is banked, not pointed. The mark decides an angle of bank; the ailerons
-        // are asked for the difference between that and the bank there already is, so the aircraft
-        // rolls in, holds the turn while the wing brings the nose round, and rolls out as the mark
-        // comes to the middle. A rudder term goes with it, small, for the last degree or two.
+        // 固定翼機は指向ではなくバンクで向ける。マークがバンク角を決め、補助翼にはその角と現在のバンクの差を要求
+        // する。だから機体はロールインし、主翼が機首を回す間その旋回を保ち、マークが中央へ来るにつれロールアウトする。
+        // 最後の1〜2度のために小さな方向舵の項も添える。
         float bank = aircraft.getRoll();
         float wanted = Mth.clamp(offYaw * BANK_PER_DEGREE, -MAX_BANK, MAX_BANK);
         float roll = Mth.clamp((wanted - bank) * ROLL_GAIN
@@ -299,12 +269,11 @@ public final class MouseAim {
     }
 
     /**
-     * The back-stick a bank costs, so that a turn stays a turn rather than becoming a descent.
+     * バンクが要求する引き量。旋回が降下ではなく旋回のままであるようにする。
      *
-     * <p>What is wanted is the load the wing has to pull for the upward part of its lift to still
-     * come to the weight, which is the secant of the bank angle: one level, two at sixty degrees,
-     * away to nothing at ninety. Given up on past the vertical, where there is no up to pull towards
-     * and pulling would only point the aircraft further at the ground.
+     * <p>欲しいのは、揚力の上向き成分が依然として重量に等しくなるために主翼が引くべき荷重、つまりバンク角の割線だ。
+     * 水平で1、60度で2、90度で無限大へ発散する。垂直を越えたら諦める。引くべき「上」が無く、引けば機体をさらに地面へ
+     * 向けるだけだからだ。
      */
     private static float holdTheTurn(float bank) {
         double upright = Math.cos(Math.toRadians(bank));
@@ -317,11 +286,10 @@ public final class MouseAim {
     }
 
     /**
-     * Keeps the mark inside the cone about the nose.
+     * マークを機首まわりの円錐内に保つ。
      *
-     * <p>Wanted every tick and not only when the mouse moves, because the aircraft is turning too:
-     * a mark left alone while the aeroplane rolls away from it would drift out of reach on its own
-     * and leave the stick hard over with nothing the pilot did to explain it.
+     * <p>マウスが動いたときだけでなく毎tick必要だ。機体も回っているからである。機体がロールで離れていく間放置された
+     * マークは自ずと届かない場所へ流れ、パイロットの操作では説明の付かない舵一杯を残すことになる。
      */
     private static void holdInCone() {
         Vec3 nose = aircraft.getNoseVector();
@@ -340,12 +308,12 @@ public final class MouseAim {
 
         Vec3 axis = nose.cross(aim);
 
-        // Straight ahead, or exactly astern, where there is no plane to swing it back through.
+        // 真正面か真後ろ。戻すために回す平面が存在しない場合。
         aim = axis.lengthSqr() < 1.0E-9 ? nose : spin(nose, axis.normalize(), CONE);
     }
 
 
-    /** A direction turned about an axis, in degrees. Both are already units, so this stays one. */
+    /** 方向を軸周りに回す（度）。どちらも既に単位ベクトルなので、結果も単位ベクトルのままになる。 */
     private static Vec3 spin(Vec3 direction, Vec3 axis, double degrees) {
         Vector3f turned = new Quaternionf()
                 .rotateAxis((float) Math.toRadians(degrees), (float) axis.x, (float) axis.y, (float) axis.z)

@@ -19,97 +19,81 @@ import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.cache.object.GeoBone;
 
 /**
- * Builds a tracked vehicle's run of track out of one link, and lays it round the wheels the vehicle
- * already names.
+ * 装軌車両の履帯を1つのリンクから組み立て、車両が既に指定している車輪の周りへ敷く。
  *
- * <p>Nothing about a track is drawn in the geometry beyond the one link. The band is the taut band
- * round the wheels — the shape a belt takes when it is pulled tight round a set of pulleys, which is
- * what a track is — and the wheels are read out of the baked model with the size and the place their
- * own geometry gives them. So a wheel moved in Blockbench, or swapped for a bigger one, or a whole
- * different tank, needs nothing changed here or in the vehicle's file.
+ * <p>履帯についてジオメトリが描いている物は、リンク1つ以外に何も無い。帯は車輪を囲む張った帯——ベルトを複数の
+ * プーリーへ張ったときの形であり、履帯とはまさにそれだ——であり、車輪はベイク済みモデルから、自身のジオメトリが与える
+ * 大きさと位置のまま読む。だから Blockbench で車輪を動かしても、大きい物へ替えても、まったく別の戦車でも、ここや車両
+ * ファイルを変更する必要は無い。
  *
- * <p>The band is worked out in the plane the vehicle drives in: the run is described by where the
- * wheels are fore and aft and how high off the ground they sit, and the only thing the third axis
- * decides is which side of the hull a wheel is on. Wheels sort themselves into two groups by that,
- * and each group gets its own band at its own wheels' distance out, which is why one link bone is
- * enough for a vehicle rather than one per side.
+ * <p>帯は車両が走る平面上で求める。周回は「車輪の前後位置」と「地面からの高さ」で記述され、第3軸が決めるのは車輪が
+ * 車体のどちら側にあるかだけだ。車輪はそれによって2群へ自動的に分かれ、各群が自分の車輪の張り出し距離に応じた帯を
+ * 得る。1台につきリンクボーン1つで足り、側面ごとに要らない理由はそれだ。
  *
- * <p><b>What the artist has to do.</b> Build one link, in its own bone, lying flat and running along
- * the bone's Z. It is drawn from wherever it was left to wherever the band wants it, so where it is
- * built does not matter; how big it is does, because that is what the run's pitch is taken from.
+ * <p><b>作者がやるべきこと。</b>リンクを1つ、専用ボーンの中に、平らに寝かせてボーンの Z 方向へ伸ばして作る。置かれた
+ * 場所から帯が求める場所へ描かれるので、どこに作ったかは問題にならない。大きさは問題になる。周回のピッチはそこから取る
+ * からだ。
  *
- * <p><b>Where the work goes.</b> The shape is settled by the geometry and nothing but, so it is
- * worked out once per model and kept against the baked model itself — which means a resource reload,
- * which bakes a new one, gets a new shape without anything having to be told to throw the old one
- * away. What is left per frame is one point along the band per link and the matrix to put it there.
+ * <p><b>処理コストの所在。</b>形状はジオメトリだけで決まるので、モデルごとに1回求めてベイク済みモデル自体に紐付けて
+ * 保持する。つまりリソースリロードは新しいモデルをベイクするので、古い物を捨てろと指示せずとも新しい形状が得られる。
+ * 毎フレーム残るのはリンク1つにつき帯上の点1つと、そこへ置く行列だけだ。
  */
 public final class TrackBelt {
     /**
-     * Which way the run travels for a wheel angle that is winding on, for a link bone the model has
-     * not turned round.
+     * 車輪角が進んでいるとき履帯がどちらへ流れるか。モデルが回していないリンクボーンの場合の値。
      *
-     * <p>Whether this model has turned it round is {@link Shape#travelSign} — the band is laid out
-     * in the link's parent's axes, and half these models hang everything off a root bone with a half
-     * turn on it, which reverses those axes against the vehicle's. The wheels themselves are already
-     * made to roll the same way on both kinds; see {@link VehicleGeoModel#turnAboutX}. Without the
-     * pair the track would run one way and the wheels under it the other.
+     * <p>このモデルが回しているかどうかは {@link Shape#travelSign} が持つ——帯はリンクの親の軸で敷かれるが、ここの
+     * モデルの半分は全てをルートボーンにぶら下げてそこで半回転させており、それが親の軸を車両の軸に対して反転させる。
+     * 車輪自体は既に両方の種類で同じ向きに転がるようにしてある。{@link VehicleGeoModel#turnAboutX} 参照。この対が
+     * 無いと、履帯が一方向へ、その下の車輪が逆方向へ動くことになる。
      *
-     * <p>Flip this if the track runs backwards on <em>every</em> vehicle at once. One vehicle's
-     * track running backwards is not this.
+     * <p><em>全車両で一斉に</em>履帯が逆走するならここを反転する。1台だけ逆走するのはこれではない。
      */
     private static final float TRAVEL_SIGN = 1.0F;
 
     /**
-     * How many points each wheel is described by while the band is pulled round it.
+     * 帯を張る際、各車輪を何点で表すか。
      *
-     * <p>The band is the convex hull of the wheels, and the cheapest honest way to take the hull of
-     * a set of circles is to take the hull of points sampled round them. Twenty-four leaves the
-     * corners of the run about a percent inside the true circle, which is a fraction of a pixel on a
-     * road wheel and nothing at all against the thickness of a link.
+     * <p>帯は車輪群の凸包であり、円の集合の凸包を取る最も安価で正直な方法は、円周上の標本点の凸包を取ることだ。24点なら
+     * 周回の角が真円の約1%内側に入るが、それは転輪上で1ピクセル未満であり、リンクの厚みに対してはまったくの無だ。
      */
     private static final int ARC_STEPS = 24;
 
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
 
-    /** How a single link is drawn, once it has been put where it belongs. */
+    /** リンク1つを、あるべき場所へ置いた後どう描くか。 */
     public interface LinkDrawer {
         void draw(GeoBone link);
     }
 
     /**
-     * The shape of every band on one model, and where the link sits in its own bone.
+     * 1モデル上の全ての帯の形状と、リンクが自身のボーン内のどこにあるか。
      *
-     * @param belts one per side of the hull, or one in total for a vehicle whose wheels are all in a
-     *              line
-     * @param linkCentre the middle of the link's own geometry, in the link bone's own axes and in
-     *                   blocks. What gets put on the band is this point rather than the bone's pivot:
-     *                   a link built off to one side of its pivot would otherwise hang off the run
-     * @param travelSign whether the axes the band was laid out in run with the vehicle or against
-     *                   it, which is minus one for a model whose root bone is turned round. See
-     *                   {@link #TRAVEL_SIGN}
+     * @param belts 車体の片側につき1つ。車輪が一直線に並ぶ車両では全体で1つ
+     * @param linkCentre リンク自身のジオメトリの中心。リンクボーン自身の軸、ブロック単位。帯に載るのはボーンの支点
+     *                   ではなくこの点だ。支点から片側へずらして作られたリンクは、さもないと周回からはみ出す
+     * @param travelSign 帯を敷いた軸が車両と同じ向きか逆向きか。ルートボーンが回されたモデルでは -1。
+     *                   {@link #TRAVEL_SIGN} 参照
      */
     private record Shape(List<Belt> belts, Vector3f linkCentre, float travelSign) {
         static final Shape NONE = new Shape(List.of(), new Vector3f(), 1.0F);
     }
 
     /**
-     * One closed band, as a ring of points with the distance to each along it.
+     * 閉じた帯1つ。点の環と、帯に沿った各点までの距離。
      *
-     * @param x how far out from the middle of the vehicle this side's run sits
-     * @param z the run's points fore and aft, in blocks, in the link bone's parent's axes
-     * @param y the same points' heights
-     * @param run the distance along the band to each point, ending with the whole way round
-     * @param links how many links go round it. See {@link #links}
-     * @param pitch the distance from one link to the next, which is the way round divided by the
-     *              number of them, so that the last link meets the first exactly
-     * @param rollRadius the radius the wheels turn at, which is what a wheel angle is turned into a
-     *                   distance travelled with. See {@link #rollRadius}
+     * @param x この側の周回が車両中心からどれだけ外側に位置するか
+     * @param z 周回の各点の前後位置（ブロック、リンクボーンの親の軸）
+     * @param y 同じ点の高さ
+     * @param run 帯に沿った各点までの距離。最後の要素は1周分
+     * @param links 1周に入るリンク数。{@link #links} 参照
+     * @param pitch リンク間の距離。1周をリンク数で割った値なので、最後のリンクが最初のリンクとぴったり合う
+     * @param rollRadius 車輪が回る半径。車輪角を走行距離へ変換するのに使う。{@link #rollRadius} 参照
      */
     private record Belt(float x, float[] z, float[] y, float[] run, int links, float pitch,
             float rollRadius) {
         /**
-         * Where the band has got to a given distance along it, wrapped, into {@code into} as
-         * {@code (z, y)}.
+         * 帯に沿って指定距離（折り返しあり）進んだ位置を、{@code (z, y)} として {@code into} へ書き込む。
          */
         void pointAt(float distance, Vector3f into) {
             float length = this.run[this.run.length - 1];
@@ -142,19 +126,18 @@ public final class TrackBelt {
     }
 
     /**
-     * The shapes worked out so far, against the baked model they were worked out from.
+     * これまでに求めた形状を、算出元のベイク済みモデルに紐付けて保持する。
      *
-     * <p>Weakly, and keyed by the model object itself, because that is what makes a reload correct
-     * for free: GeckoLib bakes a new model out of the reloaded geometry, the new model is not this
-     * one, and the shape is worked out again from the geometry that is actually being drawn. Held
-     * without locking because every caller is the render thread.
+     * <p>弱参照で、キーはモデルオブジェクト自体。おかげでリロードが無料で正しくなる。GeckoLib はリロードしたジオメトリ
+     * から新しいモデルをベイクし、新しいモデルはこれとは別物なので、実際に描かれるジオメトリから形状が求め直される。
+     * 呼び出し元が全てレンダースレッドなのでロック無しで保持する。
      */
     private static final Map<BakedGeoModel, Map<VehicleChassis.Track, Shape>> SHAPES = new WeakHashMap<>();
 
     private TrackBelt() {
     }
 
-    /** Whether this bone is the one link the vehicle's run of track is built out of. */
+    /** このボーンが、車両の履帯を組み立てる元となるリンクかどうか。 */
     public static boolean isLink(VehicleChassis.Model setup, GeoBone bone) {
         VehicleChassis.Track track = setup.track().orElse(null);
 
@@ -162,30 +145,24 @@ public final class TrackBelt {
     }
 
     /**
-     * Draws the whole of a vehicle's track, by moving the one link bone round each band and handing
-     * it to {@code drawer} where each link goes.
+     * 車両の履帯全体を描く。1つのリンクボーンを各帯に沿って移動させ、各リンクの位置で {@code drawer} へ渡す。
      *
-     * <p>The bone is left where the geometry put it afterwards. It is one bone shared by every
-     * vehicle of the kind on the screen and by every pass over each of them, and a bone left out on
-     * the run would be the next pass's starting point.
+     * <p>終わったらボーンはジオメトリが置いた位置へ戻す。画面上の同種の全車両と、各車両への全パスで共有される1つの
+     * ボーンなので、周回上に置き去りにされたボーンは次のパスの起点になってしまう。
      *
-     * <p>The run stays on the ground while the body moves above it. The whole model is rocked on the
-     * pose stack by whatever the suspension is doing — see {@link Ride} — and the band is a child of
-     * the model like everything else, so left alone it would be carried up and down with the hull
-     * and the tracks would lift clear of the ground every time the vehicle crossed a bump. Each
-     * point of the run is therefore put back down by exactly what the body's movement lifted it, the
-     * same as each road wheel is; the band then flexes along its length, which is what a real run of
-     * track does over wheels moving on their torsion bars.
+     * <p>周回は、上で車体が動いている間も地面に留まる。モデル全体がサスペンションの動きで pose stack 上を揺れる——
+     * {@link Ride} 参照——し、帯も他と同様モデルの子なので、放っておけば車体と一緒に上下し、車両が段差を越えるたび履帯
+     * が地面から浮く。よって周回の各点も、転輪と同様、車体の動きが持ち上げた分だけちょうど戻す。すると帯は長さ方向に
+     * たわむが、それはトーションバー上を動く車輪の上で実物の履帯がやることそのものだ。
      *
-     * @param wheelAngle how far the road wheels have gone round, in degrees. The run is scrolled by
-     *                   the distance those wheels have rolled through, so that a link is never seen
-     *                   to slip on a wheel. It starts again every revolution, which the run survives
-     *                   only because of the rounding in {@link #rollRadius}
-     * @param ride how far the body has moved on its springs
-     * @param wheelTravel how far a road wheel is allowed to move, in blocks, which is as far as the
-     *                    run is put back down by before it is against the stops with them
-     * @return whether there was a run to draw. False leaves the caller to draw the bone as it was
-     *         built, which is the honest answer for a model with no wheels to lay a band round
+     * @param wheelAngle 転輪の回転角（度）。周回はその車輪が転がった距離だけスクロールするので、リンクが車輪上で滑って
+     *                   見えることはない。1回転ごとに0へ戻るが、周回がそれに耐えられるのは {@link #rollRadius} の丸め
+     *                   のおかげだ
+     * @param ride バネ上の車体の変位
+     * @param wheelTravel 転輪が動いてよい距離（ブロック）。周回を戻す量の上限であり、それを超えると車輪と一緒にストッパー
+     *                    に当たる
+     * @return 描く周回があったか。false なら呼び出し元がボーンを作られたまま描く。帯を張る車輪が無いモデルにはそれが
+     *         正直な答えだ
      */
     public static boolean draw(BakedGeoModel model, VehicleChassis.Model setup, GeoBone link,
             float wheelAngle, Ride ride, float wheelTravel, LinkDrawer drawer) {
@@ -227,15 +204,13 @@ public final class TrackBelt {
     }
 
     /**
-     * How far the body's movement has lifted one point of the run, in the model's blocks, so that
-     * the caller can put it back down by the same amount.
+     * 車体の動きが周回上の1点をどれだけ持ち上げたか（モデルのブロック単位）。呼び出し元が同じ量だけ戻せるようにする。
      *
-     * <p>The band is laid out in the link bone's parent's axes rather than the model's, and half
-     * these models hang everything off a root bone turned half round — which is exactly what
-     * {@link Shape#travelSign} already measures for the run's direction of travel. The same figure
-     * carries a point of the band back into the axes {@link Ride#liftOf} works in.
+     * <p>帯はモデルではなくリンクボーンの親の軸で敷かれるし、ここのモデルの半分は全てを半回転したルートボーンへ
+     * ぶら下げている——それはまさに {@link Shape#travelSign} が周回の進行方向のために既に測っている物だ。同じ値が
+     * 帯上の点を {@link Ride#liftOf} が働く軸へ戻す。
      *
-     * @param z where along the run the point is, in the band's own axes
+     * @param z 周回上のどこに点があるか。帯自身の軸で
      */
     private static float plant(Shape shape, Belt belt, float z, Ride ride, float scale, float wheelTravel) {
         float lift = ride.liftOf(shape.travelSign() * belt.x(), shape.travelSign() * z, scale);
@@ -245,11 +220,11 @@ public final class TrackBelt {
     }
 
     /**
-     * Puts the link between two points on the band: turned to lie along the run between them, and
-     * moved so that the middle of its own geometry is the middle of that stretch.
+     * リンクを帯上の2点の間に置く。その間の周回に沿って寝るよう回し、自身のジオメトリの中心がその区間の中央に来るよう
+     * 移動させる。
      *
-     * <p>Turned about X and nothing else. A track link banks along the run and does nothing else,
-     * and a run that is a shape in one plane is a run every link of which lies in that plane.
+     * <p>回すのは X 軸周りだけ。履帯のリンクは周回に沿って傾く以外のことはしないし、1つの平面上の形である周回とは、
+     * 全リンクがその平面上に乗る周回だからだ。
      */
     private static void place(GeoBone link, Vector3f centre, float x, Vector3f here, Vector3f next,
             Vector3f pivot, Vector3f fromPivot, Matrix4f turn) {
@@ -257,8 +232,8 @@ public final class TrackBelt {
         float dz = next.x() - here.x();
         float dy = next.y() - here.y();
 
-        // A turn about X of a takes the bone's own +Z to (0, −sin a, cos a), so the turn that lays
-        // the link along the stretch is the one whose sine is minus the rise.
+        // X 軸周りに a 回すとボーン自身の +Z は (0, −sin a, cos a) へ移るので、リンクを区間に沿わせる回転は、正弦が
+        // 立ち上がりの符号を反転した値になる物だ。
         float rotX = rest.getRotX() + (float) Math.atan2(-dy, dz);
 
         link.updateRotation(rotX, rest.getRotY(), rest.getRotZ());
@@ -268,10 +243,9 @@ public final class TrackBelt {
         turn.identity().rotateZ(rest.getRotZ()).rotateY(rest.getRotY()).rotateX(rotX)
                 .transformPosition(fromPivot);
 
-        // Where the bone ends up is its offset, plus its pivot, plus the turned distance from that
-        // pivot to the link itself; so the offset is what is left of the target once those are taken
-        // off it. The X of an offset is applied negated — see RenderUtil.translateMatrixToBone —
-        // which is the whole of why that one term is the other way round.
+        // ボーンの最終位置は、オフセット＋支点＋支点からリンク本体までの距離を回した物になる。よってオフセットは、
+        // 目標位置からそれらを引いた残りだ。オフセットの X は反転して適用される——RenderUtil.translateMatrixToBone
+        // 参照——ので、その項だけ符号が逆になっている。
         float wantZ = (here.x() + next.x()) * 0.5F;
         float wantY = (here.y() + next.y()) * 0.5F;
 
@@ -281,7 +255,7 @@ public final class TrackBelt {
                 (wantZ - pivot.z() - fromPivot.z()) * BakedGeometry.UNITS);
     }
 
-    /** Puts the link bone back exactly where the geometry file left it. */
+    /** リンクボーンを、ジオメトリファイルが残した位置へ正確に戻す。 */
     private static void restore(GeoBone link) {
         BoneSnapshot rest = BakedGeometry.rest(link);
 
@@ -290,7 +264,7 @@ public final class TrackBelt {
     }
 
     // ------------------------------------------------------------------
-    // Working the shape out
+    // 形状の算出
     // ------------------------------------------------------------------
 
     private static Shape shapeOf(BakedGeoModel model, VehicleChassis.Model setup, GeoBone link) {
@@ -305,11 +279,10 @@ public final class TrackBelt {
     }
 
     /**
-     * Works out, once, where every link on a model goes.
+     * モデル上の全リンクの位置を1回だけ求める。
      *
-     * <p>Read off the model as it was built rather than as it is being drawn. A road wheel that is
-     * turning is a road wheel in the same place, and a run that was re-derived from a spinning wheel
-     * every frame would cost the same work twenty times a second to arrive at the same answer.
+     * <p>描画中のモデルではなく、作られたままのモデルから読む。回っている転輪も同じ場所の転輪であり、回転する車輪から
+     * 毎フレーム周回を導出し直せば、同じ答えに辿り着くために毎秒20回同じ作業を払うことになる。
      */
     private static Shape build(BakedGeoModel model, VehicleChassis.Model setup,
             VehicleChassis.Track track, GeoBone link) {
@@ -319,9 +292,8 @@ public final class TrackBelt {
             return Shape.NONE;
         }
 
-        // The link's own size, seen the way round the geometry file leaves it: how long it is along
-        // the run, which is the pitch, and how thick it is, which is how far off the wheel the band
-        // has to stand for the inside face of a link to touch the rim.
+        // ジオメトリファイルが残した向きで見たリンク自身の寸法。周回方向の長さがピッチであり、厚みが、リンクの内側面が
+        // リムに触れるために帯を車輪からどれだけ離すべきかを決める。
         BakedGeometry.Bounds asBuilt = BakedGeometry.bounds(link, BakedGeometry.restTransform(link));
         float pitch = (track.pitch() > 0.0F ? track.pitch() : asBuilt.sizeZ()) * track.spacing();
         float outset = track.outset().orElse(asBuilt.sizeY() * 0.5F);
@@ -330,9 +302,8 @@ public final class TrackBelt {
             return Shape.NONE;
         }
 
-        // The axes the whole band is described in: the link bone's parent's, so that a link can be
-        // put on the band without further conversion. Which way round they are against the vehicle
-        // is what a run travelling backwards hangs on, so it is read off here with them.
+        // 帯全体を記述する軸。リンクボーンの親の軸なので、変換を追加せずリンクを帯へ載せられる。それらが車両に対して
+        // どちら向きかが「逆走する周回」の分かれ目なので、ここで一緒に読んでおく。
         Matrix4f intoLink = BakedGeometry.toRoot(link.getParent()).invert();
         float travelSign = handedness(intoLink);
         List<Wheel> wheels = wheels(model, track.wheelsOr(setup.roadWheels()), intoLink);
@@ -355,16 +326,14 @@ public final class TrackBelt {
     }
 
     /**
-     * Whether an axis of the band's frame points the way the vehicle does or the other way, which is
-     * the other way for a model hung off a root bone with a half turn on it.
+     * 帯の座標系のある軸が、車両と同じ向きを指すか逆向きを指すか。半回転したルートボーンにぶら下がるモデルでは逆になる。
      */
     private static float handedness(Matrix4f intoLink) {
         return intoLink.transformDirection(new Vector3f(1.0F, 0.0F, 0.0F)).x() < 0.0F ? -1.0F : 1.0F;
     }
 
     /**
-     * One wheel the band is pulled round: where its middle is and how big it is, in the link bone's
-     * parent's axes so that a link can be put on the band without further conversion.
+     * 帯を張る対象の車輪1つ。中心位置と大きさを、リンクボーンの親の軸で持つ。変換を追加せずリンクを帯へ載せるためだ。
      */
     private record Wheel(float x, float y, float z, float radius) {
     }
@@ -386,9 +355,8 @@ public final class TrackBelt {
                 continue;
             }
 
-            // A road wheel is a disc, so how big it is is however far it reaches in the plane the
-            // vehicle drives in; which of the two that is depends on how the wheel was built and
-            // stood up, and taking the larger asks nobody to care.
+            // 転輪は円盤なので、その大きさは車両が走る平面内でどこまで届くかだ。2つの寸法のどちらがそれかは車輪の
+            // 作り方と起こし方次第であり、大きい方を取れば誰も気にせずに済む。
             float radius = Math.max(box.sizeY(), box.sizeZ()) * 0.5F;
 
             if (radius > 0.0F) {
@@ -400,11 +368,10 @@ public final class TrackBelt {
     }
 
     /**
-     * Sorts the wheels into the hull's two sides, by which side of the middle of the lot of them
-     * each sits.
+     * 車輪を車体の左右2群へ、全体の中心のどちら側にあるかで振り分ける。
      *
-     * <p>A vehicle whose wheels are all one side of that — a model with one side's wheels named, or
-     * a single line of them — comes back as one run rather than as one run and one empty one.
+     * <p>全車輪が片側に寄る車両——片側の車輪しか指定していないモデルや、一直線に並ぶ物——は、周回1つと空の周回1つでは
+     * なく周回1つとして返る。
      */
     private static List<List<Wheel>> sides(List<Wheel> wheels) {
         float middle = 0.0F;
@@ -429,7 +396,7 @@ public final class TrackBelt {
         return List.of(left, right);
     }
 
-    /** Pulls one band tight round one side's wheels and works out how many links go round it. */
+    /** 片側の車輪に帯を1つ張り、1周に入るリンク数を求める。 */
     private static Belt belt(List<Wheel> side, float outset, float pitch, int maxLinks) {
         if (side.size() < 2) {
             return null;
@@ -482,25 +449,19 @@ public final class TrackBelt {
     }
 
     /**
-     * How many links go round the band.
+     * 帯1周に入るリンク数。
      *
-     * <p>As many as fit, give or take a few — and the give and take is the whole point.
+     * <p>入るだけ、ただし数個の増減を許す——その増減こそが要点だ。
      *
-     * <p>Two things want to divide evenly by the distance between one link and the next. The band
-     * does, because the last link round has to meet the first one: that one is not negotiable, so
-     * the spacing is the way round divided by however many links are being drawn. And a wheel's
-     * circumference does, because the vehicle counts how far it has come only as far as one turn of
-     * a road wheel before starting again — which is all a spinning wheel needs, a wheel a whole turn
-     * on being a wheel where it was, but which for a run of track means the whole run jumping
-     * backwards by whatever the odd fraction of a link was, eight or nine times for every time the
-     * track goes round.
+     * <p>リンク間隔で割り切れてほしい物が2つある。1つは帯そのもの。最後のリンクが最初のリンクと合わねばならないからで、
+     * これは交渉の余地が無い。よって間隔は1周を描画リンク数で割った値になる。もう1つは車輪の円周。車両は走行距離を転輪
+     * 1回転分までしか数えず、そこで0へ戻すからだ——回る車輪にはそれで足りる。1回転した車輪は元の位置の車輪だ——が、
+     * 履帯にとっては、余ったリンクの端数の分だけ周回全体が後ろへ跳ぶことを意味する。履帯が1周する間に8回か9回もだ。
      *
-     * <p>No number of links satisfies both exactly. But moving the count by one or two barely
-     * changes how the run looks — the links are drawn at the size they were built, so all that
-     * changes is whether they sit flush or overlap by a percent or two — while it swings the
-     * fraction of a link left over at the wheel through a whole cycle. So: try the counts within a
-     * twentieth of the honest one, and take whichever leaves the least over. On the Leopard that
-     * turns a five per cent slip against the wheels into half of one.
+     * <p>両方を厳密に満たすリンク数は存在しない。だが数を1つ2つ動かしても周回の見た目はほとんど変わらない——リンクは
+     * 作られた大きさで描かれるので、変わるのは面一に並ぶか数%重なるかだけだ——一方で、車輪側に余るリンクの端数は1周期
+     * まるごと動く。そこで、正直な値の1/20以内の候補を試し、余りが最小になる物を採る。レオパルトでは、車輪に対する5%の
+     * ずれが0.5%になる。
      */
     private static int links(float length, float pitch, int maxLinks, float radius) {
         int ideal = Math.min(Math.max(Math.round(length / pitch), 3), maxLinks);
@@ -523,10 +484,8 @@ public final class TrackBelt {
     }
 
     /**
-     * The radius the run is scrolled at, which is the middling wheel's rounded to a whole number of
-     * links round — see {@link #links}, which has already chosen a count that makes the rounding
-     * nearly nothing. What is left of it the run gives away as a slow creep against the wheels
-     * rather than as a jump.
+     * 周回をスクロールさせる半径。中間的な車輪の半径を、1周が整数リンクになるよう丸めた物だ——{@link #links} が既に
+     * 丸め量をほぼ0にする個数を選んでいる。残った分は、跳躍ではなく車輪に対するゆっくりしたずれとして周回が受け流す。
      */
     private static float rollRadius(List<Wheel> side, float pitch) {
         float turn = (float) (2.0 * Math.PI) * radius(side);
@@ -535,7 +494,7 @@ public final class TrackBelt {
         return links * pitch / (float) (2.0 * Math.PI);
     }
 
-    /** The middling wheel's radius, so that one odd-sized idler does not speak for the whole side. */
+    /** 中間的な車輪の半径。1つだけ寸法の違う誘導輪が片側全体を代表しないようにするため。 */
     private static float radius(List<Wheel> side) {
         float[] radii = new float[side.size()];
 
@@ -549,10 +508,10 @@ public final class TrackBelt {
     }
 
     /**
-     * The convex hull of the sampled points, anticlockwise, by the monotone chain — which is the
-     * band, because a belt pulled tight round a set of pulleys is exactly the hull of them.
+     * 標本点の凸包を反時計回りに、monotone chain 法で求める——それが帯だ。複数のプーリーへ張ったベルトは、まさにその
+     * 凸包だからである。
      *
-     * @return the indices of the hull's points in order
+     * @return 凸包の点の添字を順に並べた物
      */
     private static int[] hull(float[] px, float[] py) {
         Integer[] order = new Integer[px.length];
@@ -568,7 +527,7 @@ public final class TrackBelt {
         int[] chain = new int[px.length * 2];
         int size = 0;
 
-        // The underside of the run, left to right.
+        // 周回の下側を、左から右へ。
         for (int i = 0; i < order.length; i++) {
             while (size >= 2 && cross(px, py, chain[size - 2], chain[size - 1], order[i]) <= 0.0F) {
                 size--;
@@ -577,7 +536,7 @@ public final class TrackBelt {
             chain[size++] = order[i];
         }
 
-        // And back along the top, which may not eat into the underside: hence the floor.
+        // そして上側を戻る。下側へ食い込んではならないので、下限を設けてある。
         int floor = size + 1;
 
         for (int i = order.length - 2; i >= 0; i--) {
@@ -588,7 +547,7 @@ public final class TrackBelt {
             chain[size++] = order[i];
         }
 
-        // The last point round is the first one again.
+        // 最後の点は最初の点と同じになる。
         return Arrays.copyOf(chain, Math.max(size - 1, 0));
     }
 

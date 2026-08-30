@@ -16,34 +16,29 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Cannon rounds as ghosts: the same streak the near renderer draws, drawn from a snapshot.
+ * ゴーストとしての機関砲弾。近距離レンダラーが描くのと同じ曳光の筋を、スナップショットから描く。
  *
- * <p>A round is a few centimetres across and crossing a hundred blocks a second, so there is
- * nothing to draw but the tracer, and the tracer is the thing worth seeing at range — a stream of
- * them is how a gunner reads where the rounds are going, and that reading matters most when the
- * target is far enough away to be out over unloaded ground.
+ * <p>弾は差し渡し数センチで毎秒100ブロック進むので、描く物は曳光しか無いし、遠距離で見る価値があるのも曳光だ。
+ * 砲手が弾道を読むのはその流れであり、その読み取りが最も重要になるのは、目標が未ロードの地面の上にいるほど
+ * 遠いときだ。
  *
- * <p><b>What the tiers mean here.</b> A tracer has no parts to leave off — it is four vertices, and
- * a line cannot be drawn with fewer — so what the tier decides is not how much of it is drawn but
- * how it is drawn to survive the distance. In the {@code GHOST} tier it is the streak, held to a
- * width on the screen rather than in the world so that it does not thin away to a flickering
- * fraction of a pixel exactly where the ghost pass takes over. In {@code BILLBOARD}, the furthest
- * tier, the streak is given up for the point of light it has become. Both live in {@link Tracer},
- * which is also what the near renderer draws with: a round crossing the hand-over distance must not
- * change appearance as it goes, and the only way to be sure of that is for one piece of code to
- * decide it.
+ * <p><b>ここでの階層の意味。</b>曳光には省ける部品が無い——頂点4つで、線はそれ未満では描けない——ので、階層が
+ * 決めるのは「どこまで描くか」ではなく「距離に耐えるためにどう描くか」だ。{@code GHOST} 階層では筋として描き、
+ * 幅をワールド基準ではなく画面基準で保つ。ゴーストパスが引き継ぐまさにその距離で、明滅する1ピクセル未満まで
+ * 細るのを防ぐためだ。最遠階層 {@code BILLBOARD} では、筋を諦めて、そこで既になっている光点にする。どちらも
+ * {@link Tracer} にあり、近距離レンダラーが描くのにも使う。引き継ぎ距離を横切る弾が見た目を変えてはならず、
+ * それを保証する唯一の方法は1か所のコードで決めることだ。
  */
 public final class BulletGhostAdapter implements GhostAdapter<BulletEntity> {
-    /** What a round is drawn as if its snapshot somehow carries no colour. */
+    /** スナップショットが何らかの理由で色を持たない場合に弾を描く色。 */
     private static final int DEFAULT_TRACER = 0xFFFFC864;
 
     @Override
     public GhostSnapshot snapshot(BulletEntity bullet, @Nullable GhostSnapshot previous, long gameTime) {
         Vec3 position = bullet.position();
         Vec3 travel = bullet.getDeltaMovement();
-        // The box the streak occupies, not the box the round does: the round is the head of it and
-        // the rest lies behind, and a streak whose head is just off the edge of the screen is still
-        // most of the way on it.
+        // 弾ではなく筋が占める箱。弾はその先端で残りは後方にあり、先端が画面外に出たばかりの筋はまだ大半が
+        // 画面内にある。
         AABB bounds = bullet.getBoundingBox().move(position.reverse());
         Vec3 tail = Tracer.tail(travel);
         return new GhostSnapshot(
@@ -65,8 +60,8 @@ public final class BulletGhostAdapter implements GhostAdapter<BulletEntity> {
                 bounds.minmax(bounds.move(tail)),
                 false,
                 gameTime,
-                // A round's colour is its weapon's, and the weapon outlives the round on every
-                // client, but the colour is cheaper to carry than to look up once a frame.
+                // 弾の色は兵器の色であり、兵器はどのクライアントでも弾より長生きする。それでも色は毎フレーム
+                // 引くより持ち回る方が安い。
                 0xFF000000 | bullet.getRound().tracer());
     }
 
@@ -74,8 +69,8 @@ public final class BulletGhostAdapter implements GhostAdapter<BulletEntity> {
     public void render(EntityGhost ghost, GhostLOD lod, GhostRenderContext context) {
         GhostSnapshot snapshot = ghost.current();
         int colour = snapshot.payload() instanceof Integer tracer ? tracer : DEFAULT_TRACER;
-        // Not lit and not shaded: the render type ignores light entirely, which is the right answer
-        // for a tracer whether or not there is a world under it to take light from.
+        // 照明も陰影も無し。この描画タイプは光を完全に無視する。下に光源となる世界があろうと無かろうと、
+        // 曳光にはそれが正しい。
         VertexConsumer buffer = context.buffers().getBuffer(RenderType.lightning());
 
         if (lod == GhostLOD.BILLBOARD) {
@@ -95,11 +90,9 @@ public final class BulletGhostAdapter implements GhostAdapter<BulletEntity> {
     }
 
     /**
-     * Never traced against the world. A round lives for a couple of seconds and there are a great
-     * many of them at once, so they would take the whole ray budget and leave none for the aircraft
-     * — which are the things a wrongly drawn ghost actually matters for. What this costs is a
-     * tracer drawn over one of Distant Horizons' hills; the game's own depth buffer still hides one
-     * behind terrain it has drawn itself.
+     * 世界に対して一切トレースしない。弾の寿命は2秒程度で同時に大量に存在するので、レイ予算を丸ごと食い潰し、
+     * 機体——ゴーストの描き間違いが本当に問題になる相手——に何も残らなくなる。代償は Distant Horizons の丘の上に
+     * 曳光が描かれること。ゲーム自身が描いた地形の背後には、ゲーム自身の深度バッファが今も隠してくれる。
      */
     @Override
     public boolean needsOcclusionCheck() {

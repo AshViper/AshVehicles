@@ -1,5 +1,6 @@
 package com.ashvehicles.entity;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Optional;
@@ -17,10 +18,15 @@ import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.particle.TintedParticleOption;
 import com.ashvehicles.sensor.Sensors;
 import com.ashvehicles.registry.ModParticles;
+import com.ashvehicles.item.EquipmentItem;
+import com.ashvehicles.item.FuelItem;
+import com.ashvehicles.item.RackItem;
 import com.ashvehicles.item.WeaponItem;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.weapon.Dispenser;
 import com.ashvehicles.weapon.TargetLock;
+import com.ashvehicles.weapon.EquipmentDefinition;
+import com.ashvehicles.weapon.GunStations;
 import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.nbt.CompoundTag;
@@ -33,6 +39,7 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
@@ -49,11 +56,14 @@ import net.minecraft.world.entity.vehicle.VehicleEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -64,86 +74,92 @@ import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 /**
- * Shared behaviour for every fixed-wing aircraft in the mod: a simplified flight model, seating,
- * and the damage handling that turns an airframe into a smoking hole.
+ * MOD 内の全固定翼機に共通する挙動。簡略化した飛行モデル、座席、そして機体を黒煙の穴に変えるダメージ処理。
  *
- * <p><b>Where the physics run.</b> Like vanilla boats, an aircraft is simulated by whoever
- * "controls" it: the piloting client while a player is at the stick, otherwise the server. That is
- * what {@link #isControlledByLocalInstance()} decides. The piloting client's position is pushed to
- * the server by vanilla's ServerboundMoveVehiclePacket, which also carries yaw and pitch; the bank
- * angle and throttle have no vanilla equivalent, so the client sends them in
- * {@link com.ashvehicles.network.AircraftInputPayload} and the server mirrors them into synched
- * data for everyone else.
+ * <p><b>物理が走る場所。</b>バニラのボート同様、航空機は「操作している側」がシミュレートする。プレイヤーが
+ * 操縦桿を握っている間は操縦クライアント、それ以外はサーバー。判定は {@link #isControlledByLocalInstance()}。
+ * 操縦クライアントの位置はバニラの ServerboundMoveVehiclePacket でサーバーへ送られ、ヨーとピッチも同梱される。
+ * バンク角とスロットルにはバニラの対応物が無いのでクライアントが
+ * {@link com.ashvehicles.network.AircraftInputPayload} で送り、サーバーが同期データへ複製して他全員へ渡す。
  */
 public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
-    /** Engine setting in [0, 1]. Synced so other clients can drive engine animations. */
+    /** エンジン出力設定（0〜1）。他クライアントがエンジンのアニメーションを回せるよう同期する。 */
     private static final EntityDataAccessor<Float> DATA_THROTTLE =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.FLOAT);
     /**
-     * How much reheat the engine is delivering, in [0, 1], from whichever side is flying it.
+     * アフターバーナーの出力（0〜1）。操縦している側から送られる。
      *
-     * <p>Synched for three separate reasons, which is unusual for one float. Every client that can
-     * see the aeroplane draws the plume out of its nozzles and pitches its engine note up, and
-     * neither of those can be worked out from anything else that is sent. And the server needs it
-     * whether or not anybody is looking: what a burner really costs is the heat, and how far a
-     * seeker can see this aircraft is decided over there. See {@link #reportAfterburner}.
+     * <p>float 1つとしては珍しく3つの理由で同期している。機体が見える全クライアントはノズルからのプルームを
+     * 描きエンジン音のピッチを上げるが、どちらも他の送信データからは算出できない。さらにサーバーは誰が見ていよう
+     * と必要とする。バーナーの本当の代償は熱であり、シーカーがこの機体をどこまで見えるかはサーバー側で決まる。
+     * {@link #reportAfterburner} 参照。
      */
     private static final EntityDataAccessor<Float> DATA_AFTERBURNER =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.FLOAT);
     /**
-     * Which way the aircraft is pointing, as a rotation. Minecraft gives an entity a heading and an
-     * elevation, which cannot describe an aeroplane upside down at the top of a loop, so the real
-     * attitude is carried here and the vanilla angles are kept in step behind it.
+     * 機体の指向を回転として保持。Minecraft はエンティティに方位と仰角しか与えず、宙返り頂点で背面になった機体を
+     * 表現できない。よって本当の姿勢はここが持ち、バニラの角度は後ろで追随させる。
      */
     private static final EntityDataAccessor<Quaternionf> DATA_ATTITUDE =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.QUATERNION);
     /**
-     * How fast the aircraft is really going, in blocks a tick, from whichever side is flying it.
+     * 機体の実速度（ブロック/tick）。操縦している側から送られる。
      *
-     * <p>Only one machine runs the flight model, and every other copy of the aircraft has to draw it
-     * from a stream of positions. Working the speed back out of that stream cannot be done cleanly —
-     * the updates arrive one a tick on average and never one a tick exactly, so a difference between
-     * two of them reads the drift between three unsynchronised clocks as speed. Sending the figure
-     * costs three floats a tick and removes the guesswork entirely. See {@link AircraftInterpolation}.
+     * <p>飛行モデルを回すのは1台だけで、他のコピーは位置の流れから機体を描くしかない。その流れから速度を綺麗に
+     * 逆算することはできない——更新は平均で1tickに1回届くが、正確に1tickごとではないので、2つの差は同期していない
+     * 3つの時計のずれを速度として読んでしまう。値の送信コストは1tickあたりfloat 3個で、推測を完全に排除できる。
+     * {@link AircraftInterpolation} 参照。
      */
     private static final EntityDataAccessor<Vector3f> DATA_VELOCITY =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.VECTOR3);
     /**
-     * How fast it is turning, in radians a tick about its own axes, for the same reason and against
-     * the same drift. Written as a scaled axis rather than as three angles so that it stays additive
-     * and has no seam of its own — see {@link Attitude#rotationVector}.
+     * 自機軸周りの角速度（ラジアン/tick）。同じ理由・同じずれ対策。3つの角度ではなくスケール済み軸ベクトルで
+     * 書くことで加法性を保ち、独自の継ぎ目を持たない——{@link Attitude#rotationVector} 参照。
      */
     private static final EntityDataAccessor<Vector3f> DATA_BODY_RATE =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.VECTOR3);
-    /** Undercarriage selector. The legs swing to match over {@link #getGearCycleTicks()} ticks. */
+    /** 降着装置のセレクタ。脚は {@link #getGearCycleTicks()} tick かけて動く。 */
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /**
-     * Lift-system selector, for an aircraft that has one. The nozzle swings to match over the time
-     * its file says a conversion takes.
+     * 揚力系のセレクタ（装備機のみ）。ノズルはファイルが指定する転換時間をかけて動く。
      */
     private static final EntityDataAccessor<Boolean> DATA_VTOL =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
-    /** Flap selector. Lowered flaps buy lift at low speed and cost drag at any speed. */
+    /** フラップのセレクタ。下げれば低速で揚力を得るが、どの速度でも抗力を払う。 */
     private static final EntityDataAccessor<Boolean> DATA_FLAPS_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /**
-     * What is hanging on the hardpoints, and what the trigger is pointed at. Sent as the same tag
-     * the aircraft is saved with: the instruments need it, and so does the renderer, which draws a
-     * pod on every loaded pylon.
+     * ハードポイントの搭載物と、トリガーの選択先。機体の保存に使うのと同じタグで送る。計器が必要とし、搭載済み
+     * パイロンにポッドを描くレンダラーも必要とするからだ。
      */
     private static final EntityDataAccessor<CompoundTag> DATA_WEAPONS =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.COMPOUND_TAG);
     /**
-     * What the airframe has left, in hit points.
+     * 砲座の残弾と、砲が今向いている方向。パイロンと同じ扱いで、同じ理由による——射手の計器が両方を必要と
+     * する。弾がどこへ行くかを描くのに向きが要り、撃つ前に知りたい数値が残弾だ。{@link GunStations} 参照。
+     */
+    private static final EntityDataAccessor<CompoundTag> DATA_STATIONS =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.COMPOUND_TAG);
+    /**
+     * ターゲティングポッドが捉えている対象のエンティティID。指示された地点に立つ
+     * {@link DesignationEntity マーカー}か、パイロットが車両を指示したならその車両自身。何も無ければ {@code -1}。
      *
-     * <p>Synched because it is not only the server's business: the pilot's instruments show it, and
-     * an aircraft that has been shot at is the same aircraft to everybody looking at it. The server
-     * owns the figure; a client reads whatever it was last told.
+     * <p>両側が必要とし、どちらも算出できないので同期する。所有者はサーバー——レーザー誘導兵器がレールを離れる
+     * ときに渡される値だ——で、パイロットのクライアントは地上にマークを描きポッドカメラをそこへ向ける。
+     * {@link #designate} 参照。
+     */
+    private static final EntityDataAccessor<Integer> DATA_DESIGNATED =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.INT);
+    /**
+     * 機体の残存耐久力（HP）。
+     *
+     * <p>サーバーだけの問題ではないので同期する。パイロットの計器が表示するし、撃たれた機体は見ている全員に
+     * とって同じ機体だ。値の所有者はサーバーで、クライアントは最後に通知された値を読む。
      */
     /**
-     * Flares and chaff left aboard. Synched so the instruments can read them without a packet of
-     * their own; the server is the only thing that ever changes them. See {@link Dispenser}.
+     * 機上に残るフレアとチャフの数。専用パケット無しで計器が読めるよう同期する。変更するのはサーバーだけ。
+     * {@link Dispenser} 参照。
      */
     private static final EntityDataAccessor<Integer> DATA_FLARES =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.INT);
@@ -151,276 +167,300 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.INT);
 
     /**
-     * Downward acceleration, in blocks/tick^2. A block is a metre and a tick is a twentieth of a
-     * second, so this is 9.81 m/s^2: real gravity rather than Minecraft's, because the aircraft are
-     * built to their real figures and those figures assume the real thing.
+     * 下向き加速度（ブロック/tick^2）。1ブロック=1m、1tick=1/20秒なので、これは 9.81 m/s^2 ——Minecraft の重力
+     * ではなく実際の重力だ。機体は実機の諸元で作ってあり、その諸元は本物の重力を前提にしている。
      */
     protected static final double GRAVITY = 0.02453;
     /**
-     * How much of the stalling speed the hover damping is spread over.
+     * ホバリング減衰を失速速度のどれだけの範囲に広げるか。
      *
-     * <p>A quarter of it, which is a walking pace, and the figure matters more than it looks. The
-     * damping is there to stop a hovering aeroplane drifting away from where it was put; it is not
-     * there to stop it going anywhere. Spread over the whole stalling speed it does both, and an
-     * aeroplane that cannot reach its stalling speed can never hand the weight to its wing — it
-     * hovers until it runs out of fuel, or in this case forever. Kept down here, a drift settles and
-     * a deliberate acceleration is untouched by the time it is a walking pace.
+     * <p>1/4——歩く程度の速度——で、この値は見た目より重要だ。減衰はホバリング中の機体が置かれた場所から流される
+     * のを防ぐためにあり、どこへも行かせないためではない。失速速度全域に広げると後者もやってしまい、失速速度に
+     * 達せない機体は決して主翼へ荷重を渡せない——燃料が尽きるまで、この場合は永久にホバリングし続ける。ここまで
+     * 下げておけば、流れは収まり、意図的な加速は歩行速度に達した時点で干渉を受けなくなる。
      */
     private static final double HOVER_BAND = 0.25;
-    /** Nozzle angle past which the wing is no longer what is holding the aircraft up, in degrees. */
+    /** これを超えると主翼が機体を支えていることにならないノズル角（度）。 */
     private static final float HOVERING_ANGLE = 30.0F;
     /**
-     * How loud a helicopter at full rotor speed and no collective is, against one working.
+     * ローター全速・コレクティブ0のヘリの音量を、作動中のそれと比べた比率。
      *
-     * <p>High, and deliberately: a rotor turning is most of the noise a helicopter makes, and the
-     * difference the collective makes is the engines taking up the load underneath it. A machine
-     * sitting at flight idle is not quiet, it is merely not pulling.
+     * <p>意図的に高くしてある。ヘリの騒音の大半は回っているローターであり、コレクティブが生む差はその下で
+     * エンジンが荷重を引き受ける分だ。フライトアイドルの機体は静かなのではなく、単に引いていないだけ。
      */
     private static final float ROTOR_IDLE_NOTE = 0.75F;
 
     /**
-     * How far a collision box has to be inside a block before the aeroplane counts as embedded in it,
-     * in blocks. Generous, so that a wingtip resting a hand's breadth into a slope is not mistaken
-     * for an aeroplane that has had a mountain built around it.
+     * 当たり判定の箱がどれだけブロック内部に入ったら機体が埋没扱いになるか（ブロック）。翼端が斜面へ手のひら幅
+     * 分入っているだけの機体を「山に埋められた機体」と誤判定しないよう、余裕を持たせてある。
      */
     private static final double EMBEDDED_MARGIN = 0.25;
 
-    /** Airframe damage per tick for each G pulled beyond what the aircraft is stressed for. */
+    /** 機体の設計耐G を超えた1G あたり、1tick に受ける機体損傷。 */
     private static final float OVER_G_DAMAGE = 4.0F;
-    /** Load factor above which the wingtips start trailing vapour. */
+    /** これを超えると翼端が蒸気を曳き始める荷重倍数。 */
     private static final float VORTEX_LOAD = 2.5F;
-    /** Height above the aircraft's origin that the wings sit at, near enough for particles. */
+    /** 機体原点から主翼までの高さ。パーティクル用の概算値。 */
     private static final double WING_HEIGHT = 1.5;
-    /** Condensation is water and light, so it is the same pale puff wherever on the wing it forms. */
+    /** 凝結は水と光なので、翼のどこにできても同じ淡い塊になる。 */
     private static final int VAPOUR_COLOUR = 0xF2F5F7;
-    /** Fraction of top speed at which the cone forms. */
+    /** ベイパーコーンが発生する最高速度に対する割合。 */
     private static final double VAPOUR_SPEED = 0.88;
     private static final double VAPOUR_RADIUS = 3.0;
     private static final double VAPOUR_AHEAD = 2.0;
 
     /**
-     * Ticks the throttle has to be held open with the lever already against its stop before the
-     * burner lights.
+     * レバーが既にストッパーに当たった状態でスロットルを開き続け、バーナーが点火するまでのtick数。
      *
-     * <p>This is the detent, and it is the whole of the control. A real throttle quadrant has a
-     * physical gate at full military power that the pilot has to lift the lever over, so that
-     * nobody arrives in reheat by simply pushing the throttle forward and finding out afterwards.
-     * Nothing here can put a notch under anybody's finger, so the notch is time instead: three
-     * quarters of a second of asking for more than the engine has, which is far longer than the
-     * moment a pilot spends reaching full power and far shorter than the wait would be if it were
-     * a thing to be endured.
+     * <p>これがデテントであり、この操作の全てだ。実機のスロットルクアドラントにはミリタリー推力全開の位置に
+     * 物理的なゲートがあり、パイロットはレバーをそこで持ち上げねばならない。前へ押しただけでアフターバーナーに
+     * 入り後から気付く、という事態を防ぐためだ。ここでは指の下に段差を作れないので、代わりに時間を段差にする。
+     * エンジンの持ち分以上を要求し続ける0.75秒——パイロットが全開まで動かす一瞬よりはるかに長く、耐え忍ぶ対象に
+     * なるほどは長くない。
      */
     private static final int GATE_TICKS = 15;
-    /** Reheat past which the burner counts as alight: for the instruments, the plume and the note. */
+    /** これを超えるとバーナー点火と見なすアフターバーナー出力。計器・プルーム・音の判定用。 */
     private static final float LIT = 0.05F;
-    /** The flame itself, which opens white and settles to this. */
+    /** 炎そのもの。白で始まりこの色に落ち着く。 */
     private static final int PLUME_COLOUR = 0xFFA33C;
-    /** And the hot air behind it, which is what gives the plume its length. */
+    /** その後ろの熱気。プルームの長さを作る。 */
     private static final int EXHAUST_COLOUR = 0x8C8478;
-    /** How far behind the nozzle the plume is drawn, in blocks at full reheat. */
+    /** ノズルの後方どこまでプルームを描くか（全開時のブロック数）。 */
     private static final double PLUME_LENGTH = 4.0;
-    /** How hard it is thrown out of the pipe, in blocks a tick on top of the aircraft's own speed. */
+    /** 排気管からの噴出速度。機体自身の速度に上乗せするブロック/tick。 */
     private static final double PLUME_SPEED = 0.9;
-    /** Width of the flame at the lip, in blocks. */
+    /** ノズル出口での炎の幅（ブロック）。 */
     private static final float PLUME_SIZE = 0.85F;
-    /** Puffs of each of the two layers, per nozzle, per tick at full reheat. */
+    /** 全開時、ノズル1つ・1tickあたりに出す2層それぞれの粒数。 */
     private static final int PLUME_PUFFS = 2;
-    /** How far off the axis a puff may start, which is what stops the column reading as a line. */
+    /** 粒が軸からどれだけ外れて出てよいか。柱が線に見えるのを防ぐ。 */
     private static final double PLUME_SCATTER = 0.12;
     /**
-     * How loud lighting the burner is where it happens, and at what pitch.
+     * バーナー点火音の、発生地点での音量とピッチ。
      *
-     * <p>Its own loudness rather than a reach in the volume slot, unlike a weapon's report: this is
-     * a noise the aeroplane makes, and the aeroplane already has an engine note that carries as far
-     * as its file says. Public because the client has to know the figures to put a stand-in
-     * recording at the same loudness; see {@code AfterburnerSounds}.
+     * <p>兵器の発射音と違い、volume 欄を到達距離として使うのではなく本来の音量として使う。これは機体が出す音で
+     * あり、機体には既にファイルが指定する距離まで届くエンジン音がある。クライアントが代替録音を同じ音量で鳴らす
+     * ために値を知る必要があるので public。{@code AfterburnerSounds} 参照。
      */
     public static final float AFTERBURNER_VOLUME = 1.0F;
     public static final float AFTERBURNER_LIGHT_PITCH = 1.0F;
     /**
-     * {@code engine.<aircraft>.afterburner}: the burner catching.
+     * {@code engine.<aircraft>.afterburner}: バーナーの点火音。
      *
-     * <p>Named on this side because the server is the one that decides it has happened, and it can
-     * only ever name a sound — resource packs are something the client has and the server has never
-     * seen. Which recording actually plays is settled over there; see {@code AfterburnerSounds}.
+     * <p>発生を判断するのはサーバーなのでこちら側で名前を決める。ただしサーバーにできるのは名前を指すことだけだ
+     * ——リソースパックはクライアントが持つ物で、サーバーは見たことがない。実際にどの録音が鳴るかは向こうで
+     * 決まる。{@code AfterburnerSounds} 参照。
      */
     public static final String AFTERBURNER_ROLE = "afterburner";
 
-    /** Where the angle of attack limiter starts to bite, as a fraction of the limit it holds. */
+    /** 迎角リミッターが効き始める点。保持する限界値に対する割合。 */
     private static final float ALPHA_LIMITER_BITE = 0.6F;
     /**
-     * Fraction of the rotation speed over which the elevator's hold on the nose fades in, so the
-     * aircraft goes light towards the end of its run rather than the stick coming alive at a step.
+     * 昇降舵が機首を押さえる力がフェードインし始める、ローテーション速度に対する割合。滑走の終盤で機体が軽く
+     * なる形にし、操縦桿が段階的に急に効き出さないようにする。
      */
     private static final double ROTATION_FADE = 0.25;
     /**
-     * How near upright the aircraft has to be for its wheels to be underneath it. This is the
-     * vertical part of the direction lift acts in, so one is dead level and zero is on its side.
+     * 車輪が機体の下にあると言えるための、水平姿勢への近さ。揚力方向の鉛直成分なので、1が完全水平、0が横倒し。
      */
     private static final double UPRIGHT = 0.5;
     /**
-     * Rate of descent an undercarriage absorbs whatever the aircraft's speed along the ground, as a
-     * fraction of the speed it is allowed to touch down at. This is what a rollout is measured
-     * against rather than a landing: past it the aircraft has to be slow enough to arrive on the
-     * wheels outright, and above <em>that</em> the gear being down makes no difference — it is not
-     * landing, it is hitting the ground with the wheels out.
+     * 地上速度に関わらず降着装置が吸収できる降下率。許容接地速度に対する割合。着陸ではなく滑走の判定基準になる。
+     * これを超えると機体は車輪で接地できるだけの低速でなければならず、<em>それ</em>も超えると脚が出ていても
+     * 意味は無い——着陸ではなく、脚を出したまま地面に衝突しているだけだ。
      */
     private static final double TOUCHDOWN_SINK = 0.25;
-    /** Nose-up attitude the wheels allow before the tail would strike the runway. */
+    /** 尾部が滑走路を擦る前に車輪が許す機首上げ姿勢。 */
     private static final float GROUND_PITCH_LIMIT = 15.0F;
-    /** How firmly the undercarriage pulls the aircraft back to sitting flat, per tick. */
+    /** 降着装置が機体を地面の線へ引き戻す強さ（1tickあたり）。 */
     private static final float GROUND_LEVELLING = 0.25F;
     /**
-     * Most control authority the airflow will ever hand the pilot, as a multiple of what it gives at
-     * the stalling speed. Authority now follows the dynamic pressure rather than the speed — which is
-     * what a control surface actually works against — so this is the square of the old ceiling and
-     * the two agree exactly at one and a half times the stalling speed.
+     * 降着装置が沿う地面の傾きの上限（度）。これを超える斜面は車輪が寝る相手ではなく、機体が突っ込む相手だ。
+     * 上限があることで、プローブの読み違え1つが機体を機首で立たせることもない。
+     */
+    private static final float GROUND_SLOPE_LIMIT = 30.0F;
+    /** 車輪下の地面を探すトレースの、機体原点からの上下の伸び（ブロック）。原点は車輪の位置にある。 */
+    private static final double GROUND_PROBE_ABOVE = 1.5;
+    private static final double GROUND_PROBE_BELOW = 3.0;
+    /**
+     * 気流がパイロットに渡しうる操舵権限の上限。失速速度での値の倍数で表す。権限は速度ではなく動圧に追従する
+     * ようになったので——舵面が実際に相手にしているのはそれだ——これは旧上限の2乗であり、失速速度の1.5倍で
+     * ちょうど一致する。
      */
     private static final double AUTHORITY_CEILING = 2.25;
+
     /**
-     * Height, as a multiple of the sea-level figure, that the air is never thinner than however high
-     * the aircraft is taken. Thrust and lift both follow the air, so without a floor an aeroplane
-     * taken high enough has neither, and what should be a ceiling becomes a trapdoor.
+     * パイロットの舵に必ず残る効き。ファイルの角速度に対する割合。
+     *
+     * <p>操舵権限は動圧に比例するので、速度が落ちれば0へ向かう。空力としては正しく、遊びとしては壊れている
+     * ——落ちていく機体で操縦桿を引いても何も起きないのは、パイロットには「機体が言うことを聞かない」では
+     * なく「ゲームが反応しない」と読める。半分を床にすれば、どれだけ遅くても機体を向け直す手段は残る。
+     *
+     * <p>これが効くのは低速側だけだ。失速速度の付近で既に1を超え、コーナー速度では2倍あるので、ここが仕事を
+     * するのは失速速度のおよそ7割より下——つまり、そもそも主翼が飛んでいない領域に限られる。
+     */
+    private static final float TURN_RATE_FLOOR = 0.5F;
+
+    /**
+     * 全機体の操舵効きに掛かる倍率。機動性そのものを1つの数値で上下させるための物。
+     *
+     * <p>ファイル側の {@code pitch_rate} などを13機分書き換えるのではなくここに置いてあるのは、これが
+     * 「この機体は他よりよく曲がる」ではなく「この MOD の機体はどれくらい曲がる物か」という問いだからだ。
+     * 機種同士の相対関係——重い迎撃機と軽い戦闘機の差——はファイルが持ち、その全体の水準をここが決める。
+     * 片方をもう片方で表そうとすると、全体を動かすたびに機種間の釣り合いを組み直す羽目になる。
+     *
+     * <p>1.0 が調整前の値。0.7 はそこから3割落とした値で、旋回にはっきり時間がかかるようになるが、
+     * 機首が動かないとは感じない範囲。速度域を問わず一律に効く。
+     */
+    private static final float CONTROL_SCALE = 0.7F;
+    /**
+     * どれだけ高く上げても空気がこれより薄くならない下限。海面値に対する倍数。推力も揚力も空気に追従するので、
+     * 下限が無いと十分高く上げた機体は両方を失い、上昇限度であるべき物が落とし穴になる。
      */
     private static final double THINNEST_AIR = 0.35;
-    /** Height the air is measured from, and the height the files' figures are quoted at. */
+    /** 空気密度の基準高度。ファイルの諸元が示されている高度でもある。 */
     private static final double DENSITY_DATUM = 64.0;
     /**
-     * Height over which the air halves in density.
+     * 空気密度が半減する高度差。
      *
-     * <p>Deliberately gentler than the real atmosphere scaled to a Minecraft world would be. The
-     * point of thinning air is that an aircraft has a ceiling rather than climbing for ever; making
-     * that ceiling low enough to meet in ordinary flying costs more than it buys, and it is felt
-     * worst by the one aircraft least able to argue — a lift system holding a hover has no speed to
-     * make up the difference with, so a steep gradient simply forbids the F-35B to hover anywhere
-     * above the treetops.
+     * <p>実大気を Minecraft の世界にスケールした場合より意図的に緩くしてある。空気が薄くなる意義は、機体が無限に
+     * 上昇せず上昇限度を持つことだ。通常の飛行で到達するほど低い限度にすると、得る物より失う物が多い。しかも
+     * それが最も響くのは最も反論できない機体——ホバリング中の揚力系は差を埋める速度を持たないので、急な勾配は
+     * F-35B が梢より上でホバリングすること自体を禁じてしまう。
      */
     private static final double DENSITY_SCALE = 512.0;
     /**
-     * Fastest a pilot's client is believed when it reports its own speed, in blocks per tick. Well
-     * clear of anything an aircraft can reach, and there so that the figure cannot be used to hurl
-     * a cannon round across the world.
+     * パイロットのクライアントが自機速度を報告したとき信用する上限（ブロック/tick）。機体が到達しうる値から
+     * 十分離してあり、この値を使って機関砲弾を世界の果てまで投げられないようにするためにある。
      */
     private static final double MAX_PILOT_SPEED = 40.0;
-    /** How big a pylon's box is, in blocks. Big enough to aim at, small enough to tell from its neighbour. */
+    /** パイロンの箱の大きさ（ブロック）。狙える程度に大きく、隣と区別できる程度に小さく。 */
     public static final double PYLON_BOX = 1.2;
-    /** And how small it is allowed to shrink for an aircraft whose stations are close together. */
+    /** ステーションが密な機体で、どこまで小さくなることを許すか。 */
     private static final double SMALLEST_PYLON_BOX = 0.5;
-    /** Speed, squared, below which an aircraft counts as standing still. */
+    /** これ未満なら停止扱いとする速度の2乗。 */
     private static final double PARKED_SPEED = 1.0E-4;
     /**
-     * What a wreck keeps of its speed each tick on the way down. A burnt-out airframe is a shape
-     * falling through the air rather than a wing flying through it, so this is one figure standing in
-     * for the whole of the aerodynamics: enough to stop a write-off carrying its airspeed to the
-     * ground, nowhere near enough to hold it up.
+     * 残骸が落下中、1tickごとに速度をどれだけ保つか。焼け落ちた機体は空気を切って飛ぶ翼ではなく空気中を落ちる
+     * 塊なので、この1つの値が空力全体の代役を務める。全損機が対気速度を地面まで持ち込むのを止める程度には効き、
+     * 支える程には効かない。
      */
     private static final double WRECK_DRAG = 0.99;
     /**
-     * And what it keeps once it is down.
+     * 接地後にどれだけ保つか。
      *
-     * <p>High, because an airframe arriving at flying speed does not stop where it touched: it
-     * ploughs. The figure is what decides how far — a wreck slides roughly {@code 1 / (1 - this)}
-     * times its speed at touchdown, so a fast jet coming down flat covers a good stretch of field
-     * before it comes to rest, and a helicopter that fell straight down covers none of it, having
-     * had no speed to carry. Terrain usually settles it long before the arithmetic does.
+     * <p>高い値。飛行速度で到達した機体は接地点で止まらず、地面を掘り進むからだ。距離を決めるのがこの値で、
+     * 残骸はおおよそ接地速度の {@code 1 / (1 - this)} 倍だけ滑る。水平に降りた高速ジェットは静止までに野原を
+     * かなり進み、真下に落ちたヘリは持ち込む速度が無いので一切進まない。大抵は計算より先に地形が決着させる。
      */
     private static final double WRECK_FRICTION = 0.92;
 
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
-    /** What the aircraft is carrying. Authoritative on the server; a copy of the tag on a client. */
+    /** 機体の搭載物。サーバー側が正であり、クライアント側はタグの複製。 */
     private final WeaponMounts weapons = new WeaponMounts(this);
-    /** Flares and chaff, and when the dispenser will part with the next one. */
+    /** 乗員が撃つ砲。持たない機体では毎tick何もしない。 */
+    private final GunStations stations = new GunStations(this);
+    /**
+     * この機体のポッドが地上に置いたマーカー（置いている間のみ）。サーバー限定で、クライアントは他と同様
+     * {@link #DATA_DESIGNATED} 経由で知る。
+     */
+    @Nullable
+    private DesignationEntity marker;
+    /** フレアとチャフ、および次弾を放出できるようになる時刻。 */
     private final Dispenser dispenser = new Dispenser(this);
 
     private AircraftInput input = AircraftInput.NONE;
     private float throttle;
     /**
-     * What the engine is actually delivering, as against what the lever is asking for. Chases the
-     * throttle rather than matching it, because an engine spools: a takeoff roll begun by slamming
-     * the lever forward should start slowly and build, not leap.
+     * レバーの要求値に対し、エンジンが実際に出している出力。一致させず追従させる。エンジンはスプールするからだ。
+     * レバーを一気に前へ倒して始めた離陸滑走は、飛び出すのではなくゆっくり始まって伸びるべきだ。
      */
     private float thrustLevel;
     /**
-     * Whether the pilot has taken the lever through the gate. A latch rather than a held key: a
-     * throttle stays where it is put, and the way out of reheat is to pull it back.
+     * パイロットがレバーをゲートの向こうへ押し込んだか。押しっ放しのキーではなくラッチ。スロットルは置いた位置に
+     * 留まり、アフターバーナーから抜けるには引き戻す。
      */
     private boolean reheatCommanded;
-    /** What the burner is actually delivering, 0 to 1. It lights quickly, but it does not light at a step. */
+    /** バーナーの実出力（0〜1）。点火は速いが、段階的に一気には点かない。 */
     private float reheat;
-    /** Ticks the lever has been held against its stop, counting towards {@link #GATE_TICKS}. */
+    /** レバーをストッパーに当て続けたtick数。{@link #GATE_TICKS} へのカウント。 */
     private int gateHeld;
     /**
-     * How much of the aircraft's weight the wheels are still carrying, 1 sitting on them and 0 with
-     * the wing holding everything. Ground friction is scaled by it, so the last of a takeoff roll
-     * goes light as the wing takes over instead of gripping right up to the instant of lift-off.
+     * 機体重量のうち車輪がまだ支えている割合。1なら全て車輪、0なら全て主翼。地面摩擦をこれで拡縮するので、
+     * 離陸滑走の終盤は浮上の瞬間まで食い付き続けるのではなく、主翼が引き受けるにつれて軽くなる。
      */
     private float weightOnWheels = 1.0F;
-    /** Heading change over the last tick, handed to the pilot so their view turns with the aircraft. */
+    /** 直前1tickの方位変化。パイロットの視界が機体と共に回るよう渡す。 */
     private float deltaRotation;
-    // Angular rates, in degrees per tick. Held between ticks so the controls have some weight.
+    // 角速度（度/tick）。tickをまたいで保持し、操縦に重みを持たせる。
     private float pitchVelocity;
     private float rollVelocity;
     private float yawVelocity;
-    /** The angle the wing is meeting the airflow at, in degrees. Past the stalling angle, trouble. */
+    /** 主翼が気流に対して成す角（度）。失速角を超えると厄介なことになる。 */
     private float angleOfAttack;
-    /** Set by whichever side ran the physics when the airframe hit something at speed. */
+    /** 機体が高速で何かに当たったとき、物理を回した側が設定する。 */
     private boolean crashing;
     /**
-     * How far the aeroplane actually got last time it moved itself, rather than how far it asked to.
+     * 前回の自己移動で機体が実際に進んだ距離（要求距離ではなく）。
      *
-     * <p>Only a wreck reads it, and it is the whole of what lets one carry its momentum into the
-     * ground. The delta movement cannot: {@code move} takes the blocked axes out of it, so at the
-     * end of the tick an aeroplane that flew into a field at four hundred knots holds a speed of
-     * nothing — the same figure as one that was sitting on the apron. What the two do not share is
-     * how far they got, and that is measured here.
+     * <p>読むのは残骸だけで、残骸が運動量を地面へ持ち込めるのはこれが全てだ。デルタ移動では代用できない。
+     * {@code move} は阻まれた軸を取り除くので、400ノットで野原へ突っ込んだ機体もtick終了時の速度は0——エプロンに
+     * 駐機していた機体と同じ値になる。両者で違うのは実際にどれだけ進んだかであり、それをここで測る。
      */
     private Vec3 lastTravel = Vec3.ZERO;
-    /** The chunk this aircraft is holding open while it flies, if any. */
+    /** 飛行中この機体が開いたまま保持しているチャンク（あれば）。 */
     private Set<ChunkPos> heldChunks = Set.of();
-    /** How this aircraft is drawn on a client that is not flying it. */
+    /** 操縦していないクライアントでこの機体をどう描くか。 */
     private final AircraftInterpolation interpolation = new AircraftInterpolation();
-    /** How fast the pilot's client says it is going. The server's only honest answer while flown. */
+    /** パイロットのクライアントが申告する速度。飛行中、サーバーが持つ唯一の正直な答え。 */
     private Vec3 pilotVelocity = Vec3.ZERO;
     /**
-     * Server side: the attitude the last update came in at, so the turn since can be measured
-     * against one whole tick of whoever is flying rather than against one of the server's own.
+     * サーバー側: 最後の更新が届いた時点の姿勢。以降の旋回量を、サーバー自身の1tickではなく操縦側の丸1tickに
+     * 対して測れるようにする。
      */
     private final Quaternionf ratedAttitude = new Quaternionf();
     private boolean hasRatedAttitude;
-    // Client side only: the last answer to whether the world stands in the way, and when it was
-    // worked out. Tracing the line costs something and the answer barely changes within a tick.
-    /** How far the undercarriage has swung out: 0 is up and locked, 1 is down and locked. */
+    // クライアント限定: 世界が行く手を遮っているかの最後の判定結果と、その算出時刻。線のトレースには
+    // コストがあり、1tick内で答えはほとんど変わらない。
+    /** 降着装置の展開度。0が上げロック、1が下げロック。 */
     private float gearProgress = 1.0F;
     private float gearProgressO = 1.0F;
-    /** How far the nozzle has swung, 0 stowed to 1 fully down. */
+    /** ノズルの振れ量。0が格納、1が完全下向き。 */
     private float vtolProgress;
     private float vtolProgressO;
-    /** How far the flaps have travelled: 0 is retracted, 1 is fully down. */
+    /** フラップの作動量。0が格納、1が全下げ。 */
     private float flapsProgress;
     private float flapsProgressO;
     /**
-     * How fast the rotor is turning, as a fraction of governed. Zero for anything that has none.
+     * 可変翼の後退量。0が全開前進、1が全開後退。可変翼を持たない機体では常に0。
      *
-     * <p>Worked out on every side rather than sent, because every side already knows everything it
-     * depends on: a rotor winds up while somebody is at the controls and runs down when nobody is,
-     * and who is aboard is synced with the passengers. A packet a tick to say how fast a wheel is
-     * going round would be a poor use of one.
+     * <p>ローターと同じく送信せず各側で算出する。依存するのは対気速度1つだけで、それは既に全側が持っている
+     * ——{@link #getVelocity()} は操縦側でも、サーバーでも、見物人のクライアントでも正直な答えを返す。全員が
+     * 同じ数値に同じ関数を当てるのだから、翼の位置を伝えるためにパケットを使う理由が無い。
+     */
+    private float sweepProgress;
+    private float sweepProgressO;
+    /**
+     * ローターの回転数。定格に対する割合で、ローターを持たない機体では0。
+     *
+     * <p>送信せず各側で算出する。依存する物を全側が既に知っているからだ。ローターは誰かが操縦席にいる間に回転を
+     * 上げ、無人になれば下がる。誰が乗っているかは搭乗者情報として同期済み。車輪の回転速度を伝えるためだけに
+     * 1tickに1パケット使うのは無駄だ。
      */
     private float rotorSpeed;
     private float rotorSpeedO;
     /**
-     * Where the rotors have got to, in degrees. Drawing only, and integrated wherever it is drawn.
+     * ローターの現在角（度）。描画専用で、描画する側で積分する。
      *
-     * <p>The tail is counted separately rather than scaled off the main one. It turns several times
-     * faster and the two do not come back into step at any convenient angle, so a tail angle worked
-     * out from the main one jumps every time the main one is brought back inside a turn.
+     * <p>テールローターはメインローターからの拡大ではなく別々に数える。数倍速く回り、両者は都合のよい角度で同期
+     * し直したりしないので、メインから算出したテール角はメインが1回転内に折り返されるたび跳ねてしまう。
      */
     private float rotorAngle;
     private float rotorAngleO;
     private float tailAngle;
     private float tailAngleO;
 
-    // Interpolation state for instances that are not simulating this aircraft themselves.
+    // 自分でこの機体をシミュレートしていない側のための補間状態。
     private int lerpSteps;
     private double lerpX;
     private double lerpY;
@@ -430,46 +470,44 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
     public AircraftEntity(EntityType<? extends AircraftEntity> type, Level level) {
         super(type, level);
-        // Culled against the view frustum like anything else. Beyond the ghost start distance the
-        // game's entity loop stands down altogether and the ghost pass draws the aircraft from a
-        // snapshot, so there is no longer anything for the frustum's far plane to throw away.
-        // See com.ashvehicles.client.ghost.GhostRenderDispatcher.
+        // 他と同様に視錐台でカリングする。ゴースト開始距離を超えるとゲームのエンティティループ自体が降板し、
+        // ゴーストパスがスナップショットから機体を描くので、視錐台の遠方面が捨てる物はもう無い。
+        // com.ashvehicles.client.ghost.GhostRenderDispatcher 参照。
         this.blocksBuilding = true;
-        // Built here rather than on the first tick: the level records an entity's parts when it is
-        // added, and an entity that has none yet is remembered as having none.
+        // 最初のtickではなくここで構築する。レベルはエンティティ追加時にそのパーツを記録するので、まだ
+        // パーツを持たないエンティティは「無し」として覚えられてしまう。
         this.buildParts();
-        // A new airframe is a whole one. An aircraft read back out of the world overwrites this from
-        // its tag, and a client is told the real figure with the rest of the synched data.
+        // 新造機体は無傷。ワールドから読み戻した機体はタグでこれを上書きし、クライアントには他の同期データと
+        // 共に実値が届く。
         this.setHealth(this.getMaxHealth());
-        // A new aeroplane comes with full magazines, the same as it comes with a whole airframe.
+        // 新造機は無傷の機体と同様、弾倉も満載で出てくる。
         this.setCountermeasures(true, this.getStats().countermeasures().flares());
         this.setCountermeasures(false, this.getStats().countermeasures().chaff());
-        // We integrate our own gravity in flightTick(). Telling the server that also stops it
-        // counting a flying aircraft as a floating vehicle, which is otherwise a kick for
-        // "flying is not enabled on this server" after four seconds airborne.
+        // タンクも同様。工場から空で出てくる機体は、置いた場所から動かせない置物だ。
+        this.setFuel(this.fuelSetup().capacity());
+        // 重力は flightTick() で自前に積分している。サーバーへそう伝えることで、飛行中の機体が浮遊エンティティ
+        // 扱いされるのも防げる。さもないと離陸4秒後に「flying is not enabled on this server」でキックされる。
         this.setNoGravity(true);
     }
 
     // ------------------------------------------------------------------
-    // Flight characteristics, read from the aircraft's data pack file.
+    // 飛行特性。機体のデータパックファイルから読む。
     //
-    // Held rather than looked up afresh, but only for as long as the files stand still: the copy is
-    // thrown away the moment Definitions reports a different version, so /reload still takes
-    // effect on aircraft that are already in the air. That is worth the two fields. An aircraft asks
-    // for its own figures several dozen times in a tick — the flight model alone reads a dozen
-    // records out of them — and each ask was a reverse lookup through the entity registry to build
-    // the name, followed by a hash of that name and a map search. Once a tick is plenty.
+    // 毎回引かずに保持するが、ファイルが変わらない間だけ。Definitions が別バージョンを報告した瞬間に複製を捨てる
+    // ので、既に飛行中の機体にも /reload が効く。フィールド2つ分の価値はある。機体は1tickに数十回自分の諸元を
+    // 問い合わせる——飛行モデルだけで十数レコードを読む——うえ、1回ごとにエンティティレジストリの逆引きで名前を
+    // 組み、その名前のハッシュとマップ検索を行っていた。1tickに1回で十分だ。
     // ------------------------------------------------------------------
 
-    /** The figures and the shape under that name, and which set of files they came out of. */
+    /** その名前の諸元と形状、およびその出所のファイル群。 */
     @Nullable
     private AircraftDefinition stats;
     @Nullable
     private int statsVersion = -1;
 
     /**
-     * This aircraft's id, which is its entity type's id. Everything else about it, from its file to
-     * its model to the item that places it, is found under the same name.
+     * この機体のID（エンティティタイプのID）。ファイル・モデル・設置アイテムまで、機体に関する他の全てが同じ
+     * 名前で見つかる。
      */
     public ResourceLocation getAircraftId() {
         return this.getVehicleId();
@@ -487,75 +525,75 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return current;
     }
 
-    /** Acceleration along the nose at full throttle, in blocks/tick^2. */
+    /** スロットル全開時の機首方向加速度（ブロック/tick^2）。 */
     public float getMaxThrust() {
         return this.getStats().engine().maxThrust();
     }
 
-    /** Throttle change per tick while a throttle key is held. */
+    /** スロットルキー押下中の1tickあたりのスロットル変化量。 */
     public float getThrottleRate() {
         return this.getStats().engine().throttleRate();
     }
 
-    /** Whether this airframe has an afterburner at all. Most of them do not. */
+    /** この機体がアフターバーナーを持つか。大半は持たない。 */
     public boolean hasAfterburner() {
         return this.getStats().engine().afterburner().isPresent();
     }
 
-    /** How much reheat the engine is delivering, 0 to 1. */
+    /** アフターバーナーの出力（0〜1）。 */
     @Override
     public float getAfterburner() {
         return this.reheat;
     }
 
-    /** Whether the burner is alight: what the instruments, the plume and the note all read off. */
+    /** バーナーが点火しているか。計器・プルーム・音が全てこれを読む。 */
     public boolean isAfterburning() {
         return this.reheat > LIT;
     }
 
-    /** Hard speed limit, in blocks/tick. */
+    /** 速度の絶対上限（ブロック/tick）。 */
     public float getMaxSpeed() {
         return this.getStats().wing().maxSpeed();
     }
 
-    /** Below this airspeed the wings stop biting and the controls go soft. */
+    /** これを下回ると主翼が食い付かなくなり操縦が甘くなる対気速度。 */
     public float getStallSpeed() {
         return this.getStats().wing().stallSpeed();
     }
 
-    /** Lift produced per (block/tick)^2 of airspeed. Level flight happens where this equals gravity. */
+    /** 対気速度 (ブロック/tick)^2 あたりの揚力。これが重力と釣り合う所で水平飛行になる。 */
     public float getLiftCoefficient() {
         return this.getStats().wing().lift();
     }
 
-    /** Fraction of the current velocity lost every tick. */
+    /** 毎tick失う現在速度の割合。 */
     public float getDragCoefficient() {
         return this.getStats().wing().drag();
     }
 
-    /** Degrees of pitch per tick at full deflection and full control authority. */
+    /** 舵一杯・操舵権限全開時のピッチ角速度（度/tick）。 */
     public float getPitchRate() {
         return this.getStats().handling().pitchRate();
     }
 
-    /** Degrees of roll per tick at full deflection and full control authority. */
+    /** 舵一杯・操舵権限全開時のロール角速度（度/tick）。 */
     public float getRollRate() {
         return this.getStats().handling().rollRate();
     }
 
-    /** Degrees of yaw per tick from the rudder alone. */
+    /** 方向舵のみによるヨー角速度（度/tick）。 */
     public float getYawRate() {
         return this.getStats().handling().yawRate();
     }
 
-    /** Impact speed, in blocks/tick, above which hitting something writes the aircraft off. */
+    /** これを超えて何かに当たると機体が全損する衝突速度（ブロック/tick）。 */
     protected float getCrashSpeed() {
         return this.getStats().airframe().crashSpeed();
     }
 
     /**
-     * Speed, in blocks/tick, an arrival on the wheels is survivable at however it was flown: 200
-     * km/h for an aeroplane and 50 for a helicopter unless the file says otherwise.
+     * どう飛んできたかに関わらず車輪での接地が生存可能な速度（ブロック/tick）。ファイル指定が無ければ固定翼機
+     * 200km/h、ヘリ 50km/h。
      */
     protected float getLandingSpeed() {
         return this.getStats().landingSpeed();
@@ -566,12 +604,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.getStats().airframe().explosionPower();
     }
 
-    /** Ticks the undercarriage takes to travel from up and locked to down and locked. */
+    /** 降着装置が上げロックから下げロックまで動くのに要するtick数。 */
     public int getGearCycleTicks() {
         return this.getStats().landingGear().cycleTicks();
     }
 
-    /** Extra drag with the gear hanging out, as a fraction of the clean-airframe figure. */
+    /** 脚を出したときの追加抗力。クリーン形態の値に対する割合。 */
     protected float getGearDragPenalty() {
         return this.getStats().landingGear().dragPenalty();
     }
@@ -580,7 +618,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.getStats().flaps().cycleTicks();
     }
 
-    /** Extra lift from fully lowered flaps, as a fraction of the clean-wing figure. */
+    /** フラップ全下げによる追加揚力。クリーン翼の値に対する割合。 */
     protected float getFlapsLiftBonus() {
         return this.getStats().flaps().liftBonus();
     }
@@ -590,7 +628,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     // ------------------------------------------------------------------
-    // What the base class needs from an aircraft
+    // 基底クラスが航空機に要求する物
     // ------------------------------------------------------------------
 
     @Override
@@ -623,21 +661,21 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.getStats().camera();
     }
 
-    /** Everything on an aeroplane is bolted to the airframe and is where the file says it is. */
+    /** 機体上の物は全て機体構造に固定されており、ファイルが示す位置にある。 */
     @Override
     protected Vec3 boxCentre(VehicleShape.Box box) {
         return this.position().add(Attitude.toWorld(this.attitude, box.offset()));
     }
 
-    /** The box's own angle within the airframe, then the airframe's angle in the world. */
+    /** 機体内での箱自身の角度、次にワールド内での機体の角度。 */
     @Override
     protected Quaternionf boxRotation(VehicleShape.Box box) {
         return new Quaternionf(this.attitude).mul(box.orientation());
     }
 
     /**
-     * The pylons, which are not among the collision boxes: a place to hang a store is a place on the
-     * aeroplane rather than a piece of it, and it is worth clicking on its own.
+     * パイロン。当たり判定の箱には含めない。兵装を吊る場所は機体の一部というより機体上の位置であり、単独で
+     * クリックできる価値がある。
      */
     @Override
     protected List<VehiclePart> extraParts() {
@@ -652,7 +690,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     // ------------------------------------------------------------------
-    // State
+    // 状態
     // ------------------------------------------------------------------
 
     @Override
@@ -667,31 +705,32 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         builder.define(DATA_FLAPS_DOWN, false);
         builder.define(DATA_VTOL, false);
         builder.define(DATA_WEAPONS, new CompoundTag());
+        builder.define(DATA_STATIONS, new CompoundTag());
         builder.define(DATA_FLARES, 0);
         builder.define(DATA_CHAFF, 0);
+        builder.define(DATA_DESIGNATED, -1);
     }
 
     /**
-     * What is on the hardpoints. The server's copy is the real one; a client reads whatever the
-     * server last sent, which is enough for the instruments and for drawing the pods.
+     * ハードポイントの搭載物。実体はサーバー側の複製で、クライアントはサーバーが最後に送った値を読む。計器と
+     * ポッドの描画にはそれで足りる。
      */
     /**
-     * The radar and the warning receiver.
+     * レーダーと警戒受信機。
      *
-     * <p>Only ever asked on the server: by this aircraft's own tick, and by another aircraft's
-     * receiver wanting to know whether this one's radar is holding it. A client is sent the picture
-     * rather than allowed to work one out.
+     * <p>問い合わせはサーバー限定。この機体自身のtickと、「この機体のレーダーが自分を捉えているか」を知りたい
+     * 他機の受信機から呼ばれる。クライアントには画を送るのであって、算出を許すのではない。
      */
     /**
-     * How many flares, or how much chaff, is left aboard.
+     * 機上に残るフレア数、またはチャフ量。
      *
-     * @param flare true for flares, false for chaff
+     * @param flare フレアなら true、チャフなら false
      */
     public int getCountermeasures(boolean flare) {
         return this.entityData.get(flare ? DATA_FLARES : DATA_CHAFF);
     }
 
-    /** Never below nothing, and never above what the airframe holds. */
+    /** 0を下回らず、機体の搭載量を超えない。 */
     public void setCountermeasures(boolean flare, int left) {
         int held = Mth.clamp(left, 0, this.getStats().countermeasures().capacity(flare));
 
@@ -699,23 +738,21 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * How big this aircraft looks to a radar: its clean airframe plus whatever is bolted to the
-     * outside of it.
+     * この機体がレーダーにどれだけ大きく映るか。クリーン形態の機体＋外部に取り付けた物。
      *
-     * <p>Stores in a bay are not counted. That is the whole argument for a bay, and it is the one
-     * decision a pilot of a stealth aeroplane actually gets to make about their own signature —
-     * everything else about it was settled by whoever drew the shape.
+     * <p>ウェポンベイ内の兵装は数えない。それがベイの存在理由の全てであり、ステルス機のパイロットが自機の
+     * シグネチャについて実際に下せる唯一の判断だ。それ以外は形状を引いた者が既に決めてしまっている。
      */
     public float radarCrossSection() {
         AircraftDefinition.Signature signature = this.getStats().signature();
 
-        return signature.radar() + signature.store() * this.weapons.externalStores();
+        return (signature.radar() + signature.store() * this.weapons.externalStores())
+                * this.weapons.radarGain();
     }
 
     /**
-     * How far a radar sees that entity, as a fraction of what the same radar manages against an
-     * ordinary fighter. Anything that is not an aeroplane is an ordinary fighter as far as this is
-     * concerned, which is a way of saying nothing has been decided about it.
+     * そのエンティティをレーダーがどこまで見えるか。同じレーダーが通常の戦闘機に対して出す距離に対する割合。
+     * ここでは航空機以外は全て通常の戦闘機扱い——つまり何も決めていない、ということだ。
      */
     public static float visibility(Entity entity) {
         return entity instanceof AircraftEntity aircraft
@@ -723,11 +760,177 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 : 1.0F;
     }
 
+    /**
+     * そのエンティティに向けたレーダーロックが、何も積んでいない相手に対して要する時間の何倍かかるか。
+     * ジャマーを吊っている機体では1を超え、それ以外は全て1。
+     *
+     * <p>反射断面積とは別物で、両方を同時に持つ。断面積は「どこまで遠くで見つかるか」、こちらは「見つけた
+     * 後どれだけ長く照準線に乗せ続けねばならないか」を決める。ジャマーの本領は後者だ——射程の外へ逃がすの
+     * ではなく、相手が旋回で失うより長く保持することを要求して、間に合わなくさせる。
+     *
+     * <p>両側で同じ値になる。搭載内容は機体の同期データに乗っており、クライアントは目標の機体を追跡して
+     * いれば読める。だから画面上の枠は実際のロック速度で閉じる。
+     */
+    public static float lockDelay(Entity entity) {
+        return entity instanceof AircraftEntity aircraft ? aircraft.weapons.lockDelay() : 1.0F;
+    }
+
     public WeaponMounts getWeapons() {
         return this.weapons;
     }
 
-    /** An aeroplane aims by pointing itself, so where the weapons look is where the nose is. */
+    /** 乗員が撃つ砲。機体が1門も持たなければ空のまま何もしない。 */
+    public GunStations getStations() {
+        return this.stations;
+    }
+
+    // ------------------------------------------------------------------
+    // ターゲティングポッド
+    // ------------------------------------------------------------------
+
+    /**
+     * ポッドが捉えている対象。無ければ null。
+     *
+     * <p>指示地点に立つ {@link DesignationEntity} か、パイロットが十字線を合わせた車両のいずれか。両側から問える。
+     * サーバーはレーザー誘導兵器がレールを離れる際に渡し、パイロットのクライアントはマークを描きカメラで追う。
+     */
+    @Nullable
+    public Entity getDesignated() {
+        int id = this.entityData.get(DATA_DESIGNATED);
+
+        if (id < 0) {
+            return null;
+        }
+
+        Entity held = this.level().getEntity(id);
+
+        return held != null && held.isAlive() ? held : null;
+    }
+
+    /** ポッドが捉えている位置。無ければ null。爆弾を誘導していく先の点。 */
+    @Nullable
+    public Vec3 getDesignatedPoint() {
+        Entity held = this.getDesignated();
+
+        return held == null ? null : held.position().add(0.0, held.getBbHeight() * 0.5, 0.0);
+    }
+
+    /**
+     * ポッドを地上の一点、または動く物へ据える。
+     *
+     * <p>両者が1つの呼び出しなのは、1つのキーの1回の押下だからだ。パイロットは十字線を何かに合わせて指示する
+     * のであって、その下にあったのが戦車か斜面かを2度判断させられる筋合いは無い。車両はそれ自身として保持する
+     * ので、動く物への指示は追従する。地点はそこへ置いたマーカーで保持する。この MOD で誘導する物は全て
+     * エンティティへ向かうからだ。{@link DesignationEntity} 参照。
+     *
+     * <p>再指示は2つ目を残さずマークを移動させ、可能な限り同じマーカーを再利用する。保持役のポッドが搭載されて
+     * いなければ即座に拒否する——この仕組み全体がポッドの仕事であり、素のセンサーステーションしか無い機体には
+     * 指示する手段が無い。
+     *
+     * <p><b>地点はパイロットが見た物ではなく計算結果でありうる。</b>ポッドはクライアントがチャンクを持つ範囲より
+     * はるかに遠くまで届くので、その外で行った指示は仮定した床の上に立ち、実際の地面との差だけずれる。そうした
+     * 地点もそのまま受け入れる——機体が飛んで行って見ることのできた地面であり、指示とはそれが全てだからだ——
+     * うえでマーカーへ算出に使った視線を渡し、その地面がロードされ次第、実際の地表へ自力で歩み寄れるようにする。
+     * {@link DesignationEntity} と {@link com.ashvehicles.client.Terrain} 参照。
+     *
+     * @param point 地上のどこか。{@code entity} を指示するなら null
+     * @param entity 保持する対象。地点を保持するなら null
+     * @param estimated 地点がブロック上で見えた物ではなく、クライアントの世界の外で算出された物か
+     * @return 現在何かが指示されているか
+     */
+    public boolean designate(@Nullable Vec3 point, @Nullable Entity entity, boolean estimated) {
+        if (!this.weapons.hasPod(EquipmentDefinition.Kind.TARGETING)) {
+            this.clearDesignation();
+
+            return false;
+        }
+
+        if (entity != null && entity.isAlive() && !WeaponMounts.isPartOf(this, entity)) {
+            this.dropMarker();
+            this.entityData.set(DATA_DESIGNATED, entity.getId());
+
+            return true;
+        }
+
+        if (point == null) {
+            this.clearDesignation();
+
+            return false;
+        }
+
+        // 後で地面を探す必要があるマークのために、マークを見つけた視線を保持する。ポッドのレンズではなく機体
+        // から取る。レンズは機体から数ブロック横にあるが、この種の指示が行われる数百ブロックの距離では差は1度
+        // 未満であり、用途はその遠端での数十ブロックの補正だからだ。
+        Vec3 sight = null;
+
+        if (estimated) {
+            Vec3 line = point.subtract(this.position());
+            sight = line.lengthSqr() > 1.0E-6 ? line.normalize() : null;
+        }
+
+        if (this.marker == null || !this.marker.isAlive()) {
+            this.marker = DesignationEntity.at(this.level(), point, sight);
+            this.level().addFreshEntity(this.marker);
+        } else {
+            this.marker.hold(point, sight);
+        }
+
+        this.entityData.set(DATA_DESIGNATED, this.marker.getId());
+
+        return true;
+    }
+
+    /** ポッドが捉えていた物を解放し、マーカーも片付ける。 */
+    public void clearDesignation() {
+        this.dropMarker();
+        this.entityData.set(DATA_DESIGNATED, -1);
+    }
+
+    private void dropMarker() {
+        if (this.marker != null) {
+            this.marker.discard();
+            this.marker = null;
+        }
+    }
+
+    /**
+     * 保持1tick分。マーカーへ「まだ保持者がいる」と伝え、保持対象を失った指示は解放する。
+     *
+     * <p>これが無いとマーカーは数秒で自ら諦める。tickの合間に機体が撃墜された場合のマーカーはそれで消える。
+     * {@link DesignationEntity} 参照。指示を終わらせうる他の要因——ポッドの脱落、目標の破壊、機体の全損——は
+     * すべてここで処理する。
+     */
+    private void tickDesignation() {
+        if (this.entityData.get(DATA_DESIGNATED) < 0) {
+            return;
+        }
+
+        if (this.isWrecked() || !this.weapons.hasPod(EquipmentDefinition.Kind.TARGETING)
+                || this.getDesignated() == null) {
+            this.clearDesignation();
+
+            return;
+        }
+
+        if (this.marker != null) {
+            // 伝えるのは「まだ保持者がいる」ことだけ。位置はマーカー自身の管轄だ。実際の地面を探している最中
+            // のマーカーは自力でそこへ歩み寄っており、毎tick元の位置へ戻せば機体がそれを台無しにしてしまう。
+            this.marker.held();
+        }
+    }
+
+    /** 特殊ステーションのポッドがシーカーにとって持つ価値。{@link WeaponMounts} 参照。 */
+    @Override
+    public float seekerRangeGain() {
+        return this.weapons.seekerRangeGain();
+    }
+
+    @Override
+    public float lockRateGain() {
+        return this.weapons.lockRateGain();
+    }
+
+    /** 航空機は機体を向けて照準するので、兵装が見るのは機首の方向。 */
     @Override
     public Vec3 getAimDirection(float partialTick) {
         return Attitude.nose(this.getAttitude(partialTick));
@@ -738,7 +941,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.getStats().radar();
     }
 
-    /** The seeker lives with the pylons, since what it is looking for is what is hanging on them. */
+    /** シーカーはパイロンと同居する。探す対象はそこに吊られている物が決めるからだ。 */
     @Override
     public TargetLock lock() {
         return this.weapons.lock();
@@ -750,6 +953,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         if (DATA_WEAPONS.equals(key) && this.level().isClientSide) {
             this.weapons.load(this.entityData.get(DATA_WEAPONS));
+        }
+
+        if (DATA_STATIONS.equals(key) && this.level().isClientSide) {
+            this.stations.load(this.entityData.get(DATA_STATIONS));
         }
     }
 
@@ -766,8 +973,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Points the aircraft. The heading and elevation Minecraft knows about are kept in step, since
-     * vanilla sends those to everyone else and uses them to place riders.
+     * 機体を指向させる。Minecraft が把握している方位と仰角も追随させる。バニラはそれらを他へ送り、搭乗者の配置
+     * にも使うからだ。
      */
     public void setAttitude(Quaternionf attitude) {
         this.attitude = attitude.normalize(new Quaternionf());
@@ -780,17 +987,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Snaps the attitude, leaving the renderer nothing to interpolate. For stand-in aircraft that
-     * are placed and drawn in the same breath rather than ticked.
+     * 姿勢を即座に設定し、レンダラーに補間する物を残さない。tickせず設置と同時に描く代替機体用。
      */
     public void snapAttitude(Quaternionf attitude) {
         this.setAttitude(attitude);
         this.attitudeO = new Quaternionf(this.attitude);
         this.yRotO = this.getYRot();
         this.xRotO = this.getXRot();
-        // Placed rather than flown here, so it is not turning and nothing should extrapolate as if
-        // it were. Measuring the next tick's rate from here also stops the placement itself being
-        // read as a turn, which on a stand-in aircraft can be most of a revolution.
+        // ここでは飛行ではなく設置なので旋回しておらず、旋回として外挿されてはならない。次tickの角速度をここ
+        // から測ることで、設置自体が旋回として読まれるのも防げる。代替機体ではそれがほぼ1回転になりうる。
         this.ratedAttitude.set(this.attitude);
         this.hasRatedAttitude = true;
 
@@ -800,14 +1005,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Takes the attitude from the client at the controls, one tick of theirs at a time.
+     * 操縦中のクライアントから姿勢を受け取る。1回につき向こうの1tick分。
      *
-     * <p>Separate from {@link #setAttitude} for when it happens rather than for what it does: one of
-     * these is one whole tick of the pilot's flight model, which is what makes the turn measured
-     * across it the aircraft's real turn rate. The server's own tick is not a safe place to measure
-     * that — the pilot's clock and the server's drift past one another, so a server tick sometimes
-     * holds two of these updates and sometimes none, and a rate taken against it would report that
-     * drift as an aeroplane rolling in fits.
+     * <p>{@link #setAttitude} と分けてあるのは処理内容ではなくタイミングのため。これ1回がパイロットの飛行モデル
+     * の丸1tickであり、だからこそその間の旋回量が機体の本当の角速度になる。サーバー自身のtickは測定に適さない
+     * ——パイロットの時計とサーバーの時計は互いにずれるので、サーバーの1tickにこの更新が2回入ることも0回のことも
+     * あり、それを基準に取った角速度はそのずれを「痙攣するようにロールする機体」として報告してしまう。
      */
     public void reportAttitude(Quaternionf attitude) {
         this.setAttitude(attitude);
@@ -815,13 +1018,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Works out how far the aircraft has turned since this was last called and tells everyone
-     * watching, as the rate they extrapolate its attitude with between updates.
+     * 前回呼び出しからの旋回量を求め、更新間の姿勢外挿に使う角速度として全視聴者へ伝える。
      *
-     * <p>Called once per update from the side that is flying: per packet for a piloted aircraft, per
-     * tick for one the server is flying itself. Never more than once for the same rotation — the
-     * flight model turns an aircraft in several steps within one tick, and each of those on its own
-     * is a fraction of the turn rather than the rate.
+     * <p>操縦側から更新1回につき1度呼ぶ。有人機ならパケットごと、サーバーが飛ばしているならtickごと。同じ回転に
+     * ついて2度呼んではならない——飛行モデルは1tick内で機体を数段階に分けて回すので、その各段階は角速度ではなく
+     * 旋回の一部でしかない。
      */
     private void recordTurnRate() {
         if (this.level().isClientSide) {
@@ -838,12 +1039,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Tells everyone watching how fast the aircraft is going, once a tick, from the server.
+     * サーバーから毎tick、機体速度を全視聴者へ伝える。
      *
-     * <p>Nobody but the side running the flight model can answer this honestly, and every other copy
-     * of the aircraft needs it to draw the thing without stuttering. {@link #getVelocity()} already
-     * knows where to look — the pilot's own figure while one is at the stick, and what the aircraft
-     * covered this tick otherwise — so this is only a matter of passing it on.
+     * <p>飛行モデルを回している側以外に正直に答えられる者はおらず、他の全コピーはカクつかせずに描くためこれを
+     * 必要とする。参照先は {@link #getVelocity()} が既に把握している——操縦者がいる間はパイロット自身の値、
+     * それ以外は今tickの移動量——ので、ここは中継するだけ。
      */
     private void publishVelocity() {
         Vec3 velocity = this.getVelocity();
@@ -852,12 +1052,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 new Vector3f((float) velocity.x, (float) velocity.y, (float) velocity.z));
     }
 
-    /** The attitude for rendering, taking the short way round between the last two ticks. */
+    /** 描画用の姿勢。直近2tick間を近い側の経路で補間する。 */
     public Quaternionf getAttitude(float partialTick) {
         return new Quaternionf(this.attitudeO).slerp(this.attitude, partialTick).normalize();
     }
 
-    /** Bank angle, positive with the right wing down. */
+    /** バンク角。右翼が下がる方向を正とする。 */
     public float getRoll() {
         return Attitude.bank(this.attitude);
     }
@@ -867,9 +1067,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * How far the aircraft turned about its own axes over the last tick, in degrees. This is what
-     * the renderer deflects the control surfaces by, and unlike the pilot's raw input it comes from
-     * synced state, so it works on every client.
+     * 直前1tickの自機軸周りの旋回量（度）。レンダラーはこれで舵面を偏向させる。パイロットの生入力と違い同期
+     * 状態から来るので、全クライアントで機能する。
      */
     public float getRollDelta() {
         return this.bodyRate(2);
@@ -883,7 +1082,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.bodyRate(1);
     }
 
-    /** One axis of the rotation from last tick to this one, measured in the aircraft's own frame. */
+    /** 前tickから今tickまでの回転の1軸成分。機体座標系で測る。 */
     private float bodyRate(int axis) {
         Quaternionf change = new Quaternionf(this.attitudeO).conjugate().mul(this.attitude).normalize();
         float sine = (float) Math.sqrt(Math.max(0.0, 1.0 - change.w * change.w));
@@ -902,32 +1101,31 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return (float) Math.toDegrees(angle * component / sine);
     }
 
-    /** Whether this airframe has a lift system at all. */
+    /** この機体が揚力系（推力偏向）を持つか。 */
     public boolean isVtolCapable() {
         return this.getStats().vtol().isPresent();
     }
 
-    /** Whether the pilot has asked for the nozzle to be down. */
+    /** パイロットがノズル下げを要求しているか。 */
     public boolean isVtolSelected() {
         return this.entityData.get(DATA_VTOL);
     }
 
-    /** How far the nozzle has actually swung, 0 to 1, interpolated for drawing. */
+    /** ノズルの実際の振れ量（0〜1）。描画用に補間済み。 */
     public float getVtolProgress(float partialTick) {
         return Mth.lerp(partialTick, this.vtolProgressO, this.vtolProgress);
     }
 
-    /** The same as an angle, in degrees off the tail. What the instruments show. */
+    /** 同じ物を角度で。尾部方向からの度数で、計器が表示する値。 */
     public float getNozzleAngle() {
         return this.vtolProgress * this.getStats().vtol().map(AircraftDefinition.Vtol::maxAngle).orElse(0.0F);
     }
 
     /**
-     * Swings the nozzle the other way.
+     * ノズルを反対側へ振る。
      *
-     * <p>Refused above the aircraft's conversion speed, in the direction that puts it down: an engine
-     * turned across the airflow at five hundred knots is not a lift system, it is an accident. Coming
-     * back up is always allowed, which is what makes the conversion recoverable.
+     * <p>機体の転換速度を超えている場合、下げ方向は拒否する。500ノットで気流を横切るよう向けたエンジンは揚力系
+     * ではなく事故だ。戻す方向は常に許可され、それが転換を可逆にしている。
      */
     public void toggleVtol() {
         if (this.level().isClientSide || !this.isVtolCapable()) {
@@ -943,26 +1141,30 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.entityData.set(DATA_VTOL, !this.isVtolSelected());
     }
 
-    /** Whether this machine is held up by a rotor rather than by a wing. */
+    /** この機体が主翼ではなくローターで支えられているか。 */
     public boolean isRotorcraft() {
         return this.getStats().rotor().isPresent();
     }
 
-    /** How fast the rotor is turning, 0 stopped to 1 governed. Zero for anything without one. */
+    /** ローターの回転数。0が停止、1が定格。ローターを持たない機体では0。 */
     public float getRotorSpeed() {
         return this.rotorSpeed;
     }
 
     /**
-     * What the engine note should follow, 0 to 1.
+     * エンジン音が追従すべき値（0〜1）。
      *
-     * <p>The throttle, for an aeroplane, where the lever and the noise are the same thing. A
-     * helicopter's rotor turns at one speed whatever the collective is doing, and it is the loudest
-     * thing about the machine long before the pilot has asked it for anything — so there the note
-     * follows the rotor coming up to speed, with a little of the collective over the top for the
-     * load the engines take when the pilot pulls.
+     * <p>固定翼機ではスロットル。レバーと音は同じ物だ。ヘリのローターはコレクティブが何をしていようと一定回転で
+     * 回り、パイロットが何か要求するずっと前から機体で最も大きい音源になっている——なのでヘリでは音はローターの
+     * 回転上昇に追従し、パイロットが引いたときエンジンが受ける負荷分としてコレクティブを少し上乗せする。
      */
     public float getEngineNote() {
+        // 乾いたタンクは音を止める。エンジンが止まった機体は、レバーがどこにあろうと無音で滑空する——
+        // そしてこの値は燃料消費そのものでもあるので、空のタンクが燃料を消し続けることも無くなる。
+        if (this.isOutOfFuel()) {
+            return 0.0F;
+        }
+
         if (!this.isRotorcraft()) {
             return this.getThrottle();
         }
@@ -970,12 +1172,106 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.rotorSpeed * Mth.lerp(this.getThrottle(), ROTOR_IDLE_NOTE, 1.0F);
     }
 
-    /** Where the main rotor has got to, in degrees, interpolated for drawing. */
+    @Override
+    public VehicleChassis.Fuel fuelSetup() {
+        return this.getStats().engine().fuel();
+    }
+
+    /**
+     * 増槽から本体タンクへ移送する。パイロンに吊った増槽が航続距離を伸ばす仕組みの全部がこれだ。
+     *
+     * <p>燃やした直後に呼ばれ、空いた分だけを引く。だから外側が先に空になり、本体タンクは増槽が尽きるまで
+     * 満タンのまま残る。{@code WeaponMounts.drawFuel} 参照。
+     */
+    @Override
+    protected float drawExternalFuel(float wanted) {
+        float drawn = this.weapons.drawFuel(wanted);
+
+        // 引けば残量が変わり、残量は計器に出る。搭載構成の同期はここでしか起きないので、変わったことを
+        // 伝えるのはこの場だ。
+        if (drawn > 0.0F && this.weapons.consumeDirty()) {
+            this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+        }
+
+        return drawn;
+    }
+
+    /** 吊っている増槽に残っている燃料の合計。計器向け。 */
+    public int getTankFuel() {
+        return this.weapons.tankFuel();
+    }
+
+    /**
+     * 吊っている増槽へ燃料を入れる。給油から。
+     *
+     * @return 実際に入った量。増槽を積んでいないか、全部満タンなら0
+     */
+    public int fillTanks(int units) {
+        if (this.level().isClientSide) {
+            return 0;
+        }
+
+        int filled = this.weapons.fillTanks(units);
+
+        if (filled > 0) {
+            this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+        }
+
+        return filled;
+    }
+
+    /**
+     * 吊っている増槽を全部切り離す。パイロットの操作から。
+     *
+     * <p>飛行中でも構わない。むしろそれが目的で、空になった増槽を抱えたまま戦闘に入る理由はどこにも無い。
+     * 落とした物は返らない——それは投棄であって取り外しではない。持ち帰りたければ地上でレンチを使う。
+     */
+    public void jettisonTanks() {
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        if (this.weapons.jettisonTanks() > 0) {
+            this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+            this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
+                    SoundEvents.ITEM_FRAME_REMOVE_ITEM, SoundSource.NEUTRAL, 0.9F, 0.8F);
+        }
+    }
+
+    /**
+     * タンクが空なのでエンジンが止まっている。止まっているならレバーを引き戻し、真を返す。
+     *
+     * <p>推力を直接0にせずレバーを戻すのは、そこから先を既存のスプールが引き受けるからだ。推力は瞬時に
+     * 消えるのではなく数秒かけて落ちていき、実機のフレームアウトもそう感じられる。バーナーは即座に落とす。
+     * そちらは燃料を吹き込んで点火する装置であって、吹き込む物が無ければ何も残らない。
+     *
+     * <p><b>主翼と舵は生きている。</b> ここが切るのはエンジンだけだ。動圧が舵面を動かし、主翼は揚力を作り
+     * 続けるので、燃料切れの機体は落ちるのではなく滑空する。降りる場所を選ぶのはパイロットの仕事として
+     * 残る——それが「燃料切れ」を、事故ではなく判断の結果にしている。
+     */
+    private boolean flameout() {
+        if (!this.isOutOfFuel()) {
+            return false;
+        }
+
+        this.setThrottle(0.0F);
+        this.reheatCommanded = false;
+        this.gateHeld = 0;
+        this.reheat = 0.0F;
+
+        if (!this.level().isClientSide) {
+            this.entityData.set(DATA_AFTERBURNER, 0.0F);
+        }
+
+        return true;
+    }
+
+    /** メインローターの現在角（度）。描画用に補間済み。 */
     public float getRotorAngle(float partialTick) {
         return Mth.lerp(partialTick, this.rotorAngleO, this.rotorAngle);
     }
 
-    /** The same for the tail rotor, which turns several times faster and is counted separately. */
+    /** テールローターの同じ値。数倍速く回るので別々に数える。 */
     public float getTailRotorAngle(float partialTick) {
         return Mth.lerp(partialTick, this.tailAngleO, this.tailAngle);
     }
@@ -985,9 +1281,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Raises or lowers the undercarriage. Refused while the aircraft is sitting on its wheels, which
-     * is the job a weight-on-wheels switch does on the real thing, and refused outright by an
-     * aircraft whose legs do not go up.
+     * 降着装置を上げ下げする。車輪で接地している間は拒否する——実機の重量感知スイッチの仕事だ——し、脚が
+     * 引き込まない機体では常に拒否する。
      */
     public void toggleGear() {
         if (this.level().isClientSide || !this.getStats().landingGear().retractable()
@@ -999,15 +1294,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Whether the undercarriage has finished going wherever it was going. The cycle animation is
-     * held at its last frame while this is true rather than played, so an aircraft already sitting
-     * on its wheels is not seen to lower them again.
+     * 降着装置が行き先まで動き終えたか。true の間は作動アニメーションを再生せず最終フレームで保持するので、
+     * 既に接地している機体が改めて脚を出すように見えることはない。
      */
     public boolean isGearSettled() {
         return this.gearProgress == (this.isGearDown() ? 1.0F : 0.0F);
     }
 
-    /** Undercarriage travel for rendering: 0 fully retracted, 1 fully extended. */
+    /** 描画用の降着装置作動量。0が完全格納、1が完全展開。 */
     public float getGearProgress(float partialTick) {
         return Mth.lerp(partialTick, this.gearProgressO, this.gearProgress);
     }
@@ -1022,9 +1316,24 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
     }
 
-    /** Flap travel for rendering: 0 retracted, 1 fully down. */
+    /** 描画用のフラップ作動量。0が格納、1が全下げ。 */
     public float getFlapsProgress(float partialTick) {
         return Mth.lerp(partialTick, this.flapsProgressO, this.flapsProgress);
+    }
+
+    /** 主翼が速度に合わせて動く機体か。 */
+    public boolean hasSweepWing() {
+        return this.getStats().wing().sweep().isPresent();
+    }
+
+    /**
+     * 主翼の後退角（度）。ジオメトリが翼を置いた位置からの移動量で、モデルも計器もこれを読む。可変翼を
+     * 持たない機体では0。
+     */
+    public float getWingSweep(float partialTick) {
+        return this.getStats().wing().sweep()
+                .map(sweep -> sweep.angle(Mth.lerp(partialTick, this.sweepProgressO, this.sweepProgress)))
+                .orElse(0.0F);
     }
 
     public AircraftInput getInput() {
@@ -1036,41 +1345,38 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Whether the aeroplane is standing still enough for ground crew to work on it.
+     * 地上員が作業できる程度に機体が静止しているか。
      *
-     * <p>Wheels on the ground is the rule. "Not moving at all" is there beside it because that test
-     * is not always awake: an aircraft settling onto its undercarriage, or one whose movement is
-     * being run by a pilot's client rather than by the server, can report itself airborne for a tick
-     * or two while plainly sitting on the apron. Arming a station is a single click, and a click
-     * that lands in one of those ticks would silently do nothing at all, which is indistinguishable
-     * from the aeroplane refusing the weapon.
+     * <p>原則は「車輪が接地していること」。「まったく動いていない」を併記してあるのは、その判定が常に起きている
+     * とは限らないからだ。脚に沈み込みつつある機体や、サーバーではなくパイロットのクライアントが移動を回して
+     * いる機体は、明らかにエプロンに駐機していても1〜2tickの間「空中」と申告しうる。ステーションへの兵装搭載は
+     * 1クリックであり、そのtickに当たったクリックは黙って何もしない——機体が兵装を拒否したのと区別が付かない。
      */
     public boolean isParked() {
         return this.onGround() || this.getVelocity().lengthSqr() < PARKED_SPEED;
     }
 
-    /** True once the airframe has hit something hard enough to write it off. */
+    /** 機体が全損するほど強く何かに当たったら true。 */
     public boolean isCrashing() {
         return this.crashing;
     }
 
-    /** The angle the wing is meeting the airflow at, in degrees. */
+    /** 主翼が気流に対して成す角（度）。 */
     public float getAngleOfAttack() {
         return this.angleOfAttack;
     }
 
-    /** True once the wing has stopped flying, which is a matter of angle rather than speed. */
+    /** 主翼が飛ばなくなったら true。速度ではなく角度の問題。 */
     public boolean isStalled() {
         return !this.onGround() && !this.isHovering()
                 && Math.abs(this.angleOfAttack) > this.getStats().wing().stallAngle();
     }
 
     /**
-     * Whether the lift system is carrying enough of the aircraft for the wing not to matter.
+     * 揚力系が機体を十分に支えており、主翼の状態が問題にならないか。
      *
-     * <p>Asked wherever something would otherwise be alarmed by a wing that has stopped flying. It
-     * has stopped flying; that is what the nozzle is for. A helicopter answers yes always, its wing
-     * having never been what was holding it up in the first place.
+     * <p>「主翼が飛んでいない」ことに警告を出すはずの箇所から問われる。実際飛んでいないが、そのためのノズルだ。
+     * ヘリは常に yes を返す。そもそも主翼が支えていたことなど無いからだ。
      */
     public boolean isHovering() {
         if (this.isRotorcraft()) {
@@ -1083,7 +1389,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     // ------------------------------------------------------------------
-    // Ticking
+    // tick 処理
     // ------------------------------------------------------------------
 
     @Override
@@ -1096,17 +1402,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.attitudeO = new Quaternionf(this.attitude);
         this.tickGear();
         this.tickVtol();
+        this.tickSweep();
         this.tickRotor();
         this.tickLerp();
 
         if (this.isControlledByLocalInstance()) {
             if (!(this.getControllingPassenger() instanceof Player)) {
-                // Nobody at the stick: the controls centre, but the throttle stays where it was left
-                // and the aircraft flies on until something takes it out of the air.
+                // 操縦者不在: 舵は中立へ戻るが、スロットルは置かれたまま。機体は何かに落とされるまで飛び
+                // 続ける。
                 this.input = AircraftInput.NONE;
             }
 
-            // A wreck is not flown. It falls, and then it lies where it landed.
+            // 残骸は飛ばさない。落ちて、落ちた場所に横たわる。
             if (this.isWrecked()) {
                 this.wreckTick();
             } else {
@@ -1115,33 +1422,26 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
             Vec3 impactVelocity = this.getDeltaMovement();
 
-            // Ground that arrived around the aeroplane is not ground the aeroplane flew into.
+            // 機体の周りに後から現れた地面は、機体が突っ込んだ地面ではない。
             //
-            // Chunks are asked for along the flight path and made on somebody else's threads, and at
-            // a few hundred knots the asking can lose the race: the aircraft crosses air that has not
-            // been decided yet, and a moment later the hillside that was always going to be there
-            // exists, with the aeroplane inside it. Collided with in the ordinary way that is a
-            // crash, and the pilot is destroyed by terrain they never saw and could not have avoided.
+            // チャンクは飛行経路に沿って要求され別スレッドで生成されるが、数百ノットでは要求が競争に負けうる。
+            // 機体はまだ確定していない空間を横切り、次の瞬間、元々そこにあるはずだった斜面が機体を内包した形で
+            // 生成される。通常の衝突として扱えばそれは墜落であり、パイロットは見たことも避けようも無い地形に
+            // 破壊される。
             //
-            // So an aircraft already inside the world flies out of it rather than into it. Nothing
-            // else changes: a hillside met from the outside stops the aeroplane at its surface, as it
-            // always did, because the swept test in move() cannot be tunnelled through. The only way
-            // to be inside something here is to have had it appear.
+            // よって、既に世界の内側にいる機体はそこへ突っ込むのではなく外へ飛び出す。他は何も変わらない。外側
+            // から出会った斜面は従来通り表面で機体を止める。move() のスイープ判定はすり抜けられないからだ。ここで
+            // 何かの内側にいられる唯一の道は、それが後から現れたことだ。
             //
-            // Not for a wreck, though, and the difference matters: what flies an aircraft out of a
-            // hillside is its own airspeed, and a wreck's is a slow drift downwards. Pushed through
-            // the world by that with nothing to stop it -- this branch does not collide with
-            // anything -- a write-off that came down on a slope would sink through the ground and go
-            // on sinking. One embedded in a hillside simply stops there instead, which is what a
-            // wreck in a hillside ought to do.
+            // ただし残骸は除く。この違いが重要だ。機体を斜面から押し出すのは自身の対気速度だが、残骸のそれは
+            // ゆっくりした降下だけ。それで世界を押し進み、止める物も無い状態で——この分岐は何とも衝突しない——
+            // 斜面に降りた全損機は地面を沈み続けてしまう。斜面に埋まった残骸はそこで止まる方がよく、それが残骸の
+            // あるべき姿だ。
             //
-            // Out, and never further in. This branch collides with nothing, so whatever it is
-            // handed is a distance the aeroplane covers through solid rock; sideways and upwards
-            // that is the escape, but in a world made of ground, downwards is only ever deeper.
-            // Left to carry a rate of descent, an aircraft that found itself inside something low
-            // down would be posted through the floor a little further every tick and never come to
-            // anything that could stop it. Held level instead, it leaves on its airspeed, which is
-            // what was meant to be getting it out.
+            // 外へ、決して奥へは進めない。この分岐は何とも衝突しないので、与えられた距離は機体が岩盤を貫いて進む
+            // 距離になる。横と上へならそれは脱出だが、地面でできた世界では下へはただ深くなるだけだ。降下率を
+            // 持たせたままにすると、低い位置で何かの内側に入った機体は毎tick少しずつ床の下へ送り込まれ、止める
+            // 物には決して行き当たらない。水平に保てば対気速度で脱出する。元々それが脱出させるはずの物だ。
             if (!this.isWrecked() && this.insideTerrain()) {
                 this.setPos(this.getX() + impactVelocity.x,
                         this.getY() + Math.max(impactVelocity.y, 0.0),
@@ -1149,56 +1449,50 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             } else {
                 this.move(MoverType.SELF, impactVelocity);
 
-                // A wreck meeting a hillside is a wreck meeting a hillside. There is no airframe left
-                // to write off and nothing to be decided about how hard it arrived.
+                // 残骸が斜面に当たっても、それは残骸が斜面に当たっただけ。全損させる機体はもう残っておらず、
+                // どれだけ強く当たったかを判定する必要も無い。
                 if (!this.isWrecked()) {
                     this.detectCrash(impactVelocity);
                 }
             }
 
             if (!this.level().isClientSide) {
-                // Flown here, so this side is the one that knows. Measured after the move: what the
-                // aircraft covered is what everyone else has to draw, and a hillside can take a good
-                // deal of that away between the flight model asking and the world agreeing.
+                // ここで飛ばしているのでこの側が知っている。移動後に測る。機体が実際に進んだ距離こそ他が
+                // 描くべき物であり、斜面は飛行モデルの要求と世界の承認の間でそれをかなり削りうるからだ。
                 this.recordTurnRate();
                 this.publishVelocity();
             }
         } else {
-            // How far this side actually saw the aircraft move, and deliberately not the speed the
-            // pilot reports. An aircraft is registered for velocity updates, so the server
-            // broadcasts a motion packet whenever this changes — and the pilot's own client is
-            // among those told. Putting the true speed in here sent the pilot a packet every tick,
-            // and their client applied it over the velocity its flight model had just worked out,
-            // throwing away a tick of turn every tick. Left as the difference this side can see, it
-            // is a steady zero on the server and nothing is ever broadcast.
+            // この側が実際に見た移動量であって、パイロットの申告速度では意図的にない。航空機は速度更新の対象
+            // に登録されているので、これが変わるたびサーバーは motion パケットをブロードキャストする——そして
+            // パイロット自身のクライアントもその宛先に含まれる。ここに本当の速度を入れると毎tickパイロットへ
+            // パケットが飛び、そのクライアントは自分の飛行モデルが今算出した速度の上からそれを適用して、毎tick
+            // 1tick分の旋回を捨ててしまう。この側から見える差分のままにしておけばサーバーでは常に0で、何も
+            // ブロードキャストされない。
             //
-            // The over-G check is fed the same figure, which on the server is that same zero, so on
-            // a piloted aircraft it does nothing. That is how it has always been, and switching it
-            // on is a change of a different kind rather than a repair: at the Su-25's present
-            // numbers a hard turn reaches about twelve times gravity against a limit of six and a
-            // half, which would break the airframe in under half a second. The limit and the
-            // damage want retuning together before they are given teeth.
+            // 過G判定にも同じ値を渡すので、サーバーではその0となり、有人機では何もしない。従来からそうであり、
+            // 有効化するのは修理ではなく別種の変更だ。Su-25 の現在の数値では、きつい旋回で約12G に達する一方
+            // 限界は6.5G で、0.5秒足らずで機体が壊れてしまう。効かせる前に限界値と損傷量を揃えて再調整したい。
             Vec3 travelled = this.travelled();
             this.setDeltaMovement(travelled);
             this.throttle = this.entityData.get(DATA_THROTTLE);
-            // Not worked out on this side at all: there is no gate to hold here and no latch to
-            // hold it with, so what the burner is doing is whatever the side flying the aeroplane
-            // last said it was doing.
+            // この側では一切算出しない。保持すべきゲートもラッチも無いので、バーナーの状態は操縦側が最後に
+            // 申告した通りになる。
             this.reheat = this.entityData.get(DATA_AFTERBURNER);
-            // Nothing here spools an engine, but this side may be handed the aircraft at any moment
-            // — a pilot climbing out, or a client taking over the controls — and starting from a cold
-            // engine on an aeroplane that is already flying would drop it out of the sky.
+            // ここでエンジンをスプールさせる物は無いが、この側はいつ機体を引き渡されるか分からない——パイロット
+            // の降機や、クライアントの操縦引き継ぎ——ので、既に飛行中の機体で冷えたエンジンから始めると空から
+            // 落としてしまう。
             this.thrustLevel = this.throttle;
 
             Quaternionf reported = this.entityData.get(DATA_ATTITUDE);
 
             if (this.level().isClientSide) {
-                // Drawn, so it is worth keeping the aircraft turning between the attitudes that
-                // arrive rather than letting it sit still and then snap. See AircraftInterpolation.
+                // 描画されるので、届く姿勢の間も機体を回し続ける価値がある。止めておいて跳ばせるよりよい。
+                // AircraftInterpolation 参照。
                 Vector3f rate = this.entityData.get(DATA_BODY_RATE);
 
-                // Before the attitude, so a correction is taken up knowing what the aircraft is
-                // doing rather than having to work it out from the corrections themselves.
+                // 姿勢より前に行う。補正を、補正自体から逆算するのではなく機体の現在の挙動を知った上で
+                // 取り込めるようにするため。
                 this.interpolation.receiveBodyRate(rate.x(), rate.y(), rate.z());
 
                 if (this.interpolation.isNewAttitude(reported)) {
@@ -1208,15 +1502,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 this.setYRot(Attitude.heading(this.attitude));
                 this.setXRot(Attitude.elevation(this.attitude));
             } else {
-                // The server draws nothing and is the one place this value is authoritative.
-                // Extrapolating here would only feed a guess back into what it broadcasts.
+                // サーバーは何も描かないし、この値が正であるのはここだけだ。ここで外挿しても、推測を
+                // ブロードキャスト内容へ差し戻すだけになる。
                 this.attitude = new Quaternionf(reported);
             }
 
             if (!this.level().isClientSide) {
                 this.checkStructuralLoad(travelled);
-                // Flown by a client, so what goes out is what that client said. The turn rate is
-                // recorded as each of its updates lands rather than here; see reportAttitude.
+                // クライアントが飛ばしているので、出て行くのはそのクライアントの申告値。角速度はここでは
+                // なく各更新の到着時に記録する。reportAttitude 参照。
                 this.publishVelocity();
             }
         }
@@ -1230,65 +1524,79 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         if (this.level().isClientSide) {
             this.spawnFlightEffects();
         } else if (!this.isWrecked()) {
-            // A burnt-out airframe has no trigger to hold, no radar to sweep and no dispenser to fire.
+            // 焼け落ちた機体には引くトリガーも、走査するレーダーも、放出するディスペンサーも無い。
             this.tickWeapons();
             this.getSensors().tick();
             this.dispenser.tick(this.input.flare(), this.input.chaff());
         }
 
-        // Hold the chunk under us open, so flying beyond everyone's render distance does not simply
-        // stop the aircraft existing.
+        // 直下のチャンクを開いたまま保持する。全員の描画距離の外へ飛んだだけで機体が存在しなくなることを
+        // 防ぐ。
         this.heldChunks = AircraftChunkLoader.update(this, this.heldChunks);
 
         this.checkInsideBlocks();
     }
 
     /**
-     * Fires whatever the trigger is pointed at, and tells the clients what is left. Server only: the
-     * flight model is run by whoever is flying, but rounds are the server's business, so a client
-     * cannot conjure them or claim a hit.
+     * トリガーが選択している物を発射し、残数をクライアントへ伝える。サーバー限定。飛行モデルは操縦側が回すが、
+     * 弾はサーバーの管轄であり、クライアントが弾を生み出したり命中を主張したりはできない。
      */
     private void tickWeapons() {
+        this.tickDesignation();
+
+        // 照準が先、発砲が後。砲座は自分では撃たず、パイロンの側が「その砲座は今どこを向いていて、引き金は
+        // 引かれているか」を訊きに来る——だから向きはその問いより前に、この tick の物になっていないといけ
+        // ない。GunStations 参照。
+        this.stations.tick();
         this.weapons.tick(this.input.fire(), this.input.lock());
 
         if (this.weapons.consumeDirty()) {
             this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
         }
-    }
 
-    /** Selects the next weapon aboard. Called from the pilot's input packet, so server side. */
-    public void cycleWeapon() {
-        if (!this.level().isClientSide) {
-            this.weapons.selectNext();
+        if (this.stations.consumeDirty()) {
+            this.entityData.set(DATA_STATIONS, this.stations.save());
         }
     }
 
+    /** 次の搭載兵装を選択する。パイロットの入力パケットから呼ばれるのでサーバー側。 */
+    public void cycleWeapon() {
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        // 砲座を持っているパイロットにとって、このキーが巡るのはパイロンの兵装と砲座の両方だ。砲座を
+        // 持たない機体では選ぶ物が変わらないので、キーは従来通りパイロンだけを進める。
+        if (this.stations.cycle()) {
+            this.entityData.set(DATA_STATIONS, this.stations.save());
+
+            return;
+        }
+
+        this.weapons.selectNext();
+    }
+
     /**
-     * Whether the aircraft is inside the world rather than in front of it.
+     * 機体が世界の手前ではなく内側にいるか。
      *
-     * <p>Asked before every move, and true only when the ground got there second: an aeroplane that
-     * flies at a hillside is stopped at its face, so being <em>within</em> one means it appeared. On
-     * the wheels this is never asked, since an aeroplane standing on the ground is standing on it and
-     * a wheel resting in a block edge is not an emergency.
+     * <p>移動のたびに問い、true になるのは地面が後から来た場合だけ。斜面へ飛び込んだ機体はその表面で止まるので、
+     * <em>内側</em>にいるということは地面が後から現れたということだ。接地中は問わない。地面に立っている機体は
+     * 立っているだけで、車輪がブロックの縁に載っているのは緊急事態ではない。
      *
-     * <p>Being on the wheels is not the only way to be over the runway, though, and that is what the
-     * floor line is for. The last few feet of an approach are flown nose-up, and an airframe is
-     * longer than its undercarriage is tall: a flare puts the tail a good half-block below the
-     * wheels, a bank does the same to a wingtip, and the wheels are still in the air the whole time.
-     * Measured against every block alike, the aeroplane is then <em>inside</em> the runway it is
-     * about to land on, and this branch flies it out of the world — downwards, because that is the
-     * way it was going — and on down through the floor for good. So ground that reaches no higher
-     * than the wheels is the floor, not the world: {@link #floorLine}, and the same line
-     * {@link #move} already scrapes over.
+     * <p>ただし滑走路の上にいる方法は接地だけではなく、そのために床の線がある。進入の最後の数フィートは機首上げ
+     * で飛び、機体は降着装置の高さより長い。フレアは尾部を車輪より半ブロック以上下げ、バンクは翼端に同じことを
+     * するが、その間ずっと車輪は空中にある。全ブロックを一律に測ると、機体はこれから着陸する滑走路の<em>内側</em>
+     * にいることになり、この分岐が機体を世界の外へ——進行方向が下だったので下へ——飛ばし、そのまま床を抜けて
+     * 落ち続ける。よって車輪より高くない地面は世界ではなく床とする。{@link #floorLine} であり、{@link #move} が
+     * 既に擦り抜けている線と同じ物だ。
      */
     private boolean insideTerrain() {
         return !this.onGround() && !this.hasRoomHere(EMBEDDED_MARGIN, this.floorLine());
     }
 
     /**
-     * Decides whether the impact that just stopped the aircraft was survivable. The velocity from
-     * before {@link #move} is what counts: move() zeroes the blocked axes, so by the time it returns
-     * there is nothing left to measure.
+     * 機体を止めた衝突が生存可能だったかを判定する。基準になるのは {@link #move} 前の速度だ。move() は阻まれた軸
+     * を0にするので、戻ってきた時点では測る物が残っていない。
      */
     private void detectCrash(Vec3 impactVelocity) {
         if (!this.horizontalCollision && !this.verticalCollision) {
@@ -1298,40 +1606,33 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         float limit = this.getCrashSpeed();
         double safe = this.getLandingSpeed();
 
-        // Whether what just happened was a landing rather than an arrival. Two of it are not in
-        // question: the undercarriage has to be out and the aircraft the right way up on it. What
-        // the machine then did with the ground can qualify either of two ways.
+        // 今起きたのが「到達」ではなく「着陸」だったか。2点は議論の余地が無い。脚が出ていること、その上で機体
+        // が正立していること。そのうえで機体が地面に対して行ったことは、2通りのいずれかで着陸と認められる。
         //
-        // A rate of descent an undercarriage absorbs is the first, and it is what lets an aeroplane
-        // use a runway at all. A takeoff run collides with the ground on every tick of it, so the
-        // sink rate — not the speed — is the only thing that tells rolling along a field from flying
-        // into one, and a shallow dive blocks the vertical axis and slides exactly as a rollout
-        // does.
+        // 1つ目は降着装置が吸収できる降下率で、これが機体に滑走路を使わせている。離陸滑走は毎tick地面と衝突する
+        // ので、「野原を転がっている」のと「野原へ突っ込んでいる」のを区別できるのは速度ではなく沈下率だけだ。
+        // 浅い降下は鉛直軸を阻まれ、滑走とまったく同じように滑る。
         //
-        // Arriving slowly enough is the second, and it is the one the pilot can actually fly to.
-        // At or under the speed the undercarriage is rated for — the figure on their own readout,
-        // 200 km/h for an aeroplane and 50 for a helicopter — nothing about how it was flown writes
-        // the airframe off, however hard it came down at the end. This is the whole of how a
-        // helicopter lands: one comes to a stop and then descends, so it has no shallow approach to
-        // pass the sink test with, and holding it to a fraction of an aeroplane's crash speed meant
-        // that setting down at anything but a crawl destroyed it.
+        // 2つ目は十分ゆっくり到達すること。パイロットが実際に狙って飛べるのはこちらだ。降着装置の定格速度以下
+        // ——本人の計器に出ている値で、固定翼機 200km/h、ヘリ 50km/h——なら、最後にどれだけ強く降りようと、
+        // どう飛んだかで機体が全損することはない。ヘリの着陸はこれが全てだ。停止してから降下するので沈下判定を
+        // 通れる浅い進入が無く、固定翼機の墜落速度の何分の一かに縛っていた頃は、這うような速度以外での接地が
+        // 機体を破壊していた。
         boolean landing = this.gearProgress > 0.5F
                 && this.getLiftVector().y > UPRIGHT
                 && (impactVelocity.y > -safe * TOUCHDOWN_SINK || impactVelocity.length() <= safe);
 
         if (landing) {
-            // Down safely, but there is still such a thing as running into something afterwards.
-            // Measured as the speed the impact actually took away — move() has already zeroed
-            // whichever axes were blocked — so that a wingtip brushing a runway light, or the corner
-            // of a six-block-wide box catching a block edge, is the nothing it ought to be.
+            // 無事に降りた。だがその後に何かへ突っ込むことは依然としてありうる。衝突が実際に奪った速度で測る
+            // ——move() は阻まれた軸を既に0にしている——ので、翼端が滑走路灯を掠めたり、幅6ブロックの箱の角が
+            // ブロックの縁に引っ掛かったりしても、本来通り何も起きない。
             Vec3 surviving = this.getDeltaMovement();
             double before = Math.sqrt(impactVelocity.x * impactVelocity.x + impactVelocity.z * impactVelocity.z);
             double after = Math.sqrt(surviving.x * surviving.x + surviving.z * surviving.z);
 
-            // Never below the speed the machine is allowed to touch down at, whatever its crash
-            // speed says. A helicopter may set down at 50 km/h, so a skid catching the lip of a
-            // block on the way in cannot be the thing that writes it off — which it was, its crash
-            // speed being less than half of that.
+            // 墜落速度が何と言おうと、接地を許される速度を下回らせない。ヘリは 50km/h で接地してよいので、
+            // 進入中にスキッドがブロックの縁を引っ掛けたことが全損の原因になってはならない——実際そうなって
+            // いた。墜落速度がその半分未満だったからだ。
             if (this.horizontalCollision && before - after > Math.max(limit, safe)) {
                 this.crashing = true;
             }
@@ -1339,36 +1640,30 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return;
         }
 
-        // Anything else that has just met the world: how fast it was going into it, in all three
-        // axes together. Sliding along the ground after the vertical axis was blocked does not make
-        // the impact survivable, and reading only the axis that happened to be stopped is what let
-        // a dive into terrain be walked away from.
+        // それ以外で世界に出会った場合は、3軸まとめた突入速度で測る。鉛直軸を阻まれた後に地面を滑ったからと
+        // いって衝突が生存可能になるわけではないし、たまたま止まった軸だけを読んでいたせいで地形への急降下から
+        // 無傷で歩き去れていた。
         if (impactVelocity.length() > limit) {
             this.crashing = true;
         }
     }
 
     /**
-     * The reheat gate, and the burner behind it. Run once a tick by whichever side is flying, before
-     * the throttle lever is allowed to move.
+     * アフターバーナーのゲートと、その先のバーナー。操縦側が毎tick、スロットルレバーの移動を許す前に1度実行する。
      *
-     * <p><b>Why there is no key for this.</b> An afterburner is not a switch on the panel; it is the
-     * top of the throttle's own travel, past a stop the pilot has to push the lever through. So it
-     * is flown with the throttle: hold the lever open with the engine already giving everything it
-     * has and, after {@link #GATE_TICKS}, it goes through the gate. It latches there, because a
-     * throttle stays where it is put and nobody flies a supersonic dash holding a key down.
+     * <p><b>専用キーが無い理由。</b>アフターバーナーはパネルのスイッチではなく、スロットル自身の可動域の頂点に
+     * あり、パイロットがレバーを押し通すべきストッパーの向こうにある。よってスロットルで操作する。エンジンが既に
+     * 全力を出している状態でレバーを開き続け、{@link #GATE_TICKS} 後にゲートを通過する。そこでラッチされる。
+     * スロットルは置いた位置に留まる物だし、超音速ダッシュをキー押しっ放しで飛ぶ者はいない。
      *
-     * <p>Coming back out is the same gate from the other side. The first pull on the throttle takes
-     * the lever out of reheat and no further — which is what the {@code true} this can return is
-     * for — so a pilot who wanted military power gets military power rather than sliding through it
-     * on the way down. The second pull, and every one after it, moves the lever as it always did.
+     * <p>抜けるときも同じゲートを逆から通る。スロットルを引く最初の操作はレバーをアフターバーナーから外すだけで
+     * それ以上は動かない——このメソッドが返しうる {@code true} はそのためにある——ので、ミリタリー推力が欲しかった
+     * パイロットは通り過ぎずにミリタリー推力を得る。2度目以降の操作は従来通りレバーを動かす。
      *
-     * <p>What the burner then delivers chases the latch rather than matching it. Quicker than the
-     * engine spools, because lighting reheat is a match rather than a turbine coming up to speed,
-     * but not instant: the plume, the note and the shove all want a moment to arrive.
+     * <p>バーナーの実出力はラッチに一致させず追従させる。エンジンのスプールより速い——アフターバーナーの点火は
+     * タービンの回転上昇ではなくマッチの火だ——が瞬時ではない。プルームも音も推力の押しも、届くには一瞬要る。
      *
-     * @return true if this tick's throttle input was spent coming out of the gate rather than on
-     *         the lever
+     * @return このtickのスロットル入力が、レバー移動ではなくゲートからの脱出に消費されたなら true
      */
     private boolean tickAfterburner(AircraftDefinition definition) {
         AircraftDefinition.Afterburner burner = definition.engine().afterburner().orElse(null);
@@ -1381,11 +1676,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return false;
         }
 
-        // Not with the lift system out, whatever the pilot asks for. The exhaust is being turned
-        // down through a nozzle and a good deal of the engine is driving a fan in the roof: there is
-        // nowhere to put reheat, and an aeroplane that lit it in the hover would be a rocket pointed
-        // at the ground. Being held at full throttle is what a conversion looks like from in here,
-        // so without this the gate would open every single time.
+        // 揚力系を展開中はパイロットが何を要求しても不可。排気はノズルで下へ向けられ、エンジン出力のかなりが
+        // 天井のファンを回している。アフターバーナーを入れる場所は無いし、ホバリング中に点火した機体は地面へ
+        // 向いたロケットになる。ここから見た転換動作は「スロットル全開の保持」に見えるので、これが無いとゲートが
+        // 毎回開いてしまう。
         boolean converted = this.vtolProgress > 0.0F;
         boolean swallowed = false;
 
@@ -1397,7 +1691,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             swallowed = this.reheatCommanded;
             this.reheatCommanded = false;
         } else if (this.reheatCommanded) {
-            // Latched. Nothing to count towards, and nothing the pilot has to keep doing.
+            // ラッチ済み。カウントする対象も、パイロットが続けるべき操作も無い。
             this.gateHeld = GATE_TICKS;
         } else if (this.throttle >= 1.0F && this.input.throttle() > 0.0F) {
             this.reheatCommanded = ++this.gateHeld >= GATE_TICKS;
@@ -1405,9 +1699,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             this.gateHeld = 0;
         }
 
-        // And it goes out the moment the lever comes off its stop, whatever the latch says. The
-        // burner is fed by the engine in front of it, and an engine at part throttle has nothing
-        // spare to burn.
+        // ラッチが何と言おうと、レバーがストッパーから離れた瞬間に消える。バーナーは前段のエンジンから供給を
+        // 受けており、部分スロットルのエンジンに燃やす余剰は無い。
         float commanded = this.reheatCommanded && this.throttle >= 1.0F ? 1.0F : 0.0F;
         this.reheat += (commanded - this.reheat) * Mth.clamp(burner.lightRate(), 0.01F, 1.0F);
 
@@ -1416,15 +1709,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         if (!this.level().isClientSide) {
-            // Flown by this side, so this side is the one that publishes it. A client at the
-            // controls sends its own figure up instead; see reportAfterburner.
+            // この側が飛ばしているので、公開するのもこの側。操縦中のクライアントは代わりに自分の値を上げて
+            // 送る。reportAfterburner 参照。
             this.entityData.set(DATA_AFTERBURNER, this.reheat);
         }
 
         return swallowed;
     }
 
-    /** What the burner is multiplying the engine's thrust by. One with no burner, or an unlit one. */
+    /** バーナーがエンジン推力を何倍しているか。バーナー無し、または未点火なら1。 */
     private double reheatThrust() {
         if (this.reheat <= 0.0F) {
             return 1.0;
@@ -1436,13 +1729,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * The reheat setting from the client that is flying, taken on trust and mirrored to everyone
-     * else — the same arrangement, and for the same reason, as the throttle beside it.
+     * 操縦中のクライアントからのアフターバーナー設定値。信用して受け取り、他全員へ複製する——隣のスロットルと
+     * 同じ仕組み、同じ理由。
      *
-     * <p>Clamped, and refused outright by an airframe with no burner in its file, so that what
-     * arrives can only ever be a figure the aircraft could have produced itself. It matters more
-     * here than it does for the throttle: the thrust is the client's business either way, but how
-     * far a seeker can see this aeroplane is decided on this side, off this number.
+     * <p>クランプし、ファイルにバーナーが無い機体では即座に拒否するので、届く値は必ず機体が自力で出せた値になる。
+     * スロットルよりここでの重要度は高い。推力はどちらにせよクライアントの管轄だが、シーカーがこの機体をどこまで
+     * 見えるかはこの側で、この数値から決まるからだ。
      */
     public void reportAfterburner(float level) {
         float delivered = this.hasAfterburner() ? Mth.clamp(level, 0.0F, 1.0F) : 0.0F;
@@ -1457,16 +1749,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * The bang of the burner catching, heard where it happens.
+     * バーナー点火の破裂音。発生地点で聞こえる。
      *
-     * <p>Sent at its own loudness rather than with the reach in the volume slot, unlike a weapon's
-     * report: this is a noise the aeroplane makes, and the aeroplane already has a note that
-     * carries as far as its file says. What lighting the burner adds is for the pilot and for
-     * anybody it has just gone over the top of.
+     * <p>兵器の発射音と違い、volume 欄を到達距離として使わず本来の音量で送る。これは機体が出す音であり、機体には
+     * 既にファイルが指定する距離まで届く音がある。点火が加えるのはパイロットと、今頭上を通過された者のための音だ。
      *
-     * <p>The recording is looked for under this aircraft's own name and resolved on the client,
-     * which is the only side that has ever seen a resource pack. Nothing here is shipped; see
-     * {@code AfterburnerSounds}, which finds something to put in its place.
+     * <p>録音はこの機体自身の名前で探し、クライアント側で解決する。リソースパックを見たことがあるのはそちらだけ
+     * だからだ。ここには何も同梱していない。代わりを見つける {@code AfterburnerSounds} 参照。
      */
     private void playAfterburnerLight() {
         ResourceLocation id = this.getAircraftId();
@@ -1479,25 +1768,23 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * How hot this aircraft looks to something homing on heat: what the airframe is worth cold, and
-     * the burner over the top of it while it is lit.
+     * 赤外線誘導にとってこの機体がどれだけ熱く見えるか。冷えた状態の機体の値と、点火中はその上に乗るバーナー分。
      *
-     * <p>The counterpart of {@link #radarCrossSection}, and deliberately not the same figure. What
-     * a stealth aeroplane bought with its shape was a small radar return; nothing about that shape
-     * makes its exhaust any cooler, and lighting the burner throws the difference away in any case.
+     * <p>{@link #radarCrossSection} の対になる値で、意図的に同じ数字ではない。ステルス機が形状で買ったのは小さな
+     * レーダー反射であり、その形状は排気を冷たくしない。どのみち点火すれば差は帳消しになる。
      */
     public float infraredSignature() {
         AircraftDefinition.Afterburner burner = this.getStats().engine().afterburner().orElse(null);
         float clean = this.getStats().signature().heat();
 
-        return burner == null ? clean : clean * burner.heatFactor(this.reheat);
+        float lit = burner == null ? clean : clean * burner.heatFactor(this.reheat);
+
+        return lit * this.weapons.heatGain();
     }
 
     /**
-     * How far a heat-seeking head sees that entity, as a fraction of what the same head manages
-     * against the hottest thing it will ever be pointed at. Anything that is not an aeroplane is
-     * that hottest thing as far as this is concerned, which is a way of saying nothing has been
-     * decided about it.
+     * 赤外線シーカーがそのエンティティをどこまで見えるか。同じシーカーが最も熱い目標に対して出す距離に対する
+     * 割合。ここでは航空機以外は全てその最も熱い目標扱い——つまり何も決めていない、ということだ。
      */
     public static float heatVisibility(Entity entity) {
         return entity instanceof AircraftEntity aircraft
@@ -1506,12 +1793,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * One tick of flight, under whichever model this machine is flown by.
+     * 飛行1tick分。この機体が従うモデルで実行する。
      *
-     * <p>Two of them, and they are genuinely different aircraft rather than one with a switch. An
-     * aeroplane is thrown forward and held up by the air it is passing through; a helicopter carries
-     * its own airflow and is held up by it standing still. Which one applies is decided by the file:
-     * a {@code rotor} block makes the machine a helicopter, and nothing else does.
+     * <p>モデルは2つあり、切り替えスイッチ付きの1機ではなく本当に別種の機体だ。固定翼機は前へ投げ出され、通過する
+     * 空気に支えられる。ヘリは自分で気流を作り、静止したままそれに支えられる。どちらを使うかはファイルが決める。
+     * {@code rotor} ブロックがあればヘリ、それ以外に判定材料は無い。
      */
     private void flightTick() {
         AircraftDefinition definition = this.getStats();
@@ -1525,14 +1811,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * One tick of flight on a wing.
+     * 主翼で飛ぶ1tick分。
      *
-     * <p>The aircraft is not pushed along its nose. Thrust acts along the nose, gravity acts down,
-     * and the wing produces lift square to the airflow in proportion to the angle it meets that
-     * airflow at. Everything that makes an aeroplane feel like one falls out of that: it has to be
-     * rotated to leave the ground, a bank turns it because the lift tilts with the wings, hauling
-     * the nose up past the stalling angle drops it, and a hard turn bleeds speed because lift is not
-     * free.
+     * <p>機体は機首方向へ押し出されるのではない。推力は機首方向に、重力は下向きに働き、主翼は気流に対して直角に、
+     * 気流と成す角に比例した揚力を生む。「航空機らしさ」の全てはそこから出てくる。離陸には機首上げが要り、バンクは
+     * 揚力が主翼と共に傾くから旋回になり、失速角を超えて機首を引き上げれば落ち、きつい旋回は揚力がただではない
+     * ので速度を失う。
      */
     private void wingFlightTick(AircraftDefinition definition) {
         AircraftDefinition.Wing wing = definition.wing();
@@ -1543,105 +1827,123 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vec3 motion = this.getDeltaMovement();
         double speed = motion.length();
 
-        // The gate is worked before the lever moves, because it sits in the lever's travel rather
-        // than beside it: coming out of reheat is the first thing a pull on the throttle does, and
-        // on that one tick it is all it does. See tickAfterburner.
-        if (!this.tickAfterburner(definition)) {
+        // ゲートはレバー移動より先に処理する。ゲートはレバーの脇ではなくレバーの可動域の中にあるからだ。
+        // スロットルを引いたとき最初に起きるのはアフターバーナーからの離脱であり、そのtickではそれだけが起きる。
+        // tickAfterburner 参照。
+        if (this.flameout()) {
+            // タンクが空。レバーがどこにあろうとエンジンには入れる物が無い。
+        } else if (!this.tickAfterburner(definition)) {
             this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
         }
 
-        // The lever moves at once and the engine does not. A turbofan asked for full power takes
-        // several seconds to give it, and most of what a takeoff roll feels like is that wait.
+        // レバーは即座に動くがエンジンは動かない。全開を要求されたターボファンが応えるまでには数秒かかり、
+        // 離陸滑走の感触の大半はその待ち時間だ。燃料が尽きた場合もこれが働き、推力は瞬時に消えるのではなく
+        // 数秒かけて落ちる。実機のフレームアウトもそう感じられる。
         float spool = Mth.clamp(definition.engine().spoolRate(), 0.01F, 1.0F);
         this.thrustLevel += (this.throttle - this.thrustLevel) * spool;
 
-        // The air thins with height, and both the engine and the wing are working it. That is the
-        // whole of why an aircraft has a ceiling: climb far enough and there is no longer enough air
-        // to make the lift the weight needs, whatever the pilot does with the nose.
+        // 空気は高度と共に薄くなり、エンジンも主翼もそれを相手にしている。機体に上昇限度がある理由はそれが
+        // 全てだ。十分上れば、パイロットが機首をどうしようと重量に必要な揚力を作る空気が無くなる。
         double density = this.airDensity();
 
-        // How far the nozzle has swung, as the fraction of the engine that is now holding the
-        // aeroplane up rather than pushing it along. Zero for everything that cannot do it at all.
+        // ノズルの振れ量。エンジン出力のうち、前へ押すのではなく機体を支えている割合として扱う。転換能力の
+        // 無い機体では0。
         AircraftDefinition.Vtol vtol = definition.vtol().orElse(null);
         double lifting = vtol == null
                 ? 0.0
                 : Math.sin(Math.toRadians(this.vtolProgress * vtol.maxAngle()));
 
-        // Control surfaces only bite while air is flowing over them, and what they have to work with
-        // is the dynamic pressure — the air's density against the square of the speed — rather than
-        // the speed itself. One at the stalling speed at sea level, so the files' rates still mean
-        // what they meant; less than the old figure below that and more above it, which is the
-        // difference between an aeroplane that is soft near the stall and one that merely feels slow.
+        // 舵面は空気が流れている間しか効かず、その相手は速度そのものではなく動圧——空気密度×速度の2乗——だ。
+        // 海面高度の失速速度で1になるので、ファイルの角速度はこれまで通りの意味を保つ。それ未満では旧値より小さく、
+        // それ以上では大きい。これが「失速近くで甘い機体」と「単に鈍く感じる機体」の違いになる。
         double reference = Math.max(wing.stallSpeed(), 1.0E-4F);
         double pressure = density * speed * speed / (reference * reference);
-        float authority = (float) Math.min(pressure, AUTHORITY_CEILING);
+        // 動圧が尾翼と舵面に与える分。下で VTOL の噴流がパイロットの分だけを引き上げるので、区別して保持する。
+        float aeroAuthority = (float) Math.min(pressure, AUTHORITY_CEILING);
+        float authority = aeroAuthority;
 
-        // And the same surfaces that give the pilot authority damp the rotation they cause. Without
-        // this the authority climbs with speed and nothing climbs with it to settle the result, so a
-        // fast aircraft wallows instead of stiffening up the way a real one does.
-        float damping = 1.0F + handling.aeroDamping() * (float) pressure;
+        // そしてパイロットに権限を与えるのと同じ舵面が、生じた回転を減衰させる。これが無いと権限だけが速度と
+        // 共に上がり、それを収める物が伴わないので、高速機は実機のように硬くなる代わりにふらつく。
+        //
+        // 減衰も権限と同じ飽和値から取る。同じ舵面なのだから、与える力が頭打ちなら奪う力も頭打ちだ。以前は
+        // 権限だけが {@link #AUTHORITY_CEILING} で止まり、減衰は動圧のまま速度の2乗で伸び続けたので、旋回率は
+        // その商として高速域で崩壊した——1000km/h でコーナー速度の1/4、1500km/h で1/8。マッハで飛ぶ機体が
+        // 泥の中を旋回することになり、それは「硬い」ではなくただの故障だ。両方が同じ所で止まれば、コーナー
+        // 速度で得た旋回率を機体はそのまま持ち続ける。それ以上の味付けはファイルの aero_damping の仕事だ。
+        float damping = 1.0F + handling.aeroDamping() * aeroAuthority;
 
-        // A lift system does not care about the wing: what flies a hovering aeroplane is jets of its
-        // own, and without them the pilot would have the controls of a brick from the moment the
-        // wing stopped working. But those jets are still the engine's, and an engine idled back to
-        // nothing is not bleeding them any thrust to vector — so this is scaled by the same spooled
-        // thrust the forces below are, and a hover cannot be held, let alone spun on the spot, on a
-        // throttle sitting at the bottom of its travel.
+        // 揚力系は主翼を気にしない。ホバリング中の機体を飛ばすのは自前の噴流であり、それが無ければ主翼が働かなく
+        // なった瞬間からパイロットはレンガの操縦桿を握ることになる。だがその噴流もエンジンの物で、アイドルまで
+        // 絞られたエンジンは偏向させる推力を供給していない——なので下の力と同じスプール済み推力で拡縮する。
+        // スロットルを下限に置いたままではホバリングの維持どころか、その場旋回もできない。
         if (vtol != null) {
             authority = Math.max(authority, (float) (lifting * vtol.authority()) * this.thrustLevel);
         }
+
+        // パイロットの操縦桿に残る効き。ファイルの角速度に対する倍率であり、下限を持つ。
+        //
+        // 下限が要る理由は、この商が速度と共に0へ落ちるからだ。低速では動圧が小さく、権限はそれに比例する
+        // ので、失速に近づくにつれ操縦桿は何にも繋がっていない棒になる。空力としては正しいが、遊びとしては
+        // 「機体が壊れた」としか読めない——落ちていく機体で操縦桿を引いても何も起きない、という状態だ。
+        // 半分を残せば、パイロットは常に機体を向け直す手段を持つ。実機の低速域より効くが、実機のパイロット
+        // は画面越しではなく座席から機体を感じている。
+        //
+        // 尾翼には掛けない。あちらは下の weathervane が別に扱う。風見に下限を与えると、動圧の無いホバリング
+        // 中の機体が「飛行経路」——垂直上昇なら真上——へ機首を叩き込まれて背面へ裏返る。パイロットの舵と
+        // 尾翼の空力は別物であり、下限を持ってよいのは前者だけだ。
+        // 倍率は下限より内側に掛ける。下限は「遅くても機体を向け直せる」という遊びの保証であって機動性の設定
+        // ではないので、機体を鈍くする調整に巻き込んで一緒に下げてはならない。順序を逆にすると、鈍くするほど
+        // 低速域の救済まで薄くなり、最も操縦を必要とする場面が最も効かなくなる。
+        float control = Math.max(authority / damping * CONTROL_SCALE, TURN_RATE_FLOOR);
+
         float previousYRot = this.getYRot();
         float weathervaneYaw = 0.0F;
         float weathervanePitch = 0.0F;
 
-        // Commanded rates, reached over a few ticks rather than at once: a control surface has to
-        // work against the mass of the aircraft. These are rates about the aircraft's own axes, not
-        // the world's: the elevator swings the nose towards the top of the canopy wherever that is
-        // pointing, which is why a banked aircraft pulls round into a turn instead of climbing.
+        // 指令角速度。即座にではなく数tickかけて到達する。舵面は機体の質量を相手にするからだ。これらはワールド
+        // 軸ではなく機体自身の軸周りの角速度だ。昇降舵は機首をキャノピー天頂の向きへ振るので、バンクした機体は
+        // 上昇せず旋回へ引き込まれる。
         float lag = Mth.clamp(handling.controlLag(), 0.02F, 1.0F);
 
         float commandedPitch = this.limitToWing(
-                this.input.pitch() * handling.pitchRate() * authority / damping, lifting);
+                this.input.pitch() * handling.pitchRate() * control, lifting);
 
-        // On the wheels, the nose does not come up until there is enough air over the tailplane to
-        // lift it. That speed is what makes a takeoff a takeoff: the aircraft runs, the stick does
-        // nothing however hard it is pulled, and then within a few knots the nose becomes light and
-        // comes up — after which the wing is already close to flying and the aircraft leaves the
-        // ground on its own. Without the gate the pilot simply rotates on the spot and sits there
-        // nose-high waiting for the wing to catch up, dragging the tail along the runway.
+        // 接地中は、水平尾翼を持ち上げるだけの空気が流れるまで機首は上がらない。その速度こそ離陸を離陸たらしめ
+        // る。機体は走り、操縦桿はどれだけ引いても何も起きず、そして数ノットのうちに機首が軽くなって上がる——その
+        // 頃には主翼はもう飛べる状態に近く、機体は自力で地面を離れる。このゲートが無いとパイロットはその場で機首
+        // を上げ、尾部を滑走路に擦りながら主翼が追い付くのを待つ姿勢で座り込むことになる。
         float wheels = rolling ? this.rotationAuthority(wing, speed) : 1.0F;
 
-        if (rolling && commandedPitch > 0.0F) {
+        // 符号を問わず掛ける。以前は機首上げ側だけを絞っていたが、滑走路上の機首下げに押す相手は無い——前輪は
+        // もう地面に着いている——ので、通してよい理由は初めから無かった。そしてマウスで飛ばす機体の舵はちょうど
+        // 0になることがほぼ無いので、地上の機体は毎tick幾らかの機首下げを指令され続け、車輪が機体を地面の線へ
+        // 戻す力と釣り合う角度で座り込む。機首はその角度ぶん滑走路の中へ沈み、駐機した機体が地面にめり込んで
+        // 見えていた。
+        if (rolling) {
             commandedPitch *= wheels;
         }
 
-        float commandedRoll = this.input.roll() * handling.rollRate() * authority / damping;
+        float commandedRoll = this.input.roll() * handling.rollRate() * control;
 
-        // And the same for the ailerons, for the same reason: what holds an aeroplane's wings level
-        // on the runway is its undercarriage, not its controls. Left ungated they win the argument
-        // slowly — the wheels level the aircraft a quarter of the way each tick, the ailerons keep
-        // adding to it, and full deflection settles at several degrees of bank while the wheels are
-        // still firmly on the ground. They come alive as the wing takes the weight, which is the
-        // point at which they really would.
+        // 補助翼も同じ理由で同様に。滑走路上で機体の翼を水平に保っているのは操縦系ではなく降着装置だ。ゲートを
+        // 設けないと補助翼がじわじわ勝つ——車輪は毎tick機体を1/4だけ水平へ戻し、補助翼は加え続けるので、車輪が
+        // しっかり接地したまま舵一杯で数度のバンクに落ち着いてしまう。主翼が荷重を受け持つにつれて効き始める。
+        // 実機で本当に効き始めるのもそこだ。
         if (rolling) {
             commandedRoll *= wheels;
         }
 
         this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
         this.rollVelocity += (commandedRoll - this.rollVelocity) * lag;
-        this.yawVelocity += (this.input.yaw() * handling.yawRate() * authority / damping - this.yawVelocity) * lag;
+        this.yawVelocity += (this.input.yaw() * handling.yawRate() * control - this.yawVelocity) * lag;
 
-        // The nosewheel, which is a different thing entirely and the reason an aeroplane can be
-        // steered off a stand. A wheel on the ground does not care how fast the air is going past the
-        // fin, so this bypasses the authority the airflow grants and answers at once rather than
-        // through the control lag. It lets go as the rudder takes over, because a nosewheel that
-        // still bit at speed would throw the aircraft off the runway rather than track it down one.
+        // 前輪操舵。これはまったく別物で、機体が駐機場から自走で向きを変えられる理由だ。地上の車輪は垂直尾翼を
+        // 流れる空気の速さを気にしないので、気流が与える操舵権限を迂回し、操縦ラグを通さず即座に応える。方向舵が
+        // 引き継ぐにつれて手放す。高速でも噛む前輪は、機体を滑走路に沿わせるどころか外へ放り出してしまうからだ。
         //
-        // It still wants the engine, though: what steers it is hydraulic or electric power drawn
-        // off the same engine as everything else aboard, and an aircraft sitting dead cold with the
-        // throttle at the bottom of its travel has none to spare — so this is scaled by the same
-        // spooled thrust the flight controls are, and a parked aircraft cannot pivot on the spot on
-        // a throttle that is doing nothing.
+        // ただしエンジンは要る。前輪を動かすのは他の全てと同じエンジンから取る油圧か電力であり、スロットルを下限に
+        // 置いた冷えきった機体には回す余裕が無い——なので飛行操縦系と同じスプール済み推力で拡縮する。何もして
+        // いないスロットルでは、駐機中の機体はその場で向きを変えられない。
         float nosewheel = 0.0F;
 
         if (rolling) {
@@ -1654,29 +1956,26 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vec3 up = this.getLiftVector();
         Vec3 right = Attitude.right(this.attitude);
 
-        // Thrust along the nose, or under the aeroplane, or anywhere between the two. Turning the
-        // nozzle down does not merely point the same push somewhere else: a lift system is worth more
-        // than the cruise engine it is bolted to, and has to be, since nothing holds an aeroplane up
-        // at a standstill but the engine and the engine has to beat gravity to do it.
+        // 推力は機首方向、機体真下、あるいはその中間へ。ノズルを下げることは同じ押しの向きを変えるだけでは
+        // ない。揚力系は取り付け元の巡航エンジンより大きな値を持つし、そうでなければならない。停止状態で機体を
+        // 支える物はエンジンしか無く、エンジンはそれで重力に勝たねばならないからだ。
         Vec3 thrustAxis = lifting <= 0.0 ? nose : nose.scale(Math.cos(Math.asin(lifting))).add(up.scale(lifting));
         double thrust = vtol == null
                 ? definition.engine().maxThrust()
                 : Mth.lerp(lifting, definition.engine().maxThrust(), vtol.liftThrust());
 
-        // Against the air it is breathing, against what the engine is actually delivering rather
-        // than what the lever is asking for, and with the burner over the top of that.
+        // 吸い込んでいる空気に対して、レバーの要求値ではなくエンジンの実出力に対して、さらにその上へバーナー
+        // を乗せて計算する。
         Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0)
                 .add(thrustAxis.scale(thrust * this.thrustLevel * this.reheatThrust() * density));
 
-        // And a hover is not a slide. Nothing aerodynamic bites at a walking pace -- drag is a square
-        // law and squares of small numbers are nothing -- so an aeroplane nudged sideways in the
-        // hover would keep going sideways until it hit something. This is the lift system holding
-        // station, and it is the difference between hovering and merely falling slowly.
+        // そしてホバリングは滑走ではない。歩行速度では空力は何も効かない——抗力は2乗則で、小さい数の2乗は無に
+        // 等しい——ので、ホバリング中に横へ押された機体は何かに当たるまで横へ流れ続ける。これは揚力系による
+        // 位置保持であり、ホバリングと「ただゆっくり落ちている」ことの違いだ。
         //
-        // It lets go as the wing takes over, and that matters more than the holding does. Left on at
-        // all speeds it is not station-keeping but a parking brake: an aeroplane trying to accelerate
-        // out of the hover reached a fraction of its stalling speed and stayed there, so the wing
-        // never started flying and the conversion could not be made at all.
+        // 主翼が引き継ぐにつれて手放す。保持することより、この解放の方が重要だ。全速度域で効かせたままだと位置
+        // 保持ではなくパーキングブレーキになる。ホバリングから加速しようとする機体は失速速度の何分の一かで止まり、
+        // 主翼は飛び始めず、転換自体が不可能になる。
         if (lifting > 0.0 && speed > 1.0E-4) {
             double band = Math.max(wing.stallSpeed() * HOVER_BAND, 1.0E-4);
             double slow = Mth.clamp(1.0 - speed / band, 0.0, 1.0);
@@ -1689,14 +1988,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         if (speed > 1.0E-4) {
             Vec3 flow = motion.scale(1.0 / speed);
 
-            // Angle of attack: how far below the wing the air is coming from.
+            // 迎角。空気が主翼のどれだけ下から来ているか。
             this.angleOfAttack = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(up), -1.0, 1.0)));
             double liftCoefficient = wing.liftCoefficient(this.angleOfAttack)
                     * (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
+                    * this.sweepLift()
                     * this.groundEffect();
 
-            // Lift acts square to the airflow, tilted with the wings. That tilt is what turns the
-            // aircraft: bank, and the same force that was holding it up starts pulling it round.
+            // 揚力は気流に直角に働き、主翼と共に傾く。その傾きが機体を旋回させる。バンクすれば、支えていた
+            // のと同じ力が機体を回し始める。
             Vec3 liftAxis = up.subtract(flow.scale(up.dot(flow)));
 
             lift = wing.lift() * liftCoefficient * speed * speed * density;
@@ -1705,43 +2005,51 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 forces = forces.add(liftAxis.normalize().scale(lift));
             }
 
-            // Drag: what the shape costs, plus what the lift costs. The second is why a hard turn
-            // washes speed off.
-            double parasitic = wing.drag() * (1.0
+            // 抗力。形状のコストと揚力のコストの和。きつい旋回で速度が落ちるのは後者のせいだ。
+            // 吊っている物の抗力は主翼の抗力へ足す。空気は何が垂れ下がっているかを気にしないし、増槽が
+            // 「ただ航続距離が伸びるだけの選択」にならないのはこれのおかげだ——燃料と引き換えに速度と旋回を
+            // 差し出すので、積むかどうかが判断になる。抗力を書いていない兵装は0を足す。
+            // 可変翼は形状抗力そのものに掛かる。翼を後退させて減るのは翼が支払っている分であって、外に吊った
+            // 物が支払っている分ではない——増槽の抵抗は翼がどこにあろうと変わらない。だから括弧の中、兵装の
+            // 抗力を足す前に掛ける。
+            double parasitic = (wing.drag() * this.sweepDrag() * (1.0
                     + this.gearProgress * this.getGearDragPenalty()
                     + this.flapsProgress * this.getFlapsDragPenalty())
+                    + this.weapons.storeDrag())
                     * (this.input.brake() ? wing.airBrakeDrag() : 1.0);
             double drag = parasitic + wing.inducedDrag() * liftCoefficient * liftCoefficient;
             forces = forces.add(flow.scale(-drag * speed * speed * density));
             this.checkStructuralLoad(motion);
 
-            // The fin drags the nose round onto the flight path. Like the rudder, it acts about the
-            // aircraft's own vertical axis, so upside down it pulls the same way relative to the
-            // aircraft and the opposite way relative to the world, exactly as a fin does. Not while
-            // the wheels are down: on the runway it is the undercarriage that decides where the nose
-            // points, and a fin arguing with it is how an aircraft ends up weaving down the centreline.
+            // 垂直尾翼は機首を飛行経路へ引き戻す。方向舵同様、機体自身の垂直軸周りに働くので、背面では機体
+            // に対しては同じ向き、ワールドに対しては逆向きに引く。実際の垂直尾翼と同じだ。ただし脚が出ている
+            // 間は働かせない。滑走路上で機首の向きを決めるのは降着装置であり、垂直尾翼がそれと争うと機体は
+            // センターラインを蛇行することになる。
             if (!rolling) {
-                weathervaneYaw = (float) (flow.dot(right) * handling.weathervane() * authority / damping);
+                // 風見は尾翼の仕事であり、尾翼の権限は空気力学の分——動圧の分——だけだ。VTOL の噴流権限
+                // （上の authority に入っている）をここへ貸してはならない。垂直に浮き上がった機体の「飛行経路」
+                // は真上であり、推力いっぱいの風見は機首をそこへ叩き込んで機体を背面へひっくり返す。降下中なら
+                // 同じ物が機首を真下へ叩き込む。ホバリングの漂いは気流ではないので、尾翼は黙っているのが正しい。
+                // パイロットの操縦だけが噴流の権限を受け取る——ノズルの反力操縦はまさにそれ用の装備だ。
+                weathervaneYaw = (float) (flow.dot(right) * handling.weathervane() * aeroAuthority / damping);
 
-                // And the tailplane does the same about the aircraft's own lateral axis, dragging the
-                // nose down out of a high angle of attack the same way the fin drags it out of a
-                // sideslip. This is bypassed by the alpha limiter entirely -- it is not the limiter,
-                // it is what the limiter is standing in front of -- so it goes on pulling the nose
-                // back towards the airflow deep past the stall, where {@link #limitToWing} has
-                // already faded the pilot's own stick out to nothing. Without it a stalled aircraft
-                // points wherever the stick last left it and stays there while gravity alone decides
-                // where it actually goes, which is a tailslide with no way out of it but to wait.
-                weathervanePitch = (float) (flow.dot(up) * handling.weathervane() * authority / damping);
+                // 水平尾翼は機体自身の横軸周りに同じことをし、垂直尾翼が横滑りから引き戻すのと同様に、高迎角
+                // から機首を引き下げる。これは迎角リミッターを完全に迂回する——これはリミッターではなく、
+                // リミッターが前に立っている当のものだ——ので、失速の深部でも機首を気流へ引き戻し続ける。そこでは
+                // {@link #limitToWing} が既にパイロットの操縦桿を無効まで落としている。これが無いと失速機は最後に
+                // 操縦桿が残した向きを指したまま、重力だけが実際の行き先を決めることになる。待つ以外に抜け道の
+                // 無いテールスライドだ。
+                weathervanePitch = (float) (flow.dot(up) * handling.weathervane() * aeroAuthority / damping);
 
-                // And the fuselage refuses to fly sideways.
+                // そして胴体は横向きに飛ぶことを拒む。
                 motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()));
             }
         } else {
             this.angleOfAttack = 0.0F;
         }
 
-        // How much of the weight is still on the tyres. Kept for the ground handling below, and it
-        // is what makes the end of a takeoff roll go light instead of gripping to the last instant.
+        // 荷重のうちタイヤに残っている割合。下の地上操作用に保持する。離陸滑走の終盤が最後の瞬間まで食い付か
+        // ずに軽くなるのはこれのおかげだ。
         this.weightOnWheels = (float) Mth.clamp(1.0 - lift / GRAVITY, 0.0, 1.0);
 
         this.applyBodyRotation(this.rollVelocity, this.pitchVelocity + weathervanePitch,
@@ -1753,8 +2061,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             motion = this.groundTick(motion);
         }
 
-        // Only a backstop against a runaway, and only if the file asks for one: drag settles the
-        // top speed on its own.
+        // 暴走を止める最後の砦であり、ファイルが要求した場合のみ。最高速度は抗力が自ずと決める。
         if (wing.maxSpeed() > 0.0F && motion.length() > wing.maxSpeed()) {
             motion = motion.normalize().scale(wing.maxSpeed());
         }
@@ -1763,30 +2070,22 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * One tick of flight on a rotor.
+     * ローターで飛ぶ1tick分。
      *
-     * <p>The whole of a helicopter is one force. The rotor pulls square to its own disc, the disc is
-     * square to the machine hanging under it, and so pointing the machine is the only steering there
-     * is: nose down and it goes forward, banked and it goes sideways, level and it hangs there. There
-     * is no thrust along the nose to be found anywhere below, because a helicopter has none — what
-     * carries it forward is a share of the same force that is holding it up, which is exactly why one
-     * is nose-down in the cruise and why hauling the collective in a hurry makes it climb rather than
-     * accelerate.
+     * <p>ヘリの全ては1つの力だ。ローターは自身のディスクに直角に引き、ディスクは下にぶら下がる機体に直角で、
+     * だから機体を向けることが唯一の操縦になる。機首を下げれば前進し、バンクすれば横へ動き、水平なら留まる。
+     * 以下のどこにも機首方向の推力は無い。ヘリはそれを持たないからだ。前へ運ぶのは支えているのと同じ力の一部で
+     * あり、まさにそれが巡航中に機首下げになる理由であり、コレクティブを急に引くと加速ではなく上昇する理由だ。
      *
-     * <p>The cyclic therefore walks the disc round and then leaves it there, rather than springing
-     * back to level the moment the key comes up. That is what the attitude-hold system every modern
-     * helicopter carries does, and on a keyboard it is the only way to ask for a cruise at all: a key
-     * is all the way down or not down, so a stick that returned to level would leave the machine with
-     * two settings, hovering and charging, and nothing whatever between them. Levelling off is
-     * something the pilot does, exactly as it is in the real thing. The one thing the machine insists
-     * on for itself is the tilt limit, past which the disc is walked back — so a helicopter here
-     * cannot be turned over, by the pilot or by a blast or by flying into a hill.
+     * <p>よってサイクリックはディスクを動かしてそのまま置き、キーを離した瞬間に水平へ戻したりしない。現代のヘリ
+     * が全て備える姿勢保持装置の働きであり、キーボードで巡航を要求する唯一の方法でもある。キーは押し切りか非押下
+     * のどちらかなので、水平へ戻る操縦桿では機体はホバリングと全力前進の2設定しか持てず、その中間がまったく無く
+     * なる。水平に戻すのはパイロットの仕事だ。実機とまったく同じ。機体が自分で譲らないのは傾斜限界だけで、それを
+     * 超えるとディスクを戻す——だからここのヘリは、パイロットにも爆風にも丘への激突にもひっくり返されない。
      *
-     * <p>Everything aerodynamic is still here and still means what it does on an aeroplane — drag,
-     * the fin, the stub wings a gunship carries — but all of it goes as the square of the speed, and
-     * a helicopter spends its life at speeds where squares of small numbers are nothing. That is the
-     * point: what flies this machine is the rotor, and the rotor does not care whether it is going
-     * anywhere.
+     * <p>空力は依然として全て存在し、固定翼機と同じ意味を持つ——抗力、垂直尾翼、ガンシップの持つスタブウイング
+     * ——が、いずれも速度の2乗に比例し、ヘリは小さい数の2乗が無に等しい速度域で生涯を過ごす。それが要点だ。
+     * この機体を飛ばすのはローターであり、ローターはどこかへ行こうとしているかどうかを気にしない。
      */
     private void rotorFlightTick(AircraftDefinition definition, AircraftDefinition.Rotor rotor) {
         AircraftDefinition.Wing wing = definition.wing();
@@ -1797,33 +2096,37 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vec3 motion = this.getDeltaMovement();
         double speed = motion.length();
 
-        // The collective. Same lever and same keys as an aeroplane's throttle, doing a quite
-        // different job: not how fast the machine goes, but how hard the rotor pulls and therefore
-        // whether it goes up or down.
-        this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
+        // コレクティブ。固定翼機のスロットルと同じレバー・同じキーだが、仕事はまるで違う。機体の速さではなく
+        // ローターの引きの強さ、つまり上がるか下がるかを決める。
+        //
+        // 燃料が尽きればレバーは何にも繋がっていない。ローターは tickRotor で回転を落としていき、揚力は
+        // 回転数の2乗で消えるので、機体はオートローテーション——制御された降下——に入る。ローターが回って
+        // いる間は操縦できるので、降りる場所を選ぶ余地は残る。
+        if (!this.flameout()) {
+            this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
+        }
 
-        // Blade pitch answers within a moment. What takes time on a helicopter is the rotor itself,
-        // and that is wound up in tickRotor rather than here.
+        // ブレードピッチは即座に応える。ヘリで時間がかかるのはローター自体であり、それはここではなく
+        // tickRotor で回転を上げる。
         float spool = Mth.clamp(definition.engine().spoolRate(), 0.01F, 1.0F);
         this.thrustLevel += (this.throttle - this.thrustLevel) * spool;
 
         double density = this.airDensity();
         float collective = Mth.clamp(this.thrustLevel, 0.0F, 1.0F);
 
-        // Lift goes as the square of the speed the blades are turning at, so a rotor at half speed is
-        // worth a quarter of its lift and the machine is not going anywhere. This is what the wait
-        // after climbing in actually buys.
+        // 揚力はブレードの回転速度の2乗に比例するので、半速のローターは揚力1/4しか出せず機体はどこへも行けない。
+        // 乗り込んだ後の待ち時間が実際に買っているのはこれだ。
         double turning = (double) this.rotorSpeed * this.rotorSpeed;
 
-        // The fin and the stub wings, which are an aeroplane's arrangement and behave like one's: on
-        // the dynamic pressure, and on nothing whatever while the machine is standing still.
+        // 垂直尾翼とスタブウイング。固定翼機の構成であり同じように振る舞う。動圧に依存し、機体が静止している
+        // 間はまったく効かない。
         double reference = Math.max(wing.stallSpeed(), 1.0E-4F);
         double pressure = density * speed * speed / (reference * reference);
         float damping = 1.0F + handling.aeroDamping() * (float) pressure;
 
-        // And what actually flies the helicopter, which is the rotor and is unaffected by any of
-        // that. A machine at a standstill has full control and a machine at speed has no more, which
-        // is the opposite of an aeroplane and is the whole reason one can be flown into a clearing.
+        // そして実際にヘリを飛ばしている物、つまりローター。上のいずれにも影響されない。停止中の機体が完全な
+        // 操縦性を持ち、高速の機体もそれ以上は持たない。固定翼機と正反対であり、ヘリが林間の空き地へ降りられる
+        // 理由の全てだ。
         float bite = Math.min(this.rotorSpeed * this.rotorSpeed * rotor.authority(), 1.0F);
 
         float previousYRot = this.getYRot();
@@ -1832,16 +2135,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         float tilt = Mth.clamp(rotor.maxTilt(), 1.0F, 89.0F);
         float trim = Mth.clamp(rotor.trim(), 0.01F, 1.0F);
 
-        // The cyclic walks the disc round and then leaves it where it was put, which is what an
-        // attitude-hold system does and the only way a keyboard can ask for a cruise: a key is all
-        // the way down or not down at all, so a stick that sprang back to level would leave the
-        // machine with two settings, hovering and charging, and nothing whatever between them.
+        // サイクリックはディスクを動かして置いた場所に残す。姿勢保持装置の働きであり、キーボードで巡航を要求
+        // できる唯一の方法だ。キーは押し切りか非押下しかないので、水平へ戻る操縦桿では機体はホバリングと全力
+        // 前進の2設定しか持てず、その中間がまったく無くなる。
         //
-        // What is subtracted is the limiter, and it is nothing at all while the machine is inside
-        // its limits — which is where it spends its life. Past them it walks the disc back, so a
-        // helicopter cannot be tipped over, by the pilot or by a blast or by flying into a hill.
-        // Minecraft's elevation is positive nose-down, hence the negation into the nose-up figure
-        // the rest of this class works in; the bank angle is already positive with the right wing low.
+        // 差し引いているのはリミッターで、機体が限界内にいる間——生涯の大半——はまったくの0だ。限界を超えると
+        // ディスクを戻すので、ヘリはパイロットにも爆風にも丘への激突にもひっくり返されない。Minecraft の仰角は
+        // 機首下げが正なので、このクラスの他の部分で使う機首上げ表記へ符号を反転している。バンク角は右翼下げが
+        // 既に正。
         float commandedPitch = Mth.clamp(
                 this.input.pitch() * handling.pitchRate() * trim
                         - overTilt(-this.getXRot(), tilt) * rotor.stability(),
@@ -1851,9 +2152,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                         - overTilt(this.getRoll(), tilt) * rotor.stability(),
                 -handling.rollRate(), handling.rollRate()) * bite;
 
-        // On the wheels the cyclic argues with the undercarriage and loses, as it should: what holds
-        // a parked helicopter level is its wheels. It comes alive exactly as the rotor takes the
-        // weight, which is the moment a real one goes light on the skids and starts to be flown.
+        // 接地中、サイクリックは降着装置と争って負ける。それでよい。駐機中のヘリを水平に保つのは車輪だ。
+        // ローターが荷重を受け持つのと同時に効き始める。実機がスキッド上で軽くなり、飛ばされ始める瞬間だ。
         if (rolling) {
             float airborne = 1.0F - this.weightOnWheels;
 
@@ -1861,19 +2161,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             commandedRoll *= airborne;
         }
 
-        // The pedals, which are a rate and not an angle: a tail rotor swings the nose and then leaves
-        // it wherever it was put, without the machine going anywhere. An aeroplane's rudder cannot do
-        // that at all, and it is why a helicopter can look one way while travelling another.
+        // ペダル。角度ではなく角速度だ。テールローターは機首を振ってそのまま置き、機体はどこへも動かない。
+        // 固定翼機の方向舵にはまったくできない芸当で、ヘリが進行方向と別の向きを向けられる理由だ。
         float commandedYaw = this.input.yaw() * handling.yawRate() * bite / damping;
 
         this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
         this.rollVelocity += (commandedRoll - this.rollVelocity) * lag;
         this.yawVelocity += (commandedYaw - this.yawVelocity) * lag;
 
-        // A steerable tail wheel, which is the same thing a nosewheel is and is here for the same
-        // reason: rolling along the ground, the pedals turn a wheel rather than a rotor. And the
-        // same reason it wants the engine, too: nothing steers it with the collective bottomed out
-        // and no power going anywhere.
+        // 操向可能な尾輪。前輪操舵と同じ物で、ここにある理由も同じだ。地上を転がっている間、ペダルはローター
+        // ではなく車輪を回す。エンジンを必要とする理由も同じ。コレクティブを下限に置き出力がどこへも行っていない
+        // 状態では何も操向しない。
         float nosewheel = 0.0F;
 
         if (rolling) {
@@ -1889,21 +2187,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         double disc = this.rotorLift(rotor, speed);
         Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(up.scale(disc));
 
-        // Air coming from below or above meets the rotor and everything slung under it broadside;
-        // air coming from ahead meets a fuselage. The difference is most of an order of magnitude,
-        // and it is the reason a helicopter's rate of climb is quoted in feet per minute while the
-        // speed beside it is in knots — the fuselage's own drag does not begin to explain either
-        // figure. It is also what the machine falls against with the collective down, and it goes
-        // with the rotor, so one whose rotor has stopped falls like the lump of metal it now is.
+        // 上下から来る空気はローターとその下に吊られた全てに横腹から当たり、前から来る空気は胴体に当たる。
+        // 差は1桁近くあり、ヘリの上昇率がフィート/分で、隣の速度がノットで示される理由でもある——胴体自身の
+        // 抗力では両方の数字を説明し始めることすらできない。コレクティブを下げたとき機体が落下に抗う相手でも
+        // あり、ローターと連動するので、ローターが止まった機体は今やそうである金属の塊として落ちる。
         double sink = motion.y;
 
         forces = forces.add(new Vec3(0.0,
                 -rotor.discDrag() * sink * Math.abs(sink) * turning * density, 0.0));
 
-        // The fuselage is hanging off a rotor, and a rotor turning one way pushes what it is bolted
-        // to the other. The tail rotor is the answer to it, and since this follows the collective,
-        // the nose walks round whenever the machine is asked to climb — which is most of what flying
-        // one by hand consists of.
+        // 胴体はローターにぶら下がっており、一方向に回るローターは取り付け先を逆方向へ押す。テールローターが
+        // その答えだが、これはコレクティブに追従するので、上昇を要求するたび機首が振れる——手動でヘリを飛ばす
+        // 作業の大半はそれだ。
         float torqueYaw = (float) (rotor.torque() * collective * turning);
 
         double lift = 0.0;
@@ -1913,10 +2208,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
             this.angleOfAttack = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(up), -1.0, 1.0)));
 
-            // The stub wings, which on a gunship are real wings and carry a useful share of the
-            // machine at speed — they are also where the weapons hang, which is what they are for.
-            // Nothing here stalls: past the critical angle the wing simply stops helping, and the
-            // rotor was doing the work anyway.
+            // スタブウイング。ガンシップでは本物の主翼であり、高速時には機体の相応の割合を支える——兵装を
+            // 吊る場所でもあり、そちらが本来の目的だ。ここでは失速しない。臨界角を超えると主翼は単に助けるのを
+            // やめるだけで、どのみち仕事をしていたのはローターだ。
             double liftCoefficient = wing.liftCoefficient(this.angleOfAttack);
             Vec3 liftAxis = up.subtract(flow.scale(up.dot(flow)));
 
@@ -1926,13 +2220,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 forces = forces.add(liftAxis.normalize().scale(lift));
             }
 
-            // Drag, and a great deal of it: a helicopter is a shape nobody chose for going fast, and
-            // what settles its top speed is the disc running out of tilt against this.
+            // 抗力。しかも相当な量だ。ヘリは誰も速く飛ぶために選んでいない形状であり、最高速度を決めるのは
+            // これに対してディスクの傾斜が尽きる点だ。
             //
-            // Which way round it is facing matters here and does not on an aeroplane, because a
-            // helicopter can be flown in any direction it likes and an aeroplane cannot. A fuselage
-            // is a shape for going forwards; turned round it is a barn door, and without saying so
-            // the machine would reach its forward top speed flying backwards.
+            // どちらを向いているかがここでは効き、固定翼機では効かない。ヘリは好きな方向へ飛べるが固定翼機は
+            // 飛べないからだ。胴体は前進のための形状で、後ろ向きにすれば納屋の扉になる。明記しなければ、機体は
+            // 後ろ向きに飛んで前進最高速度に達してしまう。
             double bluff = Mth.lerp((1.0 - Mth.clamp(flow.dot(nose), -1.0, 1.0)) * 0.5,
                     1.0, Math.max(rotor.bluffDrag(), 1.0F));
             double drag = wing.drag() * bluff * (this.input.brake() ? wing.airBrakeDrag() : 1.0)
@@ -1942,31 +2235,27 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             this.checkStructuralLoad(motion);
 
             if (!rolling) {
-                // The fin, weakened by the same dynamic pressure everything aerodynamic here is,
-                // so a hovering machine is not dragged round onto a flight path it barely has.
+                // 垂直尾翼。ここの空力全般と同じ動圧で弱まるので、ホバリング中の機体が、ほとんど存在しない
+                // 飛行経路へ引き回されることはない。
                 double aerodynamic = Math.min(pressure, AUTHORITY_CEILING);
 
                 weathervaneYaw = (float) (flow.dot(right) * handling.weathervane() * aerodynamic / damping);
 
-                // And the fuselage's dislike of being flown sideways, which fades out with it. An
-                // aeroplane's never does, because an aeroplane is never asked to fly sideways; a
-                // helicopter is asked to constantly, and refusing would take away half of what one is
-                // worth having.
+                // そして胴体の横飛び嫌い。これも同様に薄れていく。固定翼機では決して薄れない。横に飛べと
+                // 要求されないからだ。ヘリは常時それを要求されるし、拒めばヘリの価値の半分が失われる。
                 motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()
                         * Mth.clamp(pressure, 0.0, 1.0)));
             }
 
-            // A hover is not a slide. Nothing aerodynamic bites at a walking pace, so without this a
-            // machine nudged sideways would keep going until it hit something. It lets go as the
-            // helicopter picks up speed, or it would be a parking brake rather than a hover.
+            // ホバリングは滑走ではない。歩行速度では空力は何も効かないので、これが無いと横へ押された機体は
+            // 何かに当たるまで流れ続ける。速度が乗るにつれて手放す。さもなければホバリングではなくパーキング
+            // ブレーキになる。
             //
-            // It has to be gentler than it looks, and the reason is a trap worth writing down. Since
-            // it grows with speed and then fades away again, it peaks partway up the band — at a
-            // quarter of hover_drag times the band — and that peak is a wall the machine has to be
-            // pushed over before it can go anywhere at all. Set generously it is not station-keeping
-            // but a threshold: gentle forward stick does nothing whatever, and then somewhere past
-            // it the helicopter leaps off. Keep the peak below the smallest tilt anybody would use
-            // deliberately and the wall is under the floor, where it belongs.
+            // 見た目より弱く設定する必要があり、その理由は記しておく価値のある罠だ。速度と共に増えてから薄れる
+            // ので、帯域の途中——hover_drag の1/4×帯域——で頂点を持つ。その頂点は、機体がどこかへ行く前に越え
+            // させられる壁になる。大きく取ると位置保持ではなく閾値になり、穏やかな前進操作ではまったく何も起き
+            // ず、ある点を超えた途端ヘリが飛び出す。頂点を、誰かが意図的に使う最小の傾斜より下に保てば、壁は
+            // 床下という本来あるべき場所に収まる。
             double band = Math.max(rotor.translationalSpeed() * HOVER_BAND, 1.0E-4);
             double slow = Mth.clamp(1.0 - speed / band, 0.0, 1.0);
 
@@ -1975,8 +2264,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             this.angleOfAttack = 0.0F;
         }
 
-        // How much of the machine the wheels are still carrying. Read a tick late by the cyclic gate
-        // above, which is a tick nobody can see and saves working the rotor out twice.
+        // 車輪がまだ支えている機体の割合。上のサイクリックゲートは1tick遅れでこれを読むが、誰にも見えない
+        // 1tickであり、ローターを2度計算せずに済む。
         this.weightOnWheels = (float) Mth.clamp(1.0 - (disc + lift) / GRAVITY, 0.0, 1.0);
 
         this.applyBodyRotation(this.rollVelocity, this.pitchVelocity,
@@ -1996,16 +2285,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * What the rotor is pulling, in blocks per tick squared. The whole of a helicopter's lift.
+     * ローターの引き（ブロック/tick^2）。ヘリの揚力の全て。
      *
-     * <p>Worked out here rather than inline so that the instruments can ask for the same figure the
-     * flight model is using. Everything it needs is either synced or worked out identically on every
-     * side, so the answer does not depend on running the physics.
+     * <p>インラインではなくここで算出するのは、計器が飛行モデルと同じ値を問えるようにするため。必要な物は全て
+     * 同期済みか全側で同一に算出されるので、答えは物理を回しているかどうかに依存しない。
      *
-     * <p>The translational term in it is a rotor in a hover beating air it has already thrown down
-     * and used: move the machine along and every blade reaches air nothing has touched, and the same
-     * collective is worth more. It is why one too heavy to lift off vertically can often still fly
-     * away along the ground, and why the first seconds of a departure feel like it finding its feet.
+     * <p>中の並進項は、ホバリング中のローターが既に下へ叩いて使い終わった空気を打っている状態を表す。機体を
+     * 前進させれば各ブレードが手つかずの空気に届き、同じコレクティブでより多くの揚力が出る。垂直に浮けないほど
+     * 重い機体でも地上滑走からなら飛び立てることが多い理由であり、離陸最初の数秒が「足場を見つけている」ように
+     * 感じられる理由だ。
      */
     private double rotorLift(AircraftDefinition.Rotor rotor, double speed) {
         double translational = 1.0 + rotor.translationalLift()
@@ -2017,21 +2305,20 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * How far past the angle the machine is willing to hold an attitude at it has got, in degrees.
-     * Zero while it is inside that angle, which is where a helicopter spends its life; what comes
-     * back is signed, so subtracting it from a commanded rate walks the disc the short way home.
+     * 機体が姿勢を保持してよい角度を、どれだけ超えたか（度）。その角度内——ヘリが生涯を過ごす範囲——では0。
+     * 戻り値は符号付きなので、指令角速度から引けばディスクは近い側の経路で戻る。
      */
     private static float overTilt(float angle, float limit) {
         return angle - Mth.clamp(angle, -limit, limit);
     }
 
     /**
-     * How much of a nose-up command the elevator can actually deliver while the wheels are down.
+     * 脚が出ている間、昇降舵が機首上げ指令をどれだけ実際に出せるか。
      *
-     * <p>Nothing at all until shortly before the rotation speed, then fading in over the last of the
-     * run so the nose becomes light rather than snapping up the instant a threshold is passed. The
-     * result is the takeoff a pilot expects: accelerate, feel the aircraft go light, ease the nose
-     * up, and fly off — instead of standing the aeroplane on its tail at walking pace.
+     * <p>ローテーション速度の少し手前まではまったく0で、そこから滑走の終盤にかけてフェードインする。閾値を
+     * 越えた瞬間に跳ね上がるのではなく機首が軽くなる形にするためだ。結果はパイロットが期待する離陸になる。
+     * 加速し、機体が軽くなるのを感じ、機首をそっと上げ、飛び立つ——歩行速度で尾部を接地させて機体を立てるのでは
+     * なく。
      */
     private float rotationAuthority(AircraftDefinition.Wing wing, double speed) {
         float rotate = wing.effectiveRotateSpeed();
@@ -2046,40 +2333,33 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Whether the wheels are what the aeroplane is meant to be meeting the ground with.
+     * 機体が地面に接するはずの部位が車輪かどうか。
      *
-     * <p>Undercarriage out and the aircraft the right way up on it, and nothing whatever about
-     * whether it is on the ground yet. That is the configuration the undercarriage is holding the
-     * airframe in, and it is the one question behind all three of the things that follow from
-     * having wheels: what the shape scrapes over rather than hits, what the box rolls up rather
-     * than stops against, and whether the aircraft is being held down onto the runway at all. They
-     * have to be the same question, or a kerb the shape is let through and the box is not is a wall
-     * made of nothing.
+     * <p>脚が出ていて、その上で機体が正立していること。既に接地しているかどうかは一切問わない。それが降着装置が
+     * 機体を保持している形態であり、車輪があることから導かれる3つの事柄——形状が当たらず擦り抜ける物、箱が
+     * ぶつからず乗り上げる物、機体が滑走路へ押さえ付けられているか——すべての背後にある唯一の問いだ。3つは同じ
+     * 問いでなければならない。形状は通れて箱は通れない縁石は、何も無い所に建った壁になる。
      *
-     * <p>Deliberately not {@code onGround}. That flag is the leftovers of the last collision and it
-     * is only ever true along a runway because {@link #groundTick} pushes the wheels into it; asking
-     * it here would make the undercarriage come and go with it.
+     * <p>{@code onGround} を意図的に使わない。あのフラグは直前の衝突の残りかすで、滑走路上で true になるのは
+     * {@link #groundTick} が車輪を地面へ押し込んでいるからにすぎない。ここで参照すると降着装置がそれに合わせて
+     * 出たり消えたりしてしまう。
      */
     private boolean onWheels() {
         return this.gearProgress > 0.5F && this.getLiftVector().y > UPRIGHT;
     }
 
     /**
-     * How big a step the aircraft rolls over instead of running into.
+     * 機体がぶつからず乗り越える段差の高さ。
      *
-     * <p>Only on the wheels: in the air with the gear up an aeroplane does not step over anything,
-     * and a belly landing has no wheels to do it with. On them it is the difference between an
-     * undercarriage and a wall — the collision box is a single square box six blocks across, so
-     * without this the lip of one block anywhere under it is a head-on impact, and since the
-     * aircraft must pass its own crash speed to fly at all, that impact was fatal on every takeoff
-     * from ground that was not perfectly flat.
+     * <p>脚が出ているときのみ。脚を上げた空中では何も乗り越えないし、胴体着陸には乗り越える車輪が無い。脚が出て
+     * いれば、これが降着装置と壁の違いになる——当たり判定は差し渡し6ブロックの正方形の箱1つなので、これが無いと
+     * その下のどこかにある1ブロックの縁が正面衝突になる。しかも機体は飛ぶために自身の墜落速度を超えねばならない
+     * ので、完全に平坦でない地面からの離陸は毎回その衝突で致命的になっていた。
      *
-     * <p>The same line the airframe scrapes over, and for the same reason — see {@link #onWheels}.
-     * Nothing is given away by not asking whether the wheels are down on something: vanilla only
-     * reaches for this when the move was stopped and the aircraft is either standing on the ground
-     * or coming down onto it, so what it adds is a wheels-down arrival rolling up onto the kerb it
-     * touched down against instead of being stopped dead by it. Anything taller than the step was
-     * taken out of the movement by {@link #limitToShape} before this is reached.
+     * <p>機体形状が擦り抜けるのと同じ線であり、理由も同じ——{@link #onWheels} 参照。車輪が何かに接地しているかを
+     * 問わなくても失う物は無い。バニラがこれを参照するのは移動が止められ、機体が地上に立っているか降りてきている
+     * ときだけなので、これが加えるのは「脚を出した接地時に、当たった縁石で急停止せず乗り上げる」ことだけだ。段差
+     * より高い物はここへ来る前に {@link #limitToShape} が移動から取り除いている。
      */
     @Override
     public float maxUpStep() {
@@ -2087,70 +2367,57 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Turns the aircraft about its own axes. Because the attitude is a rotation rather than a pair
-     * of angles, there is nothing here to clamp and no direction the aircraft cannot point: it will
-     * fly a loop, roll inverted, and go over the vertical without anything folding back on itself.
+     * 機体を自機軸周りに回す。姿勢が2つの角度ではなく回転なので、ここにクランプすべき物は無く、機体が向けない
+     * 方向も無い。宙返りも背面ロールも、垂直越えも、折り返しを起こさずにこなす。
      *
-     * @param roll rate about the nose, positive to the right
-     * @param pitch rate about the wings, positive nose up
-     * @param yaw rate about the aircraft's vertical, positive nose right
+     * @param roll 機首軸周りの角速度。右が正
+     * @param pitch 翼軸周りの角速度。機首上げが正
+     * @param yaw 機体垂直軸周りの角速度。機首右が正
      */
     private void applyBodyRotation(float roll, float pitch, float yaw) {
         this.setAttitude(Attitude.rotate(new Quaternionf(this.attitude), roll, pitch, yaw));
     }
 
     /**
-     * Holds the aircraft at the angle where the wing pulls hardest, instead of letting the pilot
-     * haul straight past it.
+     * 主翼が最も強く引く角度で機体を保持し、パイロットがそこを通り越して引き切るのを防ぐ。
      *
-     * <p>The elevator can swing the nose several times faster than the wing can follow the flight
-     * path round. Left alone, that means a pilot who pulls hard is at the stalling angle in a third
-     * of a second and then falling rather than turning, which is a poor reward for asking for a
-     * hard turn. So the stick is faded out as the angle of attack approaches the limit, and only in
-     * the direction that would make it worse: unloading is always allowed, and so is pulling the
-     * other way.
+     * <p>昇降舵は、主翼が飛行経路を追えるより数倍速く機首を振れる。放置すると、強く引いたパイロットは0.3秒で
+     * 失速角に達し、旋回ではなく落下することになる。きつい旋回を要求したことへの報いとしてはひどい。よって迎角が
+     * 限界に近づくにつれ操縦桿をフェードアウトさせる。悪化させる方向のみで、荷重を抜く操作は常に許可され、逆へ
+     * 引く操作も許可される。
      *
-     * <p>The result settles just under the limit, which is exactly where the tightest turn is.
+     * <p>結果は限界のすぐ下に落ち着く。そこがまさに最小旋回半径の点だ。
      */
     private float limitToWing(float commanded, double lifting) {
         AircraftDefinition.Handling handling = this.getStats().handling();
         AircraftDefinition.Wing wing = this.getStats().wing();
 
-        // Not on the runway. Rolling along the ground the angle of attack is simply the angle the
-        // aircraft is sitting at, and the rotation needed to leave the ground is most of the stalling
-        // angle: a limiter that reads that as an impending stall fades the stick out exactly when the
-        // pilot is asking for the one thing the aircraft has to do, and the takeoff turns into a long
-        // wait for the wing to catch up with a nose it was never allowed to raise.
+        // 滑走路上では働かせない。地上を転がっている間、迎角は単に機体が座っている角度であり、離陸に必要な
+        // 機首上げは失速角の大半を占める。それを失速の予兆と読むリミッターは、パイロットが機体に必要な唯一の
+        // ことを要求したまさにその瞬間に操縦桿を殺し、離陸は「上げることを許されなかった機首に主翼が追い付くの
+        // を延々と待つ作業」になる。
         if (this.onGround()) {
             return commanded;
         }
 
-        // The angle that stalls the wing, for a file that wants that held to. Left unset -- an
-        // {@code alpha_limit} of one -- an airframe with nothing else limiting it flies past the
-        // stall exactly as it always could.
+        // 主翼が失速する角度。ファイルがそこで保持したい場合に使う。未設定——{@code alpha_limit} が1——なら、
+        // 他に制限の無い機体は従来通り失速を越えて飛べる。
         float limit = handling.alphaLimit() < 1.0F
                 ? wing.stallAngle() * handling.alphaLimit()
                 : Float.MAX_VALUE;
 
-        // The other half of a fly-by-wire limiter: not just the angle that stalls the wing, but the
-        // angle that overstresses it. Load climbs with the square of speed at a fixed angle of
-        // attack, so the angle worth flying at falls the faster the aircraft goes -- worked out here
-        // by solving the load equation {@link #getLoadFactor} uses backwards for the angle that
-        // reaches {@code maxG} at the current speed, and holding to whichever of the two limits is
-        // tighter. Without this the alpha limiter alone lets a pilot pull the same angle at any
-        // speed at all, which the wing cannot survive doing at three times what it was stressed for.
-        float maxG = this.getStats().airframe().maxG();
-
-        if (maxG > 0.0F) {
-            double speed = this.getDeltaMovement().length();
-            double denom = wing.lift() * wing.liftSlope() * speed * speed;
-
-            if (denom > 1.0E-9) {
-                float gLimit = (float) Math.toDegrees(maxG * GRAVITY / denom);
-                limit = Math.min(limit, gLimit);
-            }
-        }
-
+        // ここには荷重によるリミッターも居た。速いほど許される迎角を下げ、{@code max_g} に達する角度で操縦桿を
+        // フェードアウトさせる物で、意図的に外してある。
+        //
+        // 理屈は正しかったが、操縦席では「引いたのに機体が戻される」としか読めなかった。速度が上がるほど許され
+        // る角度は下がるので、パイロットが最も強く引きたい瞬間——速い機体できつい旋回に入る瞬間——にちょうど
+        // 操縦桿が抜ける。しかも抜ける理由は画面のどこにも出ない。荷重計だけが理由を知っていて、それは数字が
+        // 動くだけの1行だ。守られていることが分からない保護は、故障と区別が付かない。
+        //
+        // 過荷重そのものは今も存在する。{@link #checkStructuralLoad} が機体を歪ませるので、引き切れば主翼は
+        // 外れる。違いは、それがパイロットの選択の結果になったことだ——リミッターは選ばせずに防いでいた。
+        // 迎角リミッター（上の {@code alpha_limit}）は残してある。あちらが防ぐのは失速であって荷重ではなく、
+        // 失速は「引いたのに曲がらない」であって「引いたのに戻される」ではない。
         if (limit >= Float.MAX_VALUE || limit <= 0.0F || commanded * this.angleOfAttack <= 0.0F) {
             return commanded;
         }
@@ -2159,20 +2426,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         float over = (Math.abs(this.angleOfAttack) - bite) / Math.max(limit - bite, 1.0E-3F);
         float limited = commanded * Mth.clamp(1.0F - over, 0.0F, 1.0F);
 
-        // And the limiter stands aside for the lift system, in proportion to how much of the weight
-        // it has taken. An aeroplane going straight up meets its own airflow from directly above, so
-        // the wing reads ninety degrees of angle of attack and the limiter -- which exists to stop a
-        // pilot stalling that wing -- refuses to let the nose come down at all. Which is the one
-        // control input a vertical climb is entirely about: nothing about a hover is being flown by
-        // the wing, and there is nothing there to protect.
+        // そしてリミッターは、揚力系が引き受けた荷重の割合に応じて道を譲る。真上へ上がる機体は自分の気流を真上
+        // から受けるので主翼は迎角90度を読み、主翼の失速を防ぐために存在するリミッターは機首下げを一切許さなく
+        // なる。垂直上昇で唯一意味のある操作がそれなのに、だ。ホバリングは主翼で飛んでいるわけではなく、そこに
+        // 守るべき物は何も無い。
         return (float) Mth.lerp(lifting, limited, commanded);
     }
 
     /**
-     * Bends the airframe if the pilot pulls harder than it is stressed for. Applied on whichever
-     * side is watching: the piloting client works it out from the aerodynamics it is running, and
-     * the server works it out again from the attitude and the distance covered, so the damage does
-     * not depend on being told about it.
+     * パイロットが設計耐Gを超えて引いた場合に機体を歪ませる。見ている側で適用する。操縦クライアントは自分が
+     * 回している空力から算出し、サーバーは姿勢と移動距離から改めて算出するので、損傷は通知に依存しない。
      */
     private void checkStructuralLoad(Vec3 velocity) {
         float limit = this.getStats().airframe().maxG();
@@ -2183,54 +2446,58 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         float load = this.getLoadFactor(velocity);
 
-        // Pulled hard enough for long enough, the wings come off in the air rather than waiting for
-        // something to shoot them off.
+        // 十分強く十分長く引けば、撃ち落とされるのを待たずに空中で主翼が外れる。
         if (load > limit && this.wound((load - limit) * OVER_G_DAMAGE)) {
             this.crash();
         }
     }
 
     /**
-     * Wheels on the ground: rolling friction along the aircraft, scrub across it, brakes, and an
-     * attitude the undercarriage allows.
+     * 接地中の処理。機体前後方向の転がり摩擦、横方向のスクラブ、ブレーキ、そして降着装置が許す姿勢。
      *
-     * <p>A tyre rolls one way and scrubs the other, and that difference is the whole of why an
-     * aircraft tracks down a runway rather than sliding about on it. Damping the ground speed evenly
-     * in both directions, which is what this used to do, gives an aeroplane on wheels the manners of
-     * one on ice.
+     * <p>タイヤは一方向へ転がり、直交方向へは擦れる。その差こそが、機体が滑走路上を滑り回らずに真っ直ぐ走る理由
+     * の全てだ。以前のように地上速度を両方向へ均等に減衰させると、車輪の上の機体は氷上の機体のような振る舞いに
+     * なる。
      *
-     * <p>Both figures are scaled by how much weight is left on the tyres. Friction acts through the
-     * load carrying it, so as the wing takes the aircraft's weight the wheels stop gripping, and a
-     * takeoff roll goes light towards the end instead of holding on until it steps into the air.
+     * <p>両方の値をタイヤに残る荷重で拡縮する。摩擦はそれを支える荷重を通して働くので、主翼が機体重量を受け持つ
+     * につれ車輪はグリップを失い、離陸滑走は空中へ踏み出す瞬間まで食い付くのではなく終盤で軽くなる。
      *
-     * <p>What is deliberately <em>not</em> here is a pivot about the main wheels. A real aeroplane
-     * rotates about them and its centre rises as the nose comes up; an entity's box is axis-aligned
-     * and does not tilt, so there is nothing that rotation would push into the runway and nothing to
-     * compensate for. Adding the rise anyway is worse than leaving it out — it is vertical speed the
-     * wing did not make, so the aircraft is lifted off the ground by the act of rotating and then
-     * dropped back on it by gravity, which reads as a bounce rather than a rotation. The nose coming
-     * up over a second or so, and the wing taking the weight as it does, is the whole of the effect
-     * worth having, and both of those are real here.
+     * <p>意図的に<em>入れていない</em>のが主脚周りの回転だ。実機は主脚を軸に回転し、機首が上がるにつれ重心が
+     * 上がる。だがエンティティの箱は軸整列で傾かないので、その回転が滑走路へ押し込む物も、補正すべき物も無い。
+     * それでも上昇分を足すと、入れないより悪くなる——主翼が作っていない鉛直速度なので、機首上げ動作自体が機体を
+     * 持ち上げ、重力が地面へ落とし戻す。回転ではなくバウンドに見える。1秒ほどかけて機首が上がり、それに伴って
+     * 主翼が荷重を受け持つ、というのが持つ価値のある効果の全てで、その両方はここで本物だ。
      */
     private Vec3 groundTick(Vec3 motion) {
-        // The wheels decide the attitude, not the pilot: wings level, and the nose somewhere between
-        // sitting on the nosewheel and rotated as far as the tail will allow.
-        float rotation = Mth.clamp(this.getXRot(), -GROUND_PITCH_LIMIT, 0.0F);
+        // 姿勢を決めるのはパイロットではなく車輪であり、車輪が載っているのは地面だ。翼は地面に沿い、機首はその
+        // 線から尾部が許す最大の機首上げまでのどこかに収まる。
+        Slope slope = this.groundSlope();
+        float surface = -slope.pitch();
 
-        if (this.input.pitch() == 0.0F) {
+        // パイロットが保持している機首上げ。地面そのものの傾きではなく、そこからどれだけ引き起こしているかだ。
+        // 差を取らないと、上り坂に立っているだけの機体が「もう引き起こし済み」と読まれ、坂の上では機首が上がら
+        // なくなる。
+        float rotation = Mth.clamp(this.getXRot() - surface, -GROUND_PITCH_LIMIT, 0.0F);
+
+        // 機首上げを保持するのは、パイロットが実際に引いている間だけ。「入力がちょうど0か」ではなく「引いて
+        // いるか」を問う。マウスで飛ばす機体の舵はちょうど0になることがほぼ無く、0との比較では一度上がった機首が
+        // 滑走の残り全部にわたって上がったままになる。
+        if (this.input.pitch() <= 0.0F) {
             rotation = approach(rotation, 0.0F, 2.0F);
         }
 
-        this.setAttitude(new Quaternionf(this.attitude)
-                .slerp(Attitude.of(this.getYRot(), rotation), GROUND_LEVELLING));
+        this.setAttitude(new Quaternionf(this.attitude).slerp(
+                Attitude.of(this.getYRot(), surface + rotation)
+                        .rotateZ((float) Math.toRadians(slope.bank())),
+                GROUND_LEVELLING));
 
         AircraftDefinition.Undercarriage gear = this.getStats().landingGear();
 
         double along = this.input.brake() ? gear.brakeFriction() : gear.rollingFriction();
         double across = gear.lateralFriction();
 
-        // Only through the weight the tyres are still carrying. Nothing on the wheels, nothing to
-        // rub: a wing holding the whole aircraft up leaves the ground no say in where it goes.
+        // タイヤに残る荷重を通してのみ働く。車輪に荷重が無ければ擦る物も無い。主翼が機体全体を支えている状態
+        // では、行き先について地面に発言権は無い。
         along = Mth.lerp(this.weightOnWheels, 1.0, along);
         across = Mth.lerp(this.weightOnWheels, 1.0, across);
 
@@ -2246,39 +2513,118 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             ground = forwards.scale(ground.dot(forwards) * along)
                     .add(sideways.scale(ground.dot(sideways) * across));
         } else {
-            // Pointing straight up or straight down, which is not a thing wheels have an opinion
-            // about. Fall back to slowing it evenly rather than dividing by nothing.
+            // 真上か真下を向いている。車輪が意見を持つ状況ではない。0で割らず、均等に減速させる方へ倒す。
             ground = ground.scale(along);
         }
 
-        // And the wheels are kept pressed onto the runway. Settled at exactly nothing — which is
-        // what clamping a sinking aeroplane at zero comes to — the aircraft asks to move along a
-        // perfectly level line, meets nothing below it, and vanilla concludes it is standing on
-        // nothing: onGround goes out on the very next tick, comes back on the one after it
-        // when gravity has dropped the aeroplane onto the ground again, and flickers like that for
-        // the whole of a takeoff roll. Everything that hangs off it flickers with it — the tyres'
-        // grip, the levelling, and above all the step the undercarriage is allowed to climb, so a
-        // kerb it should roll straight over is a wall on every other tick. One block is enough to
-        // stop an aeroplane dead that way, which is what this is here to prevent.
+        // そして車輪は滑走路へ押し付け続ける。ちょうど0に落ち着かせると——沈下中の機体を0でクランプするとそう
+        // なる——機体は完全に水平な線に沿って移動しようとし、下に何も出会わず、バニラは「何の上にも立っていない」
+        // と結論する。onGround は次のtickで消え、その次のtickで重力が機体を地面へ落とすと戻り、離陸滑走の間ずっと
+        // その明滅を続ける。そこにぶら下がる全て——タイヤのグリップ、水平化、とりわけ降着装置が乗り越えてよい
+        // 段差——も一緒に明滅するので、本来なら真っ直ぐ乗り越える縁石が1tickおきに壁になる。それだけで1ブロック
+        // が機体を急停止させうる。これはそれを防ぐためにある。
         //
-        // One tick of the weight the wheels are carrying, and no more. The floor takes it, which is
-        // all that is wanted; anything heavier would start to read as a rate of descent, and
-        // detectCrash would stop calling a rollout a rollout — see TOUCHDOWN_SINK.
+        // 車輪が支える荷重の1tick分だけで、それ以上ではない。床がそれを受け止めればそれで足りる。これより重く
+        // すると降下率として読まれ始め、detectCrash が滑走を滑走と呼ばなくなる——TOUCHDOWN_SINK 参照。
         //
-        // Only while the wheels are what is touching. On its belly there is nothing to hold the
-        // aircraft down onto, and an arrival there is still an arrival.
+        // 接している物が車輪である間のみ。胴体着陸では押し付ける先が無いし、そこでの接地は依然として「到達」だ。
         double onto = this.onWheels() ? -GRAVITY : 0.0;
 
         return new Vec3(ground.x, Math.max(motion.y, onto), ground.z);
     }
 
+    /** 車輪の下の地面が機体へ与える傾き（度）。機首上げが正、右翼下げが正。 */
+    private record Slope(float pitch, float bank) {
+    }
+
     /**
-     * How much lift the wing is making compared with what it would make at the same speed and angle
-     * in free air.
+     * 降着装置の四隅の下の地面を読み、機体が寝るべき傾きを求める。
      *
-     * <p>Close to the ground the wing works against its own reflection and makes more lift for the
-     * same angle. It is what an aircraft rides off the runway on, and what makes it float down the
-     * last few feet of a landing instead of arriving. Fully gone by a wingspan's height.
+     * <p>1本ではなく4本のプローブを使う。1本では地面がどちらへ傾いているか分からないからだ。前2本と後2本の差が
+     * ピッチ、左2本と右2本の差がバンク。穴の上に張り出した隅は「無し」と読まれ両方から除外されるので、溝に車輪を
+     * 出した機体は水平のまま固まらず前のめりになる。{@code GroundVehicleEntity} が履帯に対して行っているのと同じ
+     * 処理であり、傾斜地に置かれた機体が水平に浮いて片側を地面へ埋めるのをやめさせるのが目的だ。
+     *
+     * <p>接地面は素の直方体の底面——降着装置が置かれている当の場所——を正方形として取る。ファイルに輪距や軸距は
+     * 書かれておらず、そもそも読み値から求まるのは傾斜「角」なので、接地面の大きさが変えるのは角度そのものではなく
+     * どれだけ広い範囲を均すかだけだ。大きい機体ほど広く読み、細かい凸凹を無視する。それは望ましい方向でもある。
+     *
+     * <p>読み値はそのまま採らない。呼び出し側の slerp が姿勢を毎tick一部だけ寄せるので、隅が段差を越えた瞬間に
+     * 丸1ブロック変化する読み値も、機体の上では滑らかな動きになる。
+     */
+    private Slope groundSlope() {
+        double half = Math.max(this.getStats().hitbox().width(), 1.0F) * 0.5;
+        float radians = (float) Math.toRadians(this.getYRot());
+        Vec3 forward = new Vec3(-Mth.sin(radians), 0.0, Mth.cos(radians));
+        Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
+
+        Vec3 centre = this.position();
+        double frontLeft = this.groundUnder(centre.add(forward.scale(half)).subtract(right.scale(half)));
+        double frontRight = this.groundUnder(centre.add(forward.scale(half)).add(right.scale(half)));
+        double rearLeft = this.groundUnder(centre.subtract(forward.scale(half)).subtract(right.scale(half)));
+        double rearRight = this.groundUnder(centre.subtract(forward.scale(half)).add(right.scale(half)));
+
+        // 下に何も無ければ水平と読む。車輪が何にも載っていない機体が向かうべき姿勢はそれだ。
+        float pitch = slopeAngle(mean(frontLeft, frontRight), mean(rearLeft, rearRight), half * 2.0);
+        float bank = slopeAngle(mean(frontLeft, rearLeft), mean(frontRight, rearRight), half * 2.0);
+
+        // 上限を設けるのは、読み違え1つが機体を機首で立たせないため。これを超える地形は降着装置が沿う相手では
+        // なく、機体が突っ込む相手だ。
+        return new Slope(Mth.clamp(pitch, -GROUND_SLOPE_LIMIT, GROUND_SLOPE_LIMIT),
+                Mth.clamp(bank, -GROUND_SLOPE_LIMIT, GROUND_SLOPE_LIMIT));
+    }
+
+    /**
+     * ある地点の下の地面の高さ。届く範囲に無ければ {@link Double#NaN}。
+     *
+     * <p>ハイトマップではなくトレースで求める。ハイトマップは格納庫の中も橋の上も知らないが、機体はその両方に
+     * 立つからだ。トレースは短く——機体の上下数ブロック——接地面の内側に収まる。機体がそこに立っている以上、
+     * その範囲は定義上ロード済みだ。接地中にしか呼ばれないので、{@link #heightAboveGround} が避けている「未ロード
+     * の地形をtickスレッド上で生成してしまう」問題はここには無い。
+     *
+     * <p>車輪が乗り越えられる高さより上の読み値は捨てる。プローブは素の直方体の隅ちょうどに立つので、機体の脇に
+     * 壁があればトレースはその境界面上を降りることになり、壁の天端を「車輪の下の地面」として持ち帰りうる。車輪が
+     * 立てない高さの物は、機体が寝るべき地面ではない。
+     */
+    private double groundUnder(Vec3 where) {
+        Vec3 from = new Vec3(where.x, this.getY() + GROUND_PROBE_ABOVE, where.z);
+        Vec3 to = new Vec3(where.x, this.getY() - GROUND_PROBE_BELOW, where.z);
+        BlockHitResult hit = this.level().clip(
+                new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
+
+        if (hit.getType() == HitResult.Type.MISS) {
+            return Double.NaN;
+        }
+
+        double ground = hit.getLocation().y;
+
+        return ground > this.getY() + this.getStats().landingGear().climbHeight() ? Double.NaN : ground;
+    }
+
+    /** ある区間の高低差から傾斜角（度）を求める。 */
+    private static float slopeAngle(double high, double low, double span) {
+        if (Double.isNaN(high) || Double.isNaN(low) || span <= 0.0) {
+            return 0.0F;
+        }
+
+        return (float) (Math.atan2(high - low, span) * (180.0 / Math.PI));
+    }
+
+    /** 2つの読み値の平均。片方しか有効でなければその値。 */
+    private static double mean(double a, double b) {
+        if (Double.isNaN(a)) {
+            return b;
+        }
+
+        return Double.isNaN(b) ? a : (a + b) * 0.5;
+    }
+
+    /**
+     * 自由大気中の同じ速度・同じ角度と比べて、主翼が今どれだけの揚力を出しているか。
+     *
+     * <p>地面近くでは主翼は自身の鏡像に対して働き、同じ角度でより多くの揚力を出す。機体が滑走路から浮き上がる
+     * のに使う物であり、着陸最後の数フィートで「到達」ではなく浮くようにしている物だ。翼幅ぶんの高度で完全に
+     * 消える。
      */
     private double groundEffect() {
         AircraftDefinition.Wing wing = this.getStats().wing();
@@ -2298,22 +2644,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Height above whatever is underneath, in blocks.
+     * 直下の物からの高度（ブロック）。
      *
-     * <p>Read off the heightmap rather than traced: this is wanted every tick, it only has to be
-     * right to within a block for the ground effect to look after itself, and tracing a line down
-     * from an aircraft over unloaded ground would generate the terrain to trace it against.
+     * <p>トレースせずハイトマップから読む。毎tick必要であり、地面効果が成立するにはブロック単位の精度で足りる
+     * うえ、未ロードの地面の上でトレースを下ろすとトレース相手の地形を生成してしまうからだ。
      *
-     * <p>The chunk is asked for without being allowed to load or generate — that is what the
-     * {@code false} means, and it also means a chunk short of fully generated comes back as nothing
-     * — and the height is read off the chunk itself. Asking the level instead is the trap:
-     * {@code Level#getHeight} fetches the chunk with loading allowed, so it quietly generates
-     * whatever is not there yet, on the tick thread, stalling the whole server while it happens.
-     * {@code hasChunkAt} does not guard against it either, since it answers for a chunk that merely
-     * exists at some earlier stage. This aircraft is always ticking by design, so one flying itself
-     * over ground nobody has visited would carve out a corridor of new terrain purely to ask how
-     * high it was above it. Out there the answer does not matter anyway: no chunk, no ground effect,
-     * which is the truth at altitude.
+     * <p>チャンクはロードも生成も許さずに要求する——{@code false} の意味であり、生成途中のチャンクが null として
+     * 返ることも意味する——そして高さはチャンク自身から読む。代わりにレベルへ問うのが罠だ。
+     * {@code Level#getHeight} はロードを許してチャンクを取得するので、まだ無い物をtickスレッド上で黙って生成し、
+     * その間サーバー全体を止める。{@code hasChunkAt} も防げない。より早い段階で存在するだけのチャンクにも true
+     * を返すからだ。この機体は設計上常にtickするので、誰も訪れていない地面の上を自律飛行する機体は、高度を問う
+     * ためだけに新規地形の回廊を掘ることになる。どのみちその外では答えに意味が無い。チャンクが無ければ地面効果も
+     * 無く、それが高高度での真実だ。
      */
     private double heightAboveGround() {
         if (this.onGround()) {
@@ -2332,37 +2674,32 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * How thick the air is here, as a multiple of what the files' figures assume.
+     * ここでの空気の濃さ。ファイルの諸元が前提とする値に対する倍数。
      *
-     * <p>Thrust and lift are both worked against it, so an aircraft climbing runs out of engine and
-     * wing together and settles at a ceiling rather than climbing for ever. Floored, because air that
-     * reaches nothing turns a ceiling into a trapdoor.
+     * <p>推力も揚力もこれに対して計算されるので、上昇する機体はエンジンと主翼を同時に使い切り、無限に上らず
+     * 上昇限度に落ち着く。下限を設けてあるのは、0に達する空気が上昇限度を落とし穴に変えてしまうからだ。
      */
     private double airDensity() {
         double sea = this.getStats().engine().seaLevelDensity();
         double thinning = Math.pow(2.0, -(this.getY() - DENSITY_DATUM) / DENSITY_SCALE);
-        // The floor cannot be above the ceiling, however odd a figure the file names for its air.
+        // ファイルが空気について妙な値を指定していても、下限が上限を超えてはならない。
         double floor = Math.min(THINNEST_AIR, sea);
 
         return Mth.clamp(sea * thinning, floor, sea);
     }
 
     /**
-     * How fast the aircraft is really going, in blocks a tick, on whichever side is asking.
+     * 機体の実速度（ブロック/tick）。どの側から問われても答える。
      *
-     * <p>Read this rather than the delta movement: only one machine runs the flight model, and every
-     * other copy of the aircraft holds a delta movement that means nothing. The side that is flying
-     * measures it; every other side is told, which is the same figure a tick later rather than a
-     * guess. Anything that needs to know how fast an aeroplane is going — instruments, the speed a
-     * weapon leaves with, the prediction that draws it — should come here.
+     * <p>デルタ移動ではなくこちらを読むこと。飛行モデルを回すのは1台だけで、他のコピーが持つデルタ移動は無意味
+     * だからだ。操縦側が測定し、他の側へは送られる。推測ではなく1tick遅れの同じ値だ。機体の速度を知る必要がある
+     * 物——計器、兵器の初速、描画用の予測——は全てここへ来るべきだ。
      */
     public Vec3 getVelocity() {
-        // On the server, an aircraft with a pilot at the stick is not moved by anything here: its
-        // position arrives in packets, and those are applied between ticks, after the old position
-        // has been stamped. Measured from here it has therefore not moved at all this tick, and the
-        // difference is flatly zero however fast it is really going — which quietly robbed every
-        // weapon fired from it of the speed it should have left with. The pilot's own figure is the
-        // only truthful answer on that side.
+        // サーバーでは、パイロットが操縦中の機体をここで動かす物は無い。位置はパケットで届き、それらは旧位置が
+        // 記録された後、tickの合間に適用される。よってここから測るとこのtickではまったく動いておらず、実際の速度に
+        // かかわらず差は完全に0になる——それが、そこから発射される全兵器の初速を黙って奪っていた。この側で正直な
+        // 答えはパイロット自身の申告値だけだ。
         if (this.isControlledByLocalInstance()) {
             return this.travelled();
         }
@@ -2371,32 +2708,29 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return this.pilotVelocity;
         }
 
-        // A client that is not flying it is told, for the same reason the server is: what it can see
-        // of the movement is a drawn approximation of it, smoothed and predicted, and the instruments
-        // should read the aircraft rather than the drawing of it.
+        // 操縦していないクライアントへも、サーバーと同じ理由で送る。そこから見える動きは平滑化・予測された
+        // 描画上の近似であり、計器は描画ではなく機体そのものを読むべきだからだ。
         Vector3f reported = this.entityData.get(DATA_VELOCITY);
 
         return new Vec3(reported.x(), reported.y(), reported.z());
     }
 
     /**
-     * How far the aircraft moved over the last tick as far as <em>this</em> side could see, which on
-     * the server is nothing at all while somebody else is flying it.
+     * <em>この</em>側から見えた直前1tickの移動量。他者が操縦中のサーバーでは完全に0になる。
      *
-     * <p>Almost nothing wants this: {@link #getVelocity()} is the honest answer and is what to reach
-     * for. This is here for the one thing that must not be told the truth — the delta movement the
-     * server keeps for a piloted aircraft, which is broadcast to the pilot and would fight their own
-     * flight model if it held anything real.
+     * <p>これを必要とする物はほぼ無い。正直な答えは {@link #getVelocity()} であり、参照すべきはそちらだ。これが
+     * あるのは真実を伝えてはならない唯一の相手——有人機についてサーバーが保持するデルタ移動——のためだ。それは
+     * パイロットへブロードキャストされ、実値を持てば本人の飛行モデルと衝突してしまう。
      */
     private Vec3 travelled() {
         return this.position().subtract(this.xOld, this.yOld, this.zOld);
     }
 
     /**
-     * Told by the pilot's client how fast it is really going, once a tick.
+     * パイロットのクライアントから毎tick、実速度の通知を受ける。
      *
-     * <p>Clamped, because it arrives from a client and is used to throw things: without a limit it
-     * would be a way to fire a cannon round at any speed the sender liked.
+     * <p>クランプする。クライアントから届き、物を投げるのに使われるからだ。制限が無ければ、送信者の好きな速度で
+     * 機関砲弾を撃つ手段になってしまう。
      */
     public void setPilotVelocity(Vec3 velocity) {
         double speed = velocity.length();
@@ -2405,18 +2739,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * How many times its own weight the aircraft is currently pulling. One is level flight, zero is
-     * weightless, and beyond what the airframe is stressed for it starts to bend.
+     * 機体が現在何G を引いているか。1が水平飛行、0が無重量。設計耐Gを超えると機体が歪み始める。
      */
     public float getLoadFactor(Vec3 velocity) {
         double speed = velocity.length();
 
         AircraftDefinition.Rotor rotor = this.getStats().rotor().orElse(null);
 
-        // A helicopter has no wing to read this off, and does not need one: what it is pulling is
-        // whatever the rotor is pulling, which is the same figure hovering as it is in a turn.
-        // Honest on every side too, unlike the wing figure below — nothing here depends on running
-        // the flight model, so the server and every onlooker get the same answer as the pilot.
+        // ヘリにはこれを読む主翼が無いし、必要も無い。引いているのはローターが引いている分であり、ホバリング中
+        // も旋回中も同じ値だ。下の主翼の値と違って全側で正直でもある——ここには飛行モデルの実行に依存する物が
+        // 無いので、サーバーも見物人もパイロットと同じ答えを得る。
         if (rotor != null) {
             return (float) (this.rotorLift(rotor, speed) / GRAVITY);
         }
@@ -2428,17 +2760,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         AircraftDefinition.Wing wing = this.getStats().wing();
         Vec3 flow = velocity.scale(1.0 / speed);
         float angle = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(this.getLiftVector()), -1.0, 1.0)));
-        double coefficient = wing.liftCoefficient(angle) * (1.0 + this.flapsProgress * this.getFlapsLiftBonus());
+        double coefficient = wing.liftCoefficient(angle) * (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
+                * this.sweepLift();
 
         return (float) Math.abs(wing.lift() * coefficient * speed * speed / GRAVITY);
     }
 
-    /** The direction lift acts in: up through the canopy, wherever that happens to be pointing. */
+    /** 揚力の作用方向。キャノピーを貫いて上向き。その向きがどこであれ。 */
     public Vec3 getLiftVector() {
         return Attitude.up(this.attitude);
     }
 
-    /** Where the nose points. */
+    /** 機首の指向。 */
     public Vec3 getNoseVector() {
         return Attitude.nose(this.attitude);
     }
@@ -2448,8 +2781,50 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * One tick of the nozzle travelling. Nothing is animated from this beyond the nozzle itself; what
-     * the doors do is the animation file's business.
+     * 可変翼の1tick分。
+     *
+     * <p>翼が行くべき位置を決めるのは対気速度だけであり、それは操縦席の誰かではなく空気が決めている。だから
+     * ここには入力が1つも現れない。機体が加速すれば翼は下がり、減速すれば戻る。パイロットが着陸のために翼を
+     * 前へ出し忘れることは、そもそも起こり得ない。{@link AircraftDefinition.Sweep} 参照。
+     *
+     * <p>目標へ一息には行かず、機体ファイルが書いた作動時間で追い掛ける。翼を動かしているのは油圧であって
+     * 空気ではないので、急加速した機体の翼はしばらく前進位置に取り残される——その間、機体は後退位置で得られる
+     * はずの抗力を払っていない。
+     *
+     * <p>残骸も動かす。翼を途中で止める理由が無く、落ちていく残骸は減速するので、翼は自然に前へ戻っていく。
+     */
+    private void tickSweep() {
+        this.sweepProgressO = this.sweepProgress;
+
+        AircraftDefinition.Sweep sweep = this.getStats().wing().sweep().orElse(null);
+
+        if (sweep == null) {
+            return;
+        }
+
+        this.sweepProgress = approach(this.sweepProgress, sweep.progressAt(this.getVelocity().length()),
+                1.0F / Math.max(sweep.cycleTicks(), 1));
+    }
+
+    /**
+     * 今の後退角における揚力倍率。後退した翼は気流を斜めに受けるので、同じ迎え角でも作る揚力が減る。可変翼を
+     * 持たない機体では1。
+     */
+    private double sweepLift() {
+        AircraftDefinition.Sweep sweep = this.getStats().wing().sweep().orElse(null);
+
+        return sweep == null ? 1.0 : sweep.liftFactor(this.sweepProgress);
+    }
+
+    /** 同じ物を形状抗力について。翼を後退させる目的がこちらで、高速域では1未満になる。 */
+    private double sweepDrag() {
+        AircraftDefinition.Sweep sweep = this.getStats().wing().sweep().orElse(null);
+
+        return sweep == null ? 1.0 : sweep.dragFactor(this.sweepProgress);
+    }
+
+    /**
+     * ノズル作動の1tick分。ここから動くのはノズル自体だけで、扉の動きはアニメーションファイルの管轄。
      */
     private void tickVtol() {
         this.vtolProgressO = this.vtolProgress;
@@ -2467,18 +2842,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * One tick of the rotor turning.
+     * ローター回転の1tick分。
      *
-     * <p>Run on every side, and deliberately: what it depends on is who is in the seat, which every
-     * side is told about anyway, so there is nothing to send. That also means the rotor keeps turning
-     * on a helicopter nobody is simulating — a client watching one across the valley draws it exactly
-     * as the pilot's client does, without a packet passing between them.
+     * <p>意図的に全側で実行する。依存するのは誰が座席にいるかで、それはどのみち全側へ通知されるので送る物が無い。
+     * つまり誰もシミュレートしていないヘリでもローターは回り続ける——谷の向こうから見ているクライアントは、両者の
+     * 間にパケット1つ通さずパイロットのクライアントとまったく同じに描く。
      *
-     * <p>Climbing in is the starter and climbing out is the shutdown. A helicopter is not an aircraft
-     * anybody sprints to and takes off in: the rotor has to come up to speed first, and the wait for
-     * it is most of what makes flying one feel like flying one rather than like driving a hovering
-     * brick. Getting out leaves it running down, so a machine left at a pad settles rather than
-     * stopping dead.
+     * <p>乗り込みがスターターで、降機がシャットダウン。ヘリは走って乗り込んで即離陸できる機体ではない。まず
+     * ローターの回転を上げねばならず、その待ち時間こそが「浮かぶレンガの運転」ではなく「ヘリの操縦」らしさの
+     * 大半を作っている。降りれば回転が落ちていくので、駐機場に残された機体は急停止せず静まっていく。
      */
     private void tickRotor() {
         this.rotorSpeedO = this.rotorSpeed;
@@ -2488,11 +2860,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         AircraftDefinition.Rotor rotor = this.getStats().rotor().orElse(null);
 
         if (rotor == null) {
-            this.rotorSpeed = 0.0F;
-            this.rotorAngle = 0.0F;
-            this.rotorAngleO = 0.0F;
-            this.tailAngle = 0.0F;
-            this.tailAngleO = 0.0F;
+            this.tickPropellers();
 
             return;
         }
@@ -2504,9 +2872,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.rotorAngle += this.rotorSpeed * rotor.degreesPerTick();
         this.tailAngle += this.rotorSpeed * rotor.tailDegreesPerTick();
 
-        // Kept inside a turn so the floats never grow large. The previous angle comes back with each,
-        // because a lerp between 359 and 1 across the seam draws the rotor spinning backwards for a
-        // frame, and a rotor that stutters once a second is worse than one that does not turn at all.
+        // float が大きくならないよう1回転内に収める。前回角も一緒に折り返す。継ぎ目をまたぐ 359→1 の補間は
+        // 1フレームだけローターを逆回転に描くし、毎秒つっかえるローターは、まったく回らないローターより悪い。
         while (this.rotorAngle >= 360.0F) {
             this.rotorAngle -= 360.0F;
             this.rotorAngleO -= 360.0F;
@@ -2518,7 +2885,61 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
     }
 
+    /**
+     * プロペラ。ローターを持たない機体が回す物であり、同じ角度の変数を使う——1機がローターとプロペラの両方を
+     * 持つことはないので、2つ目を持ち回る意味が無い。
+     *
+     * <p><b>回転数はエンジンの働きに従う。</b>ローターと違い自分の慣性を持たない。実機の定速プロペラは出力に
+     * 関わらず一定回転で回るが、画面の上でそれをやると、止まっているのに羽根だけ全速で回る駐機中の機体になる。
+     * ここでの回転は「エンジンが回っている」ことの表示であって、回転計ではない。燃料が尽きれば
+     * {@link #getEngineNote()} が0を返すので、羽根もそこで止まる。
+     */
+    private void tickPropellers() {
+        float degrees = this.getStats().engine().propellerDegreesPerTick();
+
+        if (degrees <= 0.0F) {
+            this.rotorSpeed = 0.0F;
+            this.rotorAngle = 0.0F;
+            this.rotorAngleO = 0.0F;
+            this.tailAngle = 0.0F;
+            this.tailAngleO = 0.0F;
+
+            return;
+        }
+
+        this.rotorSpeed = this.getEngineNote();
+        this.rotorAngle += this.rotorSpeed * degrees;
+
+        // ローターと同じく1回転内へ折り返す。理由も同じで、継ぎ目をまたぐ補間は1フレームだけ逆回転に見える。
+        while (this.rotorAngle >= 360.0F) {
+            this.rotorAngle -= 360.0F;
+            this.rotorAngleO -= 360.0F;
+        }
+    }
+
+    /**
+     * 降着装置とフラップの作動1tick分。加えて、地面に降りた機体は自分で脚を出す。
+     *
+     * <p>脚を出すのは離陸前と着陸前の1回ずつだが、忘れられるのは常に後者だ。しかも忘れた結果が現れるのは接地の
+     * 瞬間——取り返しの付かない場所——であり、脚が上がったまま滑走路に触れた機体は、パイロットが操作を1つ落とした
+     * ことに気付く前に胴体で滑っている。よって地面に立っている機体は脚が出ている、という形を機体側で保証する。
+     * 実際、降りている機体で車輪が要らない場面は無い。
+     *
+     * <p>これがパイロットと争うことはない。{@link #toggleGear} は接地中の格納を既に拒んでいるので、脚が上がった
+     * まま地面に居ることを誰かが要求している状態というのが存在しない。離陸して地面を離れれば、空中では従来通り
+     * 好きに上げ下げできる。
+     *
+     * <p>脚が上がっている間は {@link #groundTick} が機体を滑走路へ押し付けないので、接地フラグは1tickおきに
+     * 明滅する——{@code onGround} は結局のところ直前の衝突の残りかすだ。ここではそれで足りる。展開は一方向の
+     * ラッチであり、必要なのは true が1度立つことだけだから。
+     *
+     * <p>全損機は除く。残骸に降着装置は無いし、脚を伸ばしながら滑っていく残骸は誰も望んでいない。
+     */
     private void tickGear() {
+        if (!this.level().isClientSide && !this.isGearDown() && !this.isWrecked() && this.onGround()) {
+            this.entityData.set(DATA_GEAR_DOWN, true);
+        }
+
         this.gearProgressO = this.gearProgress;
         this.gearProgress = approach(this.gearProgress, this.isGearDown() ? 1.0F : 0.0F,
                 1.0F / Math.max(this.getGearCycleTicks(), 1));
@@ -2527,13 +2948,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 1.0F / Math.max(this.getFlapsCycleTicks(), 1));
     }
 
+
     /**
-     * Puts the aircraft where a client that is not flying it should draw it.
+     * 操縦していないクライアントが描くべき位置へ機体を置く。
      *
-     * <p>Vanilla's own vehicle interpolation is deliberately not used here — see
-     * {@link AircraftInterpolation} for what it does to an aeroplane at speed, which is to draw it
-     * most of a chunk behind where it really is. The fallback below is only reached before the
-     * prediction has a position to work from, or once it has given up waiting for one.
+     * <p>バニラ自身の乗り物補間は意図的に使わない——高速機に対して何をするかは {@link AircraftInterpolation}
+     * 参照。実際の位置よりほぼ1チャンク後ろに描いてしまう。下のフォールバックへ来るのは、予測が起点となる位置を
+     * まだ持たない間か、待つのを諦めた後だけだ。
      */
     private void tickLerp() {
         if (this.isControlledByLocalInstance()) {
@@ -2545,8 +2966,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         if (!this.level().isClientSide) {
-            // The server is not drawing anything, and for a piloted aircraft its position arrives
-            // whole in the pilot's movement packets. Predicting on top of that would only fight it.
+            // サーバーは何も描かないし、有人機の位置はパイロットの移動パケットで丸ごと届く。その上から予測
+            // しても衝突するだけだ。
             return;
         }
 
@@ -2554,8 +2975,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         this.interpolation.tune(sync.correctionTicks(), sync.snapDistance(), sync.maxPredictionTicks());
 
-        // What the side flying it says it is doing, rather than what the last two position updates
-        // seem to say. Handed over before the prediction moves, so this tick already uses it.
+        // 直近2回の位置更新から見える値ではなく、操縦側の申告値を使う。予測が動く前に渡すので、このtickから
+        // 既に反映される。
         Vector3f velocity = this.entityData.get(DATA_VELOCITY);
 
         this.interpolation.receiveVelocity(velocity.x(), velocity.y(), velocity.z());
@@ -2574,20 +2995,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * The server's idea of how fast this aircraft is going, which the side flying it must ignore.
+     * サーバーが考えるこの機体の速度。操縦側は無視しなければならない。
      *
-     * <p>A piloted aircraft is flown by its pilot's client, and the server deliberately keeps a delta
-     * movement of zero for it — see the note in {@link #tick()}. That zero is normally never sent,
-     * because the game only broadcasts a velocity that has changed and this one never does. There is
-     * one exception, and it is a bad one: an entity that has been hurt has its velocity
-     * <em>force</em>-broadcast at the end of that tick, so that everyone watching sees the knockback.
-     * An aeroplane has no knockback, so what went out was the zero — to every client tracking it, the
-     * pilot's included, whose own flight model was then overwritten with a dead stop.
+     * <p>有人機はパイロットのクライアントが飛ばし、サーバーは意図的にデルタ移動を0のまま保つ——{@link #tick()}
+     * の注記参照。この0は通常送られない。ゲームは変化した速度しかブロードキャストせず、これは変化しないからだ。
+     * ただし1つ、しかも厄介な例外がある。ダメージを受けたエンティティは、見ている全員がノックバックを見られる
+     * よう、そのtickの終わりに速度を<em>強制</em>ブロードキャストされる。機体にノックバックは無いので、出て
+     * 行ったのはその0だ——追跡中の全クライアントへ、パイロットのクライアントを含めて。そして本人の飛行モデルが
+     * 完全停止で上書きされた。
      *
-     * <p>The effect was an aeroplane at three hundred knots stopping in mid-air the instant anything
-     * touched it: one cannon round, one splinter of a blast, and the speed read zero. Nothing about
-     * how fast it is going is worth hearing from the server; the side at the controls is the side
-     * that knows.
+     * <p>結果、300ノットの機体が何かに触れられた瞬間に空中で停止していた。機関砲弾1発、爆風の破片1つで速度が0
+     * になる。速度についてサーバーから聞く価値のある情報は何も無い。知っているのは操縦している側だ。
      */
     @Override
     public void lerpMotion(double x, double y, double z) {
@@ -2607,9 +3025,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.lerpXRot = xRot;
         this.lerpSteps = 10;
 
-        // The prediction is what actually draws this aircraft; the fields above are only the
-        // fallback for before it is running. Note it is told where the aircraft is drawn as well as
-        // where it belongs, so a first correction can start from the former rather than jumping.
+        // この機体を実際に描くのは予測であり、上のフィールドは予測が走る前のフォールバックにすぎない。本来の
+        // 位置だけでなく現在描かれている位置も渡している点に注意。最初の補正を跳ばずに描画位置から始められる。
         if (this.level().isClientSide && !this.isControlledByLocalInstance()) {
             this.interpolation.receivePosition(x, y, z, this.getX(), this.getY(), this.getZ());
 
@@ -2650,26 +3067,23 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     // ------------------------------------------------------------------
-    // Damage
+    // ダメージ
     // ------------------------------------------------------------------
 
     /**
-     * Moves the aircraft's boxes to wherever its attitude has put them.
+     * 機体の箱を、姿勢が運んだ位置へ移動させる。
      *
-     * <p>Each one is an upright box around a rotated one, because upright boxes are all the game can
-     * collide with. The size therefore changes as the aircraft rolls: a wing is a thin slab flying
-     * level and a tall one on its side, which is where the wing actually is.
+     * <p>各箱は回転した箱を囲む直立の箱だ。ゲームが衝突できるのは直立の箱だけだからだ。よって機体がロールすると
+     * 寸法が変わる。主翼は水平飛行では薄い板、横倒しでは背の高い板になる。実際に主翼があるのはその位置だ。
      *
-     * <p><b>How many boxes there are is settled once and never changes.</b> The level is told an
-     * entity's boxes when it joins and has no way of being told about a different set afterwards, so
-     * building a fresh set here would leave the level holding the old ones — frozen where they last
-     * were, still solid, still shootable — while the new ones went unnoticed by everything. That was
-     * survivable while the plain hitbox was a target too. Now that the boxes are the only way to hit
-     * an aircraft, it would quietly make one unhittable, so the count is fixed for its lifetime.
+     * <p><b>箱の個数は一度決まったら変わらない。</b>レベルはエンティティ参加時にその箱を教えられ、後から別の
+     * 集合を教える手段が無い。だからここで新しい集合を作ると、レベルは古い方を持ち続け——最後の位置で固まり、
+     * 依然として固体で、依然として撃てる——新しい方は何からも見えなくなる。素の当たり判定も標的だった頃は
+     * それでも耐えられた。今や機体を撃つ手段が箱だけになった以上、それは機体を黙って被弾不能にしてしまうので、
+     * 個数は生涯固定にしてある。
      *
-     * <p>A {@code /reload} that changes the shape therefore moves the boxes an aircraft already has
-     * and takes full effect on the next one placed. A box the file no longer describes is folded
-     * away inside the airframe rather than left standing in the air.
+     * <p>よって形状を変える {@code /reload} は、既存機体の箱を移動させるだけで、完全な反映は次に設置される機体
+     * からになる。ファイルがもう記述しなくなった箱は、空中に残さず機体内部へ畳み込む。
      */
     private void tickParts() {
         List<VehicleShape.Box> shape = this.getShape().boxes();
@@ -2699,17 +3113,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Puts a pylon's box where its hardpoint is, at a size a player can comfortably reach for.
+     * パイロンの箱をハードポイントの位置に、プレイヤーが無理なく届く大きさで置く。
      *
-     * <p>Square rather than shaped to whatever is hanging there. A pylon is a place on the aeroplane
-     * rather than an object, and it has to stay reachable when it is bare, which is exactly when
-     * somebody wants to hang something on it.
+     * <p>吊っている物の形に合わせず正方形にする。パイロンは物体ではなく機体上の位置であり、何も吊っていないとき
+     * こそ届く必要がある。まさにそのとき誰かが何かを吊りたがるのだから。
      */
     private void placePylon(VehiclePart part, List<AircraftDefinition.Hardpoint> hardpoints) {
         int slot = part.getPylon();
 
         if (slot >= hardpoints.size()) {
-            // The file no longer lists this one. It cannot be got rid of, so it is folded away.
+            // ファイルがもうこれを列挙していない。消せないので畳み込む。
             part.fold(this.position());
 
             return;
@@ -2721,13 +3134,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * How big to make a pylon's box: comfortably reachable, but never so big that it reaches past
-     * the pylon next door.
+     * パイロンの箱の大きさ。無理なく届き、かつ隣のパイロンまで届いてしまわない大きさ。
      *
-     * <p>A wing with five stations a metre apart would otherwise have five overlapping boxes across
-     * it, and a click meant for one of them could land on any of the three around it. Which pylon a
-     * player is pointing at is the whole meaning of the click, so where the stations are close
-     * together the boxes shrink to match and each one stands over its own store.
+     * <p>1m 間隔で5つのステーションを持つ主翼では、さもないと5つの箱が重なり合い、1つを狙ったクリックが周囲3つ
+     * のどれに当たってもおかしくない。どのパイロンを指しているかがクリックの意味の全てなので、ステーションが密な
+     * 場所では箱もそれに合わせて縮み、各箱が自分の兵装の上に立つようにする。
      */
     private static double pylonBox(Vec3 where, List<AircraftDefinition.Hardpoint> hardpoints, int slot) {
         double room = PYLON_BOX;
@@ -2742,22 +3153,20 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * The air made visible: vapour off the wingtips when the wing is working hard, and a cone of
-     * condensation around the aircraft as it runs up on its own top speed.
+     * 空気を可視化する。主翼が強く働いているときの翼端ベイパーと、最高速度に近づいたときに機体を包む
+     * ベイパーコーン。
      *
-     * <p>Both are the same piece of physics. Air pulled round a wing or squeezed ahead of a fast
-     * aeroplane drops in pressure, and with it in temperature, until the moisture in it condenses.
-     * So the wingtip vapour is tied to how hard the aircraft is pulling rather than to its speed,
-     * which is why it appears in a hard turn and vanishes when the pilot unloads.
+     * <p>どちらも同じ物理現象だ。主翼の周りを引き回された空気や、高速機の前方で圧縮された空気は圧力が下がり、
+     * それに伴って温度も下がって、中の水分が凝結する。だから翼端ベイパーは速度ではなく引いているGに結び付いて
+     * おり、きつい旋回で現れ、荷重を抜くと消える理由もそれだ。
      *
-     * <p>Drawn with the mod's own particle rather than vanilla's cloud, for the same two reasons the
-     * weapons are: vanilla throws a particle away at thirty-two blocks, and draws whatever is left
-     * in flat black once there is no chunk under it to read a light level from. A hard turn is the
-     * most visible thing an aeroplane does and it is worth seeing from further off than that.
+     * <p>バニラの雲パーティクルではなく MOD 自前のパーティクルで描く。兵器と同じ2つの理由からだ。バニラは32
+     * ブロックでパーティクルを捨てるし、光レベルを読むチャンクが下に無いと残った分を真っ黒に描く。きつい旋回は
+     * 機体が行う最も目を引く動作であり、それより遠くから見える価値がある。
      */
     private void spawnFlightEffects() {
-        // Nothing a wreck does is flying. Vapour off the wingtips of a burnt-out airframe on its way
-        // down would read as the aeroplane still pulling.
+        // 残骸のすることは何一つ飛行ではない。落下中の焼けた機体の翼端から出るベイパーは、まだGを引いて
+        // いるように見えてしまう。
         if (this.isWrecked()) {
             return;
         }
@@ -2765,9 +3174,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vec3 velocity = this.getVelocity();
         double speed = velocity.length();
 
-        // Ahead of everything aerodynamic below, because none of that applies to it. A burner is lit
-        // on the runway as often as it is in the air, and a plume that waited for the aeroplane to
-        // be fast would be missing from exactly the moment the pilot lit it for.
+        // 下の空力処理より前に置く。空力はこれに当てはまらないからだ。バーナーは空中と同じくらい滑走路上でも
+        // 点火されるし、機体が速くなるのを待つプルームは、パイロットが点火した当の瞬間に限って欠けてしまう。
         this.spawnAfterburnerPlume(velocity);
 
         if (speed < 0.5) {
@@ -2780,11 +3188,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vec3 nose = this.getNoseVector();
         Vec3 drift = velocity.scale(0.5);
         RandomSource random = this.level().random;
-        // Worked out here rather than held as a constant: this class is loaded while the registries
-        // are still being built, so there is no particle type to ask for yet at that point.
+        // 定数として持たずここで求める。このクラスはレジストリ構築中に読み込まれるので、その時点では問い合わせ
+        // 可能なパーティクルタイプがまだ存在しない。
         TintedParticleOption vapour = ModParticles.VAPOUR.get().of(VAPOUR_COLOUR, 1.0F);
 
-        // Wingtips: the harder the wing is pulling, the more of it there is to see.
+        // 翼端。主翼が強く引いているほど見える量が増える。
         float load = this.getLoadFactor(velocity);
 
         if (load > VORTEX_LOAD) {
@@ -2804,7 +3212,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             }
         }
 
-        // And the cone, once the aircraft is pushing the air ahead of it faster than it will move.
+        // そしてコーン。機体が前方の空気を、その空気が逃げるより速く押し始めたら発生する。
         double onset = this.getStats().wing().maxSpeed() > 0.0F
                 ? this.getStats().wing().maxSpeed() * VAPOUR_SPEED
                 : this.topSpeed() * VAPOUR_SPEED;
@@ -2825,23 +3233,19 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * The flame out of the jet pipes, while the burner is lit.
+     * バーナー点火中に排気管から出る炎。
      *
-     * <p>Two layers, because a plume is two things. In front is the flame, which opens white at the
-     * lip and settles to orange behind it, and around and behind that is the hot air it leaves,
-     * which is what gives the plume its length and most of what is seen of it from any distance.
+     * <p>プルームは2つの物なので2層で描く。前方は炎で、出口で白く開き後方でオレンジに落ち着く。その周りと後方に
+     * あるのが残された熱気で、プルームの長さを作り、遠距離から見えるものの大半を占める。
      *
-     * <p>Thrown along the aircraft's own nose rather than along its flight path, and the difference
-     * shows in every hard turn: what comes out of a pipe goes the way the pipe is pointing, so an
-     * aeroplane pulling round trails its plume off to one side rather than down its own tail. What
-     * the exhaust is carried along by is the aircraft's velocity, less the speed it is thrown out
-     * at — so at low speed the flame stands still behind the aeroplane, and at high speed it is a
-     * streak that barely moves relative to it, which is what a plume does.
+     * <p>飛行経路ではなく機体自身の機首方向へ噴出させる。差はきつい旋回のたびに現れる。管から出た物は管が向いて
+     * いる方へ行くので、旋回中の機体はプルームを自分の尾部方向ではなく片側へ引く。排気を運ぶのは機体速度から
+     * 噴出速度を引いた分——なので低速では炎が機体の後ろに静止し、高速では機体に対してほとんど動かない筋になる。
+     * プルームの振る舞いとはそういうものだ。
      *
-     * <p>Drawn with the mod's own particles rather than vanilla's flame, for the same reason the
-     * wingtip vapour is: this wants to be seen from further away than thirty-two blocks, and it
-     * wants to be its own light — a burner beyond the loaded world would otherwise be drawn in flat
-     * black, which is the one colour it certainly is not.
+     * <p>バニラの炎ではなく MOD 自前のパーティクルで描く。翼端ベイパーと同じ理由だ。32ブロックより遠くから見え
+     * てほしいし、自前の明るさを持ってほしい。さもないとロード範囲外のバーナーは真っ黒に描かれるが、それだけは
+     * 確実に違う色だ。
      */
     private void spawnAfterburnerPlume(Vec3 velocity) {
         AircraftDefinition.Afterburner burner = this.getStats().engine().afterburner().orElse(null);
@@ -2862,16 +3266,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             Vec3 lip = this.position().add(Attitude.toWorld(this.attitude, nozzle));
 
             for (int i = 0; i < puffs; i++) {
-                // Strung back down the plume rather than all left at the lip. One tick is a long way
-                // at these speeds, and a single puff a tick would read as a dotted line rather than
-                // as a column of flame.
+                // 出口に固めず、プルームに沿って後方へ並べる。この速度では1tickの距離は長く、1tickに1粒では
+                // 炎の柱ではなく点線に見えてしまう。
                 this.puff(flame, lip.subtract(nose.scale(random.nextDouble() * length * 0.5)), blown, random);
                 this.puff(exhaust, lip.subtract(nose.scale(random.nextDouble() * length)), blown, random);
             }
         }
     }
 
-    /** One particle of the plume, scattered a little off the axis so the column has some width. */
+    /** プルームの1粒。柱に幅を持たせるため軸から少しばらけさせる。 */
     private void puff(TintedParticleOption particle, Vec3 at, Vec3 blown, RandomSource random) {
         this.level().addParticle(particle,
                 at.x + random.nextGaussian() * PLUME_SCATTER,
@@ -2881,11 +3284,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Where the plume comes out, in the aircraft's own axes.
+     * プルームの噴出位置。機体座標系。
      *
-     * <p>What the file says, and for a file that says nothing, one pipe out of the back of the
-     * collision shape. That fallback is right for a single engine buried in the fuselage and wrong
-     * for a pair of them set apart, which is why any airframe that cares names its own.
+     * <p>ファイルの指定値。指定が無ければ当たり判定形状の後端から1本。このフォールバックは胴体内の単発エンジン
+     * には正しく、離れて置かれた双発には誤りだ。だから気にする機体は自分で指定する。
      */
     private List<Vec3> nozzles(AircraftDefinition.Afterburner burner) {
         if (!burner.nozzles().isEmpty()) {
@@ -2901,7 +3303,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return List.of(new Vec3(0.0, WING_HEIGHT, tail));
     }
 
-    /** Half the width of the widest part of the aircraft, taken from its collision shape. */
+    /** 機体最大幅の半分。当たり判定形状から取る。 */
     private double getWingSpan() {
         double span = this.getBbWidth() / 2.0;
 
@@ -2912,7 +3314,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return span;
     }
 
-    /** Where thrust and drag balance out, for aircraft whose file sets no ceiling of its own. */
+    /** 推力と抗力が釣り合う点。ファイルが上限を指定していない機体用。 */
     private double topSpeed() {
         AircraftDefinition.Wing wing = this.getStats().wing();
 
@@ -2920,8 +3322,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Reports an impact detected by the piloting client. The server only accepts it if the aircraft
-     * really is up against something, so a stray packet cannot conjure an explosion out of thin air.
+     * 操縦クライアントが検出した衝突を報告する。サーバーは機体が本当に何かに接している場合のみ受理するので、
+     * 迷子のパケットが何も無い所に爆発を生み出すことはできない。
      */
     public void reportCrash() {
         if (!this.level().noCollision(this, this.getBoundingBox().inflate(0.5))) {
@@ -2932,35 +3334,38 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     @Override
     public void onRemovedFromLevel() {
         super.onRemovedFromLevel();
-        // Let go of the chunk, whether the aircraft was destroyed or merely unloaded. Only let go:
-        // this also fires when the chunk under us is demoted, from inside the chunk system's own
-        // update loop, and taking a ticket there loads a chunk and re-enters that loop mid-iteration
-        // (ConcurrentModificationException in DistanceManager.runAllUpdates). Anything still flying
-        // asks again on its next tick.
-        this.heldChunks = AircraftChunkLoader.release(this, this.heldChunks);
+        // 機体が完全に消えたとき——破壊、破棄、別ディメンションへの移動——に回廊を手放す。手放すだけだ。これは
+        // チャンクシステム自身の更新ループの内側から発火するので、そこでチケットを取るとチャンクがロードされ、
+        // 反復の途中で同じループへ再入してしまう（DistanceManager.runAllUpdates の ConcurrentModificationException）。
+        //
+        // チャンクへアンロードされるだけのときは断じて手放さない。そこで解放するのは、機体を空中で永久に凍り
+        // 付かせるデッドロックだった。誰も開いていないチャンクへ書き出された機体に次のtickは無いので、「次のtick
+        // でまた要求する」は誰も守れない約束だった。そのチャンクを——ひいては機体を——ロードし戻す唯一の物が
+        // そのチケットだったのだ。だからアンロードされた機体はチケットを保持する。チケットはワールドと共に保存
+        // され、再起動後に回廊を復元し、機体は目覚めたとき自身の NBT に保存した集合と突き合わせる。
+        if (this.getRemovalReason() != RemovalReason.UNLOADED_TO_CHUNK) {
+            this.heldChunks = AircraftChunkLoader.release(this, this.heldChunks);
+        }
     }
 
     /**
-     * The end of an aeroplane, under the name the flight model calls it by. What happens is
-     * {@link VehicleEntityBase#wreck}'s and is the same whichever way the airframe was finished —
-     * shot down, or flown into a hillside.
+     * 機体の最期。飛行モデル側での呼び名で置いてある。処理は {@link VehicleEntityBase#wreck} の担当で、撃墜
+     * でも斜面への激突でも同じだ。
      */
     protected void crash() {
         this.wreck();
     }
 
     /**
-     * Shuts the aeroplane down the moment it stops being one.
+     * 機体が機体でなくなった瞬間に停止処理を行う。
      *
-     * <p>Three things, and each of them is something that would otherwise go on happening to a
-     * burnt-out airframe. The engine is out, so the note it is heard at is nothing. What was hanging
-     * under the wings went up with the aircraft, so the pylons are bare — a charred wreck carrying a
-     * spotless missile it will not let anybody take off it is worse than one carrying nothing.
+     * <p>3つあり、いずれも放置すれば焼けた機体で起こり続けることだ。エンジンは停止するので音量は0。主翼の下に
+     * 吊っていた物は機体と共に吹き飛んだのでパイロンは空——誰にも降ろさせない無傷のミサイルを積んだ黒焦げの残骸
+     * は、何も積んでいない残骸より悪い。
      *
-     * <p>And the aircraft is no longer turning. That one matters on the clients rather than here:
-     * they draw an aeroplane between attitude updates by carrying on the rate it was last turning
-     * at, and a wreck written off in a hard bank would otherwise roll for ever. Snapping the
-     * attitude to where it already is publishes a rate of zero without moving anything.
+     * <p>そして機体はもう回転していない。これはここよりクライアント側で効く。クライアントは姿勢更新の間、最後の
+     * 角速度を継続して機体を描くので、きついバンク中に全損した残骸は放置すると永久にロールし続ける。姿勢を現在値
+     * へスナップすれば、何も動かさずに角速度0を公開できる。
      */
     @Override
     protected void onWrecked() {
@@ -2971,93 +3376,81 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.reheat = 0.0F;
         this.entityData.set(DATA_AFTERBURNER, 0.0F);
         this.input = AircraftInput.NONE;
-        // Already answered. Left standing it would call crash() again on every tick of the fall, and
-        // each of those is a wreck() that has to work out it has nothing to do.
+        // 既に処理済み。放置すると落下の毎tickで crash() が再び呼ばれ、その都度 wreck() が「やることが無い」と
+        // 判断する羽目になる。
         this.crashing = false;
         this.weapons.clear();
+        this.clearDesignation();
         this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
         this.snapAttitude(this.attitude);
     }
 
     /**
-     * One tick of being a wreck, which is one tick of falling.
+     * 残骸としての1tick、つまり落下の1tick。
      *
-     * <p>Nothing is flown here. There is no thrust, no lift and no control, and the airframe keeps
-     * whatever attitude it was written off at: a wreck that levels its own wings on the way down is
-     * an aeroplane, not a wreck. Gravity does the rest, what is left of the airspeed bleeds off on
-     * the way, and the ground takes the last of it.
+     * <p>ここでは何も飛ばさない。推力も揚力も操縦も無く、機体は全損した時点の姿勢を保つ。落下中に自分で翼を水平
+     * に戻す残骸は残骸ではなく機体だ。あとは重力がやり、残った対気速度は途中で失われ、最後は地面が受け止める。
      *
-     * <p><b>It carries on from what the world let it do, not from what it asked for.</b> Those two
-     * part company at exactly the moment that decides whether there is any momentum left. An
-     * aeroplane that flew into a field had the blocked axes taken out of its delta movement by
-     * {@code move} on the way in — so read from there, a shallow dive at flying speed and a parked
-     * aeroplane are the same standing wreck a tick later. Read from how far it actually got, the
-     * one that was travelling keeps travelling: the ground took the part of the speed that went into
-     * it and left the part that went along it, which is what ploughing is.
+     * <p><b>要求した移動量ではなく、世界が許した移動量から続ける。</b>この2つが分かれるのは、まさに運動量が残る
+     * かどうかを決める瞬間だ。野原へ突っ込んだ機体は、進入時に {@code move} が阻まれた軸をデルタ移動から取り
+     * 除いている——そちらから読むと、飛行速度の浅い降下も駐機中の機体も、1tick後には同じ「立っている残骸」に
+     * なる。実際に進んだ距離から読めば、走っていた方は走り続ける。地面は地面へ向かった分の速度を奪い、地面に
+     * 沿った分を残した。それが掘り進むということだ。
      *
-     * <p>It settles for the same reason. A wreck jammed against a hillside got nowhere last tick, so
-     * there is nothing to carry and nothing to accumulate; one lying on flat ground got nowhere
-     * downwards, so the gravity below is the whole of its vertical speed — which is what has to be
-     * pushed into the floor every tick for {@code onGround} to keep saying so.
+     * <p>停止も同じ理由で起きる。斜面に食い込んだ残骸は前tickどこへも進めなかったので、引き継ぐ物も溜まる物も
+     * 無い。平地に横たわる残骸は下方向へ進めなかったので、下の重力がその鉛直速度の全てになる——{@code onGround}
+     * が真であり続けるには、それを毎tick床へ押し込む必要がある。
      */
     private void wreckTick() {
         Vec3 carried = this.lastTravel;
-        // Down on something, which is not only what onGround says. That flag is the plain box, and
-        // the plain box sits at the wheels — an airframe lying on its back, or propped on a wingtip,
-        // is being held up by its own boxes with the wheel line still in the air. Friction is what
-        // ploughing is; without this an inverted wreck would skate.
+        // 何かの上に落ちている。判定は onGround だけではない。あのフラグは素の直方体の物で、素の直方体は車輪
+        // の位置にある——背面で横たわった機体や翼端で支えられた機体は、車輪の線を空中に残したまま自分の箱で
+        // 支えられている。摩擦こそが掘り進むということだ。これが無いと背面の残骸は滑走してしまう。
         double slide = this.onGround() || this.verticalCollision ? WRECK_FRICTION : WRECK_DRAG;
 
         this.setDeltaMovement(carried.x * slide, carried.y * WRECK_DRAG - GRAVITY, carried.z * slide);
     }
 
     // ------------------------------------------------------------------
-    // Riding
+    // 搭乗
     // ------------------------------------------------------------------
 
     @Override
     public InteractionResult interact(Player player, InteractionHand hand) {
-        // The client is in no position to judge any of this and must not try. It never runs the
-        // movement of an aircraft nobody is flying, so onGround() is false over there however firmly
-        // the aeroplane is sitting on its wheels, and any answer it works out from that is wrong.
+        // クライアントにこれを判断する立場は無く、試みてもならない。誰も操縦していない機体の移動を回すことは
+        // 無いので、機体がどれだけしっかり車輪で座っていても向こうでは onGround() が false であり、そこから導く
+        // 答えは全て誤りだ。
         //
-        // Worse than wrong: an answer that does not consume the click sends the whole interaction
-        // round again with the other hand, and the game has already sent the first one to the server
-        // by then. A pylon loaded by the main hand was being unloaded a moment later by the empty
-        // off hand, which looked for all the world like the aircraft refusing to take the weapon at
-        // all. So the client says yes to everything and the server decides what actually happened.
+        // 誤り以上に厄介なのは、クリックを消費しない答えが、同じ操作をもう一方の手で最初からやり直させることだ。
+        // その時点でゲームは既に1回目をサーバーへ送っている。メインハンドで搭載したパイロンが、直後に空のオフ
+        // ハンドで降ろされていた——傍目には機体が兵装を受け付けていないようにしか見えない。だからクライアントは
+        // 全てに yes を返し、実際に何が起きたかはサーバーが決める。
         if (this.level().isClientSide) {
             return InteractionResult.SUCCESS;
         }
 
-        // Crouching means the hold: whatever is in the player's hand, and whichever box of the
-        // aeroplane the click landed on.
+        // スニーク中は弾庫を意味する。手に何を持っていても、機体のどの箱にクリックが当たっても同じ。
         //
-        // It has to come before the pylons and before the stores, because those are what somebody
-        // crouching at an aircraft is most likely to be holding — offer a missile to a bare pylon
-        // and it goes on the pylon, which is exactly right for a click that was not crouching and
-        // exactly wrong for one that was. Crouch and it goes in the hold instead.
+        // パイロットや兵装より前に置く必要がある。機体の前でスニークしている者が最も持っていそうな物がそれだ
+        // からだ——空のパイロンへミサイルを差し出せばパイロンに載る。スニークしていないクリックには正しく、
+        // スニーク中のクリックにはまったく誤りだ。スニークすれば代わりに弾庫へ入る。
         //
-        // What this replaces is a crouched click meaning "not now" and falling through to whatever
-        // the click would otherwise have done. That is still a thing a click can do; it is now
-        // spelt without the crouch.
+        // これが置き換えたのは、スニーク中のクリックが「今はやめておく」を意味し、本来のクリック動作へ素通り
+        // していた挙動だ。それは今もクリックにできることだが、スニーク無しで綴られるようになった。
         if (player.isSecondaryUseActive()) {
             this.openHold(player);
 
             return InteractionResult.CONSUME;
         }
 
-        // A click whose line passed through a pylon was a click on that pylon, whichever box the
-        // game happened to hand it to.
+        // 視線がパイロンを貫いたクリックは、ゲームがどの箱へ渡したかに関わらずそのパイロンへのクリックだ。
         //
-        // It has to be settled here rather than left to the pick, because a pylon's box is usually
-        // inside a wing's: the game gives the click to whichever box the line enters first, and from
-        // most angles that is the wing. Left alone, reaching for a pylon under a wing climbs into
-        // the cockpit instead, which is the opposite of what was meant and hard to argue with once
-        // it has happened.
+        // ピック任せにせずここで決める必要がある。パイロンの箱は大抵主翼の箱の内側にあるからだ。ゲームは視線が
+        // 最初に入った箱へクリックを渡すが、大半の角度ではそれが主翼になる。放置すると、主翼下のパイロンへ手を
+        // 伸ばしたつもりがコックピットへ乗り込むことになる。意図と正反対で、起きてしまうと反論しにくい。
         //
-        // A pylon that has nothing to offer -- bare, with an empty hand -- answers PASS, and the
-        // click carries on down and means what it usually means.
+        // 差し出す物が無いパイロン——空のパイロンに素手——は PASS を返し、クリックはそのまま下へ流れて通常の
+        // 意味を持つ。
         VehiclePart pylon = this.pylonInSight(player);
 
         if (pylon != null) {
@@ -3070,16 +3463,22 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         ItemStack held = player.getItemInHand(hand);
 
-        // Anything that can go on a pylon goes on a pylon, ahead of everything else the click might
-        // have meant. Someone walking up to a parked aircraft holding a missile means to arm it, not
-        // to climb in and not to fold the aeroplane back into their pocket.
+        // 燃料缶を持って機体へ歩み寄る者は給油したいのであって、乗り込みたいのではない。兵装と同じ理由で
+        // 搭乗より先に置く。満タンなら缶は減らず、クリックは素通りして通常の意味を持つ——それが「満タンの
+        // 機体をうっかり撫でて缶を1個失う」を防いでいる。
+        if (held.getItem() instanceof FuelItem && FuelItem.refuel(this, player, held)) {
+            return InteractionResult.CONSUME;
+        }
+
+        // パイロンに載せられる物は、クリックが持ちえた他のどの意味よりも優先してパイロンに載る。ミサイルを
+        // 持って駐機中の機体へ歩み寄る者は武装させたいのであって、乗り込みたいのでも機体をポケットへ畳みたいの
+        // でもない。
         //
-        // Whether it can go on is settled before the click is taken, rather than after trying: an
-        // aircraft with no pylon free would otherwise swallow the click and do nothing at all, which
-        // reads as the game ignoring the player. Offer it a weapon it has no room for and the click
-        // falls through and means what it usually means.
+        // 載せられるかどうかは、試した後ではなくクリックを消費する前に判定する。さもないと空きパイロンが無い
+        // 機体はクリックを飲み込んで何もせず、ゲームがプレイヤーを無視しているように見える。収まる場所の無い
+        // 兵装を差し出せば、クリックは素通りして通常の意味を持つ。
         if (this.canBeArmedWith(held)) {
-            if (this.weapons.mount(((WeaponItem) held.getItem()).getWeaponId(), WeaponItem.ammoOf(held))) {
+            if (this.fitAnywhere(held)) {
                 held.consume(1, player);
                 this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
             }
@@ -3095,33 +3494,29 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Takes the aeroplane apart with a wrench: the stores first, one at a time, and only then the
-     * aeroplane itself.
+     * レンチで機体を解体する。まず兵装を1つずつ、それが済んでから機体本体。
      *
-     * <p>That order is the whole point of doing it in one place. A loaded aircraft packed away would
-     * go back into its item and quietly take everything hanging on it with it, so the pylons have to
-     * be bare before the airframe will fold.
+     * <p>この順序こそ、1か所でまとめて行う理由の全てだ。搭載したまま畳んだ機体はアイテムへ戻り、吊っていた物を
+     * 黙って全部持って行ってしまう。だから機体が畳まれる前にパイロンは空でなければならない。
      *
-     * <p>Which store comes off is usually settled before this is reached: a wrench pointed at a
-     * particular pylon is handled as a click on that pylon. This is what answers a wrench pointed at
-     * the aeroplane in general, and it works from the last station loaded backwards.
+     * <p>どの兵装が外れるかは大抵ここへ来る前に決まっている。特定のパイロンへ向けたレンチは、そのパイロンへの
+     * クリックとして処理されるからだ。ここが答えるのは機体全体へ向けたレンチであり、最後に搭載したステーション
+     * から遡って外していく。
      */
     private InteractionResult dismantle(Player player) {
-        // A wreck answers first and answers differently: there are no stores left to strip and no
-        // aeroplane left to fold up, only a hulk to clear away and the metal in it. It is also not
-        // asked to be parked — a write-off on its way down is a write-off, and there is nothing to
-        // be gained by making somebody wait for it to land.
+        // 残骸は先に、別の答えを返す。外す兵装も畳む機体ももう無く、片付けるべき残骸とその中の金属があるだけ
+        // だ。駐機していることも求めない。落下中の全損機も全損機であり、着地を待たせて得る物は何も無い。
         if (this.isWrecked()) {
             return this.salvage();
         }
 
-        // Ground work, and not while anybody is sitting in it.
+        // 地上作業であり、誰か座っている間は不可。
         if (!this.getPassengers().isEmpty() || !this.isParked()) {
             return InteractionResult.PASS;
         }
 
         if (this.weapons.hasRemovable()) {
-            ItemStack removed = this.weapons.unmount();
+            ItemStack removed = this.weapons.strip();
             this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
 
             if (!player.addItem(removed)) {
@@ -3131,8 +3526,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return InteractionResult.CONSUME;
         }
 
-        // The pylons are bare by the time this is reached; the hold is not, and an airframe folded
-        // up with a load still inside it would take the load with it.
+        // ここへ来る頃にはパイロンは空だが弾庫は空ではない。積んだまま畳めば積荷ごと持って行かれてしまう。
         this.spillHold();
         this.destroy(this.getDropItem());
 
@@ -3140,50 +3534,56 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * A click on one particular pylon, which means that pylon and nothing else.
+     * 特定のステーション1つへのクリック。そのステーションだけを意味し、他は意味しない。
      *
-     * <p>Offer it a weapon and it takes it; offer it a wrench and it hands back what it is holding.
-     * Neither falls through to climbing aboard: someone who reached for a pylon was not reaching for
-     * the cockpit, and treating a full pylon as an invitation to get in would be a poor answer to a
-     * deliberate aim.
+     * <p>受け取れる物を差し出せば受け取り、レンチを差し出せば最も外側に保持している物を返す。どちらも搭乗へは
+     * 素通りしない。ステーションへ手を伸ばした者はコックピットへ手を伸ばしたのではないし、満載のステーションを
+     * 「乗ってよい」の合図と解釈するのは、意図的な照準への答えとしてひどい。
      *
-     * <p>Anything else -- an empty hand above all -- passes straight through to the aeroplane behind.
-     * A pylon's box sits inside the wing's, so the whole underside of a wing is pylon as far as a
-     * click is concerned; if a bare hand stripped a station, walking up to an armed aircraft and
-     * climbing in would scatter its stores across the apron on the way past.
+     * <p><b>ステーションが受け取る物は、その種類と現在の搭載状況で決まる。</b>兵装パイロンは空のときラックを
+     * 受け取り、ラックが載れば兵装を受け取る——空のパイロンへミサイルを差し出しても何も起きない。空のパイロンには
+     * ミサイルを吊る物が無いからだ。特殊ステーションはポッドを1つ受け取り、ラックは決して受け取らない。
+     * {@link WeaponMounts} 参照。
+     *
+     * <p>それ以外——とりわけ素手——は背後の機体へそのまま通す。ステーションの箱は主翼の箱の内側にあるので、
+     * クリックにとっては主翼の下面全体がステーションだ。素手で外せるようにしたら、武装した機体へ歩み寄って乗り
+     * 込むだけで、通りすがりに兵装をエプロン中へ撒き散らすことになる。
      */
     public InteractionResult interactPylon(Player player, InteractionHand hand, int slot) {
         if (this.level().isClientSide) {
             return InteractionResult.SUCCESS;
         }
 
-        // Arming is ground work, and a pylon does nothing else. It will not let anyone climb aboard
-        // and it will not fold the aeroplane away: a pylon is for hanging weapons on, and a click
-        // that cannot hang or take one simply does nothing. Anyone who meant to get in has the whole
-        // rest of the aeroplane to click on.
+        // 武装は地上作業であり、ステーションはそれ以外何もしない。搭乗もさせないし機体も畳まない。ステーション
+        // は物を吊るための場所で、吊ることも外すこともできないクリックは単に何もしない。乗りたい者には機体の
+        // 残り全部がクリック対象として残っている。
         //
-        // A wreck has no stations at all. Its pylons are bare and there is nothing to hang a weapon
-        // on, so the click falls through to the airframe behind, where a wrench clears the hulk away.
+        // 残骸にステーションは存在しない。パイロンは空で兵装を吊る物も無いので、クリックは背後の機体へ流れ、
+        // そこでレンチが残骸を片付ける。
         if (this.isWrecked() || !this.isParked()) {
             return InteractionResult.PASS;
         }
 
         ItemStack held = player.getItemInHand(hand);
 
-        if (held.getItem() instanceof WeaponItem weapon && this.weapons.canMountAt(slot)) {
-            if (this.weapons.mountAt(slot, weapon.getWeaponId(), WeaponItem.ammoOf(held))) {
-                held.consume(1, player);
-                this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
-            }
+        if (this.fitAt(slot, held)) {
+            held.consume(1, player);
+            this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
 
             return InteractionResult.CONSUME;
         }
 
-        // Taking one off asks for the tool, the same as taking the aeroplane itself apart does. A
-        // second click while still holding a store is somebody trying to load the next one, not
-        // somebody undoing the last one.
-        if (held.getItem() instanceof WrenchItem && this.weapons.canUnmountAt(slot)) {
-            ItemStack removed = this.weapons.unmountAt(slot);
+        // 「決して受け取れない物」ではなく「今は受け取れない物」を差し出した場合——空のパイロンへミサイル、
+        // 既にラックのあるパイロンへラック。クリックは消費され何も起きない。明らかにこのステーションで作業中の
+        // 者への答えとしてはそれが正しい——素通りさせると、持ち物を間違えただけでコックピットへ入ってしまう。
+        if (isStore(held)) {
+            return InteractionResult.CONSUME;
+        }
+
+        // 取り外しには工具が要る。機体本体の解体と同じだ。兵装を持ったままの2度目のクリックは、次を搭載しよう
+        // としている者であって、前のを取り消そうとしている者ではない。
+        if (held.getItem() instanceof WrenchItem && this.weapons.canStripAt(slot)) {
+            ItemStack removed = this.weapons.strip(slot);
             this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
 
             if (!player.addItem(removed)) {
@@ -3197,16 +3597,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * The nearest pylon the player is looking through, or null if their line misses every one.
+     * プレイヤーの視線が通る最も手前のパイロン。どれにも当たらなければ null。
      *
-     * <p>Asked because a pylon's box and a wing's box occupy the same air. The game hands a click to
-     * whichever box the line of sight enters first, which under a wing is the wing, so a pylon that
-     * is not the nearest thing along the line would never be reached for at all. Running the line
-     * against the pylons alone answers the question the player was actually asking.
+     * <p>パイロンの箱と主翼の箱が同じ空間を占めるので必要になる。ゲームは視線が最初に入った箱へクリックを渡す
+     * が、主翼の下ではそれは主翼だ。だから視線上で最手前でないパイロンは決して届かなくなる。パイロンだけに対して
+     * 視線を通せば、プレイヤーが実際に問うていた問いに答えられる。
      *
-     * <p>Nearest along the line rather than nearest to the aeroplane: an aircraft carrying stores
-     * outboard and inboard on the same wing has both in view at once, and the one in front is the
-     * one being pointed at.
+     * <p>「機体に最も近い」ではなく「視線上で最も手前」。同じ主翼の内側と外側に兵装を積む機体は両方が同時に視界
+     * に入るので、手前にある方が指されている物だ。
      */
     @Nullable
     private VehiclePart pylonInSight(Player player) {
@@ -3238,14 +3636,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Whether this hardpoint is one a player could hang something on, now or later: a pylon rather
-     * than a gun bolted into the airframe.
+     * このハードポイントが、今あるいは後でプレイヤーが物を吊れる物か。機体に固定された機銃ではなくパイロンか。
      *
-     * <p>Asked by the pylon's own box to decide whether it is worth reaching for at all. A wreck has
-     * none: its stations went up with the aeroplane and there is nothing to be done with them, so
-     * every box stands aside and lets the click reach the airframe behind — which is where a wrench
-     * clears the hulk away. Worked out on both sides from state that reaches both, so the client and
-     * the server agree about what any given click was aimed at.
+     * <p>パイロン自身の箱が「そもそも届く価値があるか」を判断するために問う。残骸には1つも無い。ステーションは
+     * 機体と共に吹き飛び、できることは何も無いので、全ての箱が身を引いてクリックを背後の機体へ届かせる——そこで
+     * レンチが残骸を片付ける。両側に届く状態から両側で算出するので、どのクリックが何を狙っていたかについて
+     * クライアントとサーバーの見解が一致する。
      */
     public boolean isLoadablePylon(int slot) {
         if (this.isWrecked()) {
@@ -3258,23 +3654,75 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Whether this stack is a weapon the aircraft could hang on a pylon right now: the right sort of
-     * item, a pylon free for it, and the aircraft sitting still on its wheels. Arming is ground work.
+     * このスタックが今この機体に取り付けられる物か。種類が正しく、受け取れる場所が機上にあり、機体が車輪の上で
+     * 静止していること。武装は地上作業だ。
      *
-     * <p>Both sides work this out for themselves, from state that reaches both, so the client and the
-     * server agree on what a click meant without having to be told.
+     * <p>両側に届く状態から両側が自力で算出するので、通知無しでもクリックの意味についてクライアントとサーバーの
+     * 見解が一致する。
      */
     private boolean canBeArmedWith(ItemStack held) {
-        return held.getItem() instanceof WeaponItem && this.isParked() && this.weapons.hasFreePylon();
+        if (!this.isParked()) {
+            return false;
+        }
+
+        if (held.getItem() instanceof RackItem) {
+            return this.weapons.hasBarePylon();
+        }
+
+        if (held.getItem() instanceof EquipmentItem) {
+            return this.weapons.hasBareSpecial();
+        }
+
+        return held.getItem() instanceof WeaponItem weapon && this.weapons.canMount(weapon.getWeaponId());
+    }
+
+    /** この機体が受け取れるかどうかに関わらず、ステーションに載る3種のいずれかか。 */
+    private static boolean isStore(ItemStack held) {
+        return held.getItem() instanceof WeaponItem || held.getItem() instanceof RackItem
+                || held.getItem() instanceof EquipmentItem;
+    }
+
+    /**
+     * 手持ちの物を指定ステーションへ1つ載せる（そのステーションが受け取るなら）。
+     *
+     * <p>どのアイテムが搭載機構の3つの入口のどれへ行くかを知っている唯一の場所。ステーションへのクリックと機体
+     * 全体へのクリックが同じ規則で武装するようにするためだ。
+     *
+     * @return 何か載ったか。スタックから消費すべきかどうかも兼ねる
+     */
+    private boolean fitAt(int slot, ItemStack held) {
+        if (held.getItem() instanceof RackItem rack) {
+            return this.weapons.fitRackAt(slot, rack.getRackId());
+        }
+
+        if (held.getItem() instanceof EquipmentItem pod) {
+            return this.weapons.fitEquipmentAt(slot, pod.getEquipmentId());
+        }
+
+        return held.getItem() instanceof WeaponItem weapon
+                && this.weapons.mountAt(slot, weapon.getWeaponId(), WeaponItem.ammoOf(held));
+    }
+
+    /** 同じ処理を、受け取れる最初のステーションに対して行う版。機体へのクリックの意味。 */
+    private boolean fitAnywhere(ItemStack held) {
+        if (held.getItem() instanceof RackItem rack) {
+            return this.weapons.fitRack(rack.getRackId());
+        }
+
+        if (held.getItem() instanceof EquipmentItem pod) {
+            return this.weapons.fitEquipment(pod.getEquipmentId());
+        }
+
+        return held.getItem() instanceof WeaponItem weapon
+                && this.weapons.mount(weapon.getWeaponId(), WeaponItem.ammoOf(held));
     }
 
     @Override
     protected void positionRider(Entity passenger, Entity.MoveFunction moveFunction) {
         super.positionRider(passenger, moveFunction);
 
-        // Everyone aboard is carried round by the turn, the pilot included: the aircraft is flown
-        // from the keys, so the view is free to sit where it likes and may as well face where the
-        // aircraft is going.
+        // 搭乗者は全員、パイロットを含めて旋回で運ばれる。機体はキー操作で飛ばすので視界は好きな向きでよく、
+        // それなら進行方向を向いていた方がよい。
         passenger.setYRot(passenger.getYRot() + this.deltaRotation);
         passenger.setYHeadRot(passenger.getYHeadRot() + this.deltaRotation);
         this.clampRotation(passenger);
@@ -3286,37 +3734,31 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Sits a passenger facing the way the aircraft is facing.
+     * 搭乗者を機体の向きに合わせて座らせる。
      *
-     * <p>Their body only. Where they are <em>looking</em> used to be clamped here as well, to a
-     * hundred and thirty-five degrees either side, on the grounds that a head does not turn further
-     * than that. It is true of a head and it is not true of a camera: from outside the aircraft there
-     * is no head involved at all, and the one thing an outside view is for is seeing what is behind
-     * you — which that limit made impossible. The cockpit view still stops where a neck stops, but it
-     * stops there in {@code CockpitView}, which is measuring against the aircraft rather than against
-     * a compass and is the only one of the two that can do it correctly.
+     * <p>体だけ。以前は<em>視線</em>もここで左右135度にクランプしていた。頭はそれ以上回らないから、という理屈
+     * だ。頭については正しいが、カメラについては正しくない。機外視点にはそもそも頭が関与しないし、外部視点の
+     * 唯一の存在意義は後ろを見ることであって——その制限はそれを不可能にしていた。コックピット視点は今も首の
+     * 限界で止まるが、止めるのは {@code CockpitView} であり、方位ではなく機体に対して測る。正しくできるのは
+     * 2つのうちそちらだけだ。
      */
     protected void clampRotation(Entity passenger) {
         passenger.setYBodyRot(this.getYRot());
     }
 
     /**
-     * An aircraft that has boxes of its own is not solid in its own right: the boxes are.
+     * 自前の箱を持つ機体自身は固体ではない。固体なのは箱の方だ。
      *
-     * <p>Minecraft gives an entity one upright box with a square footprint, and for a fifteen-metre
-     * aeroplane that is a shed — six and a half blocks across whatever the wings are doing, and
-     * nowhere near the wing once it banks. The boxes in the aircraft's own file are the real
-     * shape, so once there are any, they do the work and the plain box stops pretending to.
+     * <p>Minecraft はエンティティに正方形底面の直立直方体を1つ与えるが、15m の機体にとってそれは小屋だ——主翼が
+     * 何をしていようと差し渡し6.5ブロックで、バンクすれば主翼からかけ離れる。機体自身のファイルにある箱こそ本当
+     * の形状なので、箱が1つでもあればそちらが仕事をし、素の直方体はふりをやめる。
      *
-     * <p>Nothing is lost by standing down: {@link VehiclePart} passes hits, clicks and pick results
-     * straight to the aircraft, so being shot, being climbed into and being stood on all still reach
-     * here. An aircraft with no boxes of its own keeps its plain box, because otherwise it would have
-     * no way of being touched at all.
+     * <p>降板しても失う物は無い。{@link VehiclePart} が被弾・クリック・ピック結果を機体へそのまま渡すので、
+     * 撃たれることも乗り込まれることも上に立たれることも従来通りここへ届く。自前の箱を持たない機体は素の直方体を
+     * 保つ。さもないと一切触れられなくなるからだ。
      *
-     * <p>The plain box does still exist, and still earns its keep: it is what the aircraft's own
-     * movement collides against, what decides whether it is on the ground, and what the game uses to
-     * decide which chunk the aircraft is in and whether it is worth drawing. Only being an obstacle
-     * and a target is handed over.
+     * <p>素の直方体は依然として存在し、依然として役目を果たす。機体自身の移動が衝突する相手であり、接地判定であり、
+     * ゲームが機体の所属チャンクや描画価値を決めるのに使う物だ。譲り渡すのは障害物と標的の役目だけ。
      */
     @Override
     public boolean canBeCollidedWith() {
@@ -3329,11 +3771,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Whether any of the aircraft's boxes is a piece of airframe rather than a pylon.
+     * 機体の箱のうち、パイロンではなく機体構造である物が1つでもあるか。
      *
-     * <p>Pylons alone are not enough to stand the plain box down. An aircraft with hardpoints but no
-     * boxes of its own would otherwise have nothing to be clicked or shot but five small boxes hanging
-     * under its wings, and no way to be climbed into at all.
+     * <p>パイロンだけでは素の直方体を降板させるのに足りない。ハードポイントはあるが自前の箱を持たない機体は、
+     * さもないとクリックも被弾も主翼下の小さな箱5つでしか受けられず、乗り込む手段がまったく無くなる。
      */
     private boolean hasAirframeBoxes() {
         for (VehiclePart part : this.parts) {
@@ -3346,34 +3787,37 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * Moves the aircraft, stopped by the shape it actually has rather than by the box Minecraft
-     * gives it.
+     * 機体を移動させる。止めるのは Minecraft が与える箱ではなく、実際に持っている形状だ。
      *
-     * <p>An entity collides with one upright box, and for an aeroplane that box has to stay small —
-     * a fifteen-metre box square to the world catches on everything and makes the aircraft
-     * unplaceable. So the aircraft keeps its small box for everything the game does with it, and the
-     * movement is measured against the real boxes first: whichever of them would be stopped soonest
-     * decides how far the aeroplane gets. A wing that looks like it is about to hit a hillside now
-     * hits it.
+     * <p>エンティティは直立の箱1つで衝突し、機体ではその箱を小さく保たねばならない——ワールド軸に整列した15m の
+     * 箱は何にでも引っ掛かり、機体を設置不能にする。だから機体はゲームの各種処理向けに小さい箱を保持したまま、
+     * 移動はまず本物の箱に対して測る。最も早く止められる箱が、機体がどこまで進めるかを決める。斜面に当たりそうに
+     * 見える主翼が、実際に当たるようになった。
      *
-     * <p>Only blocks are tested this way. Entities are left to the plain box, as they always were,
-     * which also keeps the aircraft from colliding with its own boxes.
+     * <p>この方式で判定するのはブロックだけ。エンティティは従来通り素の直方体に任せる。それが機体が自分の箱と
+     * 衝突するのを防いでもいる。
      *
-     * <p>Only the flight model's own movement, though. Anything else moving the aircraft is telling
-     * it where it has <em>already got to</em> — above all vanilla's vehicle packet, which arrives on
-     * the server as a {@link MoverType#PLAYER} move and is then stamped over by {@code absMoveTo} a
-     * few lines later whatever this decides. Testing that report against the shape is worse than
-     * useless: the answer is thrown away, and working it out means sweeping every box the aeroplane
-     * is made of along a whole tick of its flight path — seventeen blocks at the top end, a dozen
-     * times over, on the server thread, for every aircraft anybody is flying. That is a hitch felt by
-     * everyone on the server, and it buys nothing at all. The driving side has already run this test
-     * against ground it could actually see, which is the same reason {@code GroundVehicleEntity} has
-     * never run it on a reported move either.
+     * <p>ただし対象は飛行モデル自身の移動だけ。それ以外で機体を動かす物は、<em>既に到達した</em>位置を伝えている
+     * ——とりわけバニラの vehicle パケットは、サーバーへ {@link MoverType#PLAYER} の移動として届き、ここで何を
+     * 決めようと数行後の {@code absMoveTo} に上書きされる。その報告を形状に対して判定するのは無益を通り越して
+     * 有害だ。答えは捨てられるうえ、算出には機体を構成する全ての箱を飛行経路の丸1tick分——最速で17ブロック——
+     * にわたって十数回スイープする必要がある。サーバースレッド上で、誰かが飛ばしている全機体について、だ。
+     * サーバー全員が感じるヒッチであり、得る物はまったく無い。操縦側は実際に見えている地面に対してこの判定を
+     * 既に済ませている。{@code GroundVehicleEntity} が報告移動に対してこれを走らせたことが無いのも同じ理由だ。
      */
     @Override
     public void move(MoverType type, Vec3 movement) {
         if (type != MoverType.SELF) {
             super.move(type, movement);
+
+            // パイロットの移動報告は、サーバー側のtickが走っているかに関わらず機体を運ぶ——そして tick が
+            // 止まるのはまさに、機体が生成器を追い越してまだ作られていないチャンクへ入ったときだ。それが、まだ
+            // 動いている機体の後ろに回廊を置き去りにしていた。だから報告による移動も回廊を引きずる。普通の
+            // サーバースレッド上のパケット処理であり、update() を呼んでよい2か所のうちの1つ。tick でも実行された
+            // 場合の2回目の呼び出しは equals() で短絡しコストは無い。
+            if (type == MoverType.PLAYER && !this.level().isClientSide) {
+                this.heldChunks = AircraftChunkLoader.update(this, this.heldChunks);
+            }
 
             return;
         }
@@ -3382,14 +3826,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vec3 before = this.position();
 
         super.move(type, allowed);
-        // What the world actually let it do, which is not what it was asked for and not what the
-        // delta movement holds afterwards either. A wreck flies on this and on nothing else; see
-        // wreckTick.
+        // 世界が実際に許した移動量。要求値でもなく、事後のデルタ移動が保持する値でもない。残骸はこれだけを頼り
+        // に飛ぶ。wreckTick 参照。
         this.lastTravel = this.position().subtract(before);
 
-        // super.move only knows whether the plain box was stopped. If it was our own shape that
-        // stopped us, the flags have to say so, or a wing could be folded against a cliff without
-        // anything noticing — crash detection reads exactly these.
+        // super.move が知っているのは素の直方体が止められたかどうかだけ。自前の形状で止まったならフラグに
+        // そう書かねばならない。さもないと主翼が崖に折り畳まれても誰も気付かない——衝突検出が読むのはまさに
+        // これらだ。
         if (allowed.x != movement.x || allowed.z != movement.z) {
             this.horizontalCollision = true;
         }
@@ -3398,18 +3841,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             this.verticalCollision = true;
         }
 
-        // Deliberately not setOnGround. Being on the ground is a question about the wheels, and the
-        // plain box sits on them; a wingtip brushing a hillside in flight would otherwise have the
-        // aeroplane decide it had landed, level itself out and lose its speed in mid-air.
+        // setOnGround を意図的に呼ばない。接地しているかは車輪についての問いであり、素の直方体は車輪の位置に
+        // ある。さもないと飛行中に翼端が斜面を掠めただけで機体は着陸したと判断し、水平に戻って空中で速度を失う。
     }
 
     /**
-     * How far the aircraft may move before one of its own boxes runs into the world.
+     * 自分の箱のどれかが世界に当たるまで、機体がどれだけ動けるか。
      *
-     * <p>Each box is asked separately and the answers are combined by taking, on each axis, whatever
-     * is nearest to standing still. That is not a perfect sweep of a jointed shape — no box knows
-     * that another has already been stopped — but it is exact about never letting a box pass through
-     * a wall, which is the part that shows.
+     * <p>箱ごとに個別に問い、各軸で最も停止に近い答えを採って統合する。連結形状の完全なスイープではない——ある箱
+     * が既に止められたことを他の箱は知らない——が、箱を壁に通さない点については厳密であり、目に見えるのはその部分
+     * だ。
      */
     private Vec3 limitToShape(Vec3 movement) {
         if (movement.lengthSqr() == 0.0 || this.level().isClientSide && !this.isControlledByLocalInstance()) {
@@ -3426,9 +3867,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         double underside = this.scrapeLine();
 
         for (VehicleShape.Box box : shape) {
-            // The box as it is really lying, swept against the blocks. A wing banked over occupies a
-            // thin plate on a slant; stopped against the upright slab drawn round that plate, an
-            // aeroplane rolled into a turn is brought up short by air.
+            // 実際に寝ている姿の箱をブロックに対してスイープする。バンクした主翼は斜めの薄板を占めるが、その
+            // 薄板を囲む直立の板で止めると、旋回でロールした機体は何も無い空気に急停止させられる。
             Vec3 stopped = Hitboxes.throughBlocks(this, this.hitbox(box), movement, underside);
 
             allowed = new Vec3(
@@ -3440,77 +3880,65 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return allowed;
     }
 
-    /** Whichever of the two allows less movement, keeping the sign the pilot asked for. */
+    /** 2つのうち移動量の小さい方。パイロットが要求した符号は保つ。 */
     private static double nearerToZero(double a, double b) {
         return Math.abs(a) <= Math.abs(b) ? a : b;
     }
 
     /**
-     * The height below which ground is something the aeroplane scrapes rather than something it
-     * flies into.
+     * これより下の地面は、機体が突っ込む相手ではなく擦る相手になる、という高さ。
      *
-     * <p>The undercarriage is the lowest thing an aeroplane is meant to touch the ground with, and
-     * it is not the lowest thing an aeroplane <em>has</em>. Rotating for takeoff swings the tail
-     * below the wheels and into the runway; a flared landing does the same thing on the way in.
-     * Swept against the blocks like anything else, that tail is a wall the aeroplane runs into at
-     * flying speed — the takeoff roll stops dead, the speed the impact took away is the whole of it,
-     * and {@link #detectCrash} quite correctly concludes that an aeroplane which lost eighty knots
-     * in one tick has hit something. It has: it has hit the runway it was rolling along.
+     * <p>降着装置は機体が地面に触れることを想定された最も低い部位だが、機体が<em>持っている</em>最も低い部位では
+     * ない。離陸のための機首上げは尾部を車輪より下、滑走路の中へ振り下ろす。フレアを取った着陸も進入中に同じこと
+     * をする。他と同様にブロックへスイープすると、その尾部は機体が飛行速度で突っ込む壁になる——離陸滑走は急停止
+     * し、衝突が奪った速度がその全てになり、{@link #detectCrash} は「1tickで80ノット失った機体は何かに当たった」
+     * とまったく正しく結論する。実際当たっている。走っていた滑走路に、だ。
      *
-     * <p>So while the aircraft is in the configuration where the wheels are what touches the ground
-     * — undercarriage out, wings roughly level — nothing that reaches no higher than the wheels and
-     * the step they roll over stops the airframe. Above that line everything still does, which is
-     * the difference between scraping a runway and flying into the hill at the end of it. In the air
-     * with the gear up, or rolled past the point where a wingtip is lower than a wheel, the aircraft
-     * hits everything again.
+     * <p>よって、車輪が地面に触れる形態にある間——脚が出ていて翼がほぼ水平——は、車輪と車輪が乗り越える段差より
+     * 高くない物は機体を止めない。その線より上は従来通り全て止める。それが「滑走路を擦る」ことと「その先の丘へ
+     * 突っ込む」ことの違いだ。脚を上げた空中や、翼端が車輪より低くなるまでロールした状態では、機体は再び全てに
+     * 当たる。
      *
-     * <p>It cannot let the aeroplane through the floor. The plain box sits on the wheels and is
-     * settled against the world by {@code move} exactly as before, so ground below the wheels still
-     * holds the aircraft up and a descent into it is still an arrival at whatever speed it arrived.
+     * <p>機体を床下へ通すことはできない。素の直方体は車輪の位置にあり、従来通り {@code move} が世界に対して決着
+     * させるので、車輪より下の地面は依然として機体を支え、そこへの降下は到達速度が何であれ依然として「到達」だ。
      */
     private double scrapeLine() {
         if (!this.onWheels()) {
             return Hitboxes.UNDERSIDE_NONE;
         }
 
-        // The same step the undercarriage rolls over rather than the wheels alone: a kerb the wheels
-        // climb is not a kerb the airframe should be stopped by. See maxUpStep.
+        // 車輪だけでなく降着装置が乗り越える段差も含める。車輪が登る縁石は、機体が止められるべき縁石ではない。
+        // maxUpStep 参照。
         return this.getBoundingBox().minY + this.getStats().landingGear().climbHeight();
     }
 
     /**
-     * The height below which blocks are the floor the aircraft is over, rather than world it is
-     * buried in.
+     * これより下のブロックは、機体が埋まっている世界ではなく機体が乗っている床である、という高さ。
      *
-     * <p>The companion to {@link #scrapeLine}, for {@link #insideTerrain} rather than for movement,
-     * and the reason the two are not the same method is the aeroplane with its gear up. There is no
-     * scraping to be done then — a belly has no wheels to roll on, so the airframe hits everything,
-     * and an arrival is an arrival — but the question of what the aeroplane is <em>inside</em> has
-     * the same answer either way: the plain box sits on the wheels and is settled against the world
-     * by {@code move} in the ordinary way, so anything reaching no higher than the bottom of it is
-     * what holds the aircraft up. Overlapping that is what standing on the ground looks like from
-     * underneath. It is not the world having closed over an aeroplane, and flying out of it is not
-     * the answer to it.
+     * <p>{@link #scrapeLine} の対で、移動ではなく {@link #insideTerrain} 用。2つを同じメソッドにしていない理由は
+     * 脚を上げた機体だ。そのとき擦る動作は存在しない——胴体には転がる車輪が無いので機体は全てに当たり、到達は
+     * 到達だ——が、機体が何の<em>内側</em>にいるかという問いの答えはどちらでも同じになる。素の直方体は車輪の位置
+     * にあり通常通り {@code move} が世界に対して決着させるので、その底面より高くない物が機体を支えている物だ。
+     * それと重なっているのは、下から見た「地面に立っている」状態にすぎない。世界が機体の上に閉じたわけではないし、
+     * 飛び出すことがその答えでもない。
      *
-     * <p>Terrain that really did arrive around an aircraft is untouched by this. A hillside that
-     * appears where an aeroplane is flying reaches past the wheels and well above them — that is
-     * what being inside a hillside is — and every block of it above this line still counts.
+     * <p>本当に機体の周りに現れた地形はこれに影響されない。飛行中の機体の位置に現れた斜面は車輪を越えてさらに上
+     * まで届く——それが斜面の内側にいるということだ——ので、この線より上のブロックは全て従来通り数えられる。
      */
     private double floorLine() {
         double scrape = this.scrapeLine();
 
-        // On the wheels and the right way up, the step the undercarriage rolls over is floor too.
+        // 脚が出て正立しているなら、降着装置が乗り越える段差も床のうち。
         return scrape == Hitboxes.UNDERSIDE_NONE ? this.getBoundingBox().minY : scrape;
     }
 
     /**
-     * An aircraft is worth drawing as far away as it is sent.
+     * 機体は送られてくる距離まで描く価値がある。
      *
-     * <p>Minecraft works out how far an entity is worth drawing from how big it is, which comes to
-     * a few hundred blocks for an aeroplane and is nowhere near far enough: the server reports
-     * aircraft out to their {@code ghost_range}, and something reported and not drawn is just a
-     * hole in the sky. This is the outer limit only; where the game's own renderer stops and the
-     * ghost pass takes over is decided on the client, in {@code AircraftRenderer.shouldRender}.
+     * <p>Minecraft はエンティティの描画価値のある距離を大きさから算出し、機体では数百ブロックになるが、まるで
+     * 足りない。サーバーは {@code ghost_range} まで機体を報告するし、報告されて描かれない物は空に空いた穴に
+     * すぎない。これは外側の上限だけを定める。ゲーム自身のレンダラーがどこで止まりゴーストパスが引き継ぐかは
+     * クライアント側の {@code AircraftRenderer.shouldRender} が決める。
      */
     @Override
     public boolean shouldRenderAtSqrDistance(double distance) {
@@ -3526,20 +3954,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
-     * One controller, for the undercarriage. Everything else the aircraft does with itself follows
-     * the flight from moment to moment and is posed in code by
-     * {@link com.ashvehicles.client.model.AircraftModel#setCustomAnimations}; the gear is a sequence
-     * and is played from the aircraft's animation file instead.
+     * コントローラは降着装置用の1つだけ。機体が自身に対して行う他の全ては飛行状態に毎瞬追従する物で、
+     * {@link com.ashvehicles.client.model.AircraftModel#setCustomAnimations} がコードでポーズを付ける。脚は手順
+     * なので、代わりに機体のアニメーションファイルから再生する。
      *
-     * <p>Both halves of it are worked out in
-     * {@link com.ashvehicles.client.model.AircraftAnimations}, which is client code. Nothing here
-     * reaches it: a controller is only ever processed while something is being drawn, so a server
-     * registers this and then never looks at it again.
+     * <p>その両半分は {@link com.ashvehicles.client.model.AircraftAnimations} で算出される。クライアントコードだ。
+     * ここから届く物は何も無い。コントローラは何かが描画されている間しか処理されないので、サーバーはこれを登録
+     * した後は二度と見ない。
      *
-     * <p>The transition covers a pilot who changes their mind halfway through a cycle. GeckoLib
-     * cannot run an animation backwards, so what it does instead is blend from wherever the legs
-     * have got to into the start of the other animation, and a few ticks of that reads as the gear
-     * hesitating rather than as it teleporting.
+     * <p>トランジションは、作動途中で気が変わったパイロットに対応する。GeckoLib はアニメーションを逆再生できない
+     * ので、代わりに脚が到達した位置からもう一方のアニメーションの先頭へブレンドする。数tickのそれは、脚のテレ
+     * ポートではなく「ためらい」に見える。
      */
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
@@ -3559,8 +3984,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         } else {
             this.snapAttitude(Attitude.of(this.getYRot(), this.getXRot()));
         }
-        // An aircraft written to the world before this was a health system has no figure to read,
-        // and comes back whole rather than coming back with nothing left.
+        // 耐久システムが存在する前にワールドへ書き出された機体には読む値が無いので、残量0ではなく無傷で戻る。
         this.setHealth(tag.contains("Health") ? tag.getFloat("Health") : this.getMaxHealth());
         this.setCountermeasures(true, tag.contains("Flares")
                 ? tag.getInt("Flares") : this.getStats().countermeasures().flares());
@@ -3576,7 +4000,24 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.flapsProgress = this.isFlapsDown() ? 1.0F : 0.0F;
         this.flapsProgressO = this.flapsProgress;
         this.weapons.load(tag.getCompound("Weapons"));
+        this.stations.load(tag.getCompound("Stations"));
         this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+
+        // 書き出し時にこの機体が開いたまま保持していた回廊。チケット自体はワールドと共に保存される——このチャンク
+        // を、ひいてはこの機体をロードし戻したのがそれだ——が、キーは自分の UUID であり、どれが自分の物かを他は
+        // 知らない。読み戻した後、次の update() が突き合わせる。まだ必要な物は二重取得せずに保持し、飛行が必要と
+        // しなくなった物は解放して、地面を永久に開いたままにしない。
+        long[] corridor = tag.getLongArray("HeldChunks");
+
+        if (corridor.length > 0) {
+            Set<ChunkPos> held = new HashSet<>(corridor.length);
+
+            for (long packed : corridor) {
+                held.add(new ChunkPos(packed));
+            }
+
+            this.heldChunks = Set.copyOf(held);
+        }
     }
 
     @Override
@@ -3597,6 +4038,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         tag.putBoolean("FlapsDown", this.isFlapsDown());
         tag.putBoolean("Vtol", this.isVtolSelected());
         tag.put("Weapons", this.weapons.save());
+        tag.put("Stations", this.stations.save());
+
+        // この機体の保存済みチケットがどのチャンク向けか。readAdditionalSaveData 参照。
+        long[] corridor = new long[this.heldChunks.size()];
+        int at = 0;
+
+        for (ChunkPos pos : this.heldChunks) {
+            corridor[at++] = pos.toLong();
+        }
+
+        tag.putLongArray("HeldChunks", corridor);
     }
 
     @Override

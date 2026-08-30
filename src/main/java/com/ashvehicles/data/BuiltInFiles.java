@@ -19,22 +19,21 @@ import net.neoforged.fml.ModList;
 import net.neoforged.neoforgespi.language.IModFileInfo;
 
 /**
- * Reads a directory of JSON files straight out of the mod, before the game is far enough along to
- * read data packs.
+ * データパックを読める段階になる前に、MOD 本体から JSON ディレクトリを直接読む。
  *
- * <p>Entity types and items have to be registered while the registries are open, which is over long
- * before any data pack is touched. So the same files the data packs will later provide are read out
- * of the mod here, at start-up, purely to learn what exists. Everything else about them is read
- * again later, from the data packs, where a pack can have overridden it.
+ * <p>エンティティ型とアイテムはレジストリが開いている間に登録せねばならず、それはデータパックに触れる
+ * ずっと前に終わってしまう。そこで、後でデータパックが供給するのと同じファイルを起動時にここで読み、
+ * 「何が存在するか」だけを知る。それ以外の中身は後でデータパック側から読み直され、パックによる上書き
+ * が効く。
  */
 public final class BuiltInFiles {
     private static final String SUFFIX = ".json";
 
     /**
-     * Every file in {@code data/ashvehicles/<directory>/}, parsed, keyed by the mod's id for the
-     * file's name. Files that will not parse are logged and skipped.
+     * {@code data/ashvehicles/<directory>/} の全ファイルを解析し、ファイル名から作った MOD の ID を
+     * キーにして返す。解析できないファイルはログに出して飛ばす。
      *
-     * @param what a word for the log: "aircraft", "weapons"
+     * @param what ログ用の語。"aircraft" や "weapons" など
      */
     public static <T> Map<ResourceLocation, T> read(String directory, Codec<T> codec, String what) {
         Map<ResourceLocation, T> found = new LinkedHashMap<>();
@@ -60,8 +59,8 @@ public final class BuiltInFiles {
     }
 
     /**
-     * The directory inside the mod. Asking the mod file is the direct route; the class loader is a
-     * second opinion for the case where the mod list is not built yet.
+     * MOD 内のディレクトリ。MOD ファイルに訊くのが正攻法で、MOD リストがまだ組み上がっていない場合の
+     * second opinion がクラスローダー。
      */
     private static Path locate(String directory) {
         try {

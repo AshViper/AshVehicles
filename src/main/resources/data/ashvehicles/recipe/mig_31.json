@@ -1,28 +1,24 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 7
     },
-    "D": {
-      "tag": "c:gems/diamond"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "E": {
-      "item": "minecraft:ender_eye"
+    {
+      "item": "ashvehicles:jet_engine",
+      "count": 2
     },
-    "K": {
-      "tag": "c:storage_blocks/iron"
-    },
-    "Q": {
-      "tag": "c:storage_blocks/diamond"
-    },
-    "R": {
-      "tag": "c:dusts/redstone"
+    {
+      "item": "ashvehicles:avionics",
+      "count": 3
     }
-  },
-  "pattern": ["#K#", "DQD", "RER"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:mig_31"

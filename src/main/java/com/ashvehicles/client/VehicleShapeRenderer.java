@@ -24,18 +24,15 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 
 /**
- * Draws a vehicle's collision boxes as they are written, tilted with the vehicle, turned with its
- * turret, and with whatever angle each box carries.
+ * 車両の当たり判定の箱を、書かれている通りに描く。車両と共に傾き、砲塔と共に回り、各箱が持つ角度も反映する。
  *
- * <p>Minecraft's own hitbox overlay cannot show this. What the game collides against is an upright
- * box drawn around each tilted one, so the overlay shows a wing as a tall slab the moment the
- * aircraft banks and never shows the wing itself — and a tank's gun as a box very nearly square the
- * moment the turret comes off the bow. That is honest about what the game will collide with and
- * useless for checking whether the shape fits the model, which is what these are for.
+ * <p>Minecraft 自身の当たり判定オーバーレイではこれを表示できない。ゲームが衝突相手にするのは傾いた箱を囲む直立
+ * の箱なので、オーバーレイは機体がバンクした瞬間に主翼を背の高い板として表示し、主翼そのものは決して表示しない
+ * ——戦車の砲も、砲塔が車首から外れた瞬間にほぼ正方形の箱になる。ゲームが何と衝突するかについては正直だが、
+ * 形状がモデルに合っているかの確認には役立たない。こちらの用途はそれだ。
  *
- * <p>Shown whenever the hitbox overlay is, so F3+B turns it on. It is not an aid to reading the
- * game's own outline beside it — it is the shape itself. Nothing Minecraft draws is what a machine
- * is hit or collided with any more; these boxes are.
+ * <p>当たり判定オーバーレイと連動して表示するので F3+B で出る。隣に出るゲーム自身の輪郭を読む補助ではなく、
+ * これが形状そのものだ。今や Minecraft が描く物はどれも、機体が被弾・衝突する相手ではない。この箱がそれだ。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class VehicleShapeRenderer {
@@ -43,19 +40,20 @@ public final class VehicleShapeRenderer {
     private static final float GREEN = 1.0F;
     private static final float BLUE = 0.45F;
     private static final float ALPHA = 0.9F;
-    /** Pylons are drawn red, so that where a weapon hangs is never mistaken for a piece of airframe. */
+    /** 砲腔線を引く長さ（ブロック）。砲がどこを狙っているかが読めれば足りる。 */
+    private static final double BORE_LINE = 24.0;
+    /** パイロンは赤で描く。兵装を吊る位置が機体構造の一部と誤解されないように。 */
     private static final float PYLON_RED = 1.0F;
     private static final float PYLON_GREEN = 0.2F;
     private static final float PYLON_BLUE = 0.2F;
     /**
-     * Boxes carried by a turret are drawn amber, because the one thing worth checking about them is
-     * whether they follow the turret round — and a box that has quietly stayed on the hull looks
-     * exactly like a correct one until the gun is laid abeam.
+     * 砲塔が運ぶ箱は琥珀色で描く。確認する価値があるのは「砲塔と共に回るか」だけであり、黙って車体に留まった箱は
+     * 砲を真横へ据えるまで正しい箱とまったく同じに見えるからだ。
      */
     private static final float TURRET_RED = 1.0F;
     private static final float TURRET_GREEN = 0.75F;
     private static final float TURRET_BLUE = 0.2F;
-    /** Past this there is nothing to check and plenty to slow down. */
+    /** これを超えると確認する物は無く、遅くする要素ばかりになる。 */
     private static final double RANGE = 96.0;
 
     @SubscribeEvent
@@ -108,7 +106,7 @@ public final class VehicleShapeRenderer {
 
         for (VehicleShape.Box box : shape.boxes()) {
             poseStack.pushPose();
-            // Inside the aircraft's own frame +X points left, so an offset to the right is negative.
+            // 機体座標系では +X が左を指すので、右へのオフセットは負値になる。
             poseStack.translate(-box.offset().x, box.offset().y, box.offset().z);
             poseStack.mulPose(box.orientation());
 
@@ -119,9 +117,8 @@ public final class VehicleShapeRenderer {
             poseStack.popPose();
         }
 
-        // The pylons, in red so that they read as a different kind of thing from the airframe: these
-        // are places to hang something on rather than pieces of aeroplane, and while an aircraft's
-        // hardpoints are being positioned by eye it matters a great deal exactly where they are.
+        // パイロンは赤で、機体構造とは別種の物として読めるようにする。これらは機体の一部ではなく物を吊る場所
+        // であり、ハードポイントを目視で配置している間はその正確な位置が非常に重要だ。
         for (AircraftDefinition.Hardpoint hardpoint : hardpoints) {
             poseStack.pushPose();
             poseStack.translate(-hardpoint.pos().x, hardpoint.pos().y, hardpoint.pos().z);
@@ -134,15 +131,29 @@ public final class VehicleShapeRenderer {
         }
 
         poseStack.popPose();
+
+        // 砲座は砲腔線で示す。位置は既にパイロンの箱が示しているので、ここで足りないのは向きだけだ——
+        // そして可動範囲を機体ファイルで詰めている間に見たいのはまさにそれ。線はワールド座標で引く。
+        // 機体の姿勢を通した後の答えであり、それが弾の出ていく線そのものだから。
+        for (int index = 0; index < aircraft.getStations().count(); index++) {
+            Vec3 from = aircraft.getStations().muzzle(index, partialTick).subtract(eye);
+            Vec3 to = from.add(aircraft.getStations().direction(index, partialTick).scale(BORE_LINE));
+
+            lines.addVertex(poseStack.last(), (float) from.x, (float) from.y, (float) from.z)
+                    .setColor(PYLON_RED, PYLON_GREEN, PYLON_BLUE, ALPHA)
+                    .setNormal(poseStack.last(), 0.0F, 1.0F, 0.0F);
+            lines.addVertex(poseStack.last(), (float) to.x, (float) to.y, (float) to.z)
+                    .setColor(PYLON_RED, PYLON_GREEN, PYLON_BLUE, ALPHA)
+                    .setNormal(poseStack.last(), 0.0F, 1.0F, 0.0F);
+        }
     }
 
     /**
-     * The same for a ground vehicle, with the turret's boxes swung about its ring.
+     * 地上車両向けの同じ処理。砲塔の箱は旋回輪の周りに回す。
      *
-     * <p>Built the same way the vehicle builds them — into the ring, round by the traverse, then out
-     * to the box — so what is drawn is what is really being shot at rather than a second opinion
-     * about it. Inside the vehicle's own frame +X points left, so an offset to the right is negative,
-     * and the traverse is a negative turn about Y for the same reason.
+     * <p>車両が組み立てるのと同じ手順で組む——旋回輪へ入り、旋回量だけ回し、そこから箱へ出る——ので、描かれる物は
+     * 実際に撃たれている物であって、それについての二つ目の見解ではない。車両座標系では +X が左を指すので右への
+     * オフセットは負値になり、同じ理由で旋回は Y 軸周りの負の回転になる。
      */
     private static void draw(PoseStack poseStack, VertexConsumer lines, GroundVehicleEntity vehicle,
             Vec3 eye, float partialTick) {
@@ -176,9 +187,8 @@ public final class VehicleShapeRenderer {
                 poseStack.mulPose(Axis.YP.rotationDegrees(-traverse));
             }
 
-            // The gun's own pivot sits somewhere on the turret, so once traversed it is reached by
-            // a further move within the now-traversed frame, exactly as the ring was reached from
-            // the vehicle's origin above.
+            // 砲自身の支点は砲塔上のどこかにあるので、旋回後は旋回済み座標系内でさらに移動して到達する。上で
+            // 車両原点から旋回輪へ到達したのとまったく同じ手順だ。
             if (onGun) {
                 Vec3 fromRing = trunnion.subtract(ring);
                 poseStack.translate(-fromRing.x, fromRing.y, fromRing.z);

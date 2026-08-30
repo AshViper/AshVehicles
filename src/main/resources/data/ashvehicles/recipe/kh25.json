@@ -3,20 +3,24 @@
   "category": "equipment",
   "group": "ashvehicles_missile",
   "key": {
-    "#": {
-      "tag": "c:ingots/iron"
-    },
     "E": {
       "item": "minecraft:ender_eye"
     },
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "C": {
+      "item": "ashvehicles:circuit_board"
+    },
     "X": {
       "item": "minecraft:tnt"
-    },
-    "B": {
-      "item": "minecraft:blaze_powder"
     }
   },
-  "pattern": [" E ", "#X#", "#B#"],
+  "pattern": [
+    " E ",
+    "SCS",
+    "SXS"
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:kh25"

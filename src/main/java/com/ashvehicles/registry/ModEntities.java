@@ -11,6 +11,7 @@ import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.entity.CountermeasureEntity;
+import com.ashvehicles.entity.DesignationEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
@@ -23,8 +24,8 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
- * One entity type per aircraft file. Nothing here names an aircraft: the list comes from whatever
- * {@link Definitions} found in the mod's resources.
+ * 機体ファイル1つにつきエンティティ型1つ。ここに機体名は一切書かれておらず、一覧は
+ * {@link Definitions} が MOD のリソースから見つけたものがそのまま並ぶ。
  */
 public final class ModEntities {
     public static final DeferredRegister<EntityType<?>> ENTITY_TYPES =
@@ -37,59 +38,93 @@ public final class ModEntities {
             VEHICLES = registerVehicles();
 
     /**
-     * One round from a gun. Small, fast and short-lived, so it is tracked far out and updated every
-     * tick: a tracer that only moves every third tick is a dotted line.
+     * 機銃の弾1発。小さく速く短命なので遠くまで追跡し毎tick更新する。3tickに1度しか動かない曳光弾は
+     * ただの点線になる。
+     *
+     * <p>追跡距離は兵装の射程に合わせる。機銃の射程は800〜1400ブロックあり、既定の16 chunk（256ブロック）
+     * では弾が飛び切るはるか手前——撃った本人からたった256ブロック——でサーバーが報告をやめる。曳光は空中
+     * で消え、遠くの目標へ吸い込まれていく様子は誰にも見えない。当たり判定はサーバーが持っているので、
+     * これは見え方だけの話であり、そして遠距離射撃で見えていなければ困る物はまさに曳光だ。40 chunk
+     * （640ブロック）は {@code VehicleProjectile.RENDER_RANGE} の内側で、そこから先は
+     * {@code BulletGhostAdapter} のゴーストが引き継ぐ。代償は1発あたりパケット数個
+     * （{@code updateInterval} 参照）。
      */
     public static final DeferredHolder<EntityType<?>, EntityType<BulletEntity>> BULLET =
             ENTITY_TYPES.register("bullet",
                     () -> EntityType.Builder.<BulletEntity>of(BulletEntity::new, MobCategory.MISC)
                             .sized(0.2F, 0.2F)
-                            .clientTrackingRange(16)
-                            // Rarely, and without the velocity. Both of those would do more harm
-                            // than good: the packets that carry an entity's speed cannot express one
-                            // this fast and clamp it to a tenth of the truth, and a position that is
-                            // one tick stale is a forty-block jump. The client is told the real speed
-                            // once, in synched data, and flies the round itself from there; the
-                            // occasional position is a check rather than a correction. See
-                            // VehicleProjectile.
+                            .clientTrackingRange(40)
+                            // 更新は稀に、速度は送らない。どちらも送る方が害になる。速度パケットは
+                            // これほど速い物を表現できず真値の1/10に丸めるし、1tick古い位置は40ブロック
+                            // の飛びになる。クライアントには本当の速度を同期データで一度だけ伝え、
+                            // あとは自前で飛ばす。たまに来る位置は補正ではなく答え合わせ。
+                            // VehicleProjectile 参照。
                             .updateInterval(20)
                             .setShouldReceiveVelocityUpdates(false)
                             .build("bullet"));
 
     /**
-     * A rocket or a missile. Bigger and slower than a round, and worth watching all the way in, so
-     * it is tracked further out than one — and, since {@link com.ashvehicles.mixin.EntityTrackingMixin}
-     * lifts the cap against the player's view distance, that range is the one it actually gets.
+     * ロケットまたはミサイル。弾より大きく遅く、着弾まで見る価値があるので追跡距離は弾より長い。
+     * {@link com.ashvehicles.mixin.EntityTrackingMixin} が描画距離による頭打ちを外すため、この値が
+     * そのまま実際の追跡距離になる。
+     *
+     * <p>そしてこの値が、煙がどこで途切れるかを決めている。航跡を置くのはクライアント側の実体だけ
+     * （{@code VehicleProjectile.spawnTrail}）で、受信が止まればゴーストが機体を描き続けても煙は止まる。
+     * 32 chunk は512ブロック——1tickに68ブロック出すミサイルなら発射から8tickだ。撃った本人が、自分の
+     * ミサイルの煙が目の前で途切れるのを見ることになる。128 chunk（2048ブロック）はその種の交戦がまるごと
+     * 収まる距離で、代償は飛翔中のミサイル1発につき5tickに1個の位置パケットしかない。空にいるミサイルは
+     * 元々数発だ。
      */
     public static final DeferredHolder<EntityType<?>, EntityType<RocketEntity>> ROCKET =
             ENTITY_TYPES.register("rocket",
                     () -> EntityType.Builder.<RocketEntity>of(RocketEntity::new, MobCategory.MISC)
                             .sized(0.4F, 0.4F)
-                            .clientTrackingRange(32)
-                            // More often than a round, for the same reasons set out there: a missile
-                            // steers, and the two sides can only agree about that for as long as they
-                            // agree about what it is steering at.
+                            .clientTrackingRange(128)
+                            // 弾より高頻度。理由は弾の側に書いた通りで、ミサイルは誘導するため、
+                            // 両者が「何を狙っているか」で一致している間しか結果も一致しない。
                             .updateInterval(5)
                             .setShouldReceiveVelocityUpdates(false)
                             .build("rocket"));
 
     /**
-     * A flare or a cloud of chaff. Small, short-lived, and worth seeing from as far off as the
-     * missile chasing it, which is the whole spectacle.
+     * フレアまたはチャフ。小さく短命だが、追ってくるミサイルと同じ距離から見えるべきもの。それが
+     * 見せ場そのものなので。
      */
     public static final DeferredHolder<EntityType<?>, EntityType<CountermeasureEntity>> COUNTERMEASURE =
             ENTITY_TYPES.register("countermeasure",
                     () -> EntityType.Builder.<CountermeasureEntity>of(CountermeasureEntity::new, MobCategory.MISC)
                             .sized(0.3F, 0.3F)
                             .clientTrackingRange(32)
-                            // Thrown once and then left to fall. Corrected often, because it is
-                            // thrown with a share of the aeroplane's speed and the packet that
-                            // spawns it cannot carry more than 3.9 blocks a tick of that -- but
-                            // slowly enough that the corrections are ordinary relative moves rather
-                            // than the teleports a fast round needs.
+                            // 一度投げたら落ちるに任せる。機体の速度を分けてもらって射出されるのに
+                            // 生成パケットは1tick 3.9ブロックまでしか運べないので補正は頻繁。ただし
+                            // 十分遅いので、補正は高速弾のようなテレポートではなく普通の相対移動で済む。
                             .updateInterval(2)
                             .setShouldReceiveVelocityUpdates(false)
                             .build("countermeasure"));
+
+    /**
+     * 照準ポッドが地上に置いている光点。動かず、何も描かれず、レーザー誘導兵器が追う相手となる
+     * エンティティが要るというだけの存在。{@link DesignationEntity} 参照。
+     *
+     * <p>地平線まで追跡し、位置補正はしない。置いたらそこに留まるだけだから。高高度から落とした爆弾は
+     * 着弾する頃には通常の追跡距離のはるか外におり、マークを忘れたクライアントは「何も無い所へ落ちて
+     * いく爆弾」を見ることになる。
+     *
+     * <p>距離はポッドの射程＋α。マークが置き手の機体から離れうる最大がそこだから。そしてその機体こそ
+     * マークを見失ってはいけない唯一のクライアントで、コックピットで「今何を掴んでいるか」を示すもの
+     * は全部、世界にマークの位置を訊きに行く。この数字を意味あるものにしているのが追跡側の細工で、
+     * マークの下の地面はクライアントで決してロードされないため、バニラは距離をいくつにしようが送信を
+     * 拒む。{@link com.ashvehicles.mixin.EntityTrackingMixin} 参照。何も描かれず、地面に降りる間しか
+     * 動かないエンティティ1個なら送っても安い。
+     */
+    public static final DeferredHolder<EntityType<?>, EntityType<DesignationEntity>> DESIGNATION =
+            ENTITY_TYPES.register("designation",
+                    () -> EntityType.Builder.<DesignationEntity>of(DesignationEntity::new, MobCategory.MISC)
+                            .sized(0.2F, 0.2F)
+                            .clientTrackingRange(144)
+                            .updateInterval(20)
+                            .setShouldReceiveVelocityUpdates(false)
+                            .build("designation"));
 
     private static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> registerAll() {
         Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> types = new LinkedHashMap<>();
@@ -103,10 +138,9 @@ public final class ModEntities {
             ResourceLocation id, AircraftDefinition definition) {
         VehicleChassis.Hitbox hitbox = definition.hitbox();
 
-        // Minecraft hitboxes are boxes with a square footprint, so they can never match the
-        // silhouette of an aeroplane; the file gives a figure that covers the fuselage and wing
-        // roots and lets the outer wings overhang. The size is fixed here and cannot be changed by
-        // a data pack, because an entity type carries it from the moment it is registered.
+        // Minecraft の当たり判定は底面が正方形の箱なので、機体のシルエットには決して合わない。
+        // ファイルの値は胴体と翼根を覆い、外翼ははみ出させる寸法。大きさはここで固定でデータパックから
+        // は変えられない。エンティティ型は登録された瞬間からこの値を持ち歩くため。
         return ModEntities.ENTITY_TYPES.register(id.getPath(),
                 () -> EntityType.Builder.<AircraftEntity>of(AircraftEntity::new, MobCategory.MISC)
                         .sized(hitbox.width(), hitbox.height())
@@ -135,13 +169,11 @@ public final class ModEntities {
     }
 
     /**
-     * One entity type per ground vehicle file, on the same terms as an aircraft: the size is fixed
-     * here and cannot be changed by a data pack, because an entity type carries it from the moment
-     * it is registered.
+     * 地上車両ファイル1つにつきエンティティ型1つ。条件は機体と同じで、大きさはここで固定、データ
+     * パックからは変えられない（登録時から型が持つ値なので）。
      *
-     * <p>Updated every tick and told to carry its velocity, both for the reason an aircraft is: the
-     * hull is simulated by whoever is driving, and everyone else has to be able to draw it moving
-     * rather than stepping.
+     * <p>毎tick更新し速度も載せる。理由は機体と同じで、車体を計算しているのは運転している者であり、
+     * それ以外の全員は車体をカクつきではなく滑らかに動くものとして描けなければならない。
      */
     private static DeferredHolder<EntityType<?>, EntityType<GroundVehicleEntity>> registerVehicle(
             ResourceLocation id, GroundVehicleDefinition definition) {
@@ -156,12 +188,12 @@ public final class ModEntities {
                         .build(id.getPath()));
     }
 
-    /** Every registered aircraft, by id. */
+    /** 登録済みの全機体（ID順）。 */
     public static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> aircraft() {
         return AIRCRAFT;
     }
 
-    /** Every registered ground vehicle, by id. */
+    /** 登録済みの全地上車両（ID順）。 */
     public static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<GroundVehicleEntity>>> vehicles() {
         return VEHICLES;
     }

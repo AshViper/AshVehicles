@@ -11,32 +11,29 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 
 /**
- * The crew's own seeker, sounding off for as long as it is holding something.
+ * 乗員自身のシーカーが、何かを捉えている間ずっと鳴らす音。
  *
- * <p>The twin of {@link WarningSoundInstance}, pointed the other way round. That one is the box
- * behind the seat saying somebody has taken <em>you</em>; this one is the missile on the rail saying
- * what <em>it</em> can see. Both are instruments rather than things in the world, so both are played
- * flat into the cockpit — no position, no attenuation, nothing falling off with distance.
+ * <p>{@link WarningSoundInstance} の双子で、向きが逆だ。あちらは「誰かが<em>あなた</em>を捉えた」と告げる座席後ろ
+ * の箱、こちらは「<em>自分</em>が何を見ているか」を告げるレール上のミサイル。どちらもワールド上の物ではなく計器
+ * なので、どちらもコックピットへ平坦に流す——定位も減衰も距離低下も無し。
  *
- * <p><b>The pitch climbs as the lock closes</b>, and that is the whole point of the search tone. The
- * box on the glass tightens to say how far along the seeker has got, which is worth nothing to a
- * pilot who is looking at the target rather than at the instruments — so the tone says the same
- * thing in the ear. It starts low the moment the seeker takes something and arrives at its full note
- * exactly when the lock does, at which point this instance gives way to the lock tone proper.
+ * <p><b>ロックが閉じるにつれてピッチが上がる</b>。それが捜索トーンの要点の全てだ。計器面の枠はシーカーの進行度を
+ * 示して締まっていくが、計器ではなく目標を見ているパイロットにはそれは無価値だ——だからトーンが同じことを耳へ伝え
+ * る。シーカーが何かを捉えた瞬間に低く始まり、ロック成立とちょうど同時に最高音へ達し、そこでこのインスタンスは
+ * 本来のロックトーンへ道を譲る。
  *
- * <p>It ends itself rather than waiting to be told, for the same reason the warning receiver does: a
- * growl still running after the target has gone is worse than no growl at all. Every tick it asks
- * the seeker whether it still says what this was started for — the same machine, the same weapon,
- * the same stage — and gives its channel back the moment any of the three has changed.
+ * <p>指示を待たず自ら終わるのは、警戒受信機と同じ理由だ。目標が消えた後も鳴り続けるうなりは、うなりが無いより悪い。
+ * 毎tickシーカーへ、開始理由と同じことをまだ言っているか——同じ機体、同じ兵装、同じ段階か——を問い、3つのどれかが
+ * 変わった瞬間にチャンネルを返す。
  */
 public class SeekerSoundInstance extends AbstractTickableSoundInstance {
-    /** The machine whose seeker this is, by entity number: climbing into another one is a new sound. */
+    /** このシーカーを持つ機体のエンティティ番号。別の機体へ乗り換えれば別の音になる。 */
     private final int vehicle;
-    /** The weapon whose seeker this is, so that selecting another gets that one's recording. */
+    /** このシーカーを持つ兵装。別の兵装を選べばそちらの録音になる。 */
     @Nullable
     private final ResourceLocation weapon;
     private final SeekerSounds.Stage stage;
-    /** The note at the moment the seeker takes something, and how far it climbs by the lock. */
+    /** シーカーが捉えた瞬間の音程と、ロックまでにどれだけ上がるか。 */
     private final float base;
     private final float climb;
 
@@ -48,7 +45,7 @@ public class SeekerSoundInstance extends AbstractTickableSoundInstance {
         this.stage = readout.stage();
         this.base = base;
         this.climb = climb;
-        // Round again if the recording runs out while the seeker is still on it.
+        // シーカーが捉え続けている間に録音が尽きたら頭から回す。
         this.looping = true;
         this.delay = 0;
         this.volume = volume;
@@ -60,12 +57,12 @@ public class SeekerSoundInstance extends AbstractTickableSoundInstance {
         this.z = 0.0;
     }
 
-    /** Which of the seeker's two voices this is, so that the other can take over from it. */
+    /** シーカーの2つの声のどちらか。もう一方が引き継げるようにするため。 */
     public SeekerSounds.Stage stage() {
         return this.stage;
     }
 
-    /** True if this reading is still the one the sound was started for. */
+    /** この読み値が、音を開始した理由と今も同じなら true。 */
     public boolean matches(@Nullable SeekerSounds.Readout readout) {
         return readout != null && readout.vehicle() == this.vehicle && readout.stage() == this.stage
                 && Objects.equals(readout.weapon(), this.weapon);

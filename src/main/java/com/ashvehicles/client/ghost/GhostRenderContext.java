@@ -7,13 +7,12 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * What an adapter is handed when it is asked to draw a ghost, plus the one thing the game's own
- * renderers need to know about the ghost pass: whether they are inside it.
+ * ゴースト描画を依頼されたアダプタへ渡される情報。加えて、ゲーム自身のレンダラーがゴーストパスについて知る
+ * 必要のある唯一の情報——今その内側にいるかどうか。
  *
- * <p>The static part exists for renderers that serve both the entity loop and the ghost pass —
- * {@code AircraftRenderer} draws an aircraft either way, but a ghost is see-through and lit by
- * nothing, and the renderer has to be told which it is drawing. It is set around each draw by the
- * dispatcher and read on the render thread only.
+ * <p>static 部分は、エンティティループとゴーストパスの両方に仕える レンダラーのためにある。
+ * {@code AircraftRenderer} はどちらでも機体を描くが、ゴーストは半透明で何にも照らされないので、どちらを描いて
+ * いるか教える必要がある。ディスパッチャが描画ごとに設定し、読むのはレンダースレッドのみ。
  */
 public final class GhostRenderContext {
     private static boolean drawingGhost;
@@ -40,7 +39,7 @@ public final class GhostRenderContext {
         this.distanceSq = distanceSq;
     }
 
-    /** At the ghost's origin, world axes, far-plane pull already applied. */
+    /** ゴーストの原点、ワールド軸、遠方面への引き寄せ適用済み。 */
     public PoseStack poseStack() {
         return this.poseStack;
     }
@@ -54,12 +53,11 @@ public final class GhostRenderContext {
     }
 
     /**
-     * The ghost as seen from the eye: where it really is, less where the camera is.
+     * 視点から見たゴースト。実際の位置からカメラ位置を引いた値。
      *
-     * <p>Before the far-plane pull rather than after it, which is the useful one and also the same
-     * direction either way -- a pulled ghost slides along this very line, so only its length
-     * changes. What wants it is anything that has to be turned to face the viewer; see
-     * {@code Tracer.streak}.
+     * <p>遠方面への引き寄せ後ではなく前の値。有用なのはそちらであり、どちらでも方向は同じだ——引き寄せられた
+     * ゴーストはまさにこの線に沿って滑るので、変わるのは長さだけ。必要とするのは視聴者の方へ向ける必要がある物
+     * 全て。{@code Tracer.streak} 参照。
      */
     public Vec3 fromCamera() {
         return this.fromCamera;
@@ -69,14 +67,14 @@ public final class GhostRenderContext {
         return this.partialTick;
     }
 
-    /** Always full bright: out there the world reports no light rather than unknown light. */
+    /** 常に最大輝度。あの距離では世界は「不明な光」ではなく「光なし」を報告するからだ。 */
     public int packedLight() {
         return this.packedLight;
     }
 
     /**
-     * Whether the ghost should be drawn as a ghost — translucent, a contact against the sky — rather
-     * than as the thing itself. True when there is no drawn terrain behind it.
+     * ゴーストを実体としてではなくゴーストとして——半透明の、空を背にした点として——描くべきか。背後に描画済み
+     * 地形が無いとき true。
      */
     public boolean ghostStyle() {
         return this.ghostStyle;
@@ -87,15 +85,15 @@ public final class GhostRenderContext {
     }
 
     // ------------------------------------------------------------------
-    // For the game's own renderers
+    // ゲーム自身のレンダラー向け
     // ------------------------------------------------------------------
 
-    /** Whether the ghost pass is drawing right now. Render thread only. */
+    /** 今ゴーストパスが描画中か。レンダースレッド限定。 */
     public static boolean isDrawingGhost() {
         return drawingGhost;
     }
 
-    /** Whether what the ghost pass is drawing should be see-through. Render thread only. */
+    /** ゴーストパスが描いている物を半透明にすべきか。レンダースレッド限定。 */
     public static boolean isTranslucent() {
         return drawingGhost && translucent;
     }

@@ -26,23 +26,22 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.CustomizeGuiOverlayEvent;
 
 /**
- * Development aids: a few lines on the F3 screen, and a red box round every ghost, each behind
- * its own setting in {@link GhostConfig}.
+ * 開発補助。F3 画面への数行と、各ゴーストを囲む赤枠。いずれも {@link GhostConfig} の個別設定で切り替える。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class GhostDebug {
-    /** How often the overlay's figures also go to the log, in ticks, while the overlay is on. */
+    /** オーバーレイ表示中、その数値をログにも出す間隔（tick）。 */
     private static final int LOG_INTERVAL = 200;
-    /** At most this many ghosts are listed one by one in the log each time. */
+    /** 1回のログ出力で個別に列挙するゴーストの上限数。 */
     private static final int LOG_DETAIL_LIMIT = 8;
 
-    /** What each ghost's verdict was when it was last reported, so that only changes are logged. */
+    /** 各ゴーストの前回報告時の判定結果。変化した分だけをログに出すため。 */
     private static final Map<UUID, GhostVerdict> REPORTED = new HashMap<>();
 
     private GhostDebug() {
     }
 
-    /** The same figures to the log, now and then, for reading a session back afterwards. */
+    /** 同じ数値を時折ログへ。後からセッションを読み返すため。 */
     @SubscribeEvent
     static void onClientTick(ClientTickEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
@@ -87,12 +86,11 @@ public final class GhostDebug {
     }
 
     /**
-     * A line the moment a ghost starts or stops being drawn, and why.
+     * ゴーストが描かれ始めた／描かれなくなった瞬間に、その理由を1行出す。
      *
-     * <p>The periodic dump above catches whatever happens to be true every ten seconds, which is
-     * no use at all for "it was there and then it was not": by the time the next dump comes round
-     * the aeroplane has moved and so has the player. This is the timeline instead — one line per
-     * change, nothing while nothing changes.
+     * <p>上の定期ダンプは10秒ごとにたまたま真である物を拾うだけで、「さっきは居たのに今は居ない」にはまるで
+     * 役に立たない。次のダンプが来る頃には機体もプレイヤーも動いている。こちらは時系列だ——変化1つにつき1行、
+     * 何も変わらない間は何も出さない。
      */
     private static void reportChanges() {
         Set<UUID> present = new HashSet<>();
@@ -137,8 +135,8 @@ public final class GhostDebug {
     }
 
     /**
-     * Red boxes round the ghosts, as they are drawn — pulled in where the ghost is. Called from the
-     * ghost pass, with its pose stack, after the ghosts themselves.
+     * 描かれたゴーストを囲む赤枠。ゴーストの位置に合わせて描く。ゴーストパスから、その pose stack を使って、
+     * ゴースト本体の後に呼ばれる。
      */
     static void drawBoxes(List<EntityGhost> ghosts, Vec3 eye, float partialTick, PoseStack poseStack,
             MultiBufferSource.BufferSource buffers, double farPlane) {
@@ -158,7 +156,7 @@ public final class GhostDebug {
                     bounds.minX * pull, bounds.minY * pull, bounds.minZ * pull,
                     bounds.maxX * pull, bounds.maxY * pull, bounds.maxZ * pull).move(drawnAt.subtract(eye));
 
-            // Red for a drawn ghost, amber for one that is occluded, blue for one nothing drew.
+            // 描かれたゴーストは赤、遮蔽された物は琥珀、何も描かなかった物は青。
             float green = ghost.isOccluded() ? 0.6F : 0.0F;
             float blue = ghost.verdict() == GhostVerdict.DRAWN || ghost.isOccluded() ? 0.0F : 1.0F;
             LevelRenderer.renderLineBox(poseStack, lines, box, 1.0F, green, blue, 1.0F);

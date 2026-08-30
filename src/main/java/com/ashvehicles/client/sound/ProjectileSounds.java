@@ -10,29 +10,26 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
 
 /**
- * Gives everything in the air that a gun did not fire the noise it makes on the way.
+ * 銃が撃った物以外で空中にある全てに、飛翔中の音を与える。
  *
- * <p>Only {@link RocketEntity} is watched, which is exactly that: a rocket, a missile and a bomb are
- * all the one entity, and which of them any particular one is comes from the weapon it left. A gun's
- * rounds are the other entity and there are a great many of them a second, so not tracking them at
- * all is worth more than deciding one at a time that they are silent.
+ * <p>監視対象は {@link RocketEntity} のみで、それがまさに該当する。ロケット・ミサイル・爆弾は全て同じ
+ * エンティティであり、どれであるかは発射元の兵器が決める。銃弾は別のエンティティで、毎秒大量に飛ぶので、
+ * 1発ずつ「無音だ」と判断するより一切追跡しない方が得だ。
  *
- * <p><b>Which recording.</b> The one named after the weapon and after what it is doing,
- * {@code <namespace>:weapon.<name>.flight} or {@code weapon.<name>.fall}; else the mod's
- * {@code ashvehicles:weapon.flight} or {@code ashvehicles:weapon.fall}. <b>Neither of those is
- * shipped</b>, and a weapon with nothing under either name flies silently: both are loops, and a
- * loop that was not cut to loop is worse than nothing. See {@link ModSounds}.
+ * <p><b>どの録音を使うか。</b>兵器名と動作名から作る {@code <namespace>:weapon.<name>.flight} または
+ * {@code weapon.<name>.fall}、無ければ MOD の {@code ashvehicles:weapon.flight} か
+ * {@code ashvehicles:weapon.fall}。<b>後者2つは同梱していない</b>ので、どちらの名前でも何も無い兵器は無音で飛ぶ。
+ * どちらもループであり、ループ用に切っていないループは無い方がましだ。{@link ModSounds} 参照。
  */
 public final class ProjectileSounds {
     /**
-     * How often a round with no live sound is looked at again. Every tick, because a round at thirty
-     * blocks a tick is a hundred and fifty blocks away five ticks after it left the rail — most of
-     * the way to the edge of earshot before anything had started, which was heard as a rocket that
-     * makes no noise at all. There are never many of these in the air, and the check is a map lookup.
+     * 音が鳴っていない弾を再確認する間隔。毎tick。30ブロック/tick の弾はレールを離れて5tick後には150ブロック
+     * 先——何も始まらないうちに可聴範囲の端近くまで行ってしまい、「まったく音のしないロケット」として聞かれて
+     * いた。空中にこれが大量にあることは無いし、確認はマップ検索1回だ。
      */
     private static final int RETRY_TICKS = 1;
 
-    /** Every round in the air this client can see, and the noise it is making. */
+    /** このクライアントから見える空中の全弾と、それが出している音。 */
     public static final LiveSounds<RocketEntity> SOUNDS =
             new LiveSounds<>(RocketEntity.class, RETRY_TICKS, ProjectileSounds::start);
 
@@ -40,8 +37,8 @@ public final class ProjectileSounds {
     private static ProjectileSoundInstance start(RocketEntity projectile) {
         ProjectileSoundInstance.Kind kind = ProjectileSoundInstance.Kind.of(projectile.getWeapon());
 
-        // Out of earshot is worth asking about again, since these move faster than anything else in
-        // the sky and one fired from a long way off can be overhead a second later.
+        // 可聴範囲外でも再確認する価値がある。空にある他の何より速く動くので、遠くで発射された1発が1秒後には
+        // 頭上に来ていることがある。
         if (kind == null || EntitySoundInstance.falloff(projectile, kind.range) <= 0.0F) {
             return null;
         }

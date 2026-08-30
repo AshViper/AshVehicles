@@ -74,7 +74,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
     public static final GroundVehicleDefinition FALLBACK = new GroundVehicleDefinition(
             VehicleChassis.Hitbox.DEFAULT,
             VehicleChassis.Model.DEFAULT,
-            new Powertrain(0.2F, 0.1F, 0.006F, 0.04F, 0.004F, 1.5F, 1.0F, 0.6F),
+            new Powertrain(0.2F, 0.1F, 0.006F, 0.04F, 0.004F, 1.5F, 1.0F, 0.6F, VehicleChassis.Fuel.GROUND),
             Suspension.DEFAULT,
             Turret.NONE,
             Armament.NONE,
@@ -139,7 +139,8 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      *                        than sense. Nothing at all makes hills free
      */
     public record Powertrain(float maxSpeed, float reverseSpeed, float acceleration, float braking,
-            float rollingResistance, float steerRate, float pivotRate, float gradeResistance) {
+            float rollingResistance, float steerRate, float pivotRate, float gradeResistance,
+            VehicleChassis.Fuel fuel) {
 
         public static final Codec<Powertrain> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.fieldOf("max_speed").forGetter(Powertrain::maxSpeed),
@@ -149,7 +150,14 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
                 Codec.FLOAT.optionalFieldOf("rolling_resistance", 0.004F).forGetter(Powertrain::rollingResistance),
                 Codec.FLOAT.optionalFieldOf("steer_rate", 1.6F).forGetter(Powertrain::steerRate),
                 Codec.FLOAT.optionalFieldOf("pivot_rate", 1.1F).forGetter(Powertrain::pivotRate),
-                Codec.FLOAT.optionalFieldOf("grade_resistance", 0.8F).forGetter(Powertrain::gradeResistance)
+                Codec.FLOAT.optionalFieldOf("grade_resistance", 0.8F).forGetter(Powertrain::gradeResistance),
+                // Written as part of the drivetrain, for the same reason an aircraft writes it into its
+                // engine: fuel is what the engine consumes, not a separate fitting. The default lives on
+                // VehicleChassis.Fuel rather than here -- a constant declared in this class below CODEC
+                // would still be null when Powertrain's own CODEC reads it, and an optionalFieldOf with a
+                // null default throws while decoding rather than where the mistake is.
+                VehicleChassis.Fuel.CODEC.optionalFieldOf("fuel", VehicleChassis.Fuel.GROUND)
+                        .forGetter(Powertrain::fuel)
         ).apply(instance, Powertrain::new));
     }
 

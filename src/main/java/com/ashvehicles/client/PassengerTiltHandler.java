@@ -17,19 +17,17 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderLivingEvent;
 
 /**
- * Bolts anyone riding an aircraft to it, so they bank and pitch with the airframe.
+ * 機体の搭乗者を機体へ固定し、機体と共にバンク・ピッチさせる。
  *
- * <p>Minecraft draws every entity bolt upright and interpolates each one's position on its own, so a
- * rider left alone stays level while the aeroplane around them stands on a wingtip, and drifts out
- * of the cockpit in a hard turn as the two interpolations disagree.
+ * <p>Minecraft は全エンティティを直立で描き、位置も各自で補間するので、放っておくと搭乗者は、周りの機体が翼端で
+ * 立っている間も水平のままだ。しかもきつい旋回では2つの補間が食い違い、コックピットから流れ出てしまう。
  *
- * <p>Rather than tilting the rider where they happen to have been drawn, the pose is rebuilt from
- * the aircraft: back to the aircraft's own origin, round by its attitude, then out to the seat. That
- * is the same origin and the same rotation the model renderer uses, so the two cannot drift apart no
- * matter what the rider's own position is doing.
+ * <p>たまたま描かれた位置で搭乗者を傾けるのではなく、機体からポーズを組み直す。機体自身の原点へ戻り、機体の姿勢
+ * で回し、そこから座席へ出る。モデルレンダラーが使うのと同じ原点・同じ回転なので、搭乗者自身の位置が何をして
+ * いようと両者がずれることはない。
  *
- * <p>The pose is pushed before the rider is drawn and popped afterwards. Cancelling the pre-event
- * skips the post-event, and a cancelled event is not delivered here, so the two stay paired.
+ * <p>ポーズは搭乗者の描画前に push し、後で pop する。pre イベントをキャンセルすると post イベントは飛ばされる
+ * し、キャンセルされたイベントはここへ届かないので、2つは対のまま保たれる。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class PassengerTiltHandler {
@@ -45,20 +43,19 @@ public final class PassengerTiltHandler {
         PoseStack poseStack = event.getPoseStack();
         poseStack.pushPose();
 
-        // Step back to wherever the aircraft model is being drawn this frame.
+        // このフレームで機体モデルが描かれている位置まで戻る。
         Vec3 correction = aircraft.getPosition(partialTick).subtract(rider.getPosition(partialTick));
         poseStack.translate(correction.x, correction.y, correction.z);
 
-        // Turn into the aircraft's frame: +Z along the nose, +Y up, and therefore +X to the left.
+        // 機体座標系へ回す。+Z が機首方向、+Y が上、したがって +X は左。
         Quaternionf attitude = aircraft.getAttitude(partialTick);
         poseStack.mulPose(attitude);
 
-        // Out to the seat, which is now measured along the axes it was authored in.
+        // 座席へ出る。ここでは座席が定義された軸で測ることになる。
         Vec3 seat = aircraft.getSeatOffset(aircraft.getSeatIndex(rider));
         poseStack.translate(-seat.x, seat.y, seat.z);
 
-        // Undo the heading, about the seat rather than the aircraft: the rider is tilted with the
-        // airframe but still faces wherever they are looking.
+        // 方位を打ち消す。軸は機体ではなく座席。搭乗者は機体と共に傾くが、顔は自分が見ている方を向いたまま。
         poseStack.mulPose(Axis.YP.rotationDegrees(Attitude.heading(attitude)));
     }
 

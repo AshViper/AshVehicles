@@ -6,14 +6,13 @@ import net.minecraft.network.codec.StreamCodec;
 import io.netty.buffer.ByteBuf;
 
 /**
- * Somebody paying this aircraft the wrong sort of attention, and how much of it.
+ * この機体に良からぬ関心を向けている相手と、その度合い。
  *
- * <p>A warning receiver does not see anything; it hears. So there is no range here — only which way
- * it is coming from and how bad it is, which is all a receiver can honestly tell you and all a pilot
- * has time to read.
+ * <p>警戒受信機は「見る」のではなく「聞く」装置なので距離は無い。どちらから来ているかと、どれくらい
+ * まずいかだけ。受信機が正直に言えるのはそこまでで、パイロットが読む時間があるのもそこまで。
  *
- * @param bearing degrees off the nose, positive to the right
- * @param kind how far along the attention has got
+ * @param bearing 機首からの角度（度）。右が正
+ * @param kind 関心がどの段階まで進んでいるか
  */
 public record Threat(float bearing, Kind kind) {
     public static final StreamCodec<ByteBuf, Threat> STREAM_CODEC = StreamCodec.composite(
@@ -21,13 +20,13 @@ public record Threat(float bearing, Kind kind) {
             ByteBufCodecs.idMapper(Kind::byId, Kind::ordinal), Threat::kind,
             Threat::new);
 
-    /** The three things worth being told, in the order they usually happen. */
+    /** 知らせる価値のある3段階を、普通に起きる順で。 */
     public enum Kind {
-        /** Somebody's radar has you on their scope. They know you are there. */
+        /** 相手のレーダーのスコープに載った。存在を知られている。 */
         SEARCH,
-        /** Somebody's seeker has taken you. The next thing that happens is a launch. */
+        /** 相手のシーカーに捉えられた。次に起きるのは発射。 */
         LOCK,
-        /** Something is in the air and coming for you. */
+        /** 何かが飛んでいて、こちらへ向かっている。 */
         MISSILE;
 
         private static final Kind[] BY_ID = values();
@@ -36,7 +35,7 @@ public record Threat(float bearing, Kind kind) {
             return BY_ID[Math.floorMod(id, BY_ID.length)];
         }
 
-        /** Whether this is worse than that, so that one threat can stand for one aircraft. */
+        /** こちらが相手より深刻か。1機につき1件の脅威で代表させるために使う。 */
         public boolean worseThan(Kind other) {
             return this.ordinal() > other.ordinal();
         }

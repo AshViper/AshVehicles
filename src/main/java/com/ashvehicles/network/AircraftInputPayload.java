@@ -13,16 +13,15 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import org.joml.Quaternionf;
 
 /**
- * Sent once a tick by the client at the controls.
+ * 操縦しているクライアントが毎tick 送る。
  *
- * <p>Position, yaw and pitch already reach the server through vanilla's vehicle movement packet;
- * this carries the state vanilla knows nothing about. The payload names no entity: the server
- * applies it to whatever the sending player is piloting, so it cannot be aimed at someone else's
- * aircraft.
+ * <p>位置・ヨー・ピッチはバニラの乗り物移動パケットで既にサーバーへ届くので、こちらはバニラが知らない
+ * 状態を運ぶ。ペイロードはエンティティを名指ししない。サーバーは送信者が操縦している機体に適用するので、
+ * 他人の機体を狙うことはできない。
  */
 public record AircraftInputPayload(AircraftInput input, float throttle, float afterburner,
         Quaternionf attitude, Vec3 velocity, boolean crashed, boolean toggleGear, boolean toggleFlaps,
-        boolean toggleVtol, boolean cycleWeapon)
+        boolean toggleVtol, boolean cycleWeapon, boolean jettison)
         implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<AircraftInputPayload> TYPE =
@@ -32,16 +31,16 @@ public record AircraftInputPayload(AircraftInput input, float throttle, float af
             (buf, payload) -> {
                 payload.input().write(buf);
                 buf.writeFloat(payload.throttle());
-                // Beside the throttle because it is part of the throttle: the gate that lights it is
-                // the top of the same lever's travel, and only the flying client knows whether the
-                // pilot has been through it. See AircraftEntity.tickAfterburner.
+                // スロットルの隣に置くのは、これがスロットルの一部だから。点火のゲートは同じレバーの
+                // 可動域の一番上にあり、パイロットがそこを越えたかを知っているのは飛ばしている
+                // クライアントだけ。AircraftEntity.tickAfterburner 参照。
                 buf.writeFloat(payload.afterburner());
                 buf.writeFloat(payload.attitude().x);
                 buf.writeFloat(payload.attitude().y);
                 buf.writeFloat(payload.attitude().z);
                 buf.writeFloat(payload.attitude().w);
-                // How fast the aircraft is really going. The server cannot work this out for itself
-                // while a client is flying: see AircraftEntity.getVelocity.
+                // 機体が実際に出している速度。クライアントが飛ばしている間、サーバーはこれを自力では
+                // 出せない。AircraftEntity.getVelocity 参照。
                 buf.writeFloat((float) payload.velocity().x);
                 buf.writeFloat((float) payload.velocity().y);
                 buf.writeFloat((float) payload.velocity().z);
@@ -50,12 +49,14 @@ public record AircraftInputPayload(AircraftInput input, float throttle, float af
                 buf.writeBoolean(payload.toggleFlaps());
                 buf.writeBoolean(payload.toggleVtol());
                 buf.writeBoolean(payload.cycleWeapon());
+                // 増槽の投棄。他の単発操作と同じ形なのは、同じ物だからだ——押した瞬間に1度だけ起きる。
+                buf.writeBoolean(payload.jettison());
             },
             buf -> new AircraftInputPayload(AircraftInput.read(buf), buf.readFloat(), buf.readFloat(),
                     new Quaternionf(buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat()),
                     new Vec3(buf.readFloat(), buf.readFloat(), buf.readFloat()),
                     buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
-                    buf.readBoolean()));
+                    buf.readBoolean(), buf.readBoolean()));
 
     @Override
     public CustomPacketPayload.Type<AircraftInputPayload> type() {
@@ -96,6 +97,10 @@ public record AircraftInputPayload(AircraftInput input, float throttle, float af
 
             if (payload.cycleWeapon()) {
                 aircraft.cycleWeapon();
+            }
+
+            if (payload.jettison()) {
+                aircraft.jettisonTanks();
             }
         });
     }

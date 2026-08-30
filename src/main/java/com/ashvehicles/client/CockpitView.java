@@ -10,64 +10,55 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 /**
- * Where the pilot is looking, held as a turn of their head within the cockpit.
+ * パイロットの視線。コックピット内での頭の向きとして保持する。
  *
- * <p>Minecraft stores a view as a compass bearing and an elevation against the world, which is
- * enough for someone standing on the ground and not enough for someone strapped into an aeroplane.
- * Bank the aircraft and the mouse no longer matches the screen; put the nose near the vertical and
- * the bearing stops meaning anything, so the view slews or locks up.
+ * <p>Minecraft は視線をワールドに対する方位と仰角で保存する。地面に立つ者には十分だが、機体に固定された者には
+ * 足りない。機体をバンクさせればマウスと画面が一致しなくなるし、機首を垂直近くへ向ければ方位が意味を失い、視界が
+ * 滑るか固まる。
  *
- * <p>The answer is not to give the head a free rotation, which brings troubles of its own, but to
- * keep the same two angles a head actually has and measure them <em>against the aircraft</em>
- * instead of against the world. Sideways is then always sideways however the aircraft is lying,
- * there is no attitude at which the two angles run into each other, and the head cannot do anything
- * a head cannot do.
+ * <p>答えは頭に自由回転を与えることではない——それは独自の問題を招く——頭が実際に持つのと同じ2角を保ち、それを
+ * ワールドではなく<em>機体に対して</em>測ることだ。そうすれば機体がどう寝ていても横は常に横であり、2角が衝突する
+ * 姿勢も存在せず、頭が頭にできないことをすることもない。
  *
- * <p>That last part matters more than it sounds. Held as a free rotation, turned about its own axes
- * by each mouse movement, the head has two ways to go wrong. It can be pitched past the vertical,
- * where it carries on over the top and leaves the pilot hanging upside down facing backwards with
- * no way back; and because turning about one's own axes does not commute, circling the mouse winds
- * roll into it a few degrees at a time until the horizon sits permanently askew. Two angles and a
- * limit on each have neither problem.
+ * <p>最後の点は聞こえる以上に重要だ。自由回転として保持し、マウス移動ごとに自軸周りに回すと、頭は2通りに壊れる。
+ * 垂直を越えてピッチできてしまい、そのまま上を回り込んでパイロットを背面・後ろ向きで吊るし、戻る手立ても無い。
+ * さらに自軸周りの回転は交換法則を満たさないので、マウスで円を描くとロールが数度ずつ巻き込まれ、やがて水平線が
+ * 恒久的に傾く。2角＋各々の制限にはどちらの問題も無い。
  *
- * <p>Where the pilot is looking in the world is this turn applied after the aircraft's own attitude,
- * and the camera is handed the three angles that reproduce it.
+ * <p>ワールドでの視線は、機体自身の姿勢の後にこの向きを掛けた物であり、カメラにはそれを再現する3角を渡す。
  *
- * <p>The player's own bearing and elevation are still kept up to date from the result, because
- * everything else in the game - what the crosshair is over, which way the body faces - reads those.
+ * <p>プレイヤー自身の方位と仰角も結果から更新し続ける。ゲームの他の全て——十字線が何の上にあるか、体がどちらを
+ * 向くか——がそれを読むからだ。
  */
 public final class CockpitView {
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
     /**
-     * As far up and down as the pilot can look, in degrees. The same limit vanilla puts on every
-     * other view in the game, and for the same reason: straight up is as far as looking up goes, and
-     * a view that carries on over the top has turned itself upside down rather than looked higher.
+     * パイロットが見上げ／見下ろせる限界（度）。ゲームの他の全視点にバニラが課すのと同じ制限で、理由も同じ。
+     * 真上が見上げの限界であり、そこを越えて回り込む視界は「より高くを見た」のではなく「上下が逆になった」だけだ。
      */
     private static final float PITCH_LIMIT = 90.0F;
     /**
-     * As far round as the pilot can look, in degrees. Matches the limit the aircraft already puts on
-     * a rider's body in {@code AircraftEntity.clampRotation}, so the view and the crosshair do not
-     * end up pointing at different things.
+     * パイロットが左右へ振り向ける限界（度）。{@code AircraftEntity.clampRotation} で機体が既に搭乗者の体へ課して
+     * いる制限と一致させてある。視界と十字線が別々の物を指す事態を避けるためだ。
      */
     private static final float YAW_LIMIT = 135.0F;
 
-    /** The head's turn within the cockpit: right positive. Zero looks straight down the nose. */
+    /** コックピット内での頭の左右角。右が正。0で機首方向を見る。 */
     private static float yaw;
-    /** The head's elevation within the cockpit, counted as Minecraft counts it: down positive. */
+    /** コックピット内での頭の仰角。Minecraft 流に下を正として数える。 */
     private static float pitch;
     private static AircraftEntity aircraft;
 
     private CockpitView() {
     }
 
-    /** True while the local player is aboard an aircraft and looking out of it. */
+    /** ローカルプレイヤーが機体に搭乗し外を見ている間 true。 */
     public static boolean isActive() {
         return aircraft != null && !aircraft.isRemoved();
     }
 
     /**
-     * Called every frame from the camera. Takes note of whether the player is aboard, and starts the
-     * head looking straight ahead whenever they climb in or out.
+     * カメラから毎フレーム呼ばれる。搭乗しているかを記録し、乗降のたび頭を正面向きにリセットする。
      */
     public static void follow(AircraftEntity riding) {
         if (riding != aircraft) {
@@ -78,11 +69,10 @@ public final class CockpitView {
     }
 
     /**
-     * Turns the head by a mouse movement, in degrees.
+     * マウス移動の分だけ頭を回す（度）。
      *
-     * <p>Both angles are measured against the aircraft, so left is whatever is left on the screen at
-     * that moment whichever way up the aeroplane is; and both stop where a head stops, so the mouse
-     * cannot push the view over the top or wind it round.
+     * <p>2角とも機体に対して測るので、機体がどの向きでもその瞬間に画面上で左である方向が左になる。どちらも頭が
+     * 止まる位置で止まるので、マウスで視界を上へ回り込ませたり巻き込ませたりはできない。
      */
     public static void turn(double deltaYaw, double deltaPitch) {
         yaw = Mth.clamp((float) (yaw + deltaYaw), -YAW_LIMIT, YAW_LIMIT);
@@ -90,13 +80,12 @@ public final class CockpitView {
     }
 
     /**
-     * Points the head at a direction in the world, as far as a head can be pointed at it.
+     * 頭を、ワールド上の方向へ向けられる限り向ける。
      *
-     * <p>What the mouse moves while flying by pointing is the mark in the sky, not the head; the head
-     * then follows the mark, so the pilot is always looking at what they are asking the aeroplane to
-     * fly at. The two angles are worked out afresh from the direction rather than accumulated, so
-     * nothing drifts, and they are clamped exactly as a mouse movement would be — a mark that has
-     * gone further round than a head can turn simply leaves the head at the end of its travel.
+     * <p>ポインティング飛行中にマウスが動かすのは空のマークであって頭ではない。頭はその後マークを追うので、
+     * パイロットは常に「機体に飛べと指示している先」を見ていることになる。2角は累積せず方向から毎回求め直すので
+     * 何もドリフトしないし、マウス移動時とまったく同じくクランプされる——頭が回れる範囲を超えて動いたマークは、
+     * 単に頭を可動端に残す。
      */
     public static void lookAlong(Vec3 direction) {
         if (!isActive() || direction.lengthSqr() < 1.0E-8) {
@@ -109,12 +98,12 @@ public final class CockpitView {
         double above = direction.dot(Attitude.up(attitude));
 
         yaw = Mth.clamp((float) Math.toDegrees(Mth.atan2(across, ahead)), -YAW_LIMIT, YAW_LIMIT);
-        // The head's elevation is counted down-positive, the way Minecraft counts every other one.
+        // 頭の仰角は、Minecraft が他の全てを数えるのと同じく下を正として数える。
         pitch = Mth.clamp((float) -Math.toDegrees(Math.asin(Mth.clamp(above, -1.0, 1.0))),
                 -PITCH_LIMIT, PITCH_LIMIT);
     }
 
-    /** Where the pilot is looking in the world: the aircraft's attitude, then the head's turn. */
+    /** ワールドでのパイロットの視線。機体の姿勢に、頭の向きを掛けた物。 */
     public static Quaternionf world(float partialTick) {
         if (!isActive()) {
             return new Quaternionf();
@@ -127,9 +116,8 @@ public final class CockpitView {
     }
 
     /**
-     * Keeps the player's own bearing and elevation pointing where the pilot is looking. The roll is
-     * not theirs to carry - Minecraft has nowhere to put it - so it stays on the camera, but the
-     * direction has to agree or the crosshair would be over one thing and the view over another.
+     * プレイヤー自身の方位と仰角を、パイロットの視線に合わせ続ける。ロールはプレイヤーが持てない——Minecraft に
+     * 置き場が無い——のでカメラに残るが、方向は一致させねばならない。さもないと十字線と視界が別の物を指す。
      */
     public static void applyToPlayer() {
         LocalPlayer player = Minecraft.getInstance().player;
@@ -144,7 +132,7 @@ public final class CockpitView {
         player.setYHeadRot(player.getYRot());
     }
 
-    /** Where the pilot is looking, as a direction. */
+    /** パイロットの視線を方向ベクトルで。 */
     public static Vec3 lookVector(float partialTick) {
         return Attitude.nose(world(partialTick));
     }

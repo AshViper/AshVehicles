@@ -1,0 +1,28 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_bomb",
+  "key": {
+    "E": {
+      "item": "minecraft:ender_eye"
+    },
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "P": {
+      "item": "ashvehicles:fab_250"
+    },
+    "C": {
+      "item": "ashvehicles:circuit_board"
+    }
+  },
+  "pattern": [
+    " E ",
+    "SPS",
+    " C "
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:gbu_12"
+  }
+}

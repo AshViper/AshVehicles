@@ -8,46 +8,40 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The four blocks every machine's file has, whether it flies or drives: how big the game thinks it
- * is, how it is drawn, where the camera sits, and what it sounds like.
+ * 飛ぶ物でも走る物でも、全機体のファイルが持つ4つのブロック。ゲームから見た大きさ、描き方、カメラ位置、
+ * そして音。
  *
- * <p>These were the same record written twice, once in each definition, and the pair had already
- * started to drift — the same field under two defaults, and a fix made to one of them. What differs
- * between an aeroplane and a tank is genuinely the aeroplane and the tank: the wing, the drivetrain,
- * the turret. None of it is here.
+ * <p>以前は同じレコードが2つの定義に1つずつ、計2回書かれており、既に食い違い始めていた——同じフィールドに
+ * 2つの既定値があり、片方にだけ修正が入っていた。機体と戦車で本当に違うのは機体と戦車そのもの、つまり翼・
+ * 駆動系・砲塔であって、そのどれもここには無い。
  *
- * <p>Where one kind of machine has a field the other has no use for, the field is simply optional
- * and the other kind leaves it out. An aircraft names a sound for its undercarriage and a tank does
- * not; a tank lists its road wheels and an aircraft does not. Nobody is made to write a line that
- * means nothing to them, and neither is made to have a record of their own for one field.
+ * <p>片方の種類にしか意味の無いフィールドは単に optional にし、もう片方は書かない。機体は脚の作動音を
+ * 指定し戦車は指定しない。戦車は転輪を並べ機体は並べない。誰も無意味な行を書かされず、1フィールドのために
+ * 自分専用のレコードを持たされることもない。
  */
 public final class VehicleChassis {
     private VehicleChassis() {
     }
 
     /**
-     * The plain box Minecraft files the entity under, fixed when the entity type is registered. Read
-     * from the mod's own copy of the file at start-up, so unlike everything else a data pack cannot
-     * change it.
+     * Minecraft がエンティティを登録する素の直方体。エンティティ型の登録時に固定される。起動時に MOD
+     * 同梱のファイルから読むので、他と違いデータパックからは変えられない。
      *
-     * <p>Minecraft can only describe an entity as an upright box with a square footprint, which for
-     * a fifteen-metre aeroplane or a seven-metre tank is a shed. So it is deliberately small: it
-     * covers the fuselage and the wing roots, or the hull, and lets the rest overhang. The real shape
-     * is the {@code boxes} beside it, and what a machine is shot at, stood on and — for a ground
-     * vehicle — stopped by is those and not this.
+     * <p>Minecraft はエンティティを「底面が正方形の直立した箱」としてしか記述できず、15m の機体や 7m の
+     * 戦車にとってそれは小屋だ。だから意図的に小さくしてある。胴体と翼根、あるいは車体だけを覆い、残りは
+     * はみ出させる。本当の形は隣の {@code boxes} で、弾が当たる相手も、上に立つ床も、地上車両なら進行を
+     * 止める相手も、こちらではなくそちら。
      *
-     * @param shape the boxes the machine is really made of, read from {@code boxes} in this same
-     *              block. Unlike the width and the height, they are read afresh on every
-     *              {@code /reload} like everything else in the file
-     * @param trackingRange how far away, in chunks, other players are sent the machine
-     * @param ghostRange how far away, in blocks, an aircraft keeps being sent at all. Past the
-     *                   tracking range, and past the edge of the chunks a player has loaded, it goes
-     *                   on being reported and is drawn as a ghost: an aeroplane at altitude is
-     *                   visible from much further away than the ground beneath it. Zero removes the
-     *                   limit entirely. Nothing on the ground has any use for it
+     * @param shape 機体が実際に構成される箱。同じブロック内の {@code boxes} から読む。幅・高さと違い、
+     *              ファイル内の他の項目と同様 {@code /reload} のたびに読み直される
+     * @param trackingRange 他プレイヤーへこの機体が送られる距離（チャンク）
+     * @param ghostRange 機体が送られ続ける距離（ブロック）。追跡距離を越え、プレイヤーがロードしている
+     *                   chunk の縁を越えても報告され続け、ゴーストとして描かれる。高高度の機体は真下の
+     *                   地面よりずっと遠くから見えるから。0 で制限なし。地上の物には用途が無い
      */
     public record Hitbox(float width, float height, int trackingRange, int ghostRange, VehicleShape shape) {
         public static final Hitbox DEFAULT = new Hitbox(4.0F, 2.0F, 12, 0, VehicleShape.NONE);
@@ -60,45 +54,44 @@ public final class VehicleChassis {
                 VehicleShape.MAP_CODEC.forGetter(Hitbox::shape)
         ).apply(instance, Hitbox::new));
 
-        /** Whether the machine stops being reported at some distance at all. */
+        /** ある距離で報告が止まる機体かどうか。 */
         public boolean hasGhostLimit() {
             return this.ghostRange > 0;
         }
     }
 
     /**
-     * How to draw the machine. The geometry, texture and animation files are found by name, so one
-     * called {@code su_25} is drawn from {@code geo/entity/su_25.geo.json} and
-     * {@code textures/entity/su_25.png} without being told where they are.
+     * 機体の描き方。ジオメトリ・テクスチャ・アニメーションのファイルは名前で見つかるので、{@code su_25}
+     * という機体は指定しなくても {@code geo/entity/su_25.geo.json} と
+     * {@code textures/entity/su_25.png} から描かれる。
      *
-     * @param scale uniform scale applied to the model, for models not built at Minecraft's scale
-     * @param bones which bone in the geometry plays which part, keyed by the roles each kind of
-     *              machine lists. Anything left out simply does not move
-     * @param roadWheels the bones of a tracked vehicle's road wheels and sprockets, which all turn
-     *                   together at a speed worked out from how far it has travelled. A list rather
-     *                   than roles because a tank has as many of them as it has and they are
-     *                   interchangeable — eighteen on a Leopard 2, and nothing that reads this cares
-     *                   which is which
-     * @param steeredWheels the bones that turn with the steering, which on a wheeled vehicle is the
-     *                      front axle or two and on a tracked one is nothing at all. A wheel here is
-     *                      usually in {@link #roadWheels} as well: the two are different questions
-     *                      about the same wheel — how far it has rolled, and which way it is
-     *                      pointing — and a driven front wheel does both
-     * @param steerLock how far those wheels turn at full lock, in degrees. Nothing, which is what a
-     *                  file leaving it out gets, holds them straight however hard the driver steers
-     * @param track the one track link the whole run of track is built out of, or empty for a
-     *              vehicle whose track is drawn in the geometry like any other part
-     * @param slavedTurrets the bones of any further gun mounts laid on the same target as the main
-     *                      one — a warship's second turret, slaved to the same fire control. Each is
-     *                      traversed and elevated to the main turret's aim about its own ring, so
-     *                      they train together. The main mount itself is the {@code turret}/
-     *                      {@code gun} bones and is not listed here; a vehicle with one gun leaves
-     *                      this empty
+     * @param scale モデルへ一様に掛けるスケール。Minecraft の縮尺で作られていないモデル向け
+     * @param bones ジオメトリのどのボーンがどの役割を担うか。キーは機体種別ごとに定義された役割名。
+     *              書かれなかった物は単に動かない
+     * @param roadWheels 装軌車両の転輪と起動輪のボーン。走行距離から求めた速度で全部一緒に回る。役割名で
+     *                   はなくリストなのは、戦車の転輪は台数分あって互いに区別が要らないから
+     *                   （レオパルト2 なら18個で、これを読む側はどれがどれか気にしない）
+     * @param steeredWheels 操舵で向きが変わるボーン。装輪車なら前1〜2軸、装軌車なら該当なし。ここに載る
+     *                      車輪はたいてい {@link #roadWheels} にも載る。両者は同じ車輪への別の問い
+     *                      （どれだけ転がったか／どちらを向いているか）で、駆動する前輪は両方に該当する
+     * @param steerLock フルロック時の切れ角（度）。省略した場合は0で、いくら操舵しても真っ直ぐのまま
+     * @param track 履帯全体を組み立てる元になる1リンク。ジオメトリ内に他のパーツと同様に履帯が描かれて
+     *              いる車両では省略する
+     * @param propellers 回すプロペラのボーン。役割名ではなくリストなのは、4発機のプロペラは4枚あって互いに
+     *                   区別が要らないから——戦車の転輪と同じ理由だ。回転の中心は各ボーン自身のジオメトリの
+     *                   中心で、支点がそこに無くても構わない。実際、プロペラを複製して作ったモデルでは4枚が
+     *                   同じ支点を共有していることの方が多く、そのまま支点周りに回せば3枚が遠くの1点を公転
+     *                   する。{@code VehicleGeoModel.spinZ} 参照
+     * @param slavedTurrets 主砲塔と同じ目標に指向される追加砲塔のボーン。同じ射撃指揮に従属した軍艦の
+     *                      第2砲塔など。それぞれ自分のリング回りに主砲塔の照準へ旋回・俯仰するので、
+     *                      揃って指向する。主砲塔自体は {@code turret}/{@code gun} ボーンでありここには
+     *                      書かない。単砲の車両は空にする
      */
     public record Model(float scale, Map<String, String> bones, List<String> roadWheels,
-            List<String> steeredWheels, float steerLock, Optional<Track> track, List<String> slavedTurrets) {
+            List<String> steeredWheels, float steerLock, Optional<Track> track, List<String> slavedTurrets,
+            List<String> propellers) {
         public static final Model DEFAULT =
-                new Model(1.0F, Map.of(), List.of(), List.of(), 0.0F, Optional.empty(), List.of());
+                new Model(1.0F, Map.of(), List.of(), List.of(), 0.0F, Optional.empty(), List.of(), List.of());
 
         public static final Codec<Model> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("scale", 1.0F).forGetter(Model::scale),
@@ -110,55 +103,48 @@ public final class VehicleChassis {
                 Codec.FLOAT.optionalFieldOf("steer_lock", 0.0F).forGetter(Model::steerLock),
                 Track.CODEC.optionalFieldOf("track").forGetter(Model::track),
                 Codec.STRING.listOf().optionalFieldOf("slaved_turrets", List.of())
-                        .forGetter(Model::slavedTurrets)
+                        .forGetter(Model::slavedTurrets),
+                Codec.STRING.listOf().optionalFieldOf("propellers", List.of()).forGetter(Model::propellers)
         ).apply(instance, Model::new));
 
-        /** Whether any wheel on this machine turns with the steering. */
+        /** この機体に操舵で向きが変わる車輪があるか。 */
         public boolean isSteered() {
             return this.steerLock > 0.0F && !this.steeredWheels.isEmpty();
         }
 
-        /** The bone named for a role, or empty if this machine has no such part. */
+        /** その役割に指定されたボーン名。該当する部位が無ければ空文字。 */
         public String bone(String role) {
             return this.bones.getOrDefault(role, "");
         }
     }
 
     /**
-     * A run of track built at draw time out of one link.
+     * 1つのリンクから描画時に組み立てる履帯。
      *
-     * <p>The alternative is what most tank models do: a chain of sixty-odd bones, one per link, laid
-     * out by hand round the wheels and parented to one another so that the artist can bend the run.
-     * That is an afternoon's work per vehicle, it is wrong the moment a wheel moves, and it cannot
-     * be animated at all — a link is where it was put, so the track either does not run or every one
-     * of the sixty bones has to be keyframed.
+     * <p>代案は多くの戦車モデルがやっていること。60本前後のボーンをリンク1つにつき1本、手作業で車輪の
+     * 周りに並べ、作者が曲げられるよう親子付けする方式だ。それは車両1台につき半日の作業で、車輪が動いた
+     * 瞬間に破綻し、そもそもアニメーションできない——リンクは置かれた場所にあるだけなので、履帯は回らない
+     * か、60本全部にキーフレームを打つかの二択になる。
      *
-     * <p>So: one link, drawn many times. Where the links go is worked out from the road wheels
-     * themselves, which the file already names — each is taken with the size its own geometry gives
-     * it, and the belt is the taut band round the lot of them, exactly as a real track is the taut
-     * band round the sprocket, the idler and the road wheels. Move a wheel in the model, or give it
-     * a bigger one, and the track follows without a line changing here.
+     * <p>そこで、1リンクを何度も描く。リンクの配置は転輪自体から求める（ファイルは既に転輪を列挙している）。
+     * 各転輪は自分のジオメトリが与える大きさで扱われ、履帯はその全部に張った帯になる。実物の履帯が起動輪・
+     * 誘導輪・転輪に張られた帯であるのと同じ。モデル上で車輪を動かしても大きくしても、ここは1行も変えずに
+     * 履帯が追従する。
      *
-     * <p>Both sides come from the same link. The wheels fall into two groups by which side of the
-     * hull they are on, and each group gets its own band at its own wheels' distance out, so a
-     * vehicle needs one link bone rather than one per side.
+     * <p>左右とも同じリンクから作る。車輪は車体のどちら側にあるかで2群に分かれ、各群が自分の車輪の張り出し
+     * 位置に自分の帯を得るので、車両に必要なリンクボーンは片側ごとではなく1本。
      *
-     * @param link the bone holding a single link, drawn once for every link in the run. Anything
-     *             parented to it comes along, so a link with a guide horn or a pad is one bone here
-     * @param wheels the bones the band is drawn round, or empty to use the road wheels. Worth
-     *               setting when the run touches something that is not a road wheel and does not
-     *               turn — a return roller, or a track skid — or when a wheel is inside the run
-     *               rather than shaping it
-     * @param pitch the distance from one link to the next, in blocks, or zero to take it from the
-     *              link's own geometry. Taken from the geometry it is exactly the length of the
-     *              link, which is what makes a run with no gaps in it
-     * @param spacing pitch multiplier, for a link that is meant to overlap its neighbour or stand
-     *                clear of it. Below one the links overlap and the run is denser
-     * @param outset how far outside the wheel rims the band sits, in blocks, or empty for half the
-     *               link's own thickness — which puts the inside face of the link against the wheel,
-     *               where it belongs
-     * @param maxLinks the most links one side is ever drawn with. A backstop against a pitch of
-     *                 nearly nothing asking for ten thousand of them, not a figure to tune
+     * @param link 1リンク分を持つボーン。履帯のリンク数だけ描かれる。子付けされた物も一緒に来るので、
+     *             センターガイドやパッドの付いたリンクもここでは1ボーン
+     * @param wheels 帯を張る対象のボーン。空なら転輪を使う。履帯が転輪でない非回転物（上部支持輪、履帯
+     *               スキッド）に触れる場合や、ある車輪が帯を形作らず内側にある場合に指定する価値がある
+     * @param pitch リンク間の距離（ブロック）。0 ならリンク自身のジオメトリから取る。ジオメトリから取った
+     *              場合はリンクの長さそのものになり、隙間の無い履帯になる
+     * @param spacing ピッチの倍率。隣と重ねたい、あるいは離したいリンク用。1未満なら重なって密になる
+     * @param outset 帯が車輪のリムからどれだけ外側に出るか（ブロック）。空ならリンク自身の厚みの半分——
+     *               リンクの内面が車輪に接する、本来あるべき位置になる
+     * @param maxLinks 片側に描くリンク数の上限。ピッチがほぼ0になって1万個要求されるのを防ぐ保険であり、
+     *                 調整用の数値ではない
      */
     public record Track(String link, List<String> wheels, float pitch, float spacing,
             Optional<Float> outset, int maxLinks) {
@@ -171,32 +157,28 @@ public final class VehicleChassis {
                 Codec.INT.optionalFieldOf("max_links", 256).forGetter(Track::maxLinks)
         ).apply(instance, Track::new));
 
-        /** The bones the band is drawn round: the ones named here, or failing that the road wheels. */
+        /** 帯を張る対象のボーン。ここに書かれた物、無ければ転輪。 */
         public List<String> wheelsOr(List<String> roadWheels) {
             return this.wheels.isEmpty() ? roadWheels : this.wheels;
         }
     }
 
     /**
-     * Where the camera sits.
+     * カメラの位置。
      *
-     * @param pos the chase camera, measured along the <em>viewing</em> axes rather than the
-     *            machine's: x to the right of the view, y straight up, z along the line of sight
-     *            with negative meaning behind. Which is what keeps the machine still in frame
-     *            however it is pointing; see {@link com.ashvehicles.client.ChaseCamera}
-     * @param tilt degrees the chase view is tipped down, so the camera looks at the machine from
-     *             above rather than along a horizon that happens to pass through it. Nothing to do
-     *             with {@code pos.y}, which slides the machine down the screen without changing what
-     *             else is in it: this rotates the whole view, and with it the axes {@code pos} is
-     *             measured along, so the camera climbs as it tips. A tank wants a few degrees of it
-     *             — the ground it is fighting over is worth more of the screen than the sky. An
-     *             aeroplane wants none, since out there the sky is where everything is
-     * @param cockpit the first-person eye, in the machine's own axes: x right, y up, z towards the
-     *                front. Bolted to the machine, so the view rolls with the wings and leans onto a
-     *                slope with the hull. On a machine with a turret it is a point on the turret,
-     *                written with the turret at dead ahead, and swings about the ring with it
-     *                <p>It is the eye of any seat that does not give one of its own, which is what
-     *                every machine's file said before seats could — see {@link Seat}
+     * @param pos 追従カメラ。機体軸ではなく<em>視界</em>軸で測る。x が画面右、y が真上、z が視線方向で
+     *            負が後方。これにより機体がどちらを向いていても画面内で静止する。
+     *            {@link com.ashvehicles.client.ChaseCamera} 参照
+     * @param tilt 追従視点を下向きに傾ける角度（度）。機体をたまたま通る水平線に沿ってではなく、上から
+     *             見下ろすため。{@code pos.y} とは別物で、あちらは画面内で機体を下げるだけで他の写り方を
+     *             変えない。こちらは視界全体を回し、それに伴い {@code pos} を測る軸も回るので、傾けると
+     *             カメラが上がる。戦車には数度欲しい——戦う相手のいる地面は空より画面を占める価値がある。
+     *             機体には不要で、あちらは空にこそ全てがある
+     * @param cockpit 一人称視点の目の位置。機体軸で x が右、y が上、z が前。機体に固定されているので、
+     *                視界は翼と一緒にロールし、車体と一緒に斜面へ傾く。砲塔付きの機体では砲塔上の点で、
+     *                砲塔正面時の座標で書き、リング回りに一緒に振られる
+     *                <p>自前の目を持たない座席はこの目を使う。座席が目を持てるようになる以前は、全機体の
+     *                ファイルがこれだけを書いていた——{@link Seat} 参照
      */
     public record CameraMount(Vec3 pos, float tilt, Vec3 cockpit) {
         public static final CameraMount DEFAULT =
@@ -207,39 +189,35 @@ public final class VehicleChassis {
                 Codec.FLOAT.optionalFieldOf("tilt", 0.0F).forGetter(CameraMount::tilt),
                 Vec3.CODEC.fieldOf("cockpit").forGetter(CameraMount::cockpit)
         ).apply(instance, CameraMount::new));
+
+        // 照準ポッド用の3つ目のカメラは意図的に置いていない。あの映像が撮られるのは機体上の場所では
+        // なくポッド上の場所であり、ポッドがどのステーションに吊られているかは機体ファイルではなく機体を
+        // 武装させた者が決めるから。EquipmentDefinition.lensAt 参照。
     }
 
     /**
-     * A place aboard, and what whoever is in it can see out of.
+     * 乗り込む場所と、そこにいる者が何を通して外を見るか。
      *
-     * <p>A crew place used to be a point and nothing else, and the eye that went with it was one
-     * point for the whole machine. That is right for a single-seater and wrong for everything else:
-     * a seven-seat CV90 put its dismounts' eyes in the commander's cupola, an F-14's back-seater
-     * looked out of the front canopy, and a destroyer sat a man eight blocks below the bridge and
-     * showed him the bridge. So the eye belongs to the seat, beside the seat, where the two cannot
-     * drift apart when a seat is moved or another one added.
+     * <p>以前、乗員位置は点でしかなく、対応する目は機体全体で1点だった。単座機には正しく、それ以外には
+     * 間違っている。7人乗りの CV90 では下車兵の目が車長キューポラにあり、F-14 の後席は前席のキャノピー
+     * から外を見て、駆逐艦は艦橋の8ブロック下に座らせた者に艦橋を見せていた。そこで目は座席の物とし、
+     * 座席の隣に置いた。座席を動かしても増やしても両者が離れないように。
      *
-     * <p>A seat may still be written as a bare point, and the great many that are go on meaning
-     * exactly what they meant: the eye falls back to {@code camera.cockpit} and the view is the one
-     * it always was. Nothing has to be rewritten to keep working, and a machine is improved a seat
-     * at a time.
+     * <p>座席は今も裸の点として書けるし、そう書かれている大多数は従来通りの意味を保つ。目は
+     * {@code camera.cockpit} にフォールバックし、視界も以前のまま。動かし続けるために書き直す必要は無く、
+     * 機体は座席1つずつ改善していける。
      *
-     * @param pos where the crew member is, in the machine's own axes — x right, y up, z towards the
-     *            front — in blocks. Their <em>feet</em>: this is the point they are stood at, not
-     *            the point they see from. The first seat is the one that drives or flies
-     * @param eye where that crew member's eye is, in the same axes, or empty for the machine's own
-     *            {@code camera.cockpit}. Given outright rather than as a height above the seat,
-     *            because a head that leans out of a hatch is not over the feet that are on the
-     *            floor of the hull
-     * @param mount what the eye is bolted to, or empty for whatever the machine does by default —
-     *             the turret on anything with one, the hull on a ship or an aircraft. It is worth
-     *             saying per seat because a tank's crew genuinely differ: the commander's head is
-     *             out of the turret roof and comes round with the gun, and the driver's is in the
-     *             glacis and does not. Note that this is the <em>eye</em>, not the seat: where a
-     *             crew member's body is put is the machine's business and is not changed here
+     * @param pos 乗員の位置。機体軸（x 右、y 上、z 前）でブロック単位。これは<em>足元</em>であって、
+     *            そこから見る点ではない。最初の座席が操縦席
+     * @param eye その乗員の目の位置。同じ軸で。空なら機体の {@code camera.cockpit}。座席からの高さでは
+     *            なく絶対位置で与える。ハッチから身を乗り出した頭は、車体床にある足の真上には無いから
+     * @param mount 目の取り付け先。空なら機体の既定（砲塔があれば砲塔、艦や機体なら船体）。座席ごとに
+     *              書く価値があるのは、戦車の乗員が実際に違うから。車長の頭は砲塔上面から出ていて砲と
+     *              一緒に回るが、操縦手の頭は前面装甲の中にあって回らない。これは<em>目</em>の話であって
+     *              座席の話ではない。乗員の体をどこへ置くかは機体側の判断で、ここでは変えない
      */
     public record Seat(Vec3 pos, Optional<Vec3> eye, Optional<VehicleShape.Mount> mount) {
-        /** A seat that says nothing but where it is, which is what a bare point in a file becomes. */
+        /** 位置以外を何も言わない座席。ファイル内の裸の点はこれになる。 */
         public static Seat at(Vec3 pos) {
             return new Seat(pos, Optional.empty(), Optional.empty());
         }
@@ -251,9 +229,8 @@ public final class VehicleChassis {
         ).apply(instance, Seat::new));
 
         /**
-         * Either form: the bare point a file has always been allowed to write, or the block that
-         * says more than where. Written back out in whichever form the seat actually needs, so a
-         * file that says nothing new does not grow a set of braces round every seat in it.
+         * どちらの形式も受ける。従来から書けた裸の点と、位置以上を言うブロック。書き出しは座席が実際に
+         * 必要とする形式で行うので、新しいことを何も言わないファイルの全座席が波括弧に包まれたりしない。
          */
         public static final Codec<Seat> CODEC = Codec.either(Vec3.CODEC, SPELLED_OUT).xmap(
                 either -> either.map(Seat::at, seat -> seat),
@@ -265,43 +242,39 @@ public final class VehicleChassis {
             return this.eye.isPresent() || this.mount.isPresent();
         }
 
-        /** This seat's eye, or the machine's own if it does not have one. */
+        /** この座席の目。持たなければ機体共通の目。 */
         public Vec3 eyeOr(Vec3 machineWide) {
             return this.eye.orElse(machineWide);
         }
 
-        /** What this seat's eye is bolted to, or whatever the machine does when nobody says. */
+        /** この座席の目の取り付け先。指定が無ければ機体の既定。 */
         public VehicleShape.Mount mountOr(VehicleShape.Mount machineWide) {
             return this.mount.orElse(machineWide);
         }
     }
 
     /**
-     * What the engine sounds like. The recording itself lives in the resource pack, in
-     * {@code sounds.json} and an {@code .ogg} like any other Minecraft sound; this only says which
-     * one to use and how to play it.
+     * エンジンの音。音声そのものは他の Minecraft の音と同様、リソースパックの {@code sounds.json} と
+     * {@code .ogg} にある。ここが言うのはどれを使い、どう鳴らすかだけ。
      *
-     * <p>The recording is found in this order: the {@code engine} event named here if there is one;
-     * failing that, an event named after the machine, so {@code su_25} looks for
-     * {@code ashvehicles:engine.su_25}; and failing that the mod's default. So a machine with no
-     * recording of its own still sounds like something, and giving it one is a matter of dropping in
-     * the file and listing it in {@code sounds.json}, with nothing to change here.
+     * <p>音声は次の順で探す。ここに書かれた {@code engine} イベント、無ければ機体名から作った名前
+     * （{@code su_25} なら {@code ashvehicles:engine.su_25}）、それも無ければ MOD の既定。だから専用の
+     * 音声を持たない機体も何らかの音は出すし、専用の音を与えるにはファイルを置いて {@code sounds.json}
+     * に書くだけでよく、ここは変更不要。
      *
-     * <p>The recording should be a steady loop of the engine at a constant setting: how hard it is
-     * working is expressed by playing it louder and faster, not by switching recordings.
+     * <p>音声は一定の設定で回るエンジンの定常ループであること。負荷の高さは音量と再生速度で表現し、
+     * 音声を切り替えることでは表現しない。
      *
-     * @param engine sound event to use, or empty to look one up by the machine's name
-     * @param gear sound event for an aircraft's undercarriage travelling, or empty to look one up by
-     *            the aircraft's name. Also a loop, played only while the legs are on their way, and
-     *            played at one volume and one pitch: the figures below are the engine's alone.
-     *            Nothing on the ground has one
-     * @param volume how loud at full power, next to the machine; 1 is the recording as made
-     * @param idleVolume fraction of that at rest while the engine is still turning
-     * @param pitchMin playback speed at rest
-     * @param pitchMax playback speed flat out
-     * @param range distance, in blocks, beyond which the engine cannot be heard at all. It fades
-     *              steadily out to there. A jet is heard long before it is seen and wants hundreds
-     *              of blocks; a diesel carries a long way over open ground but nothing like as far
+     * @param engine 使う音イベント。空なら機体名から探す
+     * @param gear 機体の脚が作動する音のイベント。空なら機体名から探す。これもループで、脚が動いている
+     *             間だけ、音量も再生速度も一定で鳴らす。以下の数値はエンジン専用。地上の物は持たない
+     * @param volume 全開時、機体の真横での音量。1 が収録そのまま
+     * @param idleVolume エンジンが回っている停止時の、上記に対する比率
+     * @param pitchMin 停止時の再生速度
+     * @param pitchMax 全開時の再生速度
+     * @param range これより遠いと一切聞こえない距離（ブロック）。そこまで滑らかに減衰する。ジェットは
+     *              見えるずっと前から聞こえるので数百ブロック欲しい。ディーゼルは開けた地形をよく通るが
+     *              そこまでではない
      */
     public record Sound(Optional<ResourceLocation> engine, Optional<ResourceLocation> gear,
             float volume, float idleVolume, float pitchMin, float pitchMax, float range) {
@@ -320,35 +293,30 @@ public final class VehicleChassis {
     }
 
     /**
-     * The machine's radar, and how far its warning receiver can hear.
+     * 機体のレーダーと、警戒受信機の可聴距離。
      *
-     * <p>The radar looks along whatever the machine aims with and nowhere else: it sweeps a cone
-     * about that, so finding somebody is a matter of pointing at where they might be, and turning
-     * away from a contact loses it. That is what makes a radar worth having rather than a map of the
-     * sky. On an aeroplane the cone is about the nose, so the pilot points the aircraft; on a vehicle
-     * with a turret it is about the bore, so the crew traverse — which is the same instrument
-     * answering to whichever thing that machine aims with. See {@link com.ashvehicles.sensor.Sensors}.
+     * <p>レーダーは機体が照準に使う方向だけを見る。その周りの円錐を掃引するので、誰かを見つけるには居そう
+     * な方向を向く必要があり、目標から向きを外せば失探する。それが「空の地図」ではなく「レーダー」を持つ
+     * 意味になる。機体では円錐は機首回りなのでパイロットが機体を向け、砲塔付き車両では砲身回りなので乗員が
+     * 旋回させる——同じ計器が、その機体が照準に使う物に従っているだけ。
+     * {@link com.ashvehicles.sensor.Sensors} 参照。
      *
-     * <p>The warning receiver is the other way round and has no cone at all. It hears somebody
-     * else's radar wherever it is coming from, which is the whole point of one: what it is for is
-     * the thing you did not see, and that is behind you.
+     * <p>警戒受信機は逆で、円錐を一切持たない。他人のレーダーをどの方向からでも聞く。それこそが存在理由
+     * で、この装置が扱うのは「見えていなかった物」であり、それは背後にある。
      *
-     * @param range how far the radar sees, in blocks — kilometres rather than hundreds of blocks,
-     *              because that is the distance at which one aeroplane finds another and there is
-     *              nothing else out there to find. Zero or less means the machine has none, and a
-     *              crew with no radar has no scope and can lock only what their seeker reaches
-     * @param arc half-angle of the sweep, in degrees off whatever the machine aims along. A hundred
-     *            and eighty is no cone at all, which is what a set that turns on its own mounting
-     *            rather than with the machine comes to
-     * @param sweepTicks how often the picture is redrawn. A radar does not see continuously; it
-     *                   sweeps, and what is on the scope is where things were when it last passed
-     * @param warningRange how far off somebody can be and still set off the warning receiver, in
-     *                     blocks. Generous next to the radar's own reach: being painted from further
-     *                     away than you can see is exactly the situation worth being told about
+     * @param range レーダーの探知距離（ブロック）。数百ではなく数kmで、それが機体同士が発見し合う距離
+     *              であり、そこには他に見つける物が無いから。0以下ならレーダー非搭載で、レーダーの無い
+     *              乗員はスコープを持たず、シーカーの届く相手しかロックできない
+     * @param arc 掃引の半頂角（度）。機体が照準する方向からの角度。180 は円錐なし、つまり機体と一緒に
+     *            ではなく自分の架台で回る装置に相当する
+     * @param sweepTicks 画面を描き直す間隔。レーダーは連続的に見るのではなく掃引する。スコープにあるのは
+     *                   最後に通過した時点の位置
+     * @param warningRange 警戒受信機が反応する最大距離（ブロック）。レーダー自身の探知距離より寛大に取る。
+     *                     自分に見える距離より遠くから照射されている状況こそ、知らせる価値がある
      */
     public record Radar(float range, float arc, int sweepTicks, float warningRange) {
         public static final Radar DEFAULT = new Radar(3000.0F, 55.0F, 10, 4000.0F);
-        /** A machine with neither a set nor a receiver, which is most of what drives on the ground. */
+        /** レーダーも受信機も持たない機体。地上を走る物の大半がこれ。 */
         public static final Radar NONE = new Radar(0.0F, 0.0F, 10, 0.0F);
 
         public static final Codec<Radar> CODEC = RecordCodecBuilder.create(instance -> instance.group(
@@ -358,19 +326,96 @@ public final class VehicleChassis {
                 Codec.FLOAT.optionalFieldOf("warning_range", DEFAULT.warningRange()).forGetter(Radar::warningRange)
         ).apply(instance, Radar::new));
 
-        /** Whether there is a radar aboard at all. */
+        /** そもそもレーダーを積んでいるか。 */
         public boolean fitted() {
             return this.range > 0.0F;
         }
 
-        /** Whether this machine has anything to sweep for — a set, a receiver, or both. */
+        /** 掃引する理由があるか（レーダー、受信機、またはその両方）。 */
         public boolean exists() {
             return this.fitted() || this.warningRange > 0.0F;
         }
 
-        /** The furthest anything is worth looking for: the radar's reach or the receiver's. */
+        /** 探す価値のある最大距離。レーダーと受信機の遠い方。 */
         public double reach() {
             return Math.max(this.range, this.warningRange);
+        }
+    }
+
+    /**
+     * 燃料タンク。積める量と、エンジンがそれを消す速さ。
+     *
+     * <p>機体も戦車も艦も同じ物を持つのでここにある。中身は全部「エンジンが働くと減る1つの数」で、種類ごとに
+     * 違うのはその数の大きさだけだ。
+     *
+     * <p><b>消費はエンジン負荷に従う。</b> 速度でも移動距離でもない。全開のジェットは駐機してアイドルしている
+     * ジェットの何倍も燃料を吸うし、それは前へ進んでいるかどうかとは無関係だ——垂直に上っている機体はまさに
+     * それを最も速く消費する。だから {@code VehicleEntityBase.getEngineNote()}——各機械が既に「エンジンが
+     * どれだけ働いているか」として答えている値——を燃料計算にもそのまま使う。エンジン音を決めている物と
+     * 燃費を決める物が同じであるべきなのは、実機でも同じだ。
+     *
+     * <p><b>アイドルは無料ではないが、放置は無料だ。</b> 誰も乗っておらずスロットルも入っていない機械は
+     * エンジンが止まっていると見なし、何も消費しない。野原に置き去りにした戦車が、翌週には空タンクで
+     * 動かせなくなっている——それは誰も望まない現実味であり、燃料切れを「補給を怠った結果」ではなく
+     * 「時間が経った結果」にしてしまう。
+     *
+     * @param capacity 満タンの量。0以下なら燃料の概念そのものを持たない機械になり、無限に走る。書かない
+     *                 ファイルには既定値が入るので、これは「燃料を切りたい」と明示するための逃げ道
+     * @param burnRate ミリタリー全開1tickあたりの消費量。既定値は容量1000に対する物で、全開でおよそ10分
+     * @param idleFraction スロットルを絞りきったエンジンが、全開の何割を消費するか。0では「アイドル中は
+     *                     完全に無料」になり、着陸してから給油するまでの猶予が無限になる
+     * @param afterburnerRate 全再燃焼時の消費倍率。バーナーの対価のうち、熱と音に続く3つ目。戦闘機で3前後が
+     *                        妥当で、それが「点けっぱなしで飛ぶ」を戦術ではなく失敗にする
+     * @param refuelRate 燃料アイテム1個が入れる量
+     */
+    public record Fuel(float capacity, float burnRate, float idleFraction, float afterburnerRate,
+            float refuelRate) {
+        /** 燃料を書いていない機体向け。全開でおよそ10分、アイドルなら1時間以上。 */
+        public static final Fuel DEFAULT = new Fuel(1000.0F, 0.083F, 0.12F, 3.0F, 250.0F);
+
+        /**
+         * 燃料を書いていない地上車両向け。全開でおよそ40分、アイドルならその何倍も走る。
+         *
+         * <p>機体の既定値より寛容にしてある。戦車は前線へ自走してから戦い、そして帰る。給油の間隔が飛行と
+         * 同じでは、燃料は兵站ではなく雑務になる。再燃焼は持たないので、その倍率は1のままだ。
+         *
+         * <p>地上車両側ではなくここに置いてある。あちらに置くと、そちらのファイル先頭の {@code CODEC} が
+         * 初期化される時点——同じクラスの、この定数より前の行——で {@code Powertrain.CODEC} が読みに来て
+         * null を掴み、既定値 null の {@code optionalFieldOf} がワールド生成時に NPE で落ちる。別クラスの
+         * 定数なら、最初に触れられた時点で必ず初期化済みになる。
+         */
+        public static final Fuel GROUND = new Fuel(1000.0F, 0.021F, 0.10F, 1.0F, 250.0F);
+
+        /** 燃料を持たない機械。何も消費せず、給油もできない。 */
+        public static final Fuel NONE = new Fuel(0.0F, 0.0F, 0.0F, 1.0F, 0.0F);
+
+        public static final Codec<Fuel> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("capacity", DEFAULT.capacity()).forGetter(Fuel::capacity),
+                Codec.FLOAT.optionalFieldOf("burn_rate", DEFAULT.burnRate()).forGetter(Fuel::burnRate),
+                Codec.FLOAT.optionalFieldOf("idle_fraction", DEFAULT.idleFraction())
+                        .forGetter(Fuel::idleFraction),
+                Codec.FLOAT.optionalFieldOf("afterburner_rate", DEFAULT.afterburnerRate())
+                        .forGetter(Fuel::afterburnerRate),
+                Codec.FLOAT.optionalFieldOf("refuel_rate", DEFAULT.refuelRate()).forGetter(Fuel::refuelRate)
+        ).apply(instance, Fuel::new));
+
+        /** そもそも燃料を積む機械か。容量を持たない物は、何も消費せず止まりもしない。 */
+        public boolean fitted() {
+            return this.capacity > 0.0F;
+        }
+
+        /**
+         * この負荷で1tickに消える量。
+         *
+         * @param load エンジンがどれだけ働いているか（0〜1）。{@code getEngineNote()} の値
+         * @param reheat 再燃焼の割合（0〜1）。持たないエンジンでは0
+         */
+        public float burn(float load, float reheat) {
+            float idle = Mth.clamp(this.idleFraction, 0.0F, 1.0F);
+            float working = idle + (1.0F - idle) * Mth.clamp(load, 0.0F, 1.0F);
+            float burner = 1.0F + Mth.clamp(reheat, 0.0F, 1.0F) * (Math.max(this.afterburnerRate, 1.0F) - 1.0F);
+
+            return Math.max(this.burnRate, 0.0F) * working * burner;
         }
     }
 }

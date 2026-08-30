@@ -28,32 +28,38 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 /**
- * Ground vehicles as ghosts.
+ * ゴーストとしての地上車両。
  *
- * <p>A tank is a simpler photograph than an aeroplane. It has no undercarriage to play out of an
- * animation file and nothing hanging off it, so the snapshot carries the hull's attitude, the model
- * it is drawn from, and the four things that move: where the turret is pointing, how far the gun is
- * elevated, how far the road wheels have gone round, and how far the barrel has run back. The ghost
- * is drawn from those and nothing else.
+ * <p>戦車は機体より単純な写真だ。アニメーションファイルから再生する降着装置も、吊り下げる物も無いので、スナップ
+ * ショットが運ぶのは車体の姿勢、描画元のモデル、そして動く4つ——砲塔の指向、砲の仰角、転輪の回転量、砲身の後座量
+ * ——だけ。ゴーストはそれ以外から描かれない。
  *
- * <p>What that buys is the thing a tank at long range most needs to say. A column two kilometres off
- * is a row of shapes whatever else happens, but a turret traversed onto you is a different piece of
- * news from a turret facing away, and it reads at a distance where nothing else about the vehicle
- * does. So the turret is worth carrying even at the coarsest level of detail that still draws a
- * model at all.
+ * <p>それが買うのは、遠距離の戦車が最も伝えるべき情報だ。2km 先の縦隊は何があろうと形の列でしかないが、こちらへ
+ * 旋回した砲塔は、そっぽを向いた砲塔とは別の知らせであり、車両の他のどの情報も読めない距離でそれが読める。だから
+ * 砲塔は、モデルを描く最も粗い詳細度でも運ぶ価値がある。
  *
- * <p>Ground vehicles are sent to every client wherever they are, exactly as aircraft are (see
- * {@code EntityTrackingMixin}), so one the client stops receiving is one that is gone; its ghost
- * goes with it rather than lingering.
+ * <p>地上車両は機体と同様、どこにいても全クライアントへ送られる（{@code EntityTrackingMixin} 参照）が、車両は
+ * 自分のチャンクを保持しないので、全員が離れれば地面ごとサーバーからアンロードされ、受信はそこで止まる。消えた
+ * のではなく世界ごと眠っただけだ。だから止まっていた車両のゴーストは残る——2km 先の谷の縦隊は、まさにこうして
+ * 見え続ける。走行中に受信が止まった車両（撃破）だけが即座に消える。{@code AircraftGhostAdapter} の同じ判断に
+ * 理由を書いてある。
  */
 public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehicleEntity> {
+    /** これ未満の速度の二乗なら、その車両は停まっていた——受信が止まった理由は撃破ではなくアンロードだ。 */
+    private static final double STATIONARY = 1.0E-2;
+
     @Override
     public boolean keepAfterLeave(GroundVehicleEntity entity) {
-        return false;
+        return entity.getVelocity().lengthSqr() < STATIONARY;
+    }
+
+    @Override
+    public int orphanTicks() {
+        return GhostConfig.machineTimeoutTicks();
     }
 
     // ------------------------------------------------------------------
-    // Snapshot
+    // スナップショット
     // ------------------------------------------------------------------
 
     @Override
@@ -62,9 +68,8 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
         GroundVehicleDefinition stats = vehicle.getStats();
         VehicleChassis.Model setup = stats.model();
         Vec3 position = vehicle.position();
-        // The box the vehicle is drawn within, not the one it collides with — see
-        // VehicleEntityBase.getBoundingBoxForCulling. Culled against a hull-sized box, a
-        // seven-metre tank blinks out at the edge of the screen the moment the ghost pass has it.
+        // 車両が描かれる範囲の箱であって、衝突に使う箱ではない——VehicleEntityBase.getBoundingBoxForCulling
+        // 参照。車体サイズの箱でカリングすると、7m の戦車はゴーストパスが受け持った瞬間に画面端で消える。
         AABB bounds = vehicle.getBoundingBoxForCulling().move(position.reverse());
         Payload payload = new Payload(id, GroundVehicleModel.Setup.of(stats),
                 GroundVehicleModel.Pose.of(vehicle, 1.0F));
@@ -92,13 +97,11 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
     }
 
     /**
-     * The picture the vehicle's own item is drawn as, which is a picture of the vehicle: the right thing
-     * to stand in for it at the range where a model is not worth drawing.
+     * 車両アイテムの絵として描かれる物、つまり車両の絵。モデルを描く価値の無い距離での代役として正しい物だ。
      *
-     * <p>Not remembered here. It is taken once from the machine's own geometry and kept by
-     * {@link VehicleIcons}, which also answers with nothing for the frame or two before the
-     * first one has been taken — a snapshot without a billboard just draws its model until the
-     * next one is taken.
+     * <p>ここでは保持しない。機体自身のジオメトリから一度撮影され {@link VehicleIcons} が保持する。あちらは最初の
+     * 撮影が済むまでの1〜2フレーム、何も返さない——ビルボードを持たないスナップショットは、次が撮られるまで単に
+     * モデルを描く。
      */
     @Nullable
     private ResourceLocation billboard(ResourceLocation id) {
@@ -106,7 +109,7 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
     }
 
     // ------------------------------------------------------------------
-    // Drawing
+    // 描画
     // ------------------------------------------------------------------
 
     @Override
@@ -117,18 +120,16 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
             if (EntityGhostRenderer.drawBillboard(snapshot, context) || !GhostConfig.geckoLibGhosts()) {
                 return;
             }
-            // No icon: the model itself will do.
+            // アイコンが無い。モデル自体で用は足りる。
         }
 
         PoseStack poseStack = context.poseStack();
         poseStack.pushPose();
-        // Into the hull's own frame. The half turn is the model's: geometry faces north, and a
-        // machine is described from the front down +Z.
+        // 車体座標系へ入る。半回転はモデル由来だ。ジオメトリは北を向き、機体は正面を +Z 方向として記述される。
         poseStack.mulPose(attitude(ghost, context.partialTick()));
 
-        // And the body on its springs, the same way and in the same order the vehicle's own
-        // renderer applies it — but only when the running gear is being posed, since the wheels and
-        // the track are what put themselves back on the ground underneath it.
+        // そしてバネ上の車体を、車両自身のレンダラーと同じ方法・同じ順序で適用する——ただし走行装置をポーズ付け
+        // している場合のみ。その下で自分を地面へ戻すのは車輪と履帯だからだ。
         if (GhostConfig.animation()) {
             Ride ride = ride(ghost, context.partialTick());
 
@@ -143,7 +144,7 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
         poseStack.popPose();
     }
 
-    /** How far the body has moved on its springs: between the last two snapshots, as everything is. */
+    /** バネ上の車体の変位。他と同様、直近2つのスナップショットの間で求める。 */
     private static Ride ride(EntityGhost ghost, float partialTick) {
         Payload now = payload(ghost.current());
 
@@ -158,7 +159,7 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
                 : Ride.between(then.pose().ride(), now.pose().ride(), partialTick);
     }
 
-    /** The attitude to draw at: the short way round between the last two snapshots. */
+    /** 描画に使う姿勢。直近2スナップショット間を近い側の経路で補間する。 */
     private static Quaternionf attitude(EntityGhost ghost, float partialTick) {
         Quaternionf now = ghost.current().attitude();
         Quaternionf then = ghost.previous().attitude();
@@ -175,12 +176,12 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
     }
 
     // ------------------------------------------------------------------
-    // Moving as the vehicle moves
+    // 車両の動きに合わせて動かす
     // ------------------------------------------------------------------
 
     /**
-     * The turret, the gun, the road wheels and the recoil, set from the last two snapshots the way
-     * the vehicle's own model sets them from the vehicle.
+     * 砲塔・砲・転輪・後座を、車両自身のモデルが車両から設定するのと同じやり方で、直近2スナップショットから設定
+     * する。
      */
     private static final GhostAnimatable.GhostPoser POSER = (model, ghost, partialTick) -> {
         Payload now = payload(ghost.current());
@@ -198,7 +199,7 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
     };
 
     // ------------------------------------------------------------------
-    // What the snapshot carries
+    // スナップショットが運ぶ物
     // ------------------------------------------------------------------
 
     @Nullable
@@ -207,10 +208,9 @@ public final class GroundVehicleGhostAdapter implements GhostAdapter<GroundVehic
     }
 
     /**
-     * Everything ground-vehicle-specific a snapshot carries.
+     * スナップショットが運ぶ地上車両固有の情報すべて。
      *
-     * @param setup the figures out of the vehicle's file that the pose is applied against, which
-     *        the ghost has no vehicle left to ask for
+     * @param setup ポーズ適用の基準となる、車両ファイル由来の数値。ゴーストにはもう問い合わせる車両が無い
      */
     record Payload(ResourceLocation vehicleId, GroundVehicleModel.Setup setup, GroundVehicleModel.Pose pose) {
     }

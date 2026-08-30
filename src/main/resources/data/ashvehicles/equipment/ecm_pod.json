@@ -1,0 +1,5 @@
+{
+  "type": "jammer",
+  "radar_gain": 0.55,
+  "lock_delay": 3.0
+}

@@ -13,100 +13,92 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 /**
- * What being destroyed looks and sounds like, from the hit to the last of the smoke.
+ * 撃破された時の見た目と音。被弾から最後の煙まで。
  *
- * <p>Four moments, and they are meant to be watched in order.
+ * <p>4つの場面があり、順に見られることを想定している。
  *
- * <p><b>The hit.</b> Not one fireball but several, strung along the machine rather than stacked on
- * its middle. An aeroplane is fifteen metres of aeroplane and a point explosion over the middle of
- * it reads as something going off <em>near</em> the aircraft; fire coming out of the whole length of
- * it reads as the aircraft. Torn airframe goes out with it, hard and in every direction.
+ * <p><b>被弾。</b> 火球は1つではなく複数を、中心に積むのではなく機体に沿って並べる。機体は15mあり、
+ * 中心の一点で爆発させると「機体の<em>近く</em>で何かが起きた」に見える。全長から火が出れば機体そのものに
+ * 見える。ちぎれた機体構造も一緒に、強く全方向へ飛ぶ。
  *
- * <p><b>The fall.</b> A machine written off in the air keeps whatever it was doing and comes down
- * trailing fire and black smoke. This is the part worth having: a kill a mile away is a bright mark
- * and a long dark line, and both are visible for as long as it takes to reach the ground.
+ * <p><b>落下。</b> 空中で撃墜された機体はそれまでの動きを保ったまま、炎と黒煙を引いて落ちる。ここが本題
+ * で、1km 先の撃墜は明るい点と長く黒い線になり、どちらも地面に着くまで見え続ける。
  *
- * <p><b>The arrival.</b> Fire, dust and a heavy noise where it lands — but no second crater. The
- * blast that wrote the machine off has already dug whatever hole it was going to dig, and one
- * aeroplane digging two is one more than anybody asked for.
+ * <p><b>着地。</b> 落ちた場所に炎と土煙と重い音。ただしクレーターは作らない。撃墜した爆発が既に開ける
+ * べき穴は開けており、1機で2つ開けるのは誰も頼んでいない。
  *
- * <p><b>The burn.</b> And then it lies there and burns: hard for the first ten seconds, thinning
- * over the minute after, and cold at the end of it. A wreck that smoked for ever would be a column
- * of particles per aeroplane anyone ever shot down, and the world fills up with those.
+ * <p><b>燃焼。</b> その後はそこで燃える。最初の10秒は激しく、続く1分で細り、最後は冷える。永遠に煙を出す
+ * 残骸は「これまで撃墜された全機分のパーティクルの柱」になり、世界がそれで埋まる。
  *
- * <p>All of it is sent from the server through {@link Effects}, so all of it carries the five hundred
- * blocks a particle packet can be made to carry rather than the thirty-two it carries by default.
- * A fire nobody can see from the air is not worth setting.
+ * <p>全部サーバーから {@link Effects} 経由で送るので、パーティクルパケットの既定32ブロックではなく、
+ * 出せる限界の512ブロックを運ぶ。空から見えない火事に意味は無い。
  */
 public final class WreckEffects {
-    /** The flame itself: hotter and more orange than the ember an explosion throws off. */
+    /** 炎そのもの。爆発が撒く残り火より熱く、よりオレンジ寄り。 */
     private static final int FLAME = 0xFF8A2A;
-    /** Torn airframe, thrown out of a machine that has just come apart. */
+    /** ちぎれた機体構造。今バラバラになった機体から飛び出す物。 */
     private static final int SCRAP = 0x7A736B;
 
-    /** How long a wreck burns at its fiercest before it starts to go out, in ticks. */
+    /** 残骸が最も激しく燃え、消え始めるまでの時間（tick）。 */
     private static final int FIERCE_TICKS = 200;
-    /** And how long until it is cold and stops smoking at all. Rather over a minute in total. */
+    /** そして冷えて煙も止まるまでの時間。全体で1分強。 */
     public static final int BURN_OUT_TICKS = 1400;
 
     /**
-     * Speed, squared, above which a wreck is still coming down rather than lying where it landed.
+     * これを超えていれば残骸はまだ落下中で、着地して転がっているのではない、という速度の二乗。
      *
-     * <p>Public because the machine itself watches the same figure: the moment it drops below this is
-     * the moment the wreck arrived, and that is when {@link #impact} is worth drawing.
+     * <p>public なのは機体側も同じ値を見ているから。これを下回った瞬間が残骸の着地であり、
+     * {@link #impact} を描く価値があるのもその時。
      */
     public static final double FALLING = 0.04;
 
-    /** Ticks between puffs off a wreck at rest: this closely at its fiercest, this rarely at its last. */
+    /** 静止した残骸が煙を吐く間隔（tick）。最盛期はこの間隔、末期はこの間隔。 */
     private static final int FAST_PUFF = 2;
     private static final int SLOW_PUFF = 9;
 
-    /** How often a burning wreck is heard to crackle, in ticks. */
+    /** 燃える残骸のパチパチ音の間隔（tick）。 */
     private static final int CRACKLE_TICKS = 19;
     /**
-     * How loud the fire is. A sound reaches {@code max(volume, 1) * 16} blocks at both ends, so this
-     * is a burning machine heard from forty blocks off — near enough to walk up to, far enough to be
-     * found by.
+     * 火の音量。音は送受信の両側で {@code max(volume, 1) * 16} ブロック届くので、これは40ブロック先から
+     * 聞こえる残骸ということ。歩いて行ける近さで、それを頼りに見つけられる遠さ。
      */
     private static final float FIRE_VOLUME = 2.5F;
 
-    /** How much of the machine's own length the fire is spread over. */
+    /** 炎を機体の全長のどれだけに広げるか。 */
     private static final double SPREAD = 0.45;
-    /** And how flat that spread is: a wreck is a long low thing, not a ball. */
+    /** その広がりの扁平さ。残骸は細長く低い物であって球ではない。 */
     private static final double FLATNESS = 0.3;
 
     /**
-     * How hard something has to arrive for the impact to be worth drawing, in blocks a tick. Below it
-     * the wreck has settled onto the ground rather than met it, and there is nothing to see.
+     * 着地演出を描く価値がある落下速度（1tickあたりブロック）。これ未満なら残骸は地面に「ぶつかった」の
+     * ではなく「落ち着いた」だけで、見るべき物は無い。
      */
     private static final double HARD_ARRIVAL = 0.35;
 
     // ------------------------------------------------------------------
-    // The hit
+    // 被弾
     // ------------------------------------------------------------------
 
     /**
-     * The moment the machine stops being one: fire out of the whole length of it, a wave, wreckage,
-     * and a bang that carries.
+     * 機体が機体でなくなる瞬間。全長から出る炎、衝撃波、飛散物、そして遠くまで届く爆発音。
      *
-     * <p>The blast itself — the damage and the hole — is {@link Effects#blast}'s and has already
-     * happened by the time this is called. What is here is only what it looks like.
+     * <p>爆発そのもの（ダメージと穴）は {@link Effects#blast} の担当で、ここが呼ばれる時点で既に済んで
+     * いる。ここにあるのは見た目だけ。
      *
-     * @param power the machine's own explosion figure, which sizes everything
-     * @param reach how far the machine extends from its middle, in blocks, so that a tank's fire
-     *              comes out of a tank and an aeroplane's out of an aeroplane
-     * @param attitude which way it is lying, so the fire runs along the airframe rather than north
+     * @param power 機体自身の爆発規模。全ての大きさの基準
+     * @param reach 機体が中心から何ブロック伸びているか。戦車の炎は戦車の大きさで、機体の炎は機体の
+     *              大きさで出るように
+     * @param attitude どの向きで寝ているか。炎が北向きではなく機体に沿って走るように
      */
     public static void destroyed(ServerLevel level, Vec3 at, Quaternionf attitude, float power, double reach) {
-        // Bigger than the hole it digs, and on purpose. The explosion figure in a machine's file is
-        // what it does to the ground, and it is a modest number because a shot-down aeroplane has no
-        // business levelling a village. What it should *look* like is the size of the machine, so
-        // the drawing is given the airframe as well and the crater is left alone.
+        // 意図的に、開ける穴より大きく描く。機体ファイルの爆発値は「地面に何をするか」の値で、撃墜され
+        // た機体が村を平らにする道理は無いので控えめな数字にしてある。一方 *見た目* は機体の大きさで
+        // あるべきなので、描画には機体寸法も渡し、クレーターの方は触らない。
         float sized = Mth.clamp(power + (float) reach * 0.4F, 1.0F, Effects.BIGGEST);
         Vec3 along = Attitude.toWorld(attitude, new Vec3(0.0, 0.0, 1.0));
 
-        // Strung along the airframe. Three of them, at the nose, the middle and the tail: enough for
-        // the fire to have the shape of the machine, few enough not to be three explosions.
+        // 機体に沿って並べる。機首・中央・尾部の3つ。炎が機体の形を持つには十分で、3回の爆発に見えない
+        // 程度に少ない。
         Effects.fireball(level, at, sized, Effects.EMBER);
         Effects.fireball(level, at.add(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER);
         Effects.fireball(level, at.subtract(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER);
@@ -116,7 +108,7 @@ public final class WreckEffects {
         wreckage(level, at, sized, reach);
     }
 
-    /** Torn airframe, thrown out hard and in every direction, and burning as it goes. */
+    /** ちぎれた機体構造。強く全方向へ飛び、飛びながら燃える。 */
     private static void wreckage(ServerLevel level, Vec3 at, float power, double reach) {
         int pieces = 12 + (int) (reach * 3.0);
 
@@ -129,16 +121,14 @@ public final class WreckEffects {
     }
 
     // ------------------------------------------------------------------
-    // The fall, and the burn afterwards
+    // 落下と、その後の燃焼
     // ------------------------------------------------------------------
 
     /**
-     * One tick of a wreck being a wreck. Server side, once a tick, for as long as there is anything
-     * left to see.
+     * 残骸としての1tick分。サーバー側で、見るべき物が残っている限り毎tick。
      *
-     * @param age how long it has been a wreck, in ticks. Everything about how hard it burns is this
-     * @param velocity how it is moving, which is what tells a wreck still falling from one that has
-     *                 arrived — and, for one still falling, which way to lay the smoke
+     * @param age 残骸になってからの経過 tick。燃え方の全てがこれで決まる
+     * @param velocity 動き。落下中か着地済みかの判別に使い、落下中なら煙をどちらへ流すかも決める
      */
     public static void burn(ServerLevel level, Vec3 at, Quaternionf attitude, int age, Vec3 velocity,
             double reach) {
@@ -159,11 +149,10 @@ public final class WreckEffects {
     }
 
     /**
-     * How fiercely a wreck of this age burns, from one to nothing.
+     * その経過時間の残骸がどれだけ激しく燃えているか。1からゼロまで。
      *
-     * <p>Flat for the first ten seconds and then straight down over the minute after. The flat part
-     * is what makes a fresh kill read as a fire rather than as something already going out; the ramp
-     * is what stops the world filling up with permanent smoke columns.
+     * <p>最初の10秒は一定、その後1分かけて直線的に落ちる。一定部分が、撃墜直後を「もう消えかけの何か」
+     * ではなく火事として見せる。傾斜部分が、世界を永久の煙柱で埋めるのを防ぐ。
      */
     private static float heat(int age) {
         if (age <= FIERCE_TICKS) {
@@ -174,15 +163,13 @@ public final class WreckEffects {
     }
 
     /**
-     * A machine coming down on fire: flame at the airframe, dense smoke at it, and the trail proper
-     * laid behind it.
+     * 燃えながら落ちる機体。機体位置に炎と濃い煙、そして後ろに本来の航跡。
      *
-     * <p>Every tick, and unapologetically. This lasts as long as the fall does — a few seconds — and
-     * it is the one thing anybody watching a kill actually sees.
+     * <p>毎tick、遠慮なく出す。続くのは落下している間（数秒）だけで、撃墜を見ている者が実際に目にするの
+     * はこれだから。
      *
-     * <p>The trail is put where the machine <em>was</em> rather than where it is, which is the whole
-     * trick: smoke does not travel with the aeroplane, it is left behind by it, and a puff spawned at
-     * the nose every tick draws a line that leads the wreck instead of following it.
+     * <p>航跡は現在位置ではなく機体が<em>いた</em>位置へ置く。そこが肝で、煙は機体と一緒に進むのではなく
+     * 機体が置いていく物だ。毎tick 機首に出せば、残骸を追う線ではなく残骸を先導する線が描かれてしまう。
      */
     private static void trail(ServerLevel level, Vec3 at, Vec3 velocity, float heat, double reach) {
         float size = (float) Math.max(reach * 0.25, 1.0);
@@ -191,8 +178,8 @@ public final class WreckEffects {
                 1 + (int) (heat * 3.0F), reach * 0.2, 0.04);
         Effects.send(level, at, ModParticles.MOTOR_SMOKE.get().of(Effects.SOOT, size * 1.1F),
                 2 + (int) (heat * 2.0F), reach * 0.15, 0.03);
-        // Behind, and given the machine's own speed to carry: what is drawn is the air the wreck has
-        // already passed through, still full of what came out of it.
+        // 後方へ、機体自身の速度を持たせて。描いているのは残骸が既に通り過ぎた空気で、そこにはまだ機体
+        // から出た物が満ちている。
         Effects.aimed(level, at.subtract(velocity), ModParticles.CONTRAIL.get().of(Effects.SOOT, size * 1.4F),
                 velocity.scale(0.25));
 
@@ -202,12 +189,10 @@ public final class WreckEffects {
     }
 
     /**
-     * A wreck lying where it landed, burning itself out: licks of flame off the airframe and a column
-     * of black smoke going up off it.
+     * 着地した場所で燃え尽きていく残骸。機体から立つ炎と、そこから上がる黒煙の柱。
      *
-     * <p>Thinned by how much fire is left rather than switched off at some threshold, so a wreck goes
-     * out the way a fire goes out — the flame first, then the smoke, and the last of it a wisp — and
-     * there is no tick on which it visibly stops.
+     * <p>閾値で切るのではなく残り火の量で薄めるので、火が消えるように消える——先に炎、次に煙、最後は一筋
+     * ——し、目に見えて止まる tick が存在しない。
      */
     private static void smoulder(ServerLevel level, Vec3 at, int age, float heat, double reach) {
         int every = Math.round(Mth.lerp(heat, SLOW_PUFF, FAST_PUFF));
@@ -224,9 +209,8 @@ public final class WreckEffects {
                     1 + (int) (heat * 2.0F), spread, 0.02);
         }
 
-        // The column. Given a shove upwards rather than left to drift, so it climbs off the wreck
-        // instead of sitting on it: what tells somebody a mile off that there is a wreck down there
-        // is the smoke standing up out of the trees, and smoke that only expands never gets there.
+        // 煙柱。漂わせるのではなく上向きの初速を与え、残骸の上に居座らず立ち上がるようにする。1km 先の
+        // 誰かに「あそこに残骸がある」と告げるのは木立から立つ煙で、広がるだけの煙はそこまで届かない。
         Effects.send(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, size * (0.9F + heat * 0.8F)),
                 1 + (int) (heat * 2.0F), spread, 0.02);
         Effects.aimed(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, size * 1.3F),
@@ -236,8 +220,8 @@ public final class WreckEffects {
             Effects.sparks(level, at, Effects.EMBER, heat * 0.5F);
         }
 
-        // The crackle. Vanilla's own fire, which every client already has, played louder than a
-        // campfire and no more often than a fire crackles.
+        // パチパチ音。全クライアントが既に持っているバニラの火の音を、焚き火より大きく、火が爆ぜる程度
+        // の頻度で鳴らす。
         if (heat > 0.2F && age % CRACKLE_TICKS == 0) {
             RandomSource random = level.getRandom();
 
@@ -247,18 +231,17 @@ public final class WreckEffects {
     }
 
     // ------------------------------------------------------------------
-    // The arrival
+    // 着地
     // ------------------------------------------------------------------
 
     /**
-     * A wreck meeting the ground: fire, a wall of dust, and a heavy noise.
+     * 残骸が地面に到達する瞬間。炎、土煙の壁、重い音。
      *
-     * <p>Deliberately no explosion. Nothing here damages a block or hurts anybody — the blast that
-     * wrote the machine off has already dug whatever hole it was going to dig, and letting the hulk
-     * dig a second one where it lands would double every crater in the mod. What is wanted at this
-     * moment is the noise and the dust, and those are free.
+     * <p>意図的に爆発は起こさない。ここではブロックも壊さず誰も傷つけない——撃墜した爆発が既に開けるべき
+     * 穴は開けており、着地でもう1つ開けさせればこの MOD のクレーターが全部2倍になる。この瞬間に欲しいの
+     * は音と土煙で、そちらは無料。
      *
-     * @param speed how fast it arrived, in blocks a tick, which sizes all of it
+     * @param speed 着地時の速度（1tickあたりブロック）。全ての大きさの基準
      */
     public static void impact(ServerLevel level, Vec3 at, double speed, double reach) {
         if (speed < HARD_ARRIVAL) {

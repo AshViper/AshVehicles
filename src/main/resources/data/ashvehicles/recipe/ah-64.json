@@ -1,22 +1,32 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 5
     },
-    "K": {
-      "tag": "c:storage_blocks/iron"
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 2
     },
-    "D": {
-      "tag": "c:gems/diamond"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 2
     },
-    "R": {
-      "tag": "c:dusts/redstone"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:engine",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:avionics",
+      "count": 1
     }
-  },
-  "pattern": ["#K#", "KDK", "#R#"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:ah-64"

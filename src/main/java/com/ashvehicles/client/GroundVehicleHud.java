@@ -7,6 +7,7 @@ import javax.annotation.Nullable;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.weapon.WeaponDefinition;
 
@@ -26,57 +27,47 @@ import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 
 /**
- * The instruments, drawn over the world while the player is aboard a ground vehicle.
+ * 地上車両に搭乗している間、世界の上に描かれる計器類。
  *
- * <p>A tank crew read almost nothing an aircrew do. There is no altitude, no attitude worth showing
- * — the hull lies where the ground puts it and there is nothing to be done about that — and no
- * airspeed to keep above. What there is instead is the gun, and everything here is about the gun.
+ * <p>戦車の乗員は、航空機の乗員が読む物をほとんど読まない。高度は無い。見せる価値のある姿勢も無い——車体は地面が
+ * 決める姿勢で寝ており、それについてできることは何も無い——し、維持すべき対気速度も無い。代わりにあるのが砲であり、
+ * ここの全ては砲についての物だ。
  *
- * <p><b>The sight is a different instrument depending on what is selected</b>, for the same reason
- * an aeroplane's is: a weapon is shown the way it is aimed. A gun is aimed by laying the turret, so
- * it gets a mark on the ground where the round will land and — on a vehicle whose file gives it a
- * radar, and only there — a second one against something moving, where the barrel has to be for the
- * round to arrive. See {@link GunSight}, which is the aeroplane's own sight asked about a turret
- * instead. Missiles are not aimed at all; they are <em>given</em> something, so what is drawn is the
- * seeker's cone and a box round whatever it has taken.
+ * <p><b>照準は選択中の兵装によって別の計器になる。</b>航空機と同じ理由で、兵装はその照準方法に沿って表示される。
+ * 砲は砲塔を据えて照準するので、弾が落ちる地点のマークと、さらに——ファイルがレーダーを与えている車両に限り——動く
+ * 目標に対して弾が届くには砲身がどこにあるべきかを示す2つ目のマークが付く。{@link GunSight} 参照。あれは機体自身の
+ * 照準器に砲塔について問い合わせた物だ。ミサイルはそもそも照準しない。<em>与えられる</em>のだから、描くのはシーカー
+ * の円錐と捕捉対象を囲む枠になる。
  *
- * <p><b>The gun mark is a ring, and it is the only mark on the screen.</b> Vanilla's crosshair is
- * taken off while anybody is aboard — see {@link CrewHudSuppressor} — because two marks are two
- * answers to the one question the crew are asking, and the crew will aim with whichever of them is
- * in the middle of the screen whether or not it is the one the gun is on.
+ * <p><b>砲のマークは環であり、画面上で唯一のマークだ。</b>誰かが搭乗している間バニラの十字線は外される——
+ * {@link CrewHudSuppressor} 参照——2つのマークは、乗員が発している1つの問いへの2つの答えであり、乗員は砲が乗っている
+ * 方かどうかに関わらず、画面中央にある方で照準してしまうからだ。
  *
- * <p><b>It is still a mark on the world rather than a mark on the screen.</b> The gun is laid on the
- * middle of the view, so the ring settles there and the two agree — but only once the turret has
- * caught up: the crew look wherever they please and the turret follows at a couple of degrees a
- * tick, so for the first second of any traverse the ring is well off the middle, which is the sight
- * saying so. It also goes on the <em>point</em> the gun is laid on rather than merely along the
- * barrel, so what it reads is a range as well as a direction, and a round that will strike a ridge
- * short of the target puts the ring on the ridge.
+ * <p><b>それでも画面上のマークではなくワールド上のマークである。</b>砲は視界の中央へ据えられるので環もそこへ落ち着き
+ * 両者は一致する——ただし砲塔が追い付いてからだ。乗員は好きな方を見るが砲塔は毎tick数度で追うので、旋回の最初の1秒
+ * ほどは環が中央から大きく外れる。それが照準の伝えていることだ。しかも環は砲身の延長線ではなく砲が据えられた<em>点</em>
+ * に乗るので、方向だけでなく距離も読める。目標の手前の尾根に当たる弾は、環を尾根の上に置く。
  *
- * <p>Beside them, {@link PlanView}: the machine itself, from directly above, with the line of sight
- * up the panel and the hull swinging about underneath it. A tank driver whose turret is laid abeam
- * has no other way of knowing which way the hull is pointing, and driving off in the direction of
- * the gun is the classic way to end up in a ditch.
+ * <p>その隣が {@link PlanView}。機体そのものを真上から見た図で、視線がパネル上方向、車体はその下で振れる。砲塔を真横
+ * へ据えた戦車の運転手には、車体の向きを知る他の手段が無いし、砲の向きへ発進するのは溝に落ちる古典的な方法だ。
  *
- * <p>And, opposite the sight, {@link HitReadout}: where the last few rounds actually landed on what
- * they were fired at. Everything else here is about getting a round away; that is the only thing
- * that says what happened when one arrived, which at the range a tank gun is used at is not
- * something the crew can see for themselves.
+ * <p>そして照準の反対側が {@link HitReadout}。直近数発が目標のどこに当たったかを示す。ここの他の全ては「弾を撃ち出す」
+ * ことについての物だが、これだけが「着弾したとき何が起きたか」を伝える。戦車砲の交戦距離では、乗員が自分で見て取れる
+ * 情報ではないからだ。
  *
- * <p>Everything is read from state that reaches every client, so a passenger sees the same
- * instruments as the crew rather than a panel of zeroes.
+ * <p>全て、全クライアントへ届く状態から読む。だから搭乗者にも乗員と同じ計器が見え、0並びのパネルにはならない。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class GroundVehicleHud implements LayeredDraw.Layer {
     private static final ResourceLocation ID = ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "vehicle_hud");
 
-    /** Fraction of the hull left below which the readout goes amber. */
+    /** 表示が琥珀色に変わる、車体残存率の閾値。 */
     private static final float LOW_HEALTH = 0.3F;
-    /** Rounds left below which the count goes amber. Two engagements' worth. */
+    /** 残弾表示が琥珀色に変わる閾値。交戦2回分。 */
     private static final int LOW_ROUNDS = 6;
 
     private static final int RELOAD_BAR_WIDTH = 62;
-    /** The empty part of the reload bar: there, but not competing with the part that has filled. */
+    /** 装填バーの空の部分。存在はするが、埋まった部分と目立ち合わない色。 */
     private static final int TRACK = 0x40FFFFFF;
 
     @SubscribeEvent
@@ -100,8 +91,8 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         int centreX = graphics.guiWidth() / 2;
         int centreY = graphics.guiHeight() / 2;
 
-        // One or the other, never both: which weapon the trigger fires is which sight the crew are
-        // looking through, and two marks on one screen would be two answers to one question.
+        // どちらか一方で、両方は無い。トリガーがどの兵装を撃つかが、乗員がどの照準を覗いているかだ。1画面に2つの
+        // マークは、1つの問いへの2つの答えになってしまう。
         if (vehicle.isMissileMode()) {
             drawSeeker(graphics, minecraft, vehicle, partialTick, centreX, centreY);
         } else {
@@ -110,27 +101,23 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         drawCompass(graphics, minecraft.font, vehicle, partialTick, centreX, centreY);
 
-        // The plan of the machine goes in the corner itself and the readings are moved over to make
-        // room for it, so that the two share the bottom left-hand side rather than one being laid
-        // over the other.
+        // 機体の平面図は隅そのものへ置き、数値表示はその分ずらす。両者が重なるのではなく左下を分け合うようにする
+        // ためだ。
         PlanView.draw(graphics, vehicle, partialTick);
         drawStatus(graphics, minecraft.font, vehicle, partialTick, PlanView.SIZE + 6);
         drawCrew(graphics, minecraft.font, vehicle);
-        // What the last few rounds did, if any of them have landed lately. Drawn from the crew's own
-        // instruments rather than as a layer of its own, so that it is up while they are aboard
-        // something and gone the moment they get out.
+        // 直近の着弾があれば、その結果。独立レイヤーではなく乗員自身の計器から描くので、何かに搭乗している間だけ
+        // 表示され、降りた瞬間に消える。
         HitReadout.draw(graphics, minecraft.font);
-        // Only a machine whose file gives it a set draws either instrument, which is every launcher
-        // and no tank.
+        // どちらの計器も、ファイルがレーダーを与えている機体だけが描く。全ての発射機がそうで、戦車は1台もそうでない。
         RadarDisplay.draw(graphics, minecraft.font, vehicle);
     }
 
     /**
-     * Where the round will land, drawn out in the world rather than at the middle of the screen, and
-     * against something moving, where the barrel has to be for it to get there.
+     * 弾の落着点を、画面中央ではなくワールド上に描く。動く目標に対しては、そこへ届かせるために砲身がどこにあるべきかも
+     * 描く。
      *
-     * <p>Green with a round up the spout, amber without, so whether the gun can be fired is the same
-     * glance as where it is pointing.
+     * <p>薬室に弾があれば緑、無ければ琥珀。撃てるかどうかと、どこを向いているかが一目で分かる。
      */
     private static void drawGunMark(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
             float partialTick, int centreX, int centreY) {
@@ -142,8 +129,8 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         float focal = AircraftHud.focalLength(minecraft, graphics);
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
-        // Rebuilt from this frame's bore rather than read off last tick's: only how far out the mark
-        // sits is a tick old, and it tracks the barrel as smoothly as the barrel moves.
+        // 前tickの値を読むのではなく、このフレームの砲腔方向から組み直す。1tick古いのはマークまでの距離だけであり、
+        // マークは砲身の動きと同じなめらかさで追従する。
         Vec3 muzzle = sight.bore().muzzle(partialTick);
         Vec3 bore = sight.bore().direction(partialTick);
         Vec3 point = muzzle.add(bore.scale(sight.pipperRange())).add(sight.pipperDrop());
@@ -154,14 +141,12 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             int x = mark[0];
             int y = mark[1];
 
-            // A ring round the aiming point with a pip in the middle of it, which is the same mark
-            // an aircraft's gun gets — see AircraftHud.drawGunSight. Open in the middle apart from
-            // the pip, so what is being shot at is not hidden by the thing pointing at it.
+            // 照準点を囲む環と、その中央の点。機体の機関砲と同じマークだ——AircraftHud.drawGunSight 参照。中央は
+            // 点を除いて開けてあるので、撃たれる対象が、それを指すマークに隠れない。
             AircraftHud.circle(graphics, x, y, 9, colour);
             graphics.fill(x - 1, y - 1, x + 1, y + 1, colour);
 
-            // Stadia either side of the ring, which is what they are for: something of a known width
-            // on the ground between them is something at a known range.
+            // 環の両脇のスタジア線。用途はまさにそれで、既知の幅を持つ地上の物がその間に収まれば、距離が分かる。
             graphics.fill(x - 15, y - 3, x - 14, y + 4, colour);
             graphics.fill(x + 15, y - 3, x + 16, y + 4, colour);
 
@@ -177,17 +162,14 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     }
 
     /**
-     * The lead: a diamond on the point the target will have reached by the time a round fired now
-     * arrives, raised by the round's own drop. Put the gun mark on the diamond and fire.
+     * 見越し点。今撃った弾が到達する頃に目標がいる位置へ菱形を置き、弾自身の落下分だけ持ち上げる。砲のマークを菱形へ
+     * 合わせて撃てばよい。
      *
-     * <p>This is what an anti-aircraft mounting is for and what a tank does not get. An aeroplane
-     * crossing at a few hundred blocks is most of a second's flight away, and a gunner laying the
-     * barrel on the aeroplane itself is laying it where the aeroplane <em>was</em> — but knowing
-     * where it will be is a set measuring the range and the rate, so only a vehicle with a radar is
-     * offered one at all. {@code GunSight.leads} is where that is decided; nothing is needed here
-     * beyond drawing whatever it hands back, which for a tank is no target. Dim while the target is
-     * beyond what the round can reach, green inside it, and amber — with the word — once the barrel
-     * is close enough that firing now would hit.
+     * <p>これは対空砲架のための物で、戦車は与えられない。数百ブロック先を横切る機体は1秒近い飛翔時間の彼方にあり、
+     * 機体自身に砲身を据える砲手は機体が<em>いた</em>場所に据えている——だが「どこにいるか」を知るには距離と変化率を
+     * 測るレーダーが要るので、そもそも提示されるのはレーダー付きの車両だけだ。判断は {@code GunSight.leads} が行い、
+     * ここは返ってきた物を描く以外に何も要らない。戦車では目標無しが返る。目標が弾の到達距離の外なら暗く、内側なら
+     * 緑、砲身が今撃てば当たる程度まで近付けば——文字付きで——琥珀になる。
      */
     private static void drawLead(GuiGraphics graphics, Minecraft minecraft, GunSight.Solution sight,
             float partialTick, float focal, Vec3 camera, int centreX, int centreY) {
@@ -197,8 +179,8 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             return;
         }
 
-        // The target has moved since the tick the lead was worked out; the offset has not, so the
-        // mark rides along with wherever the target is drawn this frame.
+        // 見越しを算出したtickから目標は動いているが、オフセットは動いていない。だからマークは、このフレームで目標が
+        // 描かれる位置に乗って一緒に動く。
         Vec3 lead = target.getPosition(partialTick)
                 .add(0.0, target.getBbHeight() * 0.5, 0.0)
                 .add(sight.leadOffset());
@@ -225,13 +207,12 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     }
 
     /**
-     * The missile sight: the cone the seeker can see inside, and a box round whatever it has taken.
+     * ミサイル照準。シーカーが見られる円錐と、捕捉対象を囲む枠。
      *
-     * <p>Nothing here is a point of aim. A missile is not laid on a target, it is handed one, so what
-     * the crew are actually doing is holding the mounting still enough and long enough for the lock
-     * to close — and the two things worth drawing are therefore where it can look and how far along
-     * it has got. The ring is the seeker's own cone at the size it really is: put a target inside it
-     * and the lock will take; outside it, nothing will happen however long the crew wait.
+     * <p>ここに照準点は無い。ミサイルは目標へ据えるのではなく手渡されるので、乗員が実際にやっているのは、ロックが閉じる
+     * まで砲架を十分静かに十分長く保つことだ——だから描く価値があるのは「どこを見られるか」と「どこまで進んだか」の2つ
+     * になる。環はシーカー自身の円錐を実寸で描いた物だ。目標をその中へ入れればロックは成立するし、外にいる限り乗員が
+     * どれだけ待っても何も起きない。
      */
     private static void drawSeeker(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
             float partialTick, int centreX, int centreY) {
@@ -252,9 +233,8 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         if (boresight != null && missile.guidance().isPresent()) {
             WeaponDefinition.Guidance guidance = missile.guidance().get();
-            // The set's own arc rather than the round's head, for a radar-homing missile cued by it
-            // before launch — see TargetLock#bestCandidate, which is the same choice made the same
-            // way and is what this ring is meant to be honest about.
+            // 発射前にレーダーで指示されるレーダー誘導ミサイルでは、弾のシーカーではなくレーダー自身の走査範囲を使う
+            // ——TargetLock#bestCandidate 参照。同じ選択を同じやり方で行っており、この環が正直であるべき対象はそれだ。
             boolean radarCued = guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR
                     && vehicle.radar().fitted();
             float angle = radarCued ? vehicle.radar().arc() : guidance.lockAngle();
@@ -275,15 +255,16 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             return;
         }
 
-        // The box is drawn where the target actually is on the screen rather than at a fixed place,
-        // so it is also how the crew find something they have not spotted yet.
+        // 枠は固定位置ではなく目標が実際に画面上にある場所へ描く。だから乗員がまだ見つけていない物を発見する手段にも
+        // なる。
         Vec3 middle = target.getPosition(partialTick).add(0.0, target.getBbHeight() * 0.5, 0.0);
         int[] at = AircraftHud.project(minecraft, middle.subtract(camera).normalize(), focal, centreX, centreY);
-        int colour = locked ? AircraftHud.WARNING : AircraftHud.GREEN;
+        // 機体の HMD と同じ扱い。シーカーは味方を避けないので、避けさせずに知らせる。AircraftHud#drawLock 参照。
+        boolean friendly = Iff.between(vehicle, target) == Iff.FRIEND;
+        int colour = friendly ? AircraftHud.IFF_FRIEND : locked ? AircraftHud.WARNING : AircraftHud.GREEN;
 
         if (at != null) {
-            // The box tightens as the lock closes, so how far along it is can be read without
-            // looking away from the target.
+            // ロックが閉じるにつれ枠が締まるので、目標から目を離さずに進行度を読める。
             int half = Math.round(Mth.lerp(vehicle.getSeekerProgress(), 26.0F, 11.0F));
 
             AircraftHud.corner(graphics, at[0] - half, at[1] - half, 1, 1, colour);
@@ -292,7 +273,7 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             AircraftHud.corner(graphics, at[0] + half, at[1] + half, -1, -1, colour);
         }
 
-        String status = locked ? "LOCK" : "SEEK";
+        String status = friendly ? "FRIENDLY" : locked ? "LOCK" : "SEEK";
         graphics.drawString(minecraft.font, status, centreX - minecraft.font.width(status) / 2,
                 centreY + 54, colour, true);
 
@@ -302,13 +283,13 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
                 centreY + 64, AircraftHud.DIM, true);
     }
 
-    /** The round in the tubes, or null for a vehicle that carries none. */
+    /** 発射筒の弾。積んでいない車両では null。 */
     @Nullable
     private static WeaponDefinition missileOf(GroundVehicleEntity vehicle) {
         return vehicle.getStats().launcher().missile().map(Definitions::weapon).orElse(null);
     }
 
-    /** Which way the hull is pointing, on the same compass an aircraft gets. */
+    /** 車体の指向を、機体と同じコンパスで示す。 */
     private static void drawCompass(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
             float partialTick, int centreX, int centreY) {
         int heading = Math.floorMod(Math.round(Attitude.heading(vehicle.getAttitude(partialTick))) + 180, 360);
@@ -319,7 +300,7 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         graphics.fill(centreX - 1, centreY - 66, centreX + 1, centreY - 62, AircraftHud.GREEN);
     }
 
-    /** What is left of the vehicle, how fast it is going, and what the armament has to say. */
+    /** 車両の残存度、速度、そして兵装が伝えること。 */
     private static void drawStatus(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
             float partialTick, int indent) {
         int left = 8 + indent;
@@ -331,17 +312,16 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
                 String.format("HP %d/%d", Math.round(health), Math.round(vehicle.getMaxHealth())),
                 left, bottom - 52, healthColour);
 
-        // Blocks are metres and there are twenty ticks in a second. Signed, because a tank spends a
-        // fair amount of its life going backwards and the driver should be told which it is.
+        // 1ブロック=1m、1秒=20tick。符号付きにするのは、戦車が生涯のかなりを後進で過ごすし、運転手にはどちらか
+        // 伝えるべきだからだ。
         float speed = vehicle.getSpeed();
         int kmh = (int) Math.round(Math.abs(speed) * 20.0 * 3.6);
         String gear = speed < -0.001F ? " R" : "";
         AircraftHud.value(graphics, font, kmh + " km/h" + gear, left, bottom - 42);
 
-        // The machine gun, which belongs to neither of the lines below. It is never selected — it is
-        // simply there — so it is shown whatever the trigger is on, and it is shown in the second
-        // column so that it does not read as a third thing the crew could be firing instead. Amber
-        // once the belt is out, which is the only thing about it worth a second glance.
+        // 機関銃。下の2行のどちらにも属さない。決して選択されない——ただそこにある——ので、トリガーが何を向いていても
+        // 表示するし、2列目に置くことで「乗員が代わりに撃てる3つ目の物」に見えないようにする。ベルトが尽きたら琥珀に
+        // する。二度見に値するのはそれだけだ。
         if (vehicle.hasCoaxial()) {
             int belt = vehicle.getCoaxRounds();
 
@@ -359,21 +339,20 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             return;
         }
 
-        // What the barrel is doing in the turret, which no mark out in the world can show: a mark on
-        // a hillside looks the same at ten degrees of elevation as at two, and against an aeroplane
-        // overhead how much is left before the mounting jams against its own stop is the difference
-        // between a burst and a wasted second.
+        // 砲塔内で砲身がどうなっているか。ワールド上のマークでは示せない情報だ。斜面のマークは仰角10度でも2度でも
+        // 同じに見えるし、頭上の機体に対しては「砲架がストッパーに当たるまであとどれだけか」が、掃射できるか1秒を
+        // 無駄にするかの違いになる。
         int elevation = Math.round(vehicle.getGunPitch(partialTick));
         AircraftHud.value(graphics, font, String.format("ELV %+d°", elevation), left + 84, bottom - 32);
 
-        // Which of the two the trigger would fire, for a vehicle carrying both. Nothing at all for
-        // one carrying a single armament, where the answer is never in doubt.
+        // 両方積む車両では、トリガーがどちらを撃つか。1種しか積まない車両では何も出さない。答えが疑わしくなることは
+        // 無いからだ。
         if (vehicle.hasMissiles() && vehicle.getStats().armament().exists()) {
             AircraftHud.value(graphics, font, missiles ? "SEL MSL" : "SEL GUN", left + 84, bottom - 42);
         }
     }
 
-    /** The gun: rounds left, and the loader at work. */
+    /** 砲。残弾と装填の進行。 */
     private static void drawGun(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle, int left, int bottom) {
         int rounds = vehicle.getRounds();
 
@@ -395,7 +374,7 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         drawWait(graphics, left, bottom - 20, vehicle.getReload(), vehicle.getReloadTicks());
     }
 
-    /** The tubes: missiles left, and the wait before the next one may go. */
+    /** 発射筒。残ミサイル数と、次弾までの待ち時間。 */
     private static void drawTubes(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
             int left, int bottom) {
         int tubes = vehicle.getMissiles();
@@ -410,8 +389,8 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         }
 
         if (vehicle.getMissileReload() <= 0) {
-            // Ready is not the same as able: a guided round with nothing to chase stays in the tube,
-            // and the crew should be told which of the two is stopping them.
+            // 「準備完了」と「発射可能」は別だ。追う相手の無い誘導弾は筒に留まるし、乗員にはどちらが妨げているのかを
+            // 伝えるべきだ。
             boolean locked = vehicle.isSeekerLocked();
 
             AircraftHud.value(graphics, font, locked ? "READY" : "NO LOCK", left, bottom - 20,
@@ -424,11 +403,10 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     }
 
     /**
-     * The wait between rounds: a bar that fills as it runs down.
+     * 次弾までの待ち時間。カウントダウンに応じて埋まっていくバー。
      *
-     * <p>A bar rather than a number of seconds, because what the crew are actually deciding is
-     * whether to stay where they are or pull back, and that is a question about how much of the wait
-     * is left rather than about how many ticks it is.
+     * <p>秒数ではなくバーにしてある。乗員が実際に判断しているのは「留まるか後退するか」であり、それは残り時間が何tick
+     * かではなく、待ちがどれだけ残っているかについての問いだからだ。
      */
     private static void drawWait(GuiGraphics graphics, int x, int y, int left, int total) {
         float done = Mth.clamp(1.0F - (float) left / Math.max(total, 1), 0.0F, 1.0F);

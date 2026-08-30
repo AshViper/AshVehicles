@@ -14,18 +14,15 @@ import net.minecraft.world.phys.Vec3;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 
 /**
- * Draws a rocket or a missile from its weapon's geometry file, lying along the way it is going.
+ * ロケットやミサイルを、兵器のジオメトリファイルから進行方向に沿って寝かせて描く。
  *
- * <p>Unlike a cannon round, one of these is a thing rather than a streak: slow enough to look at,
- * large enough to see, and which way it is pointing is worth knowing, since that is the whole story
- * of whether a missile is going to make its turn.
+ * <p>機関砲弾と違い、これらは筋ではなく物体だ。眺められる程度に遅く、見える程度に大きく、どちらを向いているかを
+ * 知る価値がある。ミサイルが旋回を成功させるかどうかの全てがそこにあるからだ。
  *
- * <p>Which is exactly why it has to keep being drawn once it is past the edge of the loaded world:
- * a missile is aimed at something a long way off, and the interesting part of its flight happens out
- * there. This renderer covers the near work only — out to {@code ghostStartDistance}, where it
- * stands down and {@code RocketGhostAdapter} draws the missile from a snapshot instead, in the
- * ghost pass. The two draw the same model from the same files, turned the same way, so nothing
- * about a missile changes as it crosses the hand-over.
+ * <p>だからこそ、ロード範囲の外へ出た後も描き続ける必要がある。ミサイルは定義上遠くの物を狙うし、飛翔の面白い部分
+ * はその外で起きる。このレンダラーが受け持つのは近距離だけ——{@code ghostStartDistance} までで降板し、以降は
+ * ゴーストパスで {@code RocketGhostAdapter} がスナップショットから描く。両者は同じファイルの同じモデルを同じ向き
+ * で描くので、引き継ぎを跨いでもミサイルは何も変わらない。
  */
 public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
     public RocketRenderer(EntityRendererProvider.Context context) {
@@ -33,9 +30,8 @@ public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
     }
 
     /**
-     * Stands down beyond the ghost start distance, where the ghost pass takes over. The test is the
-     * same one the pass makes, from the same camera, so a missile is always one or the other's and
-     * never both.
+     * ゴースト開始距離を超えたら降板し、ゴーストパスへ引き継ぐ。判定はパスが同じカメラで行う物と同一なので、
+     * ミサイルは常にどちらか一方の担当であり両方になることはない。
      */
     @Override
     public boolean shouldRender(RocketEntity rocket, Frustum frustum, double camX, double camY, double camZ) {
@@ -47,12 +43,11 @@ public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
     }
 
     /**
-     * Turns the model to lie along the flight path. The base implementation is deliberately not
-     * called: it would apply a heading of its own, taken from the body rotation of a living entity,
-     * which a missile is not.
+     * モデルを飛行経路に沿わせて回す。基底実装は意図的に呼ばない。あちらは生きたエンティティの体の回転から取った
+     * 自前の方位を適用するが、ミサイルはそれではない。
      *
-     * <p>The half turn afterwards is the model's own: geometry is authored facing north, which is
-     * -Z, and the heading worked out here points +Z along the flight path.
+     * <p>その後の半回転はモデル由来だ。ジオメトリは北——つまり -Z——を向いて作られるが、ここで求める方位は飛行経路
+     * 方向を +Z とする。
      */
     @Override
     protected void applyRotations(RocketEntity animatable, PoseStack poseStack, float ageInTicks,
@@ -68,13 +63,13 @@ public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
     }
 
-    /** A name tag floating over a missile would be a strange thing to draw. */
+    /** ミサイルの上に浮かぶ名前タグを描くのは妙な話だ。 */
     @Override
     public boolean shouldShowName(RocketEntity animatable) {
         return false;
     }
 
-    /** The weapon model, told which weapon to draw by the missile itself. */
+    /** 兵装モデル。どの兵装を描くかはミサイル自身が伝える。 */
     private static class Model extends WeaponModel<RocketEntity> {
         @Override
         protected ResourceLocation weaponId(RocketEntity animatable) {

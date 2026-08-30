@@ -1,19 +1,24 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 8
     },
-    "Q": {
-      "tag": "c:storage_blocks/iron"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 2
     },
-    "H": {
-      "item": "minecraft:chain"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:engine",
+      "count": 1
     }
-  },
-  "pattern": ["###", "#Q#", "H H"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:pt_boat"

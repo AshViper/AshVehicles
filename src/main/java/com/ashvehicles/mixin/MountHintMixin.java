@@ -11,16 +11,14 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * Names the key that actually gets the crew out again.
+ * 実際に降りられるキーの名前を表示する。
  *
- * <p>Minecraft writes "press shift to dismount" across the screen the moment anybody becomes a
- * passenger, and it says shift because for a horse or a boat shift is the answer. In here it is the
- * throttle, and the way out is alt — see {@link VehicleDismountHandler}. The line was telling
- * everyone who climbed into an aeroplane to do the one thing that would not work.
+ * <p>Minecraft は誰かが搭乗者になった瞬間に「Shift で降りる」と画面に出す。馬やボートなら Shift が
+ * 正解だからだ。ここでは Shift はスロットルで、降りるのは Alt（{@link VehicleDismountHandler} 参照）。
+ * つまりこの表示は、機体に乗った全員に「唯一効かない操作」を案内していた。
  *
- * <p>Only the key named in it changes. Vanilla's own wording is kept, so the line still arrives in
- * whatever language the player is reading the game in, and everything else that is climbed into —
- * horses, boats, minecarts — is left alone.
+ * <p>変えるのはキー名だけ。バニラの文面はそのまま使うので、プレイヤーが読んでいる言語で表示されるし、
+ * 馬・ボート・トロッコなど他の乗り物には一切触れない。
  */
 @Mixin(ClientPacketListener.class)
 public abstract class MountHintMixin {

@@ -5,274 +5,197 @@
     "tracking_range": 12,
     "boxes": [
       {
-        "name": "allbody_left",
+        "name": "allbody",
+        "offset": [0.0, 2.316, -3.323],
+        "size": [1.693, 1.489, 6.785]
+      },
+      {
+        "name": "allbody_2",
         "offset": [1.188, 2.312, -2.229],
         "size": [0.858, 1.497, 8.972]
       },
       {
-        "name": "allbody_right",
+        "name": "allbody_3",
         "offset": [-1.188, 2.312, -2.229],
         "size": [0.858, 1.497, 8.972]
       },
       {
-        "name": "allbody",
+        "name": "allbody_4",
+        "offset": [0.0, 2.822, -4.419],
+        "size": [3.267, 0.687, 4.693],
+        "rotation": [-5.0, 0.0, 0.0]
+      },
+      {
+        "name": "rightengine",
+        "offset": [0.0, 2.521, -7.614],
+        "size": [3.04, 1.42, 2.01]
+      },
+      {
+        "name": "allbody_5",
         "offset": [0.0, 2.4, -5.944],
         "size": [3.099, 1.662, 1.588]
       },
       {
-        "name": "allbody_2",
-        "offset": [0.0, 2.713, -3.323],
-        "size": [1.613, 0.695, 6.785]
+        "name": "allbody_6",
+        "offset": [-0.003, 2.827, 1.417],
+        "size": [1.639, 1.657, 2.784]
       },
       {
-        "name": "rightengine",
-        "offset": [0.0, 2.521, -7.581],
-        "size": [3.04, 1.42, 1.711]
+        "name": "leftwing",
+        "offset": [-3.632, 2.912, -2.443],
+        "size": [5.691, 0.202, 6.307]
       },
       {
-        "name": "leftwing_right",
-        "offset": [-2.798, 2.912, -3.339],
-        "size": [7.456, 0.202, 4.418],
-        "rotation": [0.0, -44.0, 0.0]
+        "name": "rightwing",
+        "offset": [3.632, 2.912, -2.443],
+        "size": [5.691, 0.202, 6.307]
       },
       {
-        "name": "rightwing_left",
-        "offset": [2.798, 2.912, -3.339],
-        "size": [7.456, 0.202, 4.418],
-        "rotation": [0.0, 44.0, 0.0]
+        "name": "allbody_7",
+        "offset": [0.049, 2.592, 7.11],
+        "size": [1.306, 1.423, 3.015],
+        "rotation": [-2.172, 5.3, 44.552]
       },
       {
-        "name": "allbody_left_2",
-        "offset": [0.477, 2.839, 4.635],
-        "size": [0.516, 1.966, 5.128],
-        "rotation": [0.0, -1.0, 4.5]
+        "name": "allbody_8",
+        "offset": [-0.426, 3.011, 4.676],
+        "size": [0.559, 1.817, 5.165],
+        "rotation": [-5.0, 0.0, 0.0]
       },
       {
-        "name": "allbody_right_2",
-        "offset": [-0.477, 2.839, 4.635],
-        "size": [0.516, 1.966, 5.128],
-        "rotation": [0.0, 1.0, -4.5]
-      },
-      {
-        "name": "allbody_left_3",
-        "offset": [1.466, 2.688, 1.493],
-        "size": [1.365, 0.745, 5.092]
-      },
-      {
-        "name": "allbody_right_3",
-        "offset": [-1.466, 2.688, 1.493],
-        "size": [1.365, 0.745, 5.092]
-      },
-      {
-        "name": "hull_right",
-        "offset": [-3.312, 1.998, -1.954],
-        "size": [0.907, 0.907, 5.968]
-      },
-      {
-        "name": "hull_left",
-        "offset": [3.312, 1.998, -1.954],
-        "size": [0.907, 0.907, 5.968]
-      },
-      {
-        "name": "allbody_right_4",
-        "offset": [-0.896, 2.856, -4.416],
-        "size": [1.498, 0.663, 4.693],
-        "rotation": [-5.0, 0.0, -5.0]
-      },
-      {
-        "name": "allbody_left_4",
-        "offset": [0.896, 2.856, -4.416],
-        "size": [1.498, 0.663, 4.693],
-        "rotation": [-5.0, 0.0, 5.0]
+        "name": "allbody_9",
+        "offset": [0.196, 2.144, -0.699],
+        "size": [1.02, 0.52, 9.377]
       },
       {
         "name": "hull",
-        "offset": [0.0, 3.011, 6.298],
-        "size": [1.218, 1.488, 2.015],
-        "rotation": [-4.0, 0.0, 0.0]
+        "offset": [0.0, 3.126, 5.517],
+        "size": [1.059, 1.677, 2.619]
       },
       {
-        "name": "allbody_left_5",
-        "offset": [0.544, 2.299, -3.261],
-        "size": [0.605, 1.456, 4.035]
+        "name": "allbody_10",
+        "offset": [0.0, 2.871, -1.603],
+        "size": [1.411, 0.396, 7.627],
+        "rotation": [7.5, 0.0, 0.0]
       },
       {
-        "name": "allbody_right_5",
-        "offset": [-0.544, 2.299, -3.261],
-        "size": [0.605, 1.456, 4.035]
+        "name": "allbody_11",
+        "offset": [0.439, 2.808, 4.633],
+        "size": [0.48, 1.617, 5.126],
+        "rotation": [-1.498, -2.5, 0.109]
       },
       {
-        "name": "allbody_3",
-        "offset": [0.0, 2.827, 1.929],
-        "size": [1.032, 1.657, 1.759]
+        "name": "allbody_12",
+        "offset": [0.0, 2.146, 4.928],
+        "size": [1.406, 0.535, 4.521]
       },
       {
-        "name": "righttailplane2_left",
+        "name": "allbody_13",
+        "offset": [1.491, 2.681, 0.686],
+        "size": [1.315, 0.733, 3.478]
+      },
+      {
+        "name": "allbody_14",
+        "offset": [-1.491, 2.681, 0.686],
+        "size": [1.315, 0.733, 3.478]
+      },
+      {
+        "name": "righttailplane2",
         "offset": [1.564, 4.136, -6.878],
         "size": [0.188, 3.653, 4.344]
       },
       {
-        "name": "lefttailplane2_right",
-        "offset": [-1.564, 4.136, -6.878],
-        "size": [0.188, 3.653, 4.344]
+        "name": "lefttailplane2",
+        "offset": [-1.564, 4.167, -6.878],
+        "size": [0.188, 3.591, 4.344]
       },
       {
-        "name": "allbody_4",
-        "offset": [0.0, 2.434, 8.257],
-        "size": [1.129, 1.121, 2.254]
+        "name": "allbody_15",
+        "offset": [-1.2, 2.734, 2.954],
+        "size": [0.833, 1.137, 2.014],
+        "rotation": [22.5, 0.0, 0.0]
       },
       {
-        "name": "hull_2",
-        "offset": [0.0, 3.107, 4.015],
-        "size": [1.141, 1.591, 1.211]
+        "name": "allbody_16",
+        "offset": [1.2, 2.734, 2.954],
+        "size": [0.833, 1.137, 2.014],
+        "rotation": [22.5, 0.0, 0.0]
       },
       {
-        "name": "allbody_5",
-        "offset": [0.0, 2.581, 1.104],
-        "size": [1.644, 0.585, 2.204],
-        "rotation": [-10.0, 0.0, 0.0]
-      },
-      {
-        "name": "allbody_right_6",
+        "name": "allbody_17",
         "offset": [-0.831, 2.143, 0.02],
         "size": [0.605, 1.144, 2.722],
         "rotation": [0.0, -12.5, 0.0]
       },
       {
-        "name": "allbody_left_6",
+        "name": "allbody_18",
         "offset": [0.831, 2.143, 0.02],
         "size": [0.605, 1.144, 2.722],
         "rotation": [0.0, 12.5, 0.0]
       },
       {
-        "name": "allbody_left_7",
-        "offset": [0.576, 2.788, -0.331],
-        "size": [0.345, 0.935, 5.127],
-        "rotation": [7.5, 0.0, -15.5]
+        "name": "allbody_19",
+        "offset": [0.614, 2.784, -0.699],
+        "size": [0.182, 1.031, 9.377]
       },
       {
-        "name": "allbody_right_7",
-        "offset": [-0.576, 2.788, -0.331],
-        "size": [0.345, 0.935, 5.127],
-        "rotation": [7.5, 0.0, 15.5]
+        "name": "allbody_20",
+        "offset": [-0.614, 2.784, -0.699],
+        "size": [0.182, 1.031, 9.377]
       },
       {
-        "name": "allbody_6",
-        "offset": [0.0, 2.585, -6.659],
-        "size": [0.358, 0.947, 3.881],
-        "rotation": [-10.0, 0.0, 0.0]
+        "name": "hull_2",
+        "offset": [0.0, 3.165, 3.801],
+        "size": [1.324, 1.324, 0.823],
+        "rotation": [-15.0, 0.0, -45.0]
       },
       {
-        "name": "allbody_7",
-        "offset": [0.0, 2.977, -1.617],
-        "size": [0.881, 0.182, 7.627],
-        "rotation": [7.5, 0.0, 0.0]
+        "name": "lefttailplane",
+        "offset": [-2.608, 2.469, -8.081],
+        "size": [3.229, 0.129, 2.766],
+        "rotation": [0.0, -12.5, 0.0]
       },
       {
-        "name": "righttailplane_left",
-        "offset": [2.191, 2.469, -8.294],
-        "size": [2.209, 0.129, 3.954],
-        "rotation": [0.0, -40.0, 0.0]
+        "name": "righttailplane",
+        "offset": [2.608, 2.469, -8.081],
+        "size": [3.229, 0.129, 2.766],
+        "rotation": [0.0, 12.5, 0.0]
       },
       {
-        "name": "lefttailplane_right",
-        "offset": [-2.191, 2.469, -8.294],
-        "size": [2.209, 0.129, 3.954],
-        "rotation": [0.0, 40.0, 0.0]
-      },
-      {
-        "name": "allbody_left_8",
-        "offset": [0.614, 2.59, -0.699],
-        "size": [0.182, 0.628, 9.377]
-      },
-      {
-        "name": "allbody_8",
-        "offset": [0.0, 1.975, -0.699],
-        "size": [0.628, 0.182, 9.377]
-      },
-      {
-        "name": "cockpithatch",
-        "offset": [0.0, 3.747, 3.797],
-        "size": [0.776, 0.391, 3.334],
-        "rotation": [3.0, 0.0, 0.0]
-      },
-      {
-        "name": "allbody_9",
-        "offset": [0.445, 2.144, -0.699],
-        "size": [0.553, 0.182, 9.377],
-        "rotation": [0.0, 0.0, -45.0]
-      },
-      {
-        "name": "allbody_10",
+        "name": "allbody_21",
         "offset": [-0.445, 2.144, -0.699],
         "size": [0.182, 0.553, 9.377],
         "rotation": [0.0, 0.0, -45.0]
       },
       {
-        "name": "allbody_right_8",
-        "offset": [-0.614, 2.59, -0.699],
-        "size": [0.182, 0.628, 9.377]
-      },
-      {
-        "name": "allbody_left_9",
+        "name": "allbody_22",
         "offset": [1.547, 2.681, -1.93],
         "size": [0.533, 0.735, 2.06],
         "rotation": [0.0, 20.0, 0.0]
       },
       {
-        "name": "allbody_right_9",
+        "name": "allbody_23",
         "offset": [-1.547, 2.681, -1.93],
         "size": [0.533, 0.735, 2.06],
         "rotation": [0.0, -20.0, 0.0]
       },
       {
-        "name": "hull_right_2",
-        "offset": [-3.312, 2.603, -2.454],
-        "size": [0.246, 0.615, 2.793]
+        "name": "allbody_24",
+        "offset": [-0.076, 2.142, 8.86],
+        "size": [0.739, 0.772, 0.945],
+        "rotation": [-21.25, -15.04, -41.219]
       },
       {
-        "name": "hull_left_2",
-        "offset": [3.312, 2.603, -2.454],
-        "size": [0.246, 0.615, 2.793]
+        "name": "allbody_25",
+        "offset": [0.0, 2.308, -6.69],
+        "size": [0.358, 0.39, 3.847],
+        "rotation": [-10.0, 0.0, 0.0]
       },
       {
-        "name": "allbody_11",
-        "offset": [0.0, 1.966, 5.574],
-        "size": [0.451, 0.174, 3.2]
-      },
-      {
-        "name": "hull_3",
-        "offset": [0.0, 2.44, 4.949],
-        "size": [0.672, 0.305, 0.937]
-      },
-      {
-        "name": "hull_4",
-        "offset": [0.0, 2.127, 3.136],
-        "size": [0.672, 0.305, 0.937]
-      },
-      {
-        "name": "allbody_right_10",
-        "offset": [-1.575, 2.638, 2.937],
-        "size": [0.083, 0.972, 1.91],
-        "rotation": [22.5, 0.0, 0.0]
-      },
-      {
-        "name": "allbody_right_11",
-        "offset": [-0.825, 2.638, 2.937],
-        "size": [0.083, 0.972, 1.91],
-        "rotation": [22.5, 0.0, 0.0]
-      },
-      {
-        "name": "allbody_left_10",
-        "offset": [1.575, 2.638, 2.937],
-        "size": [0.083, 0.972, 1.91],
-        "rotation": [22.5, 0.0, 0.0]
-      },
-      {
-        "name": "allbody_left_11",
-        "offset": [0.825, 2.638, 2.937],
-        "size": [0.083, 0.972, 1.91],
-        "rotation": [22.5, 0.0, 0.0]
+        "name": "cockpithatch",
+        "offset": [0.205, 3.653, 3.194],
+        "size": [0.756, 0.172, 2.104],
+        "rotation": [10.0, 0.0, 32.5]
       }
     ]
   },
@@ -321,7 +244,7 @@
     "span": 13
   },
   "handling": {
-    "pitch_rate": 3.24,
+    "pitch_rate": 1.2,
     "roll_rate": 4.05,
     "yaw_rate": 1.2,
     "control_lag": 0.17,
@@ -336,7 +259,8 @@
     "seats": [
       [0.0, 2.05, 4.9]
     ],
-    "max_g": 9
+    "max_g": 9,
+    "ejection": {"speed": 1.5, "canopy": 22}
   },
   "landing_gear": {
     "cycle_ticks": 40,
@@ -376,35 +300,53 @@
   "hardpoints": [
     {
       "name": "pylon1_left",
-      "pos": [2.2, 2.65, -1.6]
+      "pos": [2.7, 2.4, -1.6],
+      "kind": "weapon"
     },
     {
       "name": "pylon1_right",
-      "pos": [-2.2, 2.65, -1.6]
+      "pos": [-2.7, 2.4, -1.6],
+      "kind": "weapon"
     },
     {
       "name": "pylon2_left",
-      "pos": [3.6, 2.65, -2.2]
+      "pos": [3.85, 2.4, -2.2],
+      "kind": "weapon"
     },
     {
       "name": "pylon2_right",
-      "pos": [-3.6, 2.65, -2.2]
+      "pos": [-3.85, 2.4, -2.2],
+      "kind": "weapon"
     },
     {
       "name": "pylon3_left",
-      "pos": [5.0, 2.7, -2.8]
+      "pos": [4.95, 2.4, -2.8],
+      "kind": "weapon"
     },
     {
       "name": "pylon3_right",
-      "pos": [-5.0, 2.7, -2.8]
+      "pos": [-5.0, 2.4, -2.8],
+      "kind": "weapon"
     },
     {
       "name": "pylon4_left",
-      "pos": [1.6, 1.65, -1.0]
+      "pos": [1.4, 1.15, -1.0],
+      "kind": "weapon"
     },
     {
       "name": "pylon4_right",
-      "pos": [-1.6, 1.65, -1.0]
+      "pos": [-1.4, 1.15, -1.0],
+      "kind": "weapon"
+    },
+    {
+      "name": "sensor_left",
+      "pos": [1.2, 1.4, 1.8],
+      "kind": "special"
+    },
+    {
+      "name": "sensor_right",
+      "pos": [-1.2, 1.4, 1.85],
+      "kind": "special"
     },
     {
       "name": "gun",

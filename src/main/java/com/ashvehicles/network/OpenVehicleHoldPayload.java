@@ -10,17 +10,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
- * The crew opening the hold of the machine they are sitting in.
+ * 乗員が、乗っている機体の弾庫を開く操作。
  *
- * <p>Sent on a key press and naming nothing: the machine is whichever one the sending player is
- * aboard, exactly as {@link AircraftInputPayload} works out whose aircraft an input belongs to, so
- * it cannot be aimed at somebody else's aeroplane on the other side of the map. A menu is the
- * server's to open in any case — the client has no say in what a container holds and must not be
- * given one.
+ * <p>キー押下で送られ、何も名指ししない。機体は送信者が乗っている物で、{@link AircraftInputPayload} が
+ * 入力の持ち主を判別するのと同じ仕組み。だからマップの反対側にある他人の機体を狙えない。そもそもメニュー
+ * を開くのはサーバーの仕事で、コンテナの中身についてクライアントに発言権は無いし、与えてもいけない。
  *
- * <p>Nothing here answers for somebody standing <em>outside</em> a machine. They open its hold by
- * crouching and right-clicking the machine itself, which names the one they meant exactly; a key
- * press from the apron would have to guess between the aeroplanes on it.
+ * <p>機体の<em>外</em>に立っている者はここの対象外。そちらはしゃがみ＋右クリックで機体自体を指定して
+ * 開く。エプロンからのキー押下では、並んだ機体のどれを指しているか推測するしかなくなる。
  */
 public record OpenVehicleHoldPayload() implements CustomPacketPayload {
     public static final OpenVehicleHoldPayload INSTANCE = new OpenVehicleHoldPayload();
@@ -29,7 +26,7 @@ public record OpenVehicleHoldPayload() implements CustomPacketPayload {
             new CustomPacketPayload.Type<>(
                     ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "open_vehicle_hold"));
 
-    /** Nothing on the wire: the press is the whole message. */
+    /** 通信内容は空。押されたという事実がメッセージの全て。 */
     public static final StreamCodec<FriendlyByteBuf, OpenVehicleHoldPayload> STREAM_CODEC =
             StreamCodec.unit(INSTANCE);
 
@@ -40,9 +37,8 @@ public record OpenVehicleHoldPayload() implements CustomPacketPayload {
 
     public static void handle(OpenVehicleHoldPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            // Any seat of it, and with no distance test of any sort: somebody sitting in an
-            // aeroplane is inside it whatever its shape says, and an aircraft at four hundred knots
-            // is a poor thing to measure anybody's reach against.
+            // どの席でもよく、距離判定も一切しない。機体に座っている者は形状が何と言おうと機体の中に
+            // おり、400ノットで飛ぶ機体は誰かの手の届く距離を測る基準として不適切。
             if (context.player().getRootVehicle() instanceof VehicleEntityBase machine) {
                 machine.openHold(context.player());
             }

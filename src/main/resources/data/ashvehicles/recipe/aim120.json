@@ -3,23 +3,24 @@
   "category": "equipment",
   "group": "ashvehicles_missile",
   "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+    "V": {
+      "item": "ashvehicles:avionics"
     },
-    "E": {
-      "item": "minecraft:ender_eye"
+    "S": {
+      "item": "ashvehicles:steel_plate"
     },
-    "D": {
-      "tag": "c:gems/diamond"
-    },
-    "G": {
-      "item": "minecraft:gunpowder"
+    "C": {
+      "item": "ashvehicles:circuit_board"
     },
     "B": {
       "item": "minecraft:blaze_powder"
     }
   },
-  "pattern": [" E ", "DGD", "#B#"],
+  "pattern": [
+    " V ",
+    "SCS",
+    "SBS"
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:aim120"

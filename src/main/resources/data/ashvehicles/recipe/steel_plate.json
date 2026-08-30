@@ -1,0 +1,22 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_material",
+  "key": {
+    "I": {
+      "tag": "c:ingots/iron"
+    },
+    "F": {
+      "tag": "minecraft:coals"
+    }
+  },
+  "pattern": [
+    "III",
+    " F ",
+    "III"
+  ],
+  "result": {
+    "count": 4,
+    "id": "ashvehicles:steel_plate"
+  }
+}

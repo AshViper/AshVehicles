@@ -1,22 +1,28 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 13
     },
-    "Q": {
-      "tag": "c:storage_blocks/diamond"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 3
     },
-    "N": {
-      "tag": "c:storage_blocks/netherite"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 3
     },
-    "H": {
-      "item": "minecraft:chain"
+    {
+      "item": "ashvehicles:engine",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:avionics",
+      "count": 1
     }
-  },
-  "pattern": ["#N#", "#Q#", "H#H"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:zumwalt"

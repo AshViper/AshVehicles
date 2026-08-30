@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "ashvehicles:block/vehicle_workbench"
+    }
+  }
+}

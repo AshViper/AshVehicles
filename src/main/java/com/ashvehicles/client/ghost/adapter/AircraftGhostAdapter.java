@@ -20,6 +20,7 @@ import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
 import com.ashvehicles.client.item.VehicleIcons;
 import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.client.model.AircraftModel;
+import com.ashvehicles.client.model.WeaponModel;
 import com.ashvehicles.client.renderer.MountedStore;
 import com.ashvehicles.client.renderer.VehicleRenderer;
 import com.ashvehicles.entity.AircraftEntity;
@@ -41,27 +42,37 @@ import software.bernie.geckolib.renderer.GeoObjectRenderer;
 import org.joml.Quaternionf;
 
 /**
- * Aircraft as ghosts.
+ * ゴーストとしての機体。
  *
- * <p>The snapshot carries the aircraft's attitude, its model and animation files, the pose of its
- * moving parts and what is hanging under its wings; the ghost is drawn from those and nothing
- * else. What that comes to is the aeroplane as it is: the model, armed, with its surfaces at the
- * rates it last turned at, its rotors wound on to this moment of this tick, and its undercarriage
- * playing the cycle out of its own animation file — the same controller the aircraft registers for
- * itself, given the same two figures. Only at the billboard distance, when that is switched on, is
- * it something else: the aircraft's item icon, flat and facing the camera.
+ * <p>スナップショットが運ぶのは機体の姿勢、モデルとアニメーションのファイル、可動部のポーズ、そして主翼の下に
+ * 吊られている物。ゴーストはそれ以外から描かれない。結果として得られるのは機体そのままの姿だ。武装したモデル、
+ * 最後の角速度で偏向した舵面、このtickのこの瞬間まで回されたローター、そして自身のアニメーションファイルから
+ * サイクルを再生する降着装置——機体が自分用に登録するのと同じコントローラに、同じ2つの値を渡した物だ。別物になる
+ * のはビルボード距離（有効時）だけで、そこでは機体のアイテムアイコンが平坦にカメラを向いて描かれる。
  *
- * <p>Aircraft are sent to every client wherever they are (see {@code EntityTrackingMixin}), so one
- * the client stops receiving is one that is gone; its ghost goes with it rather than lingering.
+ * <p>機体はどこにいても全クライアントへ送られる（{@code EntityTrackingMixin} 参照）ので、<em>飛行中に</em>
+ * 受信が止まった機体は撃墜された機体であり、ゴーストも居残らず一緒に消える。だが駐機中の機体は別だ。自分の
+ * チャンクを保持するのは飛んでいる間だけなので、全員がそこを離れれば機体は地面ごとサーバーからアンロードされる
+ * ——消えたのではなく、世界ごと眠っただけ。誰もロードしていない土地に駐まった機体は変わりようがないから、最後に
+ * 見えた姿で立たせ続けることが、そこにある物の唯一の正直な描画になる。だから静止していた機体のゴーストは
+ * {@link GhostConfig#machineTimeoutTicks()} の間（既定では誰かが戻るまでずっと）残る。
  */
 public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> {
+    /** これ未満の速度の二乗なら、その機体は駐まっていた——受信が止まった理由は撃墜ではなくアンロードだ。 */
+    private static final double STATIONARY = 1.0E-2;
+
     @Override
     public boolean keepAfterLeave(AircraftEntity entity) {
-        return false;
+        return entity.getVelocity().lengthSqr() < STATIONARY;
+    }
+
+    @Override
+    public int orphanTicks() {
+        return GhostConfig.machineTimeoutTicks();
     }
 
     // ------------------------------------------------------------------
-    // Snapshot
+    // スナップショット
     // ------------------------------------------------------------------
 
     @Override
@@ -70,11 +81,10 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         AircraftDefinition stats = aircraft.getStats();
         VehicleChassis.Model setup = stats.model();
         Vec3 position = aircraft.position();
-        // The box the aircraft is drawn within, not the one it collides with: the plain box covers
-        // the fuselage and nothing else, and a ghost culled against it is a fifteen-metre aeroplane
-        // blinking out while most of it is still on the screen. It is the box the game's own
-        // renderer culls the aircraft against on the near side of the hand-over, so nothing about
-        // when a machine leaves the screen changes as it crosses.
+        // 機体が描かれる範囲の箱であって、衝突に使う箱ではない。素の直方体は胴体しか覆わないので、それでカリング
+        // したゴーストは、大部分がまだ画面内にある15m の機体が消える現象になる。これは引き継ぎの手前側でゲーム自身
+        // のレンダラーが機体のカリングに使う箱と同じなので、機体が画面から外れるタイミングは引き継ぎを跨いでも
+        // 変わらない。
         AABB bounds = aircraft.getBoundingBoxForCulling().move(position.reverse());
         Payload payload = new Payload(id, setup, AircraftModel.Pose.of(aircraft, 1.0F), stores(aircraft, stats),
                 aircraft.isGearDown(), aircraft.getGearCycleTicks());
@@ -101,10 +111,14 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
                 payload);
     }
 
-    /** The stores hanging on pylons: position in the aircraft's frame and which weapon. */
+    /**
+     * ステーションに吊られている物すべて。機体座標系での位置、描画元のディレクトリ、その中のファイル。兵装だけで
+     * なくラックとポッドも含む——空の投下ラックを4本積んだゴーストは、そう見えるべきだ。
+     */
     private static List<Store> stores(AircraftEntity aircraft, AircraftDefinition stats) {
         List<AircraftDefinition.Hardpoint> hardpoints = stats.hardpoints();
-        List<WeaponMounts.Mount> mounts = aircraft.getWeapons().mounts();
+        WeaponMounts weapons = aircraft.getWeapons();
+        List<WeaponMounts.Mount> mounts = weapons.mounts();
 
         if (hardpoints.isEmpty()) {
             return List.of();
@@ -116,29 +130,49 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
             AircraftDefinition.Hardpoint hardpoint = hardpoints.get(slot);
             WeaponMounts.Mount mount = mounts.get(slot);
 
-            if (hardpoint.isFixed() || mount.isEmpty()) {
+            if (hardpoint.isFixed()) {
                 continue;
             }
 
-            // A missile that has been launched is somewhere else now; an empty pod stays bolted on.
-            if (mount.ammo() <= 0 && Definitions.weapon(mount.weapon()).leavesRail()) {
+            if (mount.equipment() != null) {
+                stores.add(new Store(hardpoint.pos(), WeaponModel.EQUIPMENT, mount.equipment()));
+
                 continue;
             }
 
-            stores.add(new Store(hardpoint.pos(), mount.weapon()));
+            if (mount.rack() == null) {
+                continue;
+            }
+
+            stores.add(new Store(hardpoint.pos(), WeaponModel.RACKS, mount.rack()));
+
+            List<WeaponMounts.Load> loads = mount.loads();
+
+            for (int place = 0; place < loads.size(); place++) {
+                WeaponMounts.Load load = loads.get(place);
+
+                if (load.isEmpty()) {
+                    continue;
+                }
+
+                // 発射済みのミサイルは今や別の場所にある。空のポッドは固定されたまま残る。
+                if (load.ammo() <= 0 && Definitions.weapon(load.weapon()).leavesRail()) {
+                    continue;
+                }
+
+                stores.add(new Store(weapons.placeOf(slot, place), WeaponModel.WEAPONS, load.weapon()));
+            }
         }
 
         return stores;
     }
 
     /**
-     * The picture the aircraft's own item is drawn as, which is a picture of the aircraft: the right thing
-     * to stand in for it at the range where a model is not worth drawing.
+     * 機体アイテムの絵として描かれる物、つまり機体の絵。モデルを描く価値の無い距離での代役として正しい物だ。
      *
-     * <p>Not remembered here. It is taken once from the machine's own geometry and kept by
-     * {@link VehicleIcons}, which also answers with nothing for the frame or two before the
-     * first one has been taken — a snapshot without a billboard just draws its model until the
-     * next one is taken.
+     * <p>ここでは保持しない。機体自身のジオメトリから一度撮影され {@link VehicleIcons} が保持する。あちらは最初の
+     * 撮影が済むまでの1〜2フレーム、何も返さない——ビルボードを持たないスナップショットは、次が撮られるまで単に
+     * モデルを描く。
      */
     @Nullable
     private ResourceLocation billboard(ResourceLocation id) {
@@ -146,7 +180,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
     }
 
     // ------------------------------------------------------------------
-    // Drawing
+    // 描画
     // ------------------------------------------------------------------
 
     @Override
@@ -157,13 +191,12 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
             if (EntityGhostRenderer.drawBillboard(snapshot, context) || !GhostConfig.geckoLibGhosts()) {
                 return;
             }
-            // No icon: the model itself will do.
+            // アイコンが無い。モデル自体で用は足りる。
         }
 
         PoseStack poseStack = context.poseStack();
         poseStack.pushPose();
-        // Into the aircraft's own frame. The half turn is the model's: geometry faces north, and the
-        // aircraft is described from the nose down +Z.
+        // 機体座標系へ入る。半回転はモデル由来だ。ジオメトリは北を向き、機体は機首を +Z 方向として記述される。
         poseStack.mulPose(attitude(ghost, context.partialTick()));
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
 
@@ -172,7 +205,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         poseStack.popPose();
     }
 
-    /** The attitude to draw at: the short way round between the last two snapshots. */
+    /** 描画に使う姿勢。直近2スナップショット間を近い側の経路で補間する。 */
     private static Quaternionf attitude(EntityGhost ghost, float partialTick) {
         Quaternionf now = ghost.current().attitude();
         Quaternionf then = ghost.previous().attitude();
@@ -188,7 +221,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         return new Quaternionf(then).slerp(now, partialTick).normalize();
     }
 
-    /** What was hanging under the wings when the snapshot was taken. */
+    /** 撮影時に主翼の下に吊られていた物。 */
     private static void drawStores(GhostSnapshot snapshot, GhostRenderContext context) {
         Payload payload = payload(snapshot);
 
@@ -204,9 +237,9 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
             poseStack.pushPose();
             poseStack.translate(store.pos().x, store.pos().y, -store.pos().z);
 
-            MountedStore mounted = MountedStore.of(store.weapon());
+            MountedStore mounted = MountedStore.of(store.folder(), store.weapon());
             ResourceLocation texture = renderer.getTextureLocation(mounted);
-            // A ghost's stores are part of the ghost.
+            // ゴーストの兵装もゴーストの一部だ。
             RenderType type = GhostGeoRenderer.renderType(texture, context.ghostStyle());
 
             renderer.render(poseStack, mounted, buffers, type, buffers.getBuffer(type),
@@ -216,19 +249,17 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
     }
 
     // ------------------------------------------------------------------
-    // Moving as the aeroplane moves
+    // 機体の動きに合わせて動かす
     // ------------------------------------------------------------------
 
     /**
-     * Everything about an aircraft that follows the flight from moment to moment, set from the
-     * last two snapshots the way the aircraft's own model sets it from the aircraft: the surfaces
-     * at the rates it turned at, the gear and flaps and nozzle part way to wherever they are going,
-     * the rotors wound on from the end of the last tick to this moment of this one.
+     * 機体のうち飛行に毎瞬追従する要素すべてを、機体自身のモデルが機体から設定するのと同じやり方で、直近2つの
+     * スナップショットから設定する。角速度に応じた舵面、行き先へ向かう途中の脚・フラップ・ノズル、前tick終端から
+     * 今tickのこの瞬間まで回したローター。
      *
-     * <p>Between two snapshots rather than from the newest, because that is what the game draws for
-     * the aeroplane standing next to this ghost: what is on the screen at any moment is the tick
-     * before last blended into the last one. A ghost posed from the newest snapshot alone would run
-     * a tick ahead of it and jump once a tick besides.
+     * <p>最新の1つではなく2つの間で求める。このゴーストの隣に立つ機体に対してゲームが描くのがそれだからだ。任意の
+     * 瞬間に画面に出ているのは、前々tickを前tickへブレンドした物である。最新スナップショットだけでポーズを付けた
+     * ゴーストは1tick先行し、しかも毎tick跳ねる。
      */
     private static final GhostAnimatable.GhostPoser POSER = (model, ghost, partialTick) -> {
         Payload now = payload(ghost.current());
@@ -246,15 +277,14 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
     };
 
     // ------------------------------------------------------------------
-    // The undercarriage
+    // 降着装置
     // ------------------------------------------------------------------
 
     /**
-     * The gear cycle, registered for a ghost exactly as {@code AircraftEntity} registers it for
-     * itself: the same two halves out of the same animation file, the same blend between them, and
-     * the same figure deciding how fast they play. A ghost's legs therefore come out in the order
-     * the file says they come out in, doors and all, rather than being swung approximately from
-     * code — which is what an aircraft with no cycle in its file gets, from the poser above.
+     * 脚のサイクル。{@code AircraftEntity} が自分用に登録するのとまったく同じ形でゴースト用に登録する。同じ
+     * アニメーションファイルの同じ2つの半分、両者間の同じブレンド、再生速度を決める同じ値。だからゴーストの脚は、
+     * 扉も含めてファイルが述べる順序で出てくる。コードから概算で振るのではなく——それはファイルにサイクルを持たない
+     * 機体が上の poser から受け取る扱いだ。
      */
     @Override
     public void registerGhostControllers(AnimatableManager.ControllerRegistrar controllers,
@@ -263,7 +293,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
                 AircraftGhostAdapter::gearCycle).setAnimationSpeedHandler(AircraftGhostAdapter::gearSpeed));
     }
 
-    /** Which half is playing: the one that ends with the gear where the pilot has asked for it. */
+    /** どちらの半分を再生するか。パイロットが要求した状態で終わる方。 */
     private static PlayState gearCycle(AnimationState<GhostAnimatable> state) {
         Payload payload = payload(state.getAnimatable().snapshot());
 
@@ -275,9 +305,8 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
     }
 
     /**
-     * How fast, from the aircraft's own cycle time, and held at the end of the cycle when the gear
-     * is already where it belongs — so a ghost that comes into view with its wheels down is sitting
-     * on them rather than lowering them again for the benefit of whoever just looked.
+     * 再生速度。機体自身のサイクル時間から求める。脚が既に所定の状態にあるときはサイクル終端で保持する——だから
+     * 脚を出した状態で視界に入ったゴーストは、今見た人のために改めて脚を下ろすのではなく、その脚の上に座っている。
      */
     private static double gearSpeed(GhostAnimatable animatable) {
         Payload payload = payload(animatable.snapshot());
@@ -293,7 +322,7 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
     }
 
     // ------------------------------------------------------------------
-    // What the snapshot carries
+    // スナップショットが運ぶ物
     // ------------------------------------------------------------------
 
     @Nullable
@@ -301,16 +330,17 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         return (Payload) snapshot.payload();
     }
 
-    /** A store on a pylon: where, in the aircraft's frame, and what. */
-    record Store(Vec3 pos, ResourceLocation weapon) {
+    /**
+     * ステーション上の物1つ。機体座標系での位置、3つのディレクトリのどれから描くか、その中のどのファイルか。
+     */
+    record Store(Vec3 pos, String folder, ResourceLocation weapon) {
     }
 
     /**
-     * Everything aircraft-specific a snapshot carries.
+     * スナップショットが運ぶ機体固有の情報すべて。
      *
-     * @param gearDown where the pilot has asked for the undercarriage to be, which is what decides
-     *        the half of the cycle a ghost plays
-     * @param gearCycleTicks how long this aircraft takes to raise or lower it
+     * @param gearDown パイロットが要求している降着装置の状態。ゴーストが再生するサイクルの半分を決める
+     * @param gearCycleTicks この機体が脚を上げ下げするのに要する時間
      */
     record Payload(ResourceLocation aircraftId, VehicleChassis.Model setup, AircraftModel.Pose pose,
             List<Store> stores, boolean gearDown, int gearCycleTicks) {

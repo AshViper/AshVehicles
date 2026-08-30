@@ -3,17 +3,21 @@
   "category": "equipment",
   "group": "ashvehicles_ammo",
   "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+    "S": {
+      "item": "ashvehicles:steel_plate"
     },
-    "T": {
+    "X": {
       "item": "minecraft:tnt"
     },
     "G": {
       "item": "minecraft:gunpowder"
     }
   },
-  "pattern": [" # ", " T ", " G "],
+  "pattern": [
+    " S ",
+    " X ",
+    " G "
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:launcher_rocket"

@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_pod",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "C": {
+      "item": "ashvehicles:circuit_board"
+    },
+    "B": {
+      "item": "minecraft:blaze_powder"
+    }
+  },
+  "pattern": [
+    " B ",
+    "SCS",
+    "SSS"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:decoy_pod"
+  }
+}

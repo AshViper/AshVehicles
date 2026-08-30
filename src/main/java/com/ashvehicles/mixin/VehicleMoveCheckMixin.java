@@ -12,75 +12,61 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * Stops the server dragging a driven vehicle back off every kerb it drives up, and stops it
- * refusing outright to believe an aeroplane.
+ * 縁石に乗り上げるたびにサーバーが運転中の車両を引き戻すのを止め、機体の報告を頭から拒否するのも止める。
  *
- * <p>A vehicle the client is driving reports where it has got to, and the server checks that report
- * before accepting it. Half of that check is whether the client's own movement was possible, which
- * {@code VehicleEntityBase.move} already answers by taking the report as given — the driving side
- * has run the test against ground it could actually see, and the server, a tick behind and probing
- * the terrain at the old position, can only take movement away.
+ * <p>クライアントが運転する車両は現在位置を報告し、サーバーはそれを受け入れる前に検査する。検査の半分は
+ * 「クライアント側の移動が可能だったか」で、そこは {@code VehicleEntityBase.move} が報告をそのまま受け
+ * 入れることで既に答えている。運転側は実際に見えている地面に対して判定を通しており、1tick 遅れて古い位置
+ * の地形を探るサーバーにできるのは移動を削ることだけだから。
  *
- * <p>The other half is this one, and it was missed. Vanilla asks twice over whether the vehicle's
- * plain box is standing in clear air — once before the reported movement and once after — and puts
- * the vehicle back where it was if it was clear before and is not clear now. For a tank that plain
- * box is a shed four blocks across and three tall standing on the tracks, and it is not what the
- * vehicle collides with: the boxes in its own file are, and {@code GroundVehicleEntity} asks
- * the question a driver would ask at the corners of those instead. So the shed catches on the first
- * block of anything the vehicle is perfectly able to drive up, and it catches on it from two blocks
- * away, which is the vehicle stopping dead against thin air a stride short of a kerb and sitting
- * there with the engine roaring.
+ * <p>もう半分がこれで、見落とされていた。バニラは車両の素の直方体が空中に空いているかを2回——報告された
+ * 移動の前と後で——問い、前は空いていて後は空いていなければ車両を元の位置へ戻す。戦車にとってその素の
+ * 直方体は履帯の上に立つ幅4×高さ3のプレハブ小屋で、車両が実際に衝突する形ではない。衝突するのは自分の
+ * ファイルに書かれた箱の方で、{@code GroundVehicleEntity} は運転手が問うであろう質問をその箱の四隅で
+ * 問う。結果、小屋は車両が余裕で登れる段差の1ブロック目に引っ掛かり、しかも2ブロック手前から引っ掛かる。
+ * 縁石の一歩手前で何も無い空気に対して急停止し、エンジンを吹かしたまま止まる、という挙動になる。
  *
- * <p>What is redirected is the question, not the answer to it. Vanilla's correction is for a vehicle
- * that <em>was</em> standing clear and has been driven into something; a vehicle whose plain box has
- * no bearing on where it may go was never standing clear in the sense the check means, and saying so
- * is what stands the correction down. Vehicles with no boxes of their own are left alone: their plain
- * box really is their shape, and the check is right about them.
+ * <p>差し替えているのは問いであって答えではない。バニラの補正は「空いていた場所に立っていた車両が何かへ
+ * 突っ込んだ」場合のためのもの。素の直方体が移動可能範囲と無関係な車両は、この検査の言う意味で最初から
+ * 「空いた場所に立って」いない。そう答えることが補正を降ろす方法になる。自前の箱を持たない車両には触れ
+ * ない。あちらは素の直方体が本当に形なので、検査は正しい。
  *
- * <p>Nothing is given away by this that was not given away already. The distance check above it
- * still holds — a client cannot report a vehicle further on than the speed it is flying could have
- * carried it, which is what {@link #ashvehicles$speedTheServerCanSee} is for — and where a vehicle
- * may go inside that is decided by {@code limitToShape}, which is a better test than this one and
- * runs on the side that can see the ground.
+ * <p>これで新たに緩む物は何も無い。手前の距離検査は生きている——クライアントは飛行速度で運べる以上の距離
+ * を報告できない。そのための {@link #ashvehicles$speedTheServerCanSee} である——し、その範囲内でどこまで
+ * 動けるかは {@code limitToShape} が決める。あちらはこれより良い判定で、しかも地面が見えている側で走る。
  */
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class VehicleMoveCheckMixin {
     /**
-     * Ticks of the machine's own travel a single report is allowed to cover.
+     * 1回の報告が覆ってよい、機体自身の移動 tick 数。
      *
-     * <p>One would be the honest figure if a tick of the client's were a tick of the server's, and
-     * it is not. Packets bunch — a hitch at either end lands two or three of them between one server
-     * tick and the next, all of them measured from the same starting point — so a check with no room
-     * in it fires on a hiccup rather than on a cheat. Four is about a fifth of a second of that, and
-     * still bounds a report to something the machine could actually have flown.
+     * <p>クライアントの1tick がサーバーの1tick なら1が正直な値だが、そうではない。パケットは固まって届く
+     * ——どちらかで一瞬詰まれば、同じ起点から測った報告が2つ3つとサーバーの1tick の間に着く——ので、余裕
+     * ゼロの検査は不正ではなく「しゃっくり」で発火する。4 はおよそ0.2秒分で、それでも報告を「機体が実際に
+     * 飛べた範囲」に縛る。
      */
     private static final double REPORTS_MAY_COVER_TICKS = 4.0;
 
     /**
-     * The speed the server judges a reported move against.
+     * サーバーが報告された移動を照らし合わせる速度。
      *
-     * <p>Vanilla asks whether the vehicle could really have reached where the client says it has,
-     * and answers by comparing that distance against the vehicle's own delta movement: more than ten
-     * blocks further than the vehicle was going is a report it refuses. Refusing it puts the vehicle
-     * back where it was and sends the client a correction, which the client applies outright.
+     * <p>バニラは「クライアントの言う位置へ本当に到達できたか」を問い、その距離を車両自身の
+     * deltaMovement と比べて答える。進んでいた分より10ブロック以上多ければ拒否。拒否すると車両を元の
+     * 位置へ戻し、クライアントへ補正を送り、クライアントはそれを無条件に適用する。
      *
-     * <p>Both halves of that comparison are wrong for a machine of this mod's. The delta movement
-     * the server keeps for one being flown by a client is a deliberate, permanent zero — the flight
-     * model runs on the pilot's machine, the position arrives in packets, and a figure with anything
-     * real in it would be broadcast back to the pilot and fight what their own flight model had just
-     * worked out; see {@code AircraftEntity.tick}. And the distance is one tick of an aeroplane,
-     * which at this pack's speeds is seventeen blocks against a limit of ten.
+     * <p>この比較は、この MOD の機体に対しては両辺とも間違っている。クライアントが飛ばしている機体の
+     * deltaMovement をサーバーが意図的かつ恒久的にゼロにしているのは、飛行モデルがパイロット側で走り位置
+     * はパケットで届くから。実の値を入れればそれがパイロットへ送り返され、当人の飛行モデルが今出した答え
+     * と喧嘩する（{@code AircraftEntity.tick} 参照）。そして距離の方は機体の1tick 分で、このパックの速度
+     * なら上限10に対して17ブロックになる。
      *
-     * <p>So every report from a fast aircraft was refused, every refusal dragged it back to where
-     * the last accepted one left it, and the aeroplane hung in the air shaking instead of flying.
-     * None of it showed in single player, because vanilla skips the check for the host of an
-     * integrated server — it is a multiplayer-only fault, and it is the whole of why an aircraft
-     * freezes partway across a server.
+     * <p>結果、高速機からの報告は毎回拒否され、拒否のたびに最後に受理された位置へ引き戻され、機体は飛ぶ
+     * 代わりに空中で震えた。シングルプレイでは一切現れない。バニラは内蔵サーバーのホストに対してこの検査
+     * を飛ばすからだ——マルチ専用の不具合であり、サーバーで機体が途中から固まる原因はこれが全て。
      *
-     * <p>The check is not stood down here, it is told the truth. The server does know how fast the
-     * machine is going: the side flying it reports that every tick, clamped on arrival, and
-     * {@code VehicleEntityBase.getVelocity} is where it comes out. A few ticks of that is what a
-     * single report may legitimately cover, and anything beyond it is still refused.
+     * <p>ここで検査を止めているのではなく、正しい値を教えている。サーバーは機体の速度を知っている。飛ばし
+     * ている側が毎tick 報告し、到着時にクランプされ、{@code VehicleEntityBase.getVelocity} から出てくる。
+     * その数tick 分が1回の報告が正当に覆える範囲で、それを超える分は今も拒否される。
      */
     @Redirect(method = "handleMoveVehicle(Lnet/minecraft/network/protocol/game/ServerboundMoveVehiclePacket;)V",
             at = @At(value = "INVOKE",

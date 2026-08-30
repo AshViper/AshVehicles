@@ -19,58 +19,50 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The crack of a round going past.
+ * 弾が通り過ぎる破裂音。
  *
- * <p>Everything else in the air here is given a loop that follows it — see {@link ProjectileSounds}
- * — and a gun's round is deliberately not, for two reasons that both still hold. There are a great
- * many of them, and a channel each is not something the sound engine has to give; and a round is
- * only in the air for a moment. A tank shell crosses three hundred blocks in seven ticks, so a loop
- * that faded in over a quarter of a second would spend most of its life fading in and the rest of it
- * out of earshot.
+ * <p>ここで空中にある他の物には追従するループが与えられる——{@link ProjectileSounds} 参照——が、銃弾には意図的に
+ * 与えない。理由は2つあり、どちらも今も有効だ。数が非常に多く、1発ごとのチャンネルをサウンドエンジンは用意でき
+ * ない。そして弾は一瞬しか空中にいない。戦車砲弾は7tickで300ブロックを横切るので、0.25秒かけてフェードインする
+ * ループは寿命の大半をフェードインに費やし、残りは可聴範囲の外で過ごす。
  *
- * <p>But that is an argument against a loop, not against a sound. What a round going past actually
- * sounds like is one short crack, at the moment it passes and at the place it passes — and that is
- * cheap: one distance a tick for each round the client can see, and a one-shot for the few that come
- * near enough to be worth hearing.
+ * <p>だがそれはループに反対する論拠であって、音に反対する論拠ではない。通り過ぎる弾の実際の音は、通過する瞬間に
+ * 通過する場所で鳴る短い破裂音1つだ——そしてそれは安い。クライアントに見える弾1発につき1tickあたり距離1つと、
+ * 聞く価値があるほど近付いた僅かな弾へのワンショットだけで済む。
  *
- * <p><b>Where it is played matters more than what it is.</b> A round covers forty blocks in a tick,
- * so the place it was at the start of the tick and the place it is at the end are both a long way
- * from wherever it went past — playing at either would put the crack behind the listener or well
- * ahead of them. What is worked out instead is the nearest the round's <em>path</em> across that
- * tick came to the listener, and the crack is played there, so it arrives from the direction the
- * round really came from.
+ * <p><b>何を鳴らすかより、どこで鳴らすかが重要だ。</b>弾は1tickで40ブロック進むので、tick開始時の位置も終了時の
+ * 位置も、実際に通り過ぎた場所からは遠く離れている。どちらで鳴らしても破裂音は聞き手の後ろか遥か前から来てしま
+ * う。代わりに、そのtickにおける弾の<em>経路</em>が聞き手に最も近付いた点を求め、そこで鳴らす。おかげで音は弾が
+ * 本当に来た方向から届く。
  *
- * <p>Not on the first tick of a round's life, which is the one that starts at the muzzle. A gun
- * fired from the machine the listener is aboard would otherwise crack in their ear on top of its own
- * report, twenty times a second on a machine gun; a tick later the round is well downrange and the
- * question stops being about the gun and starts being about the round.
+ * <p>弾の生涯の最初のtick——銃口から始まるtick——では鳴らさない。さもないと、聞き手が乗っている機体から撃った銃は
+ * 自身の発射音に重ねて耳元で破裂音を鳴らす。機関銃なら毎秒20回だ。1tick後には弾は十分遠くにあり、問いは銃について
+ * ではなく弾についてのものになる。
  *
- * <p><b>Which recording.</b> {@code <namespace>:weapon.<name>.crack} for a weapon that has one of
- * its own, else the mod's {@code ashvehicles:weapon.crack}, else the game's own sweep — which is the
- * nearest thing it has to something small going through the air fast. So this is audible with no
- * recording at all, and better with one. See {@link ModSounds}.
+ * <p><b>どの録音を使うか。</b>専用の物を持つ兵器は {@code <namespace>:weapon.<name>.crack}、無ければ MOD の
+ * {@code ashvehicles:weapon.crack}、無ければゲーム自身の空振り音——小さな物が空気を高速で切る音にゲームで最も近い
+ * 物だ。だから録音が一切無くても聞こえるし、あればより良くなる。{@link ModSounds} 参照。
  */
 public final class BulletSounds {
     /**
-     * How near a round has to pass to be worth a crack, in blocks.
+     * 破裂音に値するには弾がどれだけ近くを通る必要があるか（ブロック）。
      *
-     * <p>Rather less than the sound engine would carry it, which is deliberate: this is the noise of
-     * a round going past you and not the noise of one going past somebody else. Beyond it there is
-     * nothing to hear, which is also what keeps a firefight two hundred blocks away from being a
-     * wall of cracks.
+     * <p>サウンドエンジンが運ぶ距離よりかなり短く、それは意図的だ。これは「自分の脇を通る弾」の音であって「他人の
+     * 脇を通る弾」の音ではない。それより外では聞くべき物は無いし、それが200ブロック先の銃撃戦を破裂音の壁にしない
+     * 仕組みでもある。
      */
     private static final double CRACK_DISTANCE = 16.0;
 
     /**
-     * Most cracks played in one tick, however many rounds went by.
+     * 何発通り過ぎようと1tickで鳴らす破裂音の上限。
      *
-     * <p>An autocannon puts a round in the air every tick and a burst arrives as a burst, so some
-     * cap is needed or a single gun aimed at the listener is twenty one-shots a second and every
-     * other sound in the game loses its channel. Three is enough for a burst to read as a burst.
+     * <p>機関砲は毎tick 1発を空中へ送り、連射は連射としてまとめて届くので、上限が要る。さもないと聞き手に向けた
+     * 1門の銃だけで毎秒20回のワンショットになり、ゲーム内の他の全ての音がチャンネルを失う。連射が連射として読める
+     * には3で足りる。
      */
     private static final int MOST_PER_TICK = 3;
 
-    /** The game's own sweep, for a weapon and a pack that have both recorded nothing. */
+    /** 兵器もパックも何も録音していない場合に使う、ゲーム自身の空振り音。 */
     private static final ResourceLocation CRACK_FALLBACK =
             ResourceLocation.withDefaultNamespace("entity.player.attack.sweep");
 
@@ -78,25 +70,24 @@ public final class BulletSounds {
     private static final float HIGH_PITCH = 1.15F;
 
     /**
-     * Every round in the air this client can see and has not yet cracked for.
+     * このクライアントから見えていて、まだ破裂音を鳴らしていない空中の全弾。
      *
-     * <p>Weakly, so that a round the level forgets about takes its entry with it whatever happens to
-     * the tick that would have pruned it. One crack each: a bullet flies straight, so once it has
-     * passed it is going away and will never be nearer than it was.
+     * <p>弱参照にしてあるので、レベルが忘れた弾は、刈り取るはずだったtickに何が起きようとエントリごと消える。
+     * 破裂音は1発につき1回。弾は真っ直ぐ飛ぶので、通り過ぎた後は遠ざかる一方であり、それ以上近付くことはない。
      */
     private static final Set<BulletEntity> LIVE = Collections.newSetFromMap(new WeakHashMap<>());
 
     private BulletSounds() {
     }
 
-    /** Takes note of a round that has just come into the level, if it is one. */
+    /** レベルへ入ってきた物が弾なら記録する。 */
     public static void offer(Entity entity) {
         if (entity instanceof BulletEntity round) {
             LIVE.add(round);
         }
     }
 
-    /** Leaving the world takes the whole list with it; the next one is somebody else's sky. */
+    /** ワールドを離れるときリストごと捨てる。次のワールドは別の空だ。 */
     public static void forget() {
         LIVE.clear();
     }
@@ -106,9 +97,8 @@ public final class BulletSounds {
             return;
         }
 
-        // The camera and not the crew's own eyes: it is the camera the sound engine listens from, so
-        // it is the camera that has to decide what came near enough to be heard. On a tank they are
-        // a dozen blocks apart, which is most of this distance.
+        // 乗員自身の目ではなくカメラを使う。サウンドエンジンが聞く位置はカメラなので、何が聞こえるほど近付いたか
+        // を決めるのもカメラであるべきだ。戦車では両者が十数ブロック離れており、それはこの判定距離の大半にあたる。
         Vec3 ear = minecraft.gameRenderer.getMainCamera().getPosition();
         SoundManager sounds = minecraft.getSoundManager();
         Iterator<BulletEntity> rounds = LIVE.iterator();
@@ -123,7 +113,7 @@ public final class BulletSounds {
                 continue;
             }
 
-            // The tick that starts at the muzzle is the gun's, not the round's.
+            // 銃口から始まるtickは銃のものであって、弾のものではない。
             if (round.tickCount <= 1) {
                 continue;
             }
@@ -134,8 +124,8 @@ public final class BulletSounds {
                 continue;
             }
 
-            // Removed whether or not there is a channel for it: it has gone past, and the crack it
-            // did not get is not owed to it next tick from further away.
+            // チャンネルが取れたかに関わらず取り除く。既に通り過ぎており、鳴らせなかった破裂音を次tickにさらに
+            // 遠くから鳴らしてやる義理は無い。
             rounds.remove();
 
             if (left <= 0) {
@@ -157,12 +147,10 @@ public final class BulletSounds {
     }
 
     /**
-     * The nearest the round's path across this tick came to the listener, or null if it has not
-     * moved yet.
+     * このtickにおける弾の経路が聞き手に最も近付いた点。まだ動いていなければ null。
      *
-     * <p>The path and not the round: at forty blocks a tick the two ends of it are both a long way
-     * from wherever it actually went by, and a crack played at either is a crack from the wrong
-     * direction.
+     * <p>弾ではなく経路。40ブロック/tick では経路の両端とも実際の通過点から遠く離れており、どちらで鳴らしても
+     * 破裂音は誤った方向から来る。
      */
     @Nullable
     private static Vec3 nearestApproach(BulletEntity round, Vec3 ear) {
@@ -174,8 +162,7 @@ public final class BulletSounds {
             return null;
         }
 
-        // Clamped to the step, so a round that has not reached the listener yet is measured at the
-        // near end of its path rather than at a point it has not been to.
+        // ステップ内へクランプする。まだ聞き手に届いていない弾は、通っていない点ではなく経路の手前端で測る。
         double along = Mth.clamp(ear.subtract(from).dot(step) / flown, 0.0, 1.0);
 
         return from.add(step.scale(along));

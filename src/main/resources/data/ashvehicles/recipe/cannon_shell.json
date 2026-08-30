@@ -3,17 +3,21 @@
   "category": "equipment",
   "group": "ashvehicles_ammo",
   "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+    "S": {
+      "item": "ashvehicles:steel_plate"
     },
-    "C": {
+    "K": {
       "tag": "c:ingots/copper"
     },
     "G": {
       "item": "minecraft:gunpowder"
     }
   },
-  "pattern": [" # ", " C ", " G "],
+  "pattern": [
+    " S ",
+    " K ",
+    " G "
+  ],
   "result": {
     "count": 2,
     "id": "ashvehicles:cannon_shell"

@@ -34,83 +34,71 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
- * Where the last few rounds landed on what they were fired at, drawn on a picture of it.
+ * 直近数発が目標のどこに当たったかを、目標の絵の上に描く。
  *
- * <p><b>Why it is needed at all.</b> A tank gunner firing at eight hundred metres sees a puff of
- * smoke and nothing else. Whether the round went into the turret front, into the tracks, or a foot
- * over the roof is invisible from here, and without an answer there is nothing to correct: the next
- * round is aimed at the same place with the same hope. Everything else on this screen is about
- * getting a round away; this is the only thing that says what happened when one arrived.
+ * <p><b>そもそも必要な理由。</b>800m で撃つ戦車砲手に見えるのは煙の塊だけだ。弾が砲塔前面に入ったのか、履帯に入った
+ * のか、屋根の30cm 上を抜けたのかはここからは見えないし、答えが無ければ修正すべき物も無い。次弾は同じ場所へ同じ期待で
+ * 撃たれる。この画面の他の全ては「弾を撃ち出す」ことについての物だが、これだけが「着弾したとき何が起きたか」を伝える。
  *
- * <p><b>The target is drawn as the gunner saw it</b> — the machine's own model, turned to the bearing
- * the round came in on, which is taken from the round's own line of flight rather than from where
- * the shooter is standing now. So a shot into the side of a hull is drawn on a side view with the
- * mark low on the hull, and a shot at something head-on is drawn on its front. Nothing has to be
- * worked out about which way anybody was facing; the round already knew.
+ * <p><b>目標は砲手が見た姿で描く</b>——機体自身のモデルを、弾が飛来した方位へ回す。方位は射手の現在位置ではなく弾自身
+ * の飛行線から取る。だから車体側面への命中は側面図に、車体下部のマーク付きで描かれ、正面から撃った物はその正面に描か
+ * れる。誰がどちらを向いていたかを算出する必要は無い。弾が既に知っている。
  *
- * <p><b>Marks are held against the box they went into</b>, as a fraction of it, rather than as a
- * point in the air near the vehicle. A turret that traverses between one round and the next
- * therefore carries its own hits round with it, and a mark on the mantlet stays on the mantlet.
+ * <p><b>マークは、車両近くの空中の点ではなく、食い込んだ箱に対する割合として保持する。</b>だから弾と弾の間に旋回した
+ * 砲塔は自分への命中痕を一緒に回して運ぶし、防盾のマークは防盾に留まる。
  *
- * <p>A filled mark means the round went in. A hollow one means the armour threw it off — which is
- * the single most useful thing this instrument says, because it is the difference between aiming
- * somewhere else and firing again at the same place.
+ * <p>塗り潰したマークは貫通、中空のマークは装甲が弾いたことを意味する——この計器が伝える中で単独で最も有用な情報だ。
+ * 「別の場所を狙う」か「同じ場所へもう一度撃つ」かの分かれ目だからである。
  *
- * <p>The whole thing is a snapshot of one engagement: a hit on something else clears it and starts
- * again, and it fades out a few seconds after the last round arrives rather than sitting in the
- * corner of the screen for the rest of the battle.
+ * <p>全体が1回の交戦のスナップショットだ。別の物に当てれば消えてやり直しになるし、最後の着弾から数秒でフェードアウト
+ * する。戦闘の残りずっと画面隅に居座ったりはしない。
  */
 public final class HitReadout {
     private static final int WIDTH = 96;
     private static final int HEIGHT = 70;
     private static final int INSET = 8;
-    /** The margin inside the frame the picture is not drawn in. */
+    /** 枠の内側で絵を描かない余白。 */
     private static final int MARGIN = 6;
-    /** The room kept at the top for the target's name and at the bottom for the tally. */
+    /** 上端に目標名、下端に集計を置くために確保する領域。 */
     private static final int HEADER = 12;
     private static final int FOOTER = 11;
 
-    /** How long the readout stays up after the last round arrives, in milliseconds. */
+    /** 最後の着弾後、表示を残す時間（ミリ秒）。 */
     private static final long LINGER = 6000L;
-    /** How much of that is spent fading, so it goes out rather than switching off. */
+    /** そのうちフェードに使う割合。ぱっと消えるのではなく消えていくようにする。 */
     private static final long FADE = 900L;
-    /** How many marks are kept. A long burst from a cannon would otherwise fill the picture in. */
+    /** 保持するマーク数。機関砲の長い連射があると、さもないと絵が埋まってしまう。 */
     private static final int MOST = 24;
     /**
-     * How far into the screen the machine is drawn, and how far in front of its own skin a mark is
-     * lifted, in blocks.
+     * 機体を画面のどれだけ奥に描くか、そしてマークを機体表面からどれだけ手前へ浮かせるか（ブロック）。
      *
-     * <p>The second is what stops a mark disappearing inside the plate it is on. Where a round
-     * struck is worked out against the collision boxes, and the model's own skin does not lie
-     * exactly on those — so a mark left where the arithmetic put it can end up a few centimetres
-     * inside the armour, which on a solid model is the same as not drawing it. Lifted towards the
-     * viewer instead, by far less than the thickness of anything it could wrongly show through.
+     * <p>後者が、マークが乗っている板の内側へ消えるのを防ぐ。着弾位置は当たり判定の箱に対して求めるが、モデル自身の
+     * 表面はその箱の上にぴったり乗っているわけではない——だから計算通りの位置に置いたマークは装甲の数cm 内側に入りうる
+     * し、中身の詰まったモデルではそれは描かないのと同じだ。代わりに視聴者側へ浮かせる。誤って透けて見えうるどの物の
+     * 厚みよりも、はるかに小さい量で。
      */
     private static final float DEPTH = 90.0F;
     private static final float LIFT = 0.35F;
 
-    /** Behind every mark, so that one on a green deck is still a mark. */
+    /** 全マークの背面に敷く。緑の甲板の上のマークもマークとして見えるように。 */
     private static final int BACKING = 0xC0000000;
-    /** A round that went in. */
+    /** 貫通した弾。 */
     private static final int STRIKE = AircraftHud.WARNING;
-    /** A round the armour threw off, which is a different answer and gets a different colour. */
+    /** 装甲が弾いた弾。別の答えなので別の色を与える。 */
     private static final int BOUNCE = 0xFFFFD24A;
 
     /**
-     * One round's arrival: which box it went into and whereabouts in that box, as a fraction of each
-     * of the box's half-lengths.
+     * 弾1発の着弾。どの箱に入ったか、そしてその箱の中のどこか——箱の各半長に対する割合で。
      *
-     * <p>Kept as a fraction rather than as a distance so that the mark is placed by the same
-     * arithmetic that places the box itself — see {@link Silhouette} — and so rides the turret round
-     * with it. A {@code box} of -1 is a machine with no boxes at all, where {@code within} is
-     * measured in blocks from the middle instead.
+     * <p>距離ではなく割合で保持するので、マークは箱自体を配置するのと同じ計算で配置され——{@link Silhouette} 参照——
+     * 砲塔と共に回る。{@code box} が -1 の場合は箱を持たない機体で、{@code within} は中心からのブロック数で測る。
      */
     private record Mark(int box, Vec3 within, boolean bounced) {
     }
 
     private static final List<Mark> MARKS = new ArrayList<>();
 
-    /** Which machine is being reported on, so that hitting a second one starts a fresh picture. */
+    /** どの機体について報告しているか。2台目に当てたら新しい絵で始めるため。 */
     private static int target = -1;
     @Nullable
     private static ResourceLocation machine;
@@ -120,7 +108,7 @@ public final class HitReadout {
     private static float damage;
     private static long arrived;
 
-    /** The machine kept about to be drawn, and which kind it is. See {@link #copyOf}. */
+    /** 描画用に保持している機体と、その種類。{@link #copyOf} 参照。 */
     @Nullable
     private static VehicleEntityBase drawn;
     @Nullable
@@ -130,15 +118,14 @@ public final class HitReadout {
     }
 
     /**
-     * A round has arrived. Called from the packet the server sends the shooter and nobody else.
+     * 弾が着弾した。サーバーが射手にだけ送るパケットから呼ばれる。
      *
-     * @param struck the target's entity id, which is only ever compared: a hit on something new
-     *               clears whatever was being shown
-     * @param id which machine it is, for its shape and its name
-     * @param box which of that shape's boxes was hit, or -1 for a machine that has none
-     * @param within where in that box, as a fraction of each half-length
-     * @param approach the way the round was travelling, in the machine's own axes
-     * @param damage what it took off, or zero if the armour threw it off
+     * @param struck 目標のエンティティID。比較にしか使わない。別の物に当てれば表示中の内容を消す
+     * @param id どの機体か。形状と名前のため
+     * @param box その形状のどの箱に当たったか。箱を持たない機体では -1
+     * @param within その箱の中のどこか。各半長に対する割合
+     * @param approach 弾の進行方向。機体座標系
+     * @param damage 与えたダメージ。装甲が弾いたなら0
      */
     public static void report(int struck, ResourceLocation id, int box, Vec3 within, Vec3 approach,
             float traverse, float gunPitch, float damage, boolean bounced) {
@@ -164,7 +151,7 @@ public final class HitReadout {
         MARKS.add(new Mark(box, within, bounced));
     }
 
-    /** Draws it in the top right-hand corner, or draws nothing if nothing has been hit lately. */
+    /** 右上隅に描く。最近何にも当てていなければ何も描かない。 */
     static void draw(GuiGraphics graphics, Font font) {
         ResourceLocation id = machine;
 
@@ -200,7 +187,7 @@ public final class HitReadout {
         graphics.fill(right - 1, top, right, bottom, edge);
     }
 
-    /** What was hit, by the name the game gives it rather than by the id of its file. */
+    /** 何に当てたか。ファイルのIDではなくゲームが与える名前で。 */
     private static void name(GuiGraphics graphics, Font font, ResourceLocation id, int left, int top,
             float alpha) {
         EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null);
@@ -211,11 +198,10 @@ public final class HitReadout {
     }
 
     /**
-     * What the burst has come to: what it has taken off, and how many rounds it took.
+     * 連射の結果。削ったダメージと、要した弾数。
      *
-     * <p>The count is worth as much as the damage. A tally that keeps climbing while the damage does
-     * not is a gun that cannot get through what it is shooting at, which is the moment to stop firing
-     * and go somewhere else.
+     * <p>弾数はダメージと同じだけの価値がある。弾数だけが増えてダメージが増えない集計は、撃っている相手を貫通できない
+     * 砲を意味する。射撃をやめて別の場所へ移る潮時だ。
      */
     private static void tally(GuiGraphics graphics, Font font, int left, int top, float alpha) {
         int bounced = 0;
@@ -238,19 +224,16 @@ public final class HitReadout {
     }
 
     /**
-     * The machine itself, and the marks on it.
+     * 機体そのものと、その上のマーク。
      *
-     * <p>Drawn as the model, not as an outline: the same geometry the thing has in the world, put
-     * through the same renderer, so that a mark on the mantlet is on a mantlet the gunner
-     * recognises. What is drawn is not the target itself, though — see {@link #copyOf}.
+     * <p>輪郭ではなくモデルとして描く。ワールドで持つのと同じジオメトリを同じレンダラーに通すので、防盾のマークは砲手が
+     * 見て分かる防盾の上に乗る。ただし描いているのは目標そのものではない——{@link #copyOf} 参照。
      *
-     * <p><b>The marks are placed in the picture rather than on it.</b> Each one is worked out where
-     * it belongs on the machine, run through the very matrix the model was drawn with, and laid down
-     * at the depth that comes back. So a hit on the far side of a hull is hidden by the hull and one
-     * on the near side is not, without anything here having to know which side of anything it is on.
+     * <p><b>マークは絵の「上」ではなく絵の「中」に置かれる。</b>各マークは機体上のあるべき位置で求め、モデルを描いた
+     * まさにその行列に通し、返ってきた深度で置く。だから車体の向こう側への命中は車体に隠れ、手前側の命中は隠れない。
+     * ここで何かが「どちら側か」を知る必要は無い。
      *
-     * <p>The scale still comes from the collision boxes, which are the only account of the machine's
-     * size that can be read without drawing it first.
+     * <p>スケールは今も当たり判定の箱から取る。先に描かずに読める機体寸法の記述はそれだけだからだ。
      */
     private static void picture(GuiGraphics graphics, ResourceLocation id, int left, int top, float alpha) {
         Minecraft minecraft = Minecraft.getInstance();
@@ -273,9 +256,8 @@ public final class HitReadout {
 
         machine.poseForDrawing(new Quaternionf(), traverse, gunPitch);
 
-        // Everything from here is cut off at the panel: the barrel runs out of it, and a long burst
-        // walking off the back of a hull should stop at the frame rather than in the middle of the
-        // reading underneath.
+        // ここから先は全てパネルで切り取る。砲身はパネルの外へはみ出すし、車体後方へ流れていく長い連射は、下の数値
+        // 表示の途中ではなく枠で止まるべきだ。
         graphics.enableScissor(left + 1, top + HEADER, left + WIDTH - 1, top + HEADER + height);
 
         PoseStack pose = graphics.pose();
@@ -283,29 +265,25 @@ public final class HitReadout {
         pose.pushPose();
         pose.translate(left + WIDTH / 2.0, top + HEADER + height / 2.0, DEPTH);
         pose.scale(scale, scale, -scale);
-        // In blocks rather than pixels, since it is inside the scale: it slides the machine so that
-        // the middle of what is drawn sits in the middle of the panel rather than its origin, which
-        // on a tank is down between the tracks.
+        // スケールの内側なのでピクセルではなくブロック単位。描かれる物の中心がパネル中央に来るよう機体をずらす。
+        // 原点ではだめだ。戦車では履帯の間の下の方にあるからだ。
         pose.translate(-middleAcross, middleAloft, 0.0F);
         turn(pose, view);
         model(graphics, machine, pose);
 
-        // Kept while it is still the matrix the model was drawn with, which is what makes a mark land
-        // on the metal rather than near it.
+        // モデルを描いた行列である間に保持しておく。それがマークを金属の近くではなく金属の上に着地させる。
         Matrix4f drawnWith = new Matrix4f(pose.last().pose());
 
         pose.popPose();
 
-        // And then taken back out of whatever the screen's own matrix is. A layer of the HUD is not
-        // handed a clean one — every layer drawn before this one has pushed it further forward — so a
-        // depth read straight off the matrix above would have that offset in it twice over, and a
-        // mark that should be buried in the far side of a hull would float in front of the near one.
+        // その後、画面自身の行列の分を差し引く。HUD のレイヤーには綺麗な行列が渡されない——これより前に描かれた各
+        // レイヤーがさらに手前へ押し出している——ので、上の行列からそのまま読んだ深度にはそのオフセットが二重に入り、
+        // 車体の向こう側に埋まるはずのマークが手前側の前に浮いてしまう。
         Matrix4f onScreen = new Matrix4f(pose.last().pose()).invert().mul(drawnWith);
 
         for (Mark spot : MARKS) {
             Vec3 on = where(spot, shape, stats);
-            // The x is crossed over because the machine's own axes count it to the right and the
-            // world counts it to the left. See Silhouette.
+            // x を反転する。機体自身の軸は右を正とし、ワールドは左を正とするからだ。Silhouette 参照。
             Vector3f at = onScreen.transformPosition(
                     new Vector3f((float) -on.x, (float) on.y, (float) on.z));
 
@@ -317,16 +295,15 @@ public final class HitReadout {
     }
 
     /**
-     * Turns the picture so that the machine is seen from wherever the round came in from.
+     * 弾が飛来した方向から機体が見えるよう絵を回す。
      *
-     * <p>Three turns and no thinking. The machine is spun about its own vertical until the line the
-     * round came in on runs into the screen, tipped by however far above or below the horizontal
-     * that line was, and then stood the right way up — which the last one is for, since the screen
-     * counts its y downwards and the world counts it up.
+     * <p>3回の回転で、考えることは何も無い。弾の飛来線が画面奥へ向くまで機体を自身の鉛直軸周りに回し、その線が水平から
+     * どれだけ上下していたかだけ倒し、最後に上下を正す——最後の1つがそのためにある。画面は y を下向きに数え、ワールドは
+     * 上向きに数えるからだ。
      */
     private static void turn(PoseStack pose, Silhouette.View view) {
         Vec3 look = view.look();
-        // Into the world's axes, where the machine's right-hand side lies along −x.
+        // ワールド軸へ。そこでは機体の右舷が −x 方向に沿う。
         float bearing = (float) Math.toDegrees(Mth.atan2(-look.x, look.z));
         float climb = (float) Math.toDegrees(Math.asin(Mth.clamp(look.y, -1.0, 1.0)));
 
@@ -336,10 +313,10 @@ public final class HitReadout {
     }
 
     /**
-     * Draws the machine, lit as an inventory model and at full brightness.
+     * 機体を、インベントリモデルとして照らし最大輝度で描く。
      *
-     * <p>Bright on purpose: what was hit is usually a long way off with half of it in shadow, and an
-     * instrument that reports the light on the target rather than the shape of it is no use.
+     * <p>意図的に明るくしている。当てた相手は大抵遠方にあり半分は影の中だし、目標の形ではなく目標に当たっている光を報告
+     * する計器は役に立たない。
      */
     private static void model(GuiGraphics graphics, VehicleEntityBase machine, PoseStack pose) {
         EntityRenderDispatcher dispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
@@ -348,18 +325,17 @@ public final class HitReadout {
         dispatcher.setRenderShadow(false);
         dispatcher.render(machine, 0.0, 0.0, 0.0, 0.0F, 1.0F, pose, graphics.bufferSource(),
                 LightTexture.FULL_BRIGHT);
-        // Put down now rather than left in the batch, so that the marks go over the top of it.
+        // バッチに残さず今描き出す。マークがその上に来るようにするためだ。
         graphics.flush();
         dispatcher.setRenderShadow(true);
         Lighting.setupFor3DItems();
     }
 
     /**
-     * One mark, at the depth it sits at on the machine.
+     * マーク1つを、機体上でそれが位置する深度に描く。
      *
-     * <p>Filled where the round went in and hollow where the armour threw it off. A shape as well as
-     * a colour, because which of the two happened is the whole point of the instrument and should
-     * not rest on telling red from amber.
+     * <p>貫通なら塗り潰し、装甲が弾いたなら中空。色だけでなく形も変える。どちらが起きたかがこの計器の要点であり、赤と
+     * 琥珀の区別に頼るべきではないからだ。
      */
     private static void mark(GuiGraphics graphics, int x, int y, int z, boolean bounced, float alpha) {
         int colour = fade(bounced ? BOUNCE : STRIKE, alpha);
@@ -379,18 +355,15 @@ public final class HitReadout {
     }
 
     /**
-     * A machine of this kind that exists only to be drawn.
+     * 描かれるためだけに存在する、同種の機体。
      *
-     * <p><b>Not the target.</b> A round fired at anything worth this instrument is fired at something
-     * a long way off, and a long way off is usually outside what the client is told about at all — so
-     * by the time the readout goes up there is very often no such entity here to point a renderer at.
-     * What is drawn instead is a fresh one of the same kind, made from the entity type, never added
-     * to any world and never ticked: a mannequin, posed from what the server said about the real one
-     * and thrown away when the next report is about something else.
+     * <p><b>目標そのものではない。</b>この計器に値する相手へ撃つ弾は遠方の物へ撃たれるし、遠方は大抵クライアントが
+     * 通知される範囲の外だ——だから表示が出る頃には、レンダラーを向ける対象のエンティティがここに存在しないことが非常に
+     * 多い。代わりに描くのは、エンティティタイプから作った同種の新しい個体だ。どのワールドにも追加されず、tickもされ
+     * ない。サーバーが本物について語った内容でポーズを付けたマネキンであり、次の報告が別の物についてになれば捨てられる。
      *
-     * <p>Kept between frames because making one is not free and the readout is up for seconds at a
-     * time. Thrown away when the kind changes, or when the level does — a mannequin still holding a
-     * level the player has left would hold the whole of it.
+     * <p>フレーム間で保持するのは、作るのが無料ではなく、表示が数秒間続くからだ。種類が変わったとき、あるいはレベルが
+     * 変わったときに捨てる——プレイヤーが去ったレベルを掴んだままのマネキンは、そのレベル全体を掴んだままにしてしまう。
      */
     @Nullable
     private static VehicleEntityBase copyOf(ResourceLocation id, @Nullable ClientLevel level) {
@@ -415,22 +388,19 @@ public final class HitReadout {
     }
 
     /**
-     * How much room the machine takes up in the picture, as the stretch its boxes cover: left,
-     * right, bottom and top, in blocks.
+     * 機体が絵の中で占める範囲を、箱が覆う広がり——左・右・下・上（ブロック）——として求める。
      *
-     * <p>Measured off the collision boxes because they are the only account of the machine's size
-     * that can be read without drawing it, and the scale has to be settled before anything is drawn.
-     * A machine that lists none falls back on the plain box its file gives it.
+     * <p>当たり判定の箱から測る。描かずに読める機体寸法の記述はそれだけだし、スケールは何かを描く前に決めねばならない。
+     * 箱を1つも列挙していない機体は、ファイルが与える素の直方体へフォールバックする。
      */
     private static double[] extent(VehicleEntityBase machine, VehicleShape shape,
             @Nullable GroundVehicleDefinition stats, Silhouette.View view) {
         double[] extent = {Double.MAX_VALUE, -Double.MAX_VALUE, Double.MAX_VALUE, -Double.MAX_VALUE};
 
         for (VehicleShape.Box box : shape.boxes()) {
-            // The barrel is left out of the fit and drawn over the edge instead. A tank gun is half
-            // again as long as the tank, and seen from the beam it would otherwise decide the whole
-            // scale: the machine the marks are on would be squeezed into a third of the panel so
-            // that a length of empty tube could have the rest.
+            // 砲身は収める対象から外し、代わりに枠の外へはみ出させて描く。戦車砲は戦車の1.5倍の長さがあり、真横から
+            // 見れば放っておくとスケール全体を決めてしまう。マークが乗る機体はパネルの1/3へ押し込められ、残りは空の
+            // 筒の長さが取ることになる。
             if (box.mount() == VehicleShape.Mount.GUN) {
                 continue;
             }
@@ -452,7 +422,7 @@ public final class HitReadout {
         return new double[]{-half, half, 0.0, machine.hitbox().height()};
     }
 
-    /** Where a mark sits in the machine's own axes, with the turret where it was when it arrived. */
+    /** 機体座標系でのマークの位置。砲塔は着弾時の向きで。 */
     private static Vec3 where(Mark mark, VehicleShape shape, @Nullable GroundVehicleDefinition stats) {
         if (mark.box() < 0 || mark.box() >= shape.boxes().size()) {
             return mark.within();
@@ -469,8 +439,7 @@ public final class HitReadout {
     }
 
     /**
-     * One box flattened onto the picture, as the stretch of it the corners cover: left, right, bottom
-     * and top, in blocks.
+     * 箱1つを絵へ平面化し、その隅が覆う広がり——左・右・下・上（ブロック）——として返す。
      */
     private static double[] flatten(VehicleShape.Box box, @Nullable GroundVehicleDefinition stats,
             Silhouette.View view) {
@@ -498,7 +467,7 @@ public final class HitReadout {
         return flat;
     }
 
-    /** The same colour, dimmed by however much of the readout's life is left. */
+    /** 同じ色を、表示の残り寿命に応じて暗くした物。 */
     private static int fade(int colour, float alpha) {
         int opacity = Math.round(((colour >>> 24) & 0xFF) * Mth.clamp(alpha, 0.0F, 1.0F));
 

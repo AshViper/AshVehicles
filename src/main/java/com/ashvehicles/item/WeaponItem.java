@@ -17,13 +17,13 @@ import net.minecraft.world.item.component.CustomData;
 import net.neoforged.neoforge.registries.DeferredItem;
 
 /**
- * A weapon, carried about and hung on an aircraft's pylon.
+ * 兵装。持ち運んで機体のパイロンに吊るす。
  *
- * <p>The item remembers how many rounds are in it, so a pod taken off half-empty goes back on half
- * empty. A fresh one from the creative tab is full.
+ * <p>アイテムが残弾数を覚えているので、半分減った状態で外したポッドは半分減ったまま戻る。クリエイティブ
+ * タブから出したての物は満載。
  */
 public class WeaponItem extends Item {
-    /** Where the remaining rounds are kept on the stack. Absent means full. */
+    /** 残弾をスタックのどこに書くか。キーが無ければ満載の意味。 */
     private static final String AMMO_KEY = "Ammo";
 
     private final ResourceLocation weapon;
@@ -33,7 +33,7 @@ public class WeaponItem extends Item {
         this.weapon = weapon;
     }
 
-    /** Which weapon file this item is. */
+    /** このアイテムがどの兵装ファイルか。 */
     public ResourceLocation getWeaponId() {
         return this.weapon;
     }
@@ -42,7 +42,7 @@ public class WeaponItem extends Item {
         return Definitions.weapon(this.weapon);
     }
 
-    /** One of a weapon, carrying the rounds given. */
+    /** その兵装1個分のスタック。指定した残弾を持たせる。 */
     public static ItemStack stackOf(ResourceLocation weapon, int ammo) {
         DeferredItem<WeaponItem> item = ModItems.weapons().get(weapon);
 
@@ -57,7 +57,7 @@ public class WeaponItem extends Item {
         return stack;
     }
 
-    /** Rounds in a stack, or -1 for "however many it holds": a fresh one is full. */
+    /** スタックの残弾。-1 は「定数いっぱい」の意味で、出したての物は満載。 */
     public static int ammoOf(ItemStack stack) {
         CustomData data = stack.get(DataComponents.CUSTOM_DATA);
 
@@ -72,6 +72,14 @@ public class WeaponItem extends Item {
         lines.add(Component.translatable("tooltip.ashvehicles.ammo",
                         ammo < 0 ? definition.ammo() : ammo, definition.ammo())
                 .withStyle(ChatFormatting.GRAY));
+
+        // 対で使う兵装向けに、これを撃つ前に機体へ積んでおく必要がある物。
+        definition.requires().ifPresent(kind -> lines.add(
+                Component.translatable("tooltip.ashvehicles.requires",
+                                Component.translatable("tooltip.ashvehicles.equipment_kind."
+                                        + kind.getSerializedName()))
+                        .withStyle(ChatFormatting.GOLD)));
+
         lines.add(Component.translatable("tooltip.ashvehicles.mount").withStyle(ChatFormatting.DARK_GRAY));
     }
 }

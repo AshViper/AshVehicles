@@ -48,125 +48,128 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 /**
- * What every machine in the mod has in common, whether it flies or drives.
+ * 飛ぶ物でも走る物でも、この MOD の全機体に共通する部分。
  *
- * <p>Not the physics. An aeroplane chooses its attitude and holds itself up; a tank lies on the
- * ground and is pushed along it, and the two have almost nothing to say to each other about how they
- * move. What they share is everything <em>around</em> that: they are both made of boxes rather than
- * of one square hitbox, both worth a few hundred points rather than a boat's four, both climbed into
- * and sat in, and both described by a file found under their own name.
+ * <p>物理は含まない。機体は自分で姿勢を選び自分を支え、戦車は地面に寝てその上を押される。動き方について
+ * 両者が互いに言うことはほとんど無い。共有しているのはその<em>周り</em>の全部だ。どちらも1つの正方形の
+ * 当たり判定ではなく複数の箱でできており、どちらもボートの4点ではなく数百点の価値があり、どちらも乗り込ま
+ * れて座られ、どちらも自分の名前で見つかるファイルに記述される。
  *
- * <p>Four things live here.
+ * <p>ここには4つの物がある。
  *
- * <p><b>The boxes.</b> Minecraft gives an entity a single upright box with a square footprint, which
- * is no shape for an aeroplane and no shape for a tank, and no surface to walk on either. Both are
- * instead made of {@link VehiclePart}s placed from the boxes in their file. Where each box is and which
- * way it is turned is the one part of this that differs — an aircraft's boxes are bolted to the
- * airframe, a tank's may be carried round by its turret — so that is a pair of hooks and the rest is
- * shared.
+ * <p><b>箱。</b> Minecraft がエンティティに与えるのは底面が正方形の直立した箱1つで、それは機体の形でも
+ * 戦車の形でもなく、歩ける面でもない。代わりに両者ともファイルの箱定義から配置した {@link VehiclePart}
+ * でできている。各箱がどこにあり、どちらを向いているかだけが違う——機体の箱は構造に固定され、戦車の箱は
+ * 砲塔に運ばれ得る——のでそこはフック2つにし、残りは共有する。
  *
- * <p><b>The damage.</b> Health, and a blow counted once however many boxes it arrived through.
+ * <p><b>ダメージ。</b> 耐久と、いくつの箱を経由して届いても1回だけ数える打撃。
  *
- * <p><b>The seats.</b> Where the crew sit, in the machine's own axes, and how many of them fit.
+ * <p><b>座席。</b> 乗員がどこに座るか（機体自身の軸で）と、何人乗れるか。
  *
- * <p><b>The name.</b> A machine's id is its entity type's id, and its file, its model, its shape and
- * the item that places it are all found under it.
+ * <p><b>名前。</b> 機体の ID はエンティティ型の ID であり、ファイル・モデル・形状・設置アイテムはすべて
+ * その名前で見つかる。
  */
 public abstract class VehicleEntityBase extends VehicleEntity implements PartHost {
-    /** What this machine has left, in hit points. Zero is a smoking hole. */
+    /** この機体の残り耐久（ヒットポイント）。0 なら煙を上げる穴。 */
     private static final EntityDataAccessor<Float> DATA_HEALTH =
             SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.FLOAT);
 
     /**
-     * Whether the machine has been written off.
+     * 機体が全損しているか。
      *
-     * <p>Synched because being a wreck is most of what the thing looks like: a client draws a
-     * burnt-out machine charred and a live one in its colours, and it has no other way of telling
-     * them apart. The server owns the flag, and nothing but {@link #wreck()} ever sets it.
+     * <p>同期するのは、残骸であることが見た目の大半を占めるから。クライアントは燃え尽きた機体を炭化した姿
+     * で、生きている機体を本来の色で描くが、それを見分ける手段が他に無い。フラグの持ち主はサーバーで、
+     * {@link #wreck()} 以外がこれを設定することは無い。
      */
     private static final EntityDataAccessor<Boolean> DATA_WRECKED =
             SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.BOOLEAN);
 
     /**
-     * Which crew member is in which seat, so the two can come apart.
+     * どの乗員がどの座席にいるか。両者を切り離すための情報。
      *
-     * <p>Vanilla has no such notion: a rider's seat is only their place in the passenger list, the
-     * order they climbed in, and there is no way to change it without getting out and letting
-     * somebody else in first. This decouples the two — a synched line of occupant ids, one per
-     * seat, empty where a seat is free — so a crew member can move to another seat, the driver's
-     * among them, without anybody leaving. The server owns it; both sides read it, because a seat
-     * decides where a rider is drawn ({@link #getPassengerAttachmentPoint}) and who is at the
-     * controls ({@link #getControllingPassenger}), and those are asked on both. See
-     * {@link #switchToNextSeat}.
+     * <p>バニラにはこの概念が無い。搭乗者の席は「搭乗者リストの中の位置」＝乗り込んだ順でしかなく、降りて
+     * 誰かを先に乗せない限り変えられない。ここではその2つを切り離す——座席ごとに1つ、空席なら空欄の、同期
+     * された乗員 ID の列——ので、乗員は誰も降りずに別の席へ、運転席を含めて移れる。持ち主はサーバー。読むの
+     * は両側だ。座席は搭乗者の描画位置（{@link #getPassengerAttachmentPoint}）と操縦者
+     * （{@link #getControllingPassenger}）を決め、それらは両側で問われるから。{@link #switchToNextSeat}
+     * 参照。
      *
-     * <p>The wire form is the occupants' {@link UUID}s in seat order, comma-separated, with an empty
-     * field for an empty seat: {@code "u0,,u2"} is a driver in seat 0, seat 1 free, a rider in
-     * seat 2.
+     * <p>通信形式は乗員の {@link UUID} を座席順にカンマ区切りで並べた物。空席は空欄になる。
+     * {@code "u0,,u2"} なら座席0に運転手、座席1は空、座席2に搭乗者。
      */
     private static final EntityDataAccessor<String> DATA_SEATS =
             SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.STRING);
 
-    /** What a machine with no file at all is worth, so that the first scratch does not finish it. */
+    /**
+     * タンクに残っている燃料。
+     *
+     * <p>同期する理由は2つあり、どちらも「持ち主はサーバーだが、必要とするのはクライアント」だ。飛行モデル
+     * を回しているのは操縦しているクライアントなので、乾いたタンクが実際に推力を切るにはそちら側がそれを
+     * 知っていなければならない。そして計器はそれを表示する。数値の持ち主はサーバーで、燃やすのも給油する
+     * のもあちら側だけだ。
+     */
+    private static final EntityDataAccessor<Float> DATA_FUEL =
+            SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.FLOAT);
+
+    /** ファイルが1つも無い機体の耐久。最初の擦り傷で終わらないように。 */
     public static final float DEFAULT_HEALTH = 300.0F;
 
     /**
-     * Hit points a single iron ingot stands for, for a machine whose file does not price its own
-     * scrap. A three-hundred-point airframe comes to thirteen ingots, which is a machine's worth of
-     * metal without being a reason to build aeroplanes in order to break them.
+     * 自分のスクラップ量をファイルに書いていない機体で、鉄インゴット1個が相当する耐久値。300点の機体なら
+     * 13個で、機体1台分の金属としては妥当だが「壊すために機体を作る」理由にはならない量。
      */
     private static final float HEALTH_PER_INGOT = 24.0F;
 
     /**
-     * How loud a fist on the skin is, and how high it rings.
+     * 外皮を拳で叩いた時の音量と高さ。
      *
-     * <p>Quiet, and higher than the metal both halves of it are borrowed from. What is wanted is the
-     * sound of somebody finding out the thing is made of steel, not the sound of a forge.
+     * <p>静かで、素材を借りてきた両方の金属音より高い。欲しいのは「これが鋼でできていると気付いた音」で
+     * あって、鍛冶場の音ではない。
      */
     private static final float KNUCKLE_VOLUME = 0.45F;
     private static final float KNUCKLE_PITCH = 1.5F;
 
-    /** The boxes this machine is made of, built once in the constructor. See {@link #buildParts}. */
+    /** この機体を構成する箱。コンストラクタで一度だけ組む。{@link #buildParts} 参照。 */
     /**
-     * How far a machine may have moved in one tick and still be taken to have travelled there rather
-     * than to have been put there. Beyond it, whoever is standing on the deck stays where they are.
+     * 1tickでどれだけ動いても「そこへ置かれた」ではなく「そこまで進んだ」と見なすか。これを超えたら、甲板
+     * の上に立っている者はその場に留まる。
      */
     private static final double CARRY_LIMIT = 32.0;
 
     protected VehiclePart[] parts = new VehiclePart[0];
-    /** Where all of the boxes were, last time they were placed. See {@link #placedBounds}. */
+    /** 前回配置した時点で全ての箱がどこにあったか。{@link #placedBounds} 参照。 */
     @Nullable
     private AABB placed;
-    /** Where the machine itself was then, and which way it was pointing. See {@link #carryStanders}. */
+    /** その時点で機体自身がどこにいて、どちらを向いていたか。{@link #carryStanders} 参照。 */
     @Nullable
     private Vec3 carriedFrom;
     private float carriedHeading;
 
-    /** The last blow taken, so one that arrives through several boxes at once only lands once. */
+    /** 直近に受けた打撃。複数の箱を同時に経由して届いた1発が1回だけ効くように。 */
     @Nullable
     private DamageSource lastHurtSource;
     private long lastHurtTime = Long.MIN_VALUE;
 
     /**
-     * How long this has been a wreck, in ticks, and how hard it was still moving last tick.
+     * 残骸になってからの tick 数と、前 tick にまだどれだけ動いていたか。
      *
-     * <p>The age is what the fire burns down from, and it is written into the world with everything
-     * else: a wreck left overnight is cold in the morning rather than freshly alight. The other two
-     * are only wanted between one tick and the next -- they are how the moment a falling wreck
-     * arrives is noticed at all, which is the tick its speed stops being a speed.
+     * <p>年齢は炎が燃え尽きていく基準で、他の物と一緒にワールドへ書き込まれる。一晩置かれた残骸は朝には
+     * 燃えたてではなく冷えている。他の2つは tick と tick の間でしか要らない——落下中の残骸が到着した瞬間を
+     * 検出する手段であり、それは「速度が速度でなくなる tick」だ。
      */
     private int wreckAge;
     private boolean wasFalling;
     private double fallSpeed;
 
-    /** The name, which cannot change: an entity's type is settled when it is made. */
+    /** 名前。変わることは無い。エンティティの型は生成時に決まるので。 */
     @Nullable
     private ResourceLocation vehicleId;
-    /** The boxes under that name, and which set of files they came out of. */
+    /** その名前に対応する箱と、それがどのファイル群から来たか。 */
     @Nullable
     private VehicleShape shape;
     private int shapeVersion = -1;
 
-    /** What the machine is carrying inside it, and what its ground crew rearm it out of. */
+    /** 機体が内部に積んでいる物であり、地上要員が再武装に使う元。 */
     private final VehicleHold hold = new VehicleHold(this);
 
     protected VehicleEntityBase(EntityType<?> type, Level level) {
@@ -174,12 +177,12 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     // ------------------------------------------------------------------
-    // What the machine is
+    // 機体が何であるか
     // ------------------------------------------------------------------
 
     /**
-     * This machine's id, which is its entity type's id. Everything else about it, from its file to
-     * its model to the item that places it, is found under the same name.
+     * この機体の ID＝エンティティ型の ID。ファイルからモデルから設置アイテムまで、この機体に関する他の全部
+     * が同じ名前で見つかる。
      */
     public ResourceLocation getVehicleId() {
         ResourceLocation id = this.vehicleId;
@@ -193,11 +196,10 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * The boxes this machine is made of.
+     * この機体を構成する箱。
      *
-     * <p>Held rather than looked up afresh, but only for as long as the files stand still: the copy
-     * is thrown away the moment {@link Definitions} reports a different version, so a {@code /reload}
-     * still takes effect on machines that are already out there.
+     * <p>毎回引き直さず保持するが、それはファイルが動かない間だけ。{@link Definitions} が別のバージョンを
+     * 報告した瞬間に写しを捨てるので、{@code /reload} は既に世界にいる機体にも効く。
      */
     public VehicleShape getShape() {
         VehicleShape current = this.shape;
@@ -212,39 +214,35 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return current;
     }
 
-    /** Called whenever a reload has handed the machine a different set of boxes. */
+    /** リロードで機体に別の箱一式が渡された時に呼ばれる。 */
     protected void onShapeChanged() {
     }
 
     /**
-     * What the engine sounds like, from the machine's own file.
+     * エンジンの音。機体自身のファイルから。
      *
-     * <p>Declared here so that {@code EngineSounds} can be given a machine rather than an aeroplane.
-     * A tank's engine and a jet's want exactly the same three things said about them — which
-     * recording, how loud, and how far it carries — and there was never a reason for the code that
-     * plays one to know which it had.
+     * <p>ここで宣言しているのは、{@code EngineSounds} に「機体」を渡せるようにするため（「飛行機」ではなく）。
+     * 戦車のエンジンとジェットのエンジンについて言うべきことはまったく同じ3つ——どの音声か、どれだけの音量
+     * か、どこまで届くか——であり、鳴らす側がどちらを持っているか知る理由は元々無かった。
      */
     /**
-     * The chassis figures every machine has, whatever it is: how big its plain box is, how far it is
-     * tracked, and how far it goes on being reported once it is past the loaded world.
+     * 種類を問わず全機体が持つ車体諸元。素の直方体の大きさ、追跡距離、そしてロード済みの世界を越えた後も
+     * 報告され続ける距離。
      *
-     * <p>Asked by {@code EntityTrackingMixin}, which has no business knowing whether the thing it is
-     * deciding about flies or drives — only that a machine is worth hearing about further away than
-     * a cow is.
+     * <p>訊いてくるのは {@code EntityTrackingMixin} で、あちらは判断対象が飛ぶか走るかを知る必要が無い
+     * ——「機体は牛より遠くから知らせる価値がある」ということだけ分かればよい。
      */
     /**
-     * Ticks wherever it is, but only on a client.
+     * どこにいても tick する。ただしクライアントでのみ。
      *
-     * <p>A machine beyond the world the player has loaded is still being sent, and is still drawn as
-     * a ghost, but the client stops ticking anything whose chunk it does not have — and one that is
-     * not ticked never runs the interpolation that the position packets feed, so what is drawn out
-     * there is a contact frozen at the moment it crossed the edge. Saying it always ticks is what
-     * keeps it moving. It is the same answer for a tank as for an aeroplane: the turret of a frozen
-     * ghost is the most misleading thing on the screen.
+     * <p>プレイヤーがロードした世界の外にいる機体も送られ続け、ゴーストとして描かれ続ける。しかしクライアン
+     * トは chunk を持っていない物の tick を止める——tick されない物は位置パケットが供給する補間を回さないの
+     * で、そこで描かれるのは「縁を越えた瞬間に凍り付いた目標」になる。常に tick すると宣言することがそれを
+     * 動かし続ける。戦車でも機体でも答えは同じだ。凍ったゴーストの砲塔は画面上で最も誤解を招く物になる。
      *
-     * <p>Emphatically not on the server. Out there a machine ticks because something is holding its
-     * chunk open; ticking anyway would run the physics over ground the server has not loaded, and
-     * every block it asked about would be generated on the spot to answer.
+     * <p>サーバーでは断じてやらない。あちらでは何かが chunk を開いているから機体が tick するのであって、
+     * それでも tick させれば、サーバーがロードしていない地面の上で物理を回し、問い合わせた全ブロックがその
+     * 場で生成されることになる。
      */
     @Override
     public boolean isAlwaysTicking() {
@@ -252,19 +250,23 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * The one thing every machine does whatever else it is doing: if it is a wreck, it burns.
+     * 他に何をしていようと全機体がやる唯一のこと。残骸なら燃える。
      *
-     * <p>Here rather than in each machine's own tick because it is the same fire either way, and
-     * because both of them call up to this on their way through. Server side alone: every one of
-     * these effects is a particle packet or a sound, and a client that made its own would draw the
-     * fire twice for anybody who could see it.
+     * <p>各機体の tick ではなくここに置いてあるのは、どちらでも同じ火だからで、両者ともここへ上がってくる
+     * から。サーバー側のみ。この演出は1つ残らずパーティクルパケットか音であり、クライアントが自前で作れば
+     * 見える者には火が二重に描かれる。
      *
-     * <p>Run before the machine has moved this tick, which is what puts the smoke a wreck leaves
-     * behind it rather than in front of it.
+     * <p>この tick に機体が動く前に走らせる。それが、残骸の残す煙を前方ではなく後方に置く。
      */
     @Override
     public void tick() {
         super.tick();
+
+        // 残骸の判定より前に。燃料はどの機械も、飛んでいようが走っていようが同じように消す物であり、以下の
+        // 残骸専用の分岐に入る資格とは無関係だ。中で自分の条件を見る。
+        if (!this.level().isClientSide) {
+            this.tickFuel();
+        }
 
         if (!this.isWrecked() || !(this.level() instanceof ServerLevel level)) {
             return;
@@ -272,22 +274,19 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
 
         this.wreckAge++;
 
-        // The delta movement rather than getVelocity(). This runs before the machine has moved this
-        // tick, and getVelocity() on the side running the physics is measured from how far it has
-        // got -- which at this point in the tick is nowhere, every tick. What the delta holds here is
-        // what last tick left it at, which is exactly how the wreck is falling.
+        // getVelocity() ではなく deltaMovement を使う。これはこの tick に機体が動く前に走り、物理を回して
+        // いる側の getVelocity() は「どこまで進んだか」から測るので、tick のこの時点では毎回ゼロになる。
+        // ここで delta が持っているのは前 tick が残した値で、それがまさに残骸の落ち方。
         Vec3 velocity = this.getDeltaMovement();
-        // Still coming down, which is not the same as still moving. A write-off carries its speed
-        // into the ground and ploughs along it, so a wreck that touched down at the top of a field
-        // can still be travelling at the bottom of it — and the plume belongs where it first hit,
-        // not where the skid ran out.
+        // まだ落ちているかどうかは、まだ動いているかどうかとは別。全損機は速度を地面へ持ち込んでそのまま
+        // 滑るので、畑の上端で接地した残骸が下端でもまだ動いていることがある——そして噴煙が属するのは最初に
+        // 当たった場所であって、滑走が止まった場所ではない。
         boolean falling = velocity.lengthSqr() > WreckEffects.FALLING && !this.onGround();
         double reach = this.reach();
 
         if (falling) {
-            // The fastest it managed on the way down, not the speed it happens to have as it stops.
-            // A wreck skids for a few ticks after it lands, and the impact is worth the height it
-            // fell from rather than the last of the slide.
+            // 落下中に出した最大速度であって、止まる時にたまたま持っていた速度ではない。残骸は着地後も
+            // 数tick滑るし、衝撃は滑走の終わりではなく落ちてきた高さに見合うべきだから。
             this.fallSpeed = Math.max(this.fallSpeed, velocity.length());
         } else if (this.wasFalling) {
             WreckEffects.impact(level, this.position(), this.fallSpeed, reach);
@@ -304,69 +303,201 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     public abstract VehicleChassis.Sound soundSetup();
 
     /**
-     * {@code engine.<vehicle>}: the root of everything a machine's engine is recorded under.
+     * {@code engine.<vehicle>}。機体のエンジン音が収録される名前の根。
      *
-     * <p>Named on this side rather than with the rest of the sounds because the server has to be
-     * able to ask for one, and the server has never seen a resource pack. See
-     * {@code ModSounds}, which is where the client end of the same name lives.
+     * <p>他の音と一緒ではなくこちら側で名付けているのは、サーバーがこれを要求できる必要があり、サーバーは
+     * リソースパックを一度も見たことが無いから。同じ名前のクライアント側は {@code ModSounds} にある。
      */
     public static final String SOUND_PREFIX = "engine.";
 
-    /** How hard the engine is working, in [0, 1]: what the note is pitched and faded from. */
+    /** エンジンの負荷（[0,1]）。音の高さと音量をここから決める。 */
     public abstract float getEngineNote();
 
+    // ------------------------------------------------------------------
+    // 燃料
+    // ------------------------------------------------------------------
+
     /**
-     * How much reheat the engine is delivering, in [0, 1].
+     * この機械のタンクの仕様。機体はエンジンの、地上車両は駆動系の一部として書く。
      *
-     * <p>Nothing at all for almost everything: a tank has no afterburner and neither has a
-     * helicopter. It is asked for out here rather than on the aircraft because the engine note is,
-     * and what the burner does to that note is the same question as how hard the engine is working.
-     * See {@code EngineSoundInstance}.
+     * <p>抽象のままにしてあるのは、燃料が「どこに書かれているか」だけが種類ごとに違い、それ以外は全部同じ
+     * だからだ。燃料を持たない機械は {@link VehicleChassis.Fuel#NONE} を返せばよく、そうすれば以下は
+     * 何もしない。
+     */
+    public abstract VehicleChassis.Fuel fuelSetup();
+
+    /** タンクに残っている量。両側で同じ値を返す。 */
+    public float getFuel() {
+        return this.entityData.get(DATA_FUEL);
+    }
+
+    /** 0を下回らず、タンクの容量を超えない。サーバーのみ。 */
+    public void setFuel(float left) {
+        if (!this.level().isClientSide) {
+            this.entityData.set(DATA_FUEL, Mth.clamp(left, 0.0F, this.fuelSetup().capacity()));
+        }
+    }
+
+    /**
+     * タンクへ入れて、実際に入った量を返す。溢れる分は受け取らない——燃料アイテムは満タンの機械に対して
+     * 消費されずに済むべきで、それを判断できるのは入れてみた結果だけだ。
+     *
+     * @return 実際に入った量。満タンなら0
+     */
+    public float addFuel(float amount) {
+        if (this.level().isClientSide || amount <= 0.0F) {
+            return 0.0F;
+        }
+
+        float before = this.getFuel();
+        this.setFuel(before + amount);
+
+        return this.getFuel() - before;
+    }
+
+    /** 満タンに対する残量の割合（[0,1]）。燃料を持たない機械は常に満タンと答える。 */
+    public float getFuelFraction() {
+        VehicleChassis.Fuel fuel = this.fuelSetup();
+
+        return fuel.fitted() ? Mth.clamp(this.getFuel() / fuel.capacity(), 0.0F, 1.0F) : 1.0F;
+    }
+
+    /**
+     * エンジンを回せるだけの燃料があるか。
+     *
+     * <p>タンクを持たない機械——ファイルが容量0と書いた物——は常に真だ。燃料の概念そのものを持たない機械が
+     * 燃料切れで止まることはない。
+     */
+    public boolean hasFuel() {
+        return !this.fuelSetup().fitted() || this.getFuel() > 0.0F;
+    }
+
+    /** 燃料を積む機械が、それを切らしているか。計器と警報が問う向き。 */
+    public boolean isOutOfFuel() {
+        return this.fuelSetup().fitted() && this.getFuel() <= 0.0F;
+    }
+
+    /**
+     * エンジンが今かかっているか。燃料を消すかどうかの判断であって、出力の大小ではない。
+     *
+     * <p>誰かが乗っているか、あるいはレバーが入っているか。放置された機械のエンジンは止まっていると見なす。
+     * 野原に置いた戦車が翌週には空タンクになっている——それは誰も望まない現実味だ。
+     */
+    protected boolean isEngineRunning() {
+        return this.getControllingPassenger() != null || this.getEngineNote() > 0.0F;
+    }
+
+    /**
+     * この tick 分の燃料を燃やす。サーバーのみ。残骸は燃やさない——燃える物はもう燃えた。
+     *
+     * <p>消費はエンジン負荷に従う。速度でも距離でもない。垂直に上っている機体は最も速く消費するし、それは
+     * どこへも進んでいない。{@link VehicleChassis.Fuel#burn} 参照。
+     */
+    private void tickFuel() {
+        VehicleChassis.Fuel fuel = this.fuelSetup();
+
+        if (!fuel.fitted() || this.isWrecked() || !this.isEngineRunning()) {
+            return;
+        }
+
+        float burnt = fuel.burn(this.getEngineNote(), this.getAfterburner());
+
+        if (burnt > 0.0F) {
+            this.setFuel(this.getFuel() - burnt);
+        }
+
+        // 燃やした分を外部タンクから補う。実機と同じで、増槽は直接エンジンへ送るのではなく本体タンクへ
+        // 移送する。だから増槽が先に空になり、本体は満タンのまま残る——投棄した瞬間に航続距離が尽きること
+        // にはならない。増槽を持たない機械では下の呼び出しが0を返して終わる。
+        // 空きが1単位に満たないうちは引かない。外部タンクは整数単位で数えるので、入る場所が0.08単位しか
+        // 無いところへ1単位を引けば、差の0.92単位は満タンで切り捨てられて消える——1tickあたり十数倍の速さで
+        // 増槽が空になる。溜まって1単位ぶんの空きができてから引けば、1滴も失われない。
+        float room = fuel.capacity() - this.getFuel();
+
+        if (room >= 1.0F) {
+            this.setFuel(this.getFuel() + this.drawExternalFuel(room));
+        }
+    }
+
+    /**
+     * 外部タンクから燃料を引く。既定では持っていないので0。
+     *
+     * <p>{@code AircraftEntity} だけが増槽を吊れるので、そちらが上書きする。基底に置いてあるのは、燃料を
+     * 燃やしているのがここだからで、「どこから補うか」は「いつ補うか」と同じ場所で決まるべきだ。
+     *
+     * @param wanted 本体タンクの空き。これ以上引いても入れる場所が無い
+     * @return 実際に引けた量
+     */
+    protected float drawExternalFuel(float wanted) {
+        return 0.0F;
+    }
+
+    /**
+     * エンジンが出している再燃焼の量（[0,1]）。
+     *
+     * <p>ほとんどの物では常に0だ。戦車にアフターバーナーは無いしヘリコプターにも無い。機体側ではなくここで
+     * 訊くのは、エンジン音がここで訊かれるからで、バーナーがその音に何をするかは「エンジンの負荷」と同じ
+     * 問いだから。{@code EngineSoundInstance} 参照。
      */
     public float getAfterburner() {
         return 0.0F;
     }
 
-    /** How fast the machine is really going, in blocks a tick, on whichever side is asking. */
+    /** 機体の本当の速度（1tickあたりブロック）。訊いている側がどちらでも同じ値。 */
     public abstract Vec3 getVelocity();
 
-    /** The radar and the warning receiver. Server side; whoever is at the controls is sent the picture. */
+    /** レーダーと警戒受信機。サーバー側で、操縦席にいる者へ画面が送られる。 */
     private final Sensors sensors = new Sensors(this);
 
     /**
-     * What this machine can see of everything else, and who can see it.
+     * この機体が他の全部について見える物と、この機体を見ている相手。
      *
-     * <p>On the base rather than on the aircraft because both kinds of machine want the same
-     * instrument, and because they want it about <em>each other</em>: an aeroplane's warning
-     * receiver has to be able to hear a launcher on the ground looking at it, which it can only do
-     * if a launcher on the ground has a radar that is the same sort of thing. A machine whose file
-     * gives it neither a set nor a receiver sweeps for nothing and costs nothing.
+     * <p>機体側ではなく基底に置いてあるのは、両方の種類が同じ計器を欲しがるからで、しかも<em>互いについて
+     * </em>欲しがるから。機体の警戒受信機は、地上の発射機が自分を見ていることを聞き取れなければならず、それ
+     * ができるのは地上の発射機が同種のレーダーを持っている場合だけだ。ファイルがレーダーも受信機も与えて
+     * いない機体は何も掃引せず、コストもゼロ。
      */
     public Sensors getSensors() {
         return this.sensors;
     }
 
     /**
-     * Which way this machine's weapons point.
+     * この機体の兵装がどちらを向いているか。
      *
-     * <p>Not the same question as which way it is <em>lying</em>. An aeroplane aims by pointing
-     * itself, so this is the nose; a machine with a turret aims by traversing, so it is the bore and
-     * has nothing to do with the hull. Everything that has to know where the weapons are looking —
-     * the seeker, the radar's own cone, the sight — asks here rather than picking one of the two,
-     * which is what lets all three work on either kind of machine.
+     * <p>機体が<em>どう寝ているか</em>とは別の問い。機体は自分を向けて狙うのでこれは機首になり、砲塔付きの
+     * 機体は旋回して狙うのでこれは砲身方向であり車体とは無関係だ。兵装の指向方向を知る必要がある物——シーカー、
+     * レーダーの視野、照準——は、2つのどちらかを選ぶのではなくここへ訊く。それが3つとも両方の機体種別で動く
+     * 理由。
      */
     public abstract Vec3 getAimDirection(float partialTick);
 
-    /** What the machine's file says it can see with. {@link VehicleChassis.Radar#NONE} for most. */
+    /** 機体ファイルが言う探知手段。大半は {@link VehicleChassis.Radar#NONE}。 */
     public abstract VehicleChassis.Radar radar();
 
     /**
-     * What the seeker is holding, or null for a machine with no seeker at all.
+     * 機体に取り付けた物のおかげで、シーカーが兵装ファイルの値よりどれだけ遠くまで届くか、そしてロックが
+     * どれだけ速く決まるか。
      *
-     * <p>There is at most one per machine however many weapons it carries: a seeker is a thing that
-     * looks, not a thing that is fired, and the crew have one pair of eyes. Where it actually lives
-     * is each machine's own business — an aircraft keeps it with its pylons, a launcher with its
-     * tubes — and nothing out here needs to know which.
+     * <p>役立つ物を積んでいない機体では1。全地上車両と、センサーステーションが空の全機体がそれ。照準ポッド
+     * を積んだ機体はそれ以上を返す（{@link com.ashvehicles.weapon.EquipmentDefinition} 参照）。訊くのは
+     * {@link com.ashvehicles.weapon.TargetLock} が見る tick で、ポッドの価値がシーカーの中に散らばらず
+     * 1箇所で決まるようにしてある。
+     */
+    public float seekerRangeGain() {
+        return 1.0F;
+    }
+
+    /** ロックが決まる速さについての同じ物。{@link #seekerRangeGain} 参照。 */
+    public float lockRateGain() {
+        return 1.0F;
+    }
+
+    /**
+     * シーカーが捉えている物。シーカーを持たない機体では null。
+     *
+     * <p>兵装を何個積んでいても機体につき最大1つ。シーカーは撃たれる物ではなく見る物で、乗員の目は1対しか
+     * 無い。実際にどこに置かれているかは各機体の都合——機体はパイロンと一緒に、発射機は発射筒と一緒に持つ
+     * ——で、ここではどちらかを知る必要が無い。
      */
     @Nullable
     public TargetLock lock() {
@@ -374,35 +505,30 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Which way the machine is lying, as a rotation rather than as three angles.
+     * 機体がどう寝ているか。3つの角度ではなく回転として。
      *
-     * <p>Heading, elevation and bank are how Minecraft describes a mob's facing, and they are fine
-     * for something that stays the right way up. Neither of these does: an aeroplane at the top of a
-     * loop is inverted and pointing backwards, and a tank across a slope has a roll Minecraft has no
-     * field for at all. A rotation has no such seam.
+     * <p>方位・仰角・バンクは Minecraft が mob の向きを表す方法で、上下が保たれる物には十分だ。ここの機体は
+     * どちらもそうではない。宙返りの頂点の機体は背面かつ後ろ向きだし、斜面を横切る戦車には Minecraft に
+     * フィールドすら無いロールがある。回転にはその継ぎ目が無い。
      *
-     * <p>{@code attitudeO} is what it was at the end of the tick before, so that anything drawn
-     * between two ticks can be interpolated. How the attitude gets its value is each machine's own
-     * business — one integrates it from the controls, the other builds it from the ground.
+     * <p>{@code attitudeO} は前 tick 終了時の値で、2つの tick の間に描かれる物を補間できるようにする。
+     * 姿勢がどう値を得るかは各機体の都合——一方は操作から積分し、他方は地面から組み立てる。
      */
     protected Quaternionf attitude = new Quaternionf();
     protected Quaternionf attitudeO = new Quaternionf();
 
     /**
-     * Puts a machine nobody is flying or driving into a given pose, for the instruments that draw
-     * one.
+     * 誰も操縦していない機体を指定の姿勢にする。それを描く計器のため。
      *
-     * <p>There is a copy of every machine the mod has that exists only to be drawn: the hit readout
-     * needs a picture of whatever a round arrived on, and at the range these are fired at that thing
-     * is usually well outside the client's own world. So one is made from the entity type, never
-     * added to anything, and posed from what the server said — which is this.
+     * <p>この MOD の全機体には「描かれるためだけに存在する複製」がある。命中表示は弾が着いた相手の絵を必要
+     * とするが、この距離で撃たれる以上その相手はたいていクライアント自身の世界の外にいる。だからエンティティ
+     * 型から1つ作り、どこにも追加せず、サーバーが言った通りの姿勢にする——それがこれ。
      *
-     * <p>Both the current attitude and the previous one, because a machine that is never ticked has
-     * no previous one and the renderer interpolates between the two. Setting only the first would
-     * draw it halfway back to whatever it was built at.
+     * <p>現在の姿勢と前回の姿勢の両方を設定する。tick されない機体には前回が無く、レンダラーは2つを補間する
+     * から。片方だけ設定すれば、生成時の姿勢へ半分戻った状態で描かれる。
      *
-     * @param turret where the turret is laid, ignored by anything that has none
-     * @param gun how far the gun is elevated, ignored by anything that has none
+     * @param turret 砲塔の指向。持たない物では無視される
+     * @param gun 砲の仰角。持たない物では無視される
      */
     public void poseForDrawing(Quaternionf hull, float turret, float gun) {
         this.attitude = new Quaternionf(hull);
@@ -413,31 +539,33 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return this.attitude;
     }
 
-    /** The same at a moment between two ticks, for anything drawing it. */
+    /** 2つの tick の間の任意の瞬間における同じ物。描画側のため。 */
     public Quaternionf getAttitude(float partialTick) {
         return new Quaternionf(this.attitudeO).slerp(this.attitude, partialTick);
     }
 
     // ------------------------------------------------------------------
-    // Damage
+    // ダメージ
     // ------------------------------------------------------------------
 
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
-        // A figure rather than this machine's own maximum, because this runs from inside the entity
-        // constructor, before there is a machine to ask. The constructor fills in the real one.
+        // この機体自身の最大値ではなく定数を使う。これはエンティティのコンストラクタの中から走り、その
+        // 時点で訊ける機体がまだ無いから。本当の値はコンストラクタが埋める。
         builder.define(DATA_HEALTH, DEFAULT_HEALTH);
         builder.define(DATA_WRECKED, false);
         builder.define(DATA_SEATS, "");
+        // 耐久と同じ理由で0から始める。これはコンストラクタの中から走るのでまだ機体に訊けない。本当の量は
+        // コンストラクタが満タンで埋める。
+        builder.define(DATA_FUEL, 0.0F);
     }
 
     /**
-     * Whether this is a wreck rather than a machine: the same shape in the same place, burnt through
-     * and good for nothing but the metal in it.
+     * これが機体ではなく残骸か。同じ場所に同じ形であるが、焼け抜けており、中の金属以外に用途が無い。
      *
-     * <p>Asked all over the place, and by both sides. Nothing about a wreck runs -- no engine, no
-     * radar, no trigger, nobody aboard -- and a renderer that has one draws it charred.
+     * <p>あちこちで、しかも両側から訊かれる。残骸では何も動かない——エンジンもレーダーも引き金も無く、誰も
+     * 乗っていない——し、これを持つレンダラーは炭化した姿で描く。
      */
     public boolean isWrecked() {
         return this.entityData.get(DATA_WRECKED);
@@ -447,13 +575,12 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         this.entityData.set(DATA_WRECKED, wrecked);
     }
 
-    /** What a whole machine of this sort is worth, from its file. */
+    /** この種類の機体1台分の価値。ファイルから。 */
     protected abstract float health();
 
     /**
-     * What a whole machine of this sort is worth, in hit points. Never nothing, whatever the file
-     * says: one worth zero is destroyed by the first scratch it takes, which is not a thing anybody
-     * means to write down and would be very hard to work out from the machine vanishing.
+     * この種類の機体1台分の耐久値。ファイルが何と言おうと0にはしない。0の機体は最初の擦り傷で破壊され、
+     * それは誰も書くつもりのない値だし、機体が消えたという結果から原因を突き止めるのは極めて難しい。
      */
     public float getMaxHealth() {
         return Math.max(this.health(), 1.0F);
@@ -464,16 +591,16 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Sets what is left, never below nothing and never above what the machine is worth.
+     * 残り耐久を設定する。0未満にも、機体の最大値超にもしない。
      *
-     * <p>The ceiling matters as much as the floor: one whose file has been edited down since it was
-     * parked would otherwise come back out of the world with more than it can have.
+     * <p>上限は下限と同じくらい重要だ。駐機してからファイルの値を下げられた機体は、そうしないと持てる量を
+     * 超えた状態でワールドから戻ってくる。
      */
     public void setHealth(float health) {
         this.entityData.set(DATA_HEALTH, Mth.clamp(health, 0.0F, this.getMaxHealth()));
     }
 
-    /** What is left as a fraction of a whole machine, in [0, 1]. */
+    /** 機体1台分に対する残り耐久の割合（[0,1]）。 */
     public float getHealthFraction() {
         float max = this.getMaxHealth();
 
@@ -481,48 +608,42 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Whether a round striking one of this machine's boxes is striking armour, and so may be thrown
-     * off it rather than going in. See {@link com.ashvehicles.weapon.Ricochet}.
+     * この機体の箱に当たった弾が「装甲に当たった」ことになるか。つまり中へ入らず弾かれ得るか。
+     * {@link com.ashvehicles.weapon.Ricochet} 参照。
      *
-     * <p>No by default, which is the honest answer for an aeroplane: what a wing is made of is a
-     * skin over ribs, and a cannon round meeting one at any angle goes through it. Armour is a
-     * different thing from thick, and being thrown off it is a different thing from surviving a hit,
-     * so nothing gets it by having a lot of health.
+     * <p>既定は false で、機体には正直な答えだ。主翼はリブの上に張った外皮であり、機関砲弾はどんな角度で
+     * 出会っても通り抜ける。装甲であることと厚いことは別だし、弾かれることと被弾に耐えることも別なので、
+     * 耐久が高いからといってこれが得られることは無い。
      */
     public boolean isArmoured() {
         return false;
     }
 
     /**
-     * How much this machine's armour is worth against being gone through, in degrees taken off the
-     * angle a round would otherwise need before the plate throws it off.
+     * 貫通に対するこの機体の装甲の価値。装甲板が弾を弾くのに本来必要な角度から引く度数で表す。
      *
-     * <p>Only asked of something that {@link #isArmoured} says yes to. The angle itself is not here
-     * and does not need to be — the boxes lie the way the machine lies, so a hull turned to meet the
-     * shot is already the shallower hit.
+     * <p>{@link #isArmoured} が true を返す物にしか訊かない。角度自体はここに無いし、必要も無い——箱は機体
+     * が寝ている通りに寝ているので、射線へ向けて振った車体は既に浅い当たりになっている。
      */
     public float armour() {
         return 0.0F;
     }
 
     /**
-     * Takes a blow, once, however many of the machine's boxes it arrived through.
+     * 打撃を受ける。機体のいくつの箱を経由して届いても1回だけ。
      *
-     * <p>Anything that hurts an area — an explosion above all — asks the level for everything inside
-     * it and hurts each in turn, and the machine's boxes are all in that list. Passed straight
-     * through, a single blast would land once for every box the machine is described with: eleven
-     * times over for the Su-25, seven for the Leopard. That would make a machine's toughness depend
-     * on how finely somebody chose to draw its shape, which is precisely backwards.
+     * <p>範囲にダメージを与える物——とりわけ爆発——はレベルへ範囲内の全部を問い合わせ、順に傷つける。そして
+     * 機体の箱は全部そのリストに入っている。素通しにすれば、1回の爆風が機体の記述に使われた箱の数だけ命中
+     * する。Su-25 なら11回、レオパルトなら7回。それでは機体の頑丈さが「形をどれだけ細かく描いたか」で決まる
+     * ことになり、完全に逆だ。
      *
-     * <p>So the same blow is counted once. Sameness is the damage source itself: one explosion builds
-     * one of those and hands it to everything it touches, while two shells arriving in the same tick
-     * bring one each and both count.
+     * <p>だから同じ打撃は1回だけ数える。同一性の基準はダメージソースそのもの。1回の爆発はそれを1つ作って
+     * 触れた全部へ渡すが、同じ tick に届いた2発の砲弾はそれぞれ1つずつ持ってくるので両方数えられる。
      *
-     * <p>Everything goes through the health and nothing takes the machine out early. A boat is
-     * removed outright by one punch from anyone in creative, and both of these inherited that: an
-     * arrow, a stray swing, a test shot, and a whole machine was gone with three hundred points still
-     * on the gauge. Whoever wants rid of one uses the wrench, which puts it back in their pocket
-     * rather than scattering it over the ground.
+     * <p>全部が耐久を通り、機体を早期に退場させる物は無い。ボートはクリエイティブの誰かの1発の殴打で即座に
+     * 除去され、この2種類はどちらもそれを継承していた。矢1本、振り間違えた一撃、試し撃ち——それで、耐久計に
+     * 300点残ったまま機体1台が消えた。処分したい者はレンチを使う。あちらは地面に撒き散らすのではなくポケット
+     * へ戻す。
      */
     @Override
     public boolean hurt(DamageSource source, float amount) {
@@ -530,8 +651,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             return true;
         }
 
-        // A bare hand does nothing to an airframe but make a noise. Before the wreck check, so that a
-        // burnt-out hulk rings under a fist as readily as a live machine does.
+        // 素手は機体に対して音を出す以外に何もしない。残骸判定より前に置いてあるので、焼け残った船体も
+        // 生きている機体と同じように拳の下で鳴る。
         Player fist = knuckles(source);
 
         if (fist != null) {
@@ -544,9 +665,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             return false;
         }
 
-        // A wreck has already had everything that can happen to it happen. Nothing takes it further:
-        // there is no health left to spend, and going round again would set its own blast off a
-        // second time -- which is exactly what that blast reaching the wreck's own boxes would do.
+        // 残骸には起こり得ることが既に全部起きている。それ以上進む物は無い。使う耐久が残っていないし、
+        // もう一周すれば自分の爆発を2度目に起こすことになる——その爆風が残骸自身の箱へ届けばまさにそうなる。
         if (this.isWrecked()) {
             return true;
         }
@@ -560,9 +680,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         this.lastHurtSource = source;
         this.lastHurtTime = now;
 
-        // Deliberately not markHurt(). All that does is ask the server to broadcast this machine's
-        // velocity at the end of the tick, which for a boat is its knockback and for one of these is
-        // a figure its own physics owns.
+        // 意図的に markHurt() を呼ばない。あれがやるのは tick の終わりにこの機体の速度を送信させることで、
+        // ボートにとってはノックバックだが、この機体にとってはそれは自分の物理が持つ値だ。
         this.setHurtDir(-this.getHurtDir());
         this.setHurtTime(10);
         this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
@@ -575,14 +694,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Whether that blow was somebody's bare hand, which a machine of this size does not feel.
+     * その打撃が素手だったか。この大きさの機体は素手を感じない。
      *
-     * <p>The hand and not the man: what is asked for is the direct cause of the damage rather than
-     * whoever is behind it, so a player's own round, their own bomb and their own blast all still
-     * count for exactly what they are worth. Every one of those arrives with something in between.
+     * <p>人ではなく手を見る。問うのはダメージの直接原因であって背後にいる者ではないので、プレイヤー自身の
+     * 弾も爆弾も爆風も、それぞれの価値通りに数えられる。それらはどれも間に何かを挟んで届く。
      *
-     * <p>An empty hand only. Anything held is somebody doing something the mod already has an answer
-     * for -- the wrench picks the machine up, and everything else is a weapon and is treated as one.
+     * <p>空手のみ。何かを持っていれば、それは MOD が既に答えを持っている行為だ——レンチは機体を回収し、
+     * それ以外は兵装であり兵装として扱われる。
      */
     @Nullable
     static Player knuckles(DamageSource source) {
@@ -592,15 +710,14 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * The noise a few tonnes of machine makes when somebody hits it with their hand.
+     * 数トンの機体を手で叩いた時の音。
      *
-     * <p>Two of the game's own recordings, so that every client already has both and nothing has to
-     * be shipped: a metal block's knock for the impact, and an anvil quietened right down and pitched
-     * up over the top of it for the ring that carries. Neither on its own is the sound -- the knock
-     * alone is a footstep and the anvil alone is a smithy.
+     * <p>ゲーム本体の音声を2つ使うので、どのクライアントも既に両方持っており、同梱する物は無い。打撃には
+     * 金属ブロックのノック音、そこへ響きを乗せるために金床の音をぐっと下げて高くした物を重ねる。単体ではどち
+     * らも足りない——ノックだけでは足音、金床だけでは鍛冶場になる。
      *
-     * <p>Played at the fist rather than at the machine, whose origin sits down between the wheels and
-     * can be thirty metres from the panel actually being hit.
+     * <p>鳴らす位置は機体ではなく拳。機体の原点は車輪の間に沈んでおり、実際に叩かれたパネルから30m 離れて
+     * いることもあるから。
      */
     private void clank(Player player) {
         Vec3 at = player.getEyePosition();
@@ -613,14 +730,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Takes points off, wherever they came from.
+     * どこから来た物であれ耐久を引く。
      *
-     * <p>Point for point: what a weapon's file says it does is what it does here, with none of the
-     * scaling a boat applies. A machine is worth a few hundred of these and a player is worth twenty,
-     * so the same round that costs a man two hearts costs an airframe four points of three hundred,
-     * which is the whole of what the two numbers mean.
+     * <p>点数はそのまま。兵装ファイルが言う値がここでの値であり、ボートが掛けるような換算は一切無い。機体は
+     * 数百点、プレイヤーは20点の価値なので、人からハート2個分を奪う同じ弾が機体からは300点中の4点を奪う。
+     * その2つの数値が意味するのはそれで全部。
      *
-     * @return true if that was the last of it
+     * @return これで尽きたなら true
      */
     protected boolean wound(float amount) {
         if (amount <= 0.0F) {
@@ -632,29 +748,25 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return this.getHealth() <= 0.0F;
     }
 
-    /** A machine that has been knocked out comes apart rather than dropping a serviceable one. */
+    /** 撃破された機体は、使える機体を落とすのではなくバラバラになる。 */
     @Override
     protected void destroy(DamageSource source) {
         this.wreck();
     }
 
-    /** How big a hole this leaves. */
+    /** これが残す穴の大きさ。 */
     protected abstract float explosionPower();
 
     /**
-     * The end of it: everyone out, the blast, and a burnt-out hulk left standing where the machine
-     * was.
+     * 終わり。全員を降ろし、爆発させ、機体があった場所に焼け残った船体を立てる。
      *
-     * <p>The machine is not removed. A destroyed aeroplane that simply stops existing is the one
-     * thing about being shot down that never reads as anything having happened -- the sky is empty
-     * and so is the ground. What is left instead is the same shape in the same place, dark, inert,
-     * and worth nothing but the metal in it. Somebody with a wrench clears it away and keeps the
-     * scrap; see {@link #salvage}.
+     * <p>機体は除去しない。破壊された機体がただ存在しなくなるのは、撃墜された事実がまったく伝わらない唯一の
+     * 形だ——空も地面も空っぽになる。代わりに残すのは、同じ場所の同じ形で、黒く、動かず、中の金属以外に価値
+     * の無い物。レンチを持った誰かがそれを片付けてスクラップを持ち帰る。{@link #salvage} 参照。
      *
-     * <p>Written off before the blast and not after. An explosion damages everything in reach as it
-     * goes off, and this machine's own collision boxes are in reach: they pass the hit through, the
-     * machine is destroyed again, and it explodes again. Setting the flag first makes {@link #hurt}
-     * a no-op, which is the job the removal used to do.
+     * <p>全損フラグは爆発の後ではなく前に立てる。爆発は起きた瞬間に届く範囲の全部を傷つけ、この機体自身の
+     * 当たり判定の箱も届く範囲にある。箱はその打撃を通し、機体は再び破壊され、再び爆発する。先にフラグを
+     * 立てれば {@link #hurt} が何もしなくなり、それが以前は除去がやっていた仕事になる。
      */
     protected void wreck() {
         if (!(this.level() instanceof ServerLevel level) || this.isRemoved() || this.isWrecked()) {
@@ -665,44 +777,41 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         this.ejectPassengers();
         this.onWrecked();
 
-        // Off the origin, which sits at the wheels or the tracks. What blows up is the machine, not
-        // the ground under it.
+        // 車輪や履帯にある原点から少しずらす。爆発するのは機体であって、その下の地面ではない。
         double reach = this.reach();
         Vec3 pos = this.position().add(0.0, reach * 0.15, 0.0);
         float power = this.explosionPower();
 
-        // The mod's own blast rather than vanilla's: vanilla's carries a bang nobody more than sixty
-        // blocks off can hear and a puff of smoke that is thrown away at thirty-two, which for an
-        // aeroplane coming apart at altitude means the whole thing happens where nobody can see it.
-        // Everything the weapons already do about that, a machine wants for the same reasons.
+        // バニラではなく MOD 自前の爆発を使う。バニラのそれは60ブロック以遠の誰にも聞こえない爆発音と、
+        // 32ブロックで捨てられる煙を持ち歩く。高高度で分解する機体にとってそれは「全部が誰にも見えない場所
+        // で起きる」ことを意味する。兵装が既にそれについてやっていること全部を、機体も同じ理由で欲しがる。
         Effects.blast(level, this, pos, power, Effects.EMBER);
         WreckEffects.destroyed(level, pos, this.getAttitude(), power, reach);
     }
 
     /**
-     * Called on the server the moment the machine becomes a wreck, for whatever each kind of machine
-     * has to shut down: an engine, a radar, whatever was hanging under the wings.
+     * 機体が残骸になった瞬間にサーバーで呼ばれる。種類ごとに止めるべき物——エンジン、レーダー、翼下に吊って
+     * いた物——のために。
      */
     protected void onWrecked() {
     }
 
     // ------------------------------------------------------------------
-    // Clearing a wreck away
+    // 残骸の片付け
     // ------------------------------------------------------------------
 
     /**
-     * What the machine's file says its wreck is worth, in iron ingots, or zero if it does not say.
-     * See {@link #getSalvage()}, which is what anything asking should call.
+     * 機体ファイルが言う残骸の価値（鉄インゴット）。書かれていなければ0。訊く側が呼ぶべきなのは
+     * {@link #getSalvage()} の方。
      */
     protected abstract int declaredSalvage();
 
     /**
-     * How much metal is left in a wreck of this machine, in iron ingots.
+     * この機体の残骸に残っている金属の量（鉄インゴット）。
      *
-     * <p>From the file where the file has an opinion, and otherwise worked out from what the machine
-     * is worth in hit points. Toughness is the nearest thing every machine already has to a
-     * statement of how much of it there is, so a tank comes out heavier than an aeroplane without
-     * anybody having had to write a second number down for it.
+     * <p>ファイルが意見を持っていればそれを使い、無ければ耐久値から求める。全機体が既に持っている値の中で
+     * 「どれだけの量があるか」に最も近いのが頑丈さなので、誰も2つ目の数値を書かなくても戦車は機体より重く
+     * なる。
      */
     public int getSalvage() {
         int declared = this.declaredSalvage();
@@ -711,15 +820,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Clears a wreck away with a wrench and leaves the metal on the ground.
+     * レンチで残骸を片付け、金属を地面に残す。
      *
-     * <p>The one thing that can still be done with a machine once it has been destroyed, and the
-     * reason a wreck is worth leaving standing rather than removing outright. It is deliberately the
-     * same tool that packs a serviceable machine away: taking a machine to pieces is a wrench's job
-     * whether or not there is anything left to fly.
+     * <p>破壊された機体に対してまだできる唯一のこと。残骸を即座に消さず立たせておく価値がある理由でもある。
+     * 使える機体を畳む道具と同じ工具にしてあるのは意図的だ。機体をばらすのは、飛べる物が残っているかどうかに
+     * 関わらずレンチの仕事だから。
      *
-     * <p>What comes back is scrap and not the aeroplane. Anyone who wants their aircraft back has to
-     * not have lost it.
+     * <p>戻ってくるのはスクラップであって機体ではない。機体を取り戻したい者は、失わないようにするしかない。
      */
     public InteractionResult salvage() {
         if (!this.isWrecked()) {
@@ -730,13 +837,12 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             return InteractionResult.SUCCESS;
         }
 
-        // Whatever was aboard comes out with the scrap. A hold survives being shot down: the
-        // airframe is a write-off, but a crate of missiles in the belly of it is still a crate of
-        // missiles, and losing it to a wreck nobody could open would be a poor answer.
+        // 積んでいた物はスクラップと一緒に出てくる。弾庫は撃墜を生き延びる。機体は全損でも、その腹の中の
+        // ミサイル1箱はまだミサイル1箱であり、誰も開けられない残骸と一緒に失わせるのは良い答えではない。
         this.spillHold();
 
-        // The same gamerule vanilla's own destroy() honours, so a world that has turned entity drops
-        // off does not quietly get metal out of this one.
+        // バニラの destroy() が従うのと同じゲームルール。エンティティのドロップを切ったワールドが、これ
+        // から黙って金属を得ることのないように。
         if (this.level().getGameRules().getBoolean(GameRules.RULE_DOENTITYDROPS)) {
             int stack = Math.max(Items.IRON_INGOT.getDefaultMaxStackSize(), 1);
 
@@ -751,20 +857,20 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     // ------------------------------------------------------------------
-    // The hold
+    // 弾庫
     // ------------------------------------------------------------------
 
-    /** Three rows of nine inside the machine. Never null, and never synched to a client. */
+    /** 機体内部の9×3。null にはならず、クライアントへ同期もしない。 */
     public VehicleHold getHold() {
         return this.hold;
     }
 
     /**
-     * Opens the hold for somebody, which is the whole of what the key press comes to.
+     * 誰かのために弾庫を開く。キー押下が行き着く先はこれで全部。
      *
-     * <p>Vanilla's own three-row chest menu, deliberately. A hold is a chest in every way a player
-     * cares about, and one drawn by the game's own screen is one that already works with every
-     * habit and every mod a player has for moving items about.
+     * <p>意図的にバニラの3行チェストメニューを使う。プレイヤーが気にする全ての面において弾庫はチェストで
+     * あり、ゲーム本体の画面で描かれる物は、プレイヤーがアイテム移動のために持っている全ての癖と全ての MOD
+     * と最初から噛み合う。
      */
     public void openHold(Player player) {
         if (this.level().isClientSide) {
@@ -777,15 +883,14 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Tips the hold out on to the ground, for a machine that is about to stop existing.
+     * これから存在しなくなる機体のために、弾庫の中身を地面へぶちまける。
      *
-     * <p>Whatever is inside is the player's and has to go somewhere. Folding an aeroplane away with
-     * a wrench would otherwise quietly take a hold full of missiles into the item with it, which is
-     * the same trap the pylons are stripped one at a time to avoid — and a hold is a good deal
-     * easier to forget about than a store hanging under a wing.
+     * <p>中身はプレイヤーの物であり、どこかへ行かねばならない。さもないとレンチで機体を畳んだ時に、ミサイル
+     * 満載の弾庫が黙ってアイテムの中へ持っていかれる。パイロンを1つずつ外して避けているのと同じ罠であり、
+     * しかも弾庫は翼下に吊った兵装よりずっと忘れやすい。
      *
-     * <p>Under the same gamerule vanilla's own {@code destroy} honours, so a world that has turned
-     * entity drops off does not get an aeroplane's load out of this one.
+     * <p>バニラの {@code destroy} が従うのと同じゲームルールの下で行う。エンティティのドロップを切った
+     * ワールドが、これから機体の積荷を得ることのないように。
      */
     protected void spillHold() {
         if (!(this.level() instanceof ServerLevel)
@@ -801,24 +906,22 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     // ------------------------------------------------------------------
-    // Seats
+    // 座席
     // ------------------------------------------------------------------
 
     /**
-     * The crew places, in the machine's own axes — x to the right, y up, z towards the front — in
-     * blocks. The first is the one that drives or flies it.
+     * 乗員位置。機体自身の軸（x 右、y 上、z 前）でブロック単位。最初の1つが操縦する席。
      */
     protected abstract List<VehicleChassis.Seat> seats();
 
-    /** Where the camera goes for a crew member with no eye of their own, and how the chase is hung. */
+    /** 自前の目を持たない乗員のカメラ位置と、追従視点の吊り方。 */
     protected abstract VehicleChassis.CameraMount cameraMount();
 
     /**
-     * What a first-person eye is bolted to when the seat does not say.
+     * 座席が指定していない場合に一人称視点の目が取り付く先。
      *
-     * <p>The turret on anything with one, because that is where a tank's hatches are: lay the gun
-     * abeam and the view comes round over the side of the hull with it, as it does from a real
-     * cupola. A ship and an aircraft have nothing that swings, so theirs is the hull.
+     * <p>砲塔を持つ物では砲塔。戦車のハッチはそこにあるからだ。砲を横に向ければ視界も車体の側面へ回り込む。
+     * 実際のキューポラと同じ。艦と機体には振れる物が無いので船体になる。
      */
     protected VehicleShape.Mount defaultEyeMount() {
         return VehicleShape.Mount.HULL;
@@ -828,7 +931,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return Math.max(this.seats().size(), 1);
     }
 
-    /** The seat at an index, or the last one there is. Never null, so nobody has to check. */
+    /** その添字の座席。範囲外なら最後の座席。null にはならないので確認不要。 */
     private VehicleChassis.Seat seatAt(int index) {
         List<VehicleChassis.Seat> seats = this.seats();
 
@@ -837,30 +940,28 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
                 : seats.get(Mth.clamp(index, 0, seats.size() - 1));
     }
 
-    /** Seat position relative to the entity origin, before the machine's attitude is applied. */
+    /** エンティティ原点からの座席位置。機体の姿勢を適用する前の値。 */
     public Vec3 getSeatOffset(int index) {
         return this.seatAt(index).pos();
     }
 
     /**
-     * Where the crew member in a seat sees the world from, in the machine's own axes.
+     * その座席の乗員が世界を見る位置。機体自身の軸で。
      *
-     * <p>The seat's own eye where it has one. Where it has not, the machine's single
-     * {@code camera.cockpit} — which is what every seat used before seats could carry an eye, and
-     * so is what a file that has not been touched goes on doing.
+     * <p>座席が自前の目を持っていればそれ。無ければ機体唯一の {@code camera.cockpit}——座席が目を持てる
+     * 以前は全座席がそれを使っていたので、手を加えていないファイルは今もそう動く。
      */
     public Vec3 getSeatEye(int index) {
         return this.seatAt(index).eyeOr(this.cameraMount().cockpit());
     }
 
-    /** What that eye is bolted to: the seat's own answer, or the machine's. */
+    /** その目の取り付け先。座席自身の答え、無ければ機体の答え。 */
     public VehicleShape.Mount getSeatEyeMount(int index) {
         return this.seatAt(index).mountOr(this.defaultEyeMount());
     }
 
     /**
-     * Where a rider sees the world from, in the world's own coordinates: their own seat's eye,
-     * carried by whichever part of the machine that eye is bolted to.
+     * 搭乗者が世界を見る位置を世界座標で。自分の座席の目を、その目が取り付いている機体の部位が運んだ結果。
      */
     public Vec3 eyeOf(Entity rider, float partialTick) {
         int seat = this.getSeatIndex(rider);
@@ -869,21 +970,20 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * A first-person eye in the world. Nothing but a turret makes this any more than
-     * {@link #toWorld}, so only the machine that has one overrides it.
+     * 世界座標での一人称視点の目。砲塔以外にこれを {@link #toWorld} 以上の物にする要素は無いので、砲塔を
+     * 持つ機体だけがこれを上書きする。
      */
     protected Vec3 eyeToWorld(VehicleShape.Mount mount, Vec3 eye, float partialTick) {
         return this.toWorld(eye, partialTick);
     }
 
     /**
-     * Which seat a rider occupies.
+     * 搭乗者がどの座席にいるか。
      *
-     * <p>Their assigned seat, from {@link #DATA_SEATS}, not their place in the passenger list: the
-     * two used to be the same thing, but a crew member can now move between seats without leaving,
-     * so the list order no longer says where anyone sits. A rider the assignment has not yet caught
-     * up with — one aboard for the tick before the server hands out a seat — falls back to their
-     * list order, which is where the first of them would have sat anyway.
+     * <p>{@link #DATA_SEATS} による割り当て席であって、搭乗者リストの中の位置ではない。以前は同じ物だったが、
+     * 今は乗員が降りずに席を移れるので、リスト順はもう誰がどこに座っているかを語らない。割り当てがまだ追い
+     * 付いていない搭乗者——サーバーが席を配る前の tick に乗っている者——はリスト順へフォールバックする。
+     * どのみち最初の1人が座ったであろう席がそこだ。
      */
     public int getSeatIndex(Entity passenger) {
         UUID id = passenger.getUUID();
@@ -898,18 +998,16 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return Math.max(this.getPassengers().indexOf(passenger), 0);
     }
 
-    /** Nobody climbs into a wreck. There is no seat left in it and nothing for them to do there. */
+    /** 残骸には誰も乗り込まない。座席は残っておらず、そこでできることも無い。 */
     @Override
     protected boolean canAddPassenger(Entity passenger) {
         return !this.isWrecked() && this.getPassengers().size() < this.getMaxPassengers();
     }
 
     /**
-     * Whoever is in the driver's seat — seat 0, the one at the controls — rather than whoever
-     * climbed in first. They are usually the same crew member, but once anybody has moved seats
-     * they part company: the controls follow the seat, so a rider who takes seat 0 takes the machine
-     * with it, and one who leaves it hands the machine back to the server until somebody sits there
-     * again.
+     * 最初に乗り込んだ者ではなく、運転席——座席0、操縦装置のある席——にいる者。たいていは同じ乗員だが、誰か
+     * が席を移った時点で別れる。操縦装置は席に従うので、座席0に着いた者が機体を得るし、そこを離れた者は誰か
+     * が再び座るまで機体をサーバーへ返すことになる。
      */
     @Override
     public LivingEntity getControllingPassenger() {
@@ -922,31 +1020,30 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
                 }
             }
 
-            // The seat names a rider who is no longer aboard — a stale line the server has yet to
-            // tidy. Nobody is driving until it does.
+            // その席が、もう乗っていない者を指している——サーバーがまだ片付けていない古い記述だ。片付く
+            // までは誰も運転していない。
             return super.getControllingPassenger();
         }
 
-        // Before the first assignment arrives, fall back to the old rule so a freshly boarded
-        // machine is drivable on the tick it is entered rather than the tick after.
+        // 最初の割り当てが届く前は旧規則へフォールバックする。乗り込んだ機体が、次の tick ではなく乗り
+        // 込んだ tick から運転できるように。
         return seated.length == 0 && this.getFirstPassenger() instanceof LivingEntity crew
                 ? crew
                 : super.getControllingPassenger();
     }
 
     // ------------------------------------------------------------------
-    // Moving between seats
+    // 座席間の移動
     // ------------------------------------------------------------------
 
-    /** The cache behind {@link #seatOccupants}, reparsed only when the synched line changes. */
+    /** {@link #seatOccupants} の裏のキャッシュ。同期文字列が変わった時だけ解析し直す。 */
     @Nullable
     private String seatLine;
     private UUID[] seatCache = new UUID[0];
 
     /**
-     * The occupant of each seat, by seat index, with a null where a seat is empty. Read on both
-     * sides straight off {@link #DATA_SEATS}, and cached so the hot callers — every seat drawn and
-     * every check of who is driving — do not reparse a string they have already seen.
+     * 座席ごとの乗員を座席番号順に。空席は null。両側とも {@link #DATA_SEATS} から直接読み、キャッシュする。
+     * 頻繁に呼ぶ側——描画される全座席と、運転者の確認全部——が既に見た文字列を解析し直さないように。
      */
     private UUID[] seatOccupants() {
         String line = this.entityData.get(DATA_SEATS);
@@ -972,7 +1069,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
                 try {
                     seated[i] = UUID.fromString(fields[i]);
                 } catch (IllegalArgumentException ignored) {
-                    // A malformed field is simply an empty seat; nothing here is worth a crash.
+                    // 壊れた項目は単に空席として扱う。ここにクラッシュに値する物は無い。
                 }
             }
         }
@@ -981,9 +1078,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Reads out the current seating, one seat per slot up to the machine's capacity, and drops
-     * anybody the list still names who is no longer aboard. Server-side working copy: the caller
-     * changes it and writes it back with {@link #writeSeats}.
+     * 現在の座席割りを、機体の定員分の枠として読み出し、リストがまだ名指ししている「もう乗っていない者」を
+     * 落とす。サーバー側の作業用の写しで、呼び出し側が変更して {@link #writeSeats} で書き戻す。
      */
     private UUID[] currentSeating() {
         int max = this.getMaxPassengers();
@@ -994,7 +1090,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             seated[i] = stored[i];
         }
 
-        // Turf out ids for anybody who has since left, so their old seat reads as free.
+        // その後降りた者の ID を追い出し、その席が空席として読まれるようにする。
         for (int i = 0; i < max; i++) {
             if (seated[i] != null && !this.isAboard(seated[i])) {
                 seated[i] = null;
@@ -1030,12 +1126,12 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         this.entityData.set(DATA_SEATS, line.toString());
     }
 
-    /** Sits a rider just climbing aboard in the lowest free seat, which for the first is the driver's. */
+    /** 乗り込んできた者を最も若い空席に座らせる。最初の1人にとってそれは運転席。 */
     private void seatBoarding(Entity passenger) {
         UUID[] seated = this.currentSeating();
         UUID id = passenger.getUUID();
 
-        // Already placed — a reorder rather than a fresh boarding — needs nothing doing.
+        // 既に着席済み——新規搭乗ではなく並べ替え——なら何もしなくてよい。
         for (UUID occupant : seated) {
             if (id.equals(occupant)) {
                 return;
@@ -1052,7 +1148,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         }
     }
 
-    /** Empties the seat of a rider getting out, so the seat is free for the next of them. */
+    /** 降りる者の席を空ける。次の者のために。 */
     private void seatLeaving(Entity passenger) {
         UUID[] seated = this.currentSeating();
         UUID id = passenger.getUUID();
@@ -1071,13 +1167,11 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Moves a rider to the next free seat, wrapping round from the last back to the first. The way a
-     * crew member changes station without getting out: a lone rider walks the whole machine seat by
-     * seat, the driver's included, and where seats are shared everyone keeps to their own until one
-     * is vacated. An occupied seat is never taken from under the crew member in it — a press with
-     * nowhere free to go does nothing.
+     * 搭乗者を次の空席へ移す。最後の席からは最初へ回る。乗員が降りずに配置を変える方法だ。1人だけ乗っている
+     * なら運転席を含めて全席を1つずつ巡れるし、複数人なら誰かが空けるまで各自が自分の席に留まる。使用中の席
+     * をその乗員の下から奪うことは決してない——空きが無い状態で押しても何も起きない。
      *
-     * <p>Server-side, off the switch-seat key. Returns whether the rider actually moved.
+     * <p>サーバー側、座席切替キーから。実際に移動したかを返す。
      */
     public boolean switchToNextSeat(Entity passenger) {
         if (this.level().isClientSide || !this.hasPassenger(passenger)) {
@@ -1127,9 +1221,9 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Built from the machine's own axes rather than from yaw and pitch alone, so a seat banks with
-     * the wings and leans with the hull. Rotating the offset by the euler angles instead leaves the
-     * crew sitting upright in a rolled machine, adrift of the cockpit the model draws.
+     * ヨーとピッチだけからではなく機体自身の軸から組む。だから座席は翼と一緒にバンクし、車体と一緒に傾く。
+     * オイラー角でオフセットを回すと、ロールした機体の中で乗員だけが直立し、モデルが描くコックピットから
+     * 浮いてしまう。
      */
     @Override
     protected Vec3 getPassengerAttachmentPoint(Entity passenger, EntityDimensions dimensions, float scale) {
@@ -1137,22 +1231,20 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Turns an offset written in the machine's own axes (x right, y up, z towards the front) into a
-     * world position at a moment between two ticks. Used for seats, muzzles and the first-person
-     * eye, so all of them ride the machine through whatever it is doing.
+     * 機体自身の軸（x 右、y 上、z 前）で書かれたオフセットを、2つの tick の間の任意の瞬間の世界座標へ変換
+     * する。座席・砲口・一人称視点の目に使うので、そのどれもが機体の動きに乗る。
      */
     public Vec3 toWorld(Vec3 offset, float partialTick) {
         return this.getPosition(partialTick).add(Attitude.toWorld(this.getAttitude(partialTick), offset));
     }
 
     // ------------------------------------------------------------------
-    // The boxes the machine is made of
+    // 機体を構成する箱
     // ------------------------------------------------------------------
 
     /**
-     * Builds the boxes. Called from the constructor and nowhere else: the level records an entity's
-     * parts the moment it is added, and one that has none then is remembered as having none and can
-     * never be given any afterwards.
+     * 箱を組む。コンストラクタからだけ呼ばれる。レベルはエンティティが追加された瞬間にそのパーツを記録し、
+     * その時点でパーツを持たない物は「持たない物」として覚えられ、後から与えることはできないから。
      */
     protected final void buildParts() {
         List<VehicleShape.Box> shape = this.getShape().boxes();
@@ -1160,9 +1252,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         this.parts = new VehiclePart[shape.size() + extra.size()];
 
         for (int i = 0; i < shape.size(); i++) {
-            // Told which box of the file it stands for, so that the machine can put the right one
-            // where it belongs each tick. What the part is measured against from then on is the
-            // Hitbox it was placed with, and never the upright box it is carried around in.
+            // ファイルの何番目の箱かを伝える。機体が毎tick正しい箱を正しい場所へ置けるように。以後その
+            // パーツが判定される相手は、配置に使った Hitbox であって、運搬用の直立した箱では決してない。
             this.parts[i] = VehiclePart.airframe(this, shape.get(i).name(), i);
         }
 
@@ -1170,41 +1261,38 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             this.parts[shape.size() + i] = extra.get(i);
         }
 
-        // Numbered from the machine's own id rather than left with whatever the entity counter
-        // handed out, so that the two sides agree about which box is which. See setId.
+        // エンティティカウンタが配った番号をそのまま使わず、機体自身の ID から番号を振る。どの箱がどれか
+        // について両側が一致するように。setId 参照。
         this.setId(this.getId());
     }
 
     /**
-     * Boxes the file does not list: an aircraft's pylons, which are places on the machine
-     * rather than pieces of it. Nothing else has any.
+     * ファイルに列挙されていない箱。機体のパイロンで、機体の一部ではなく機体上の「場所」だ。他の物は持た
+     * ない。
      */
     protected List<VehiclePart> extraParts() {
         return List.of();
     }
 
     /**
-     * Numbers the machine's boxes after the machine itself, so that both sides call the same box by
-     * the same name.
+     * 機体の箱に、機体自身の ID から派生した番号を振る。両側が同じ箱を同じ名前で呼べるように。
      *
-     * <p>A box is an entity with an id, and ids come from a counter each side keeps for itself. The
-     * server makes a machine, its boxes take the next few numbers, and the client is then told the
-     * machine's id and quietly renumbers only the machine — leaving its boxes on whatever numbers its
-     * own counter had reached. The two sides then disagree about every box.
+     * <p>箱は ID を持つエンティティで、ID は各側が自分で持つカウンタから出る。サーバーが機体を作ると、その
+     * 箱が次の数個の番号を取る。クライアントはその後で機体の ID を伝えられ、機体だけを黙って番号付け直す
+     * ——箱は自分のカウンタが到達していた番号のまま残る。結果、両側は全ての箱について食い違う。
      *
-     * <p>Nothing notices until a player clicks one. Being shot is decided by the server against its
-     * own boxes and never crosses the gap, but a click is the client naming what it hit and asking
-     * the server to act on it; named by a number the server does not recognise, the click reaches
-     * nothing and climbing aboard simply fails to happen.
+     * <p>プレイヤーが箱をクリックするまで誰も気付かない。被弾はサーバーが自分の箱に対して決めるので境界を
+     * 越えないが、クリックは「クライアントが当たった物を名指ししてサーバーに処理を頼む」行為だ。サーバーの
+     * 知らない番号で名指しされたクリックは何にも届かず、搭乗は単に起きない。
      *
-     * <p>Deriving each box's id from the machine's own makes the two sides agree by construction. It
-     * is what vanilla does for the ender dragon, for the same reason.
+     * <p>各箱の ID を機体の ID から導けば、両側は構造的に一致する。バニラがエンダードラゴンに対して同じ理由
+     * でやっていることでもある。
      */
     @Override
     public void setId(int id) {
         super.setId(id);
 
-        // Called once by the entity's own constructor, before there are any boxes to number.
+        // エンティティ自身のコンストラクタから1回、番号を振る箱がまだ無い時点で呼ばれる。
         if (this.parts == null) {
             return;
         }
@@ -1224,21 +1312,19 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return this.parts;
     }
 
-    /** Where the middle of a box is in the world, which is where whatever carries it has put it. */
+    /** 箱の中心の世界座標。それを運んでいる物が置いた場所。 */
     protected abstract Vec3 boxCentre(VehicleShape.Box box);
 
-    /** The rotation a box is standing at in the world, including its own angle within the machine. */
+    /** 箱が世界で取っている回転。機体内での自分の角度も含む。 */
     protected abstract Quaternionf boxRotation(VehicleShape.Box box);
 
     /**
-     * The patch of world every one of the machine's boxes is inside, as of the last time they were
-     * put where they belong.
+     * 前回の配置時点で、機体の全ての箱が収まっていた世界の領域。
      *
-     * <p>One box round the lot of them, for deciding in a single test whether a machine is worth
-     * asking about at all. Anything moving near a carrier described by eighty boxes should find out
-     * that it is nowhere near it without touching eighty of anything, and this is how.
+     * <p>全部を囲む箱1つ。1回の判定で「この機体を問い合わせる価値があるか」を決めるため。80個の箱で記述され
+     * た空母の近くを動く物は、80個の何かに触れずに「近くにいない」と分かるべきで、その手段がこれ。
      *
-     * <p>Null before the machine has ever placed its boxes.
+     * <p>機体が一度も箱を配置していなければ null。
      */
     @Nullable
     public AABB placedBounds() {
@@ -1246,15 +1332,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Takes whatever is standing on the machine along with it, by however far it has moved and come
-     * round since its boxes were last put down.
+     * 機体の上に立っている物を、前回の箱配置以降に機体が進んだ距離と回った角度の分だけ一緒に運ぶ。
      *
-     * <p>Called by whatever places them, straight after doing so: the boxes have to be where the
-     * machine is now before anybody can be found standing on one, and the machine has to have
-     * finished moving for this tick before there is a distance to carry them by.
+     * <p>箱を配置した処理が、その直後に呼ぶ。箱が今の機体位置に来ていなければ誰かがその上に立っていることを
+     * 見つけられないし、この tick の移動を終えていなければ運ぶべき距離が存在しない。
      *
-     * <p>A machine that has been put somewhere else outright — spawned, loaded, teleported — carries
-     * nobody for that tick. The distance would not be a distance it travelled.
+     * <p>別の場所へそのまま置かれた機体——生成、読み込み、テレポート——はその tick に誰も運ばない。その距離は
+     * 機体が進んだ距離ではないから。
      */
     protected final void carryStanders() {
         Vec3 now = this.position();
@@ -1282,8 +1366,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * Works that out, once, at the end of placing the boxes. Called by whatever placed them: it is
-     * the only moment they are all known to be where they belong.
+     * それを箱の配置の最後に1回だけ計算する。配置した処理が呼ぶ。全ての箱が正しい場所にあると分かっている
+     * 唯一の瞬間がそこだから。
      */
     protected final void notePlacement() {
         AABB union = null;
@@ -1300,40 +1384,37 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * One of the machine's boxes as it is really lying in the world: where the machine has carried it
-     * to, at the size its file gives it, at the angle it is lying at.
+     * 機体の箱1つを、世界で実際に寝ている姿で。機体が運んだ位置に、ファイルが与える大きさで、寝ている角度
+     * のまま。
      *
-     * <p>Not an upright box, and not built out of any. See {@link Hitbox}, which is the mod's own
-     * shape and the only thing anything about this machine is ever measured against.
+     * <p>直立した箱ではないし、直立した箱から組んでもいない。{@link Hitbox} 参照。あれがこの MOD 自前の形状
+     * であり、この機体に関する物が判定される唯一の相手。
      */
     protected Hitbox hitbox(VehicleShape.Box box) {
         return new Hitbox(this.boxCentre(box), box.size(), this.boxRotation(box));
     }
 
     /**
-     * Whether the machine's real shape has room where it is standing, give or take a margin.
+     * 機体の本当の形状が今いる場所に収まる余地があるか。余裕を差し引いて判定する。
      *
-     * <p>Used when one is put down. The boxes stop against the world, so a machine set down with a
-     * wing or a track inside a hillside would be wedged there and unable to move; the whole shape has
-     * to be clear rather than just the middle of it.
+     * <p>設置時に使う。箱は世界に対して止まるので、主翼や履帯が斜面に埋まった状態で置かれた機体はそこで
+     * 嵌まって動けなくなる。中央だけでなく形状全体が空いている必要がある。
      *
-     * @param margin how much each box may overlap the world and still count as clear, which keeps a
-     *               wingtip resting a hair inside a slope from making the machine unplaceable
+     * @param margin 各箱が世界とどれだけ重なっても「空いている」と数えるか。翼端が斜面へごくわずかに食い
+     *               込んでいるだけで設置不能にならないようにする値
      */
     public boolean hasRoomHere(double margin) {
         return this.hasRoomHere(margin, Hitboxes.UNDERSIDE_NONE);
     }
 
     /**
-     * The same, with a height below which blocks are the floor rather than something the machine is
-     * inside.
+     * 同じ処理に、「これ以下のブロックは機体が埋まっている物ではなく床である」高さを与えた版。
      *
-     * <p>For asking whether the world has closed around a machine that is standing on it, or coming
-     * down onto it. Nothing below the wheels is an answer to that question; see
-     * {@code Hitboxes.clearOfBlocks}.
+     * <p>地面に立っている、あるいは降下してくる機体に対して「世界が閉じてきたか」を問うため。車輪より下の
+     * 物はその問いの答えにならない。{@code Hitboxes.clearOfBlocks} 参照。
      *
-     * @param underside the height at or below which blocks are floor, or
-     *                  {@link Hitboxes#UNDERSIDE_NONE} to count every one of them
+     * @param underside これ以下のブロックを床と見なす高さ。全部を数えるなら
+     *                  {@link Hitboxes#UNDERSIDE_NONE}
      */
     public boolean hasRoomHere(double margin, double underside) {
         List<VehicleShape.Box> shape = this.getShape().boxes();
@@ -1343,8 +1424,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         }
 
         for (VehicleShape.Box box : shape) {
-            // The box as it is really lying, against the blocks as they really are. The upright box
-            // round a machine set down on a slope holds a good deal of hillside it never touches.
+            // 実際に寝ている姿の箱を、実際にあるブロックに対して判定する。斜面に置かれた機体を囲む直立
+            // した箱は、機体が決して触れない斜面をかなり含んでしまう。
             if (!Hitboxes.clearOfBlocks(this, this.hitbox(box), margin, underside)) {
                 return false;
             }
@@ -1354,14 +1435,12 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * The box the renderer decides visibility against, which is deliberately not the box the machine
-     * collides with.
+     * レンダラーが可視判定に使う箱。機体が衝突に使う箱とは意図的に別物。
      *
-     * <p>The plain hitbox is kept small on purpose — it covers the fuselage, or the hull, so that an
-     * overhanging wingtip or gun barrel does not make the machine unplaceable or catch on every
-     * doorway. That is the right size to collide with and quite the wrong size to be drawn against: a
-     * fifteen-metre aeroplane whose six-metre box has just left the screen is still very much on it,
-     * and would blink out. So the shape it really occupies is what culling is given.
+     * <p>素の当たり判定は意図的に小さく保ってある——胴体や車体だけを覆うので、はみ出した翼端や砲身が機体を
+     * 設置不能にしたり戸口ごとに引っ掛かったりしない。衝突には正しい大きさだが、描画判定にはまるで正しくな
+     * い。6m の箱が画面から外れたばかりの15m の機体はまだ十分に画面上にいるのに、消えてしまう。だからカリング
+     * には実際に占めている形状を渡す。
      */
     @Override
     public AABB getBoundingBoxForCulling() {
@@ -1371,15 +1450,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * How far the machine reaches from its middle, in blocks.
+     * 機体が中心からどれだけ届くか（ブロック）。
      *
-     * <p>Half the longest way across the shape it is really made of, and deliberately not half the
-     * plain box, which for a fifteen-metre aeroplane is a shed measured in the wrong places. This is
-     * what sizes anything drawn at the scale of the machine rather than at the scale of a blast: how
-     * far the fire is strung along a burning airframe, how far the wreckage goes.
+     * <p>実際に構成されている形状の最長差し渡しの半分であって、素の直方体の半分ではない。15m の機体にとって
+     * あれは間違った場所で測った小屋だ。これは「爆発の尺度ではなく機体の尺度で描かれる物」の大きさを決める。
+     * 燃える機体に沿って炎をどこまで並べるか、破片がどこまで飛ぶか。
      *
-     * <p>A machine with no boxes at all falls back to its plain box, which is all anybody
-     * has said about how big it is.
+     * <p>箱を1つも持たない機体は素の直方体へフォールバックする。大きさについて誰かが言ったのはそれだけだから。
      */
     public double reach() {
         double reach = this.shapeReach();
@@ -1387,7 +1464,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return reach > 0.0 ? reach : Math.max(this.getBbWidth(), this.getBbHeight()) * 0.5;
     }
 
-    /** The same from the collision boxes alone, which is zero for a machine that has none. */
+    /** 当たり判定の箱だけから求めた同じ値。箱を持たない機体では0。 */
     private double shapeReach() {
         double reach = 0.0;
 
@@ -1406,9 +1483,9 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * A machine does not collide with itself. Its own boxes are solid to everyone else, which is the
-     * point of them, but to the machine they are simply where it is: without this it spends every
-     * tick shouldering its way past its own wings and never gets up to speed.
+     * 機体は自分自身と衝突しない。自分の箱は他の全員にとって固体であり、それが箱の存在意義だが、機体にとって
+     * それは単に「自分がいる場所」だ。これが無いと機体は毎tick自分の主翼を押しのけて進むことになり、決して
+     * 速度が乗らない。
      */
     @Override
     public boolean canCollideWith(Entity other) {
@@ -1421,17 +1498,20 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
-     * The one thing every machine writes down whatever else it keeps, and the one thing that has to
-     * survive the world being closed on it: a wreck left in a field is still a wreck tomorrow.
+     * 他に何を保持していようと全機体が書き出す唯一の物であり、ワールドを閉じられても生き延びねばならない
+     * 唯一の物。野原に残された残骸は明日も残骸だ。
      *
-     * <p>Both of these are implemented here rather than left abstract, as they are on {@link Entity},
-     * so every machine's own version has to call up to this first.
+     * <p>{@link Entity} のように抽象のままにせずここで実装してあるので、各機体の実装はまずこちらを呼ぶ必要
+     * がある。
      */
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
         this.setWrecked(tag.getBoolean("Wrecked"));
         this.wreckAge = tag.getInt("WreckAge");
         this.hold.load(tag, this.registryAccess());
+        // 燃料システムが存在する前にワールドへ書き出された機械には読む値が無いので、空ではなく満タンで戻る。
+        // 耐久と同じ判断だ。空で戻せば、更新した瞬間に世界中の機械が一斉に動かなくなる。
+        this.setFuel(tag.contains("Fuel") ? tag.getFloat("Fuel") : this.fuelSetup().capacity());
     }
 
     @Override
@@ -1439,6 +1519,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         tag.putBoolean("Wrecked", this.isWrecked());
         tag.putInt("WreckAge", this.wreckAge);
         this.hold.save(tag, this.registryAccess());
+        tag.putFloat("Fuel", this.getFuel());
     }
 
     @Override

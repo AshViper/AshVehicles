@@ -25,105 +25,96 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
- * The noise a seeker makes, which is how the crew know they have a shot without looking down.
+ * シーカーが出す音。乗員が計器を見ずに「撃てる」と知る手段だ。
  *
- * <p>{@link WarningSounds} is the other half of the same afternoon and it is worth saying which is
- * which. That one is the receiver behind the seat: somebody else's seeker has taken <em>you</em>,
- * and the tone is bad news. This one is the missile on your own rail, and the tone is the shot
- * arriving — a growl while the seeker is working on something and a steady note once it has it.
+ * <p>{@link WarningSounds} は同じ午後のもう半分であり、どちらがどちらかを述べておく価値がある。あちらは座席後ろの
+ * 受信機で、他人のシーカーが<em>こちら</em>を捉えたという悪い知らせ。こちらは自分のレール上のミサイルで、射撃機会
+ * の到来を告げる——シーカーが取り組んでいる間はうなり、捉えれば定常音になる。
  *
- * <p><b>Three things to hear, because a lock is three moments rather than one.</b> The seeker takes
- * something and starts working on it; the lock closes, which takes seconds the crew have to hold the
- * boresight through; and then either it takes, or the target gets out of the cone and everything
- * starts again. So there is a search tone that climbs as the lock closes, a lock tone that runs for
- * as long as the lock does, and one short falling note for a lock that was had and is now gone.
+ * <p><b>聞くべき物が3つあるのは、ロックが1つではなく3つの瞬間だからだ。</b>シーカーが何かを捉えて取り組み始める。
+ * ロックが閉じる——乗員がその間ボアサイトを保ち続けねばならない数秒だ。そして捉えるか、目標が円錐から出て最初から
+ * やり直しになるか。だから、ロックが閉じるにつれ上がる捜索音、ロックが続く間鳴る定常音、そして得ていたロックが外れた
+ * ときの短い下降音がある。
  *
- * <p>That middle one is the part a HUD cannot do. The box on the glass already tightens as the lock
- * closes — but a pilot flying a target down is looking at the target, not at the box, and a tone
- * that climbs says the same thing without asking them to look away. See {@link SeekerSoundInstance},
- * which does the climbing.
+ * <p>真ん中の1つは HUD にはできない仕事だ。計器面の枠はロックが閉じるにつれ既に締まっている——だが目標を追っている
+ * パイロットが見ているのは枠ではなく目標であり、上がっていく音は目を逸らさせずに同じことを伝える。上昇を担う
+ * {@link SeekerSoundInstance} 参照。
  *
- * <p><b>How far it climbs depends on whose recording is playing</b>, and that is the whole of the
- * arrangement below. The mod's own search tone was cut for this, at the note it is meant to be
- * heard at, so it is played as cut and the climb is a hand's breadth either side — enough to hear
- * the lock closing, not enough to turn the recording into something else. Anything borrowed —
- * another stage's tone, or the game's own — was cut for something else entirely, so it is shifted
- * well down and climbs the whole way: there is nothing to spoil and everything to distinguish.
+ * <p><b>どれだけ上がるかは、誰の録音が鳴っているかによる。</b>それが下の仕組みの全てだ。MOD 自身の捜索音はこの用途
+ * のために、聞かせたい音程で切ってある。だから切られたまま鳴らし、上昇は上下に手のひら幅程度——ロックが閉じるのが
+ * 聞き取れて、録音を別物に変えてしまうほどではない量だ。借り物——別段階の音やゲーム自身の音——はまったく別の用途で
+ * 切られた物なので、大きく下げてから全域を上がる。台無しにする物が何も無く、区別すべき事だけがあるからだ。
  *
- * <p><b>Both kinds of machine, one instrument.</b> An aeroplane keeps its seeker with its pylons and
- * a launcher keeps it with its tubes, and the two report it to their clients quite differently — the
- * first sends the whole of {@link TargetLock}, the second sends the target and how far along it is.
- * Neither difference is audible, so both are read into one {@link Readout} here and everything below
- * works the same either way.
+ * <p><b>2種類の機体に、1つの計器。</b>機体はシーカーをパイロンと同居させ、発射機は発射筒と同居させるが、両者は
+ * クライアントへの報告方法がかなり違う——前者は {@link TargetLock} を丸ごと送り、後者は目標と進行度を送る。どちらの
+ * 違いも耳には届かないので、ここでは両方を1つの {@link Readout} へ読み込み、以下は同じように動く。
  *
- * <p>Heard by everyone aboard rather than by the crew alone, which is what the instruments already
- * do: a passenger watching the seeker box close on the glass and hearing nothing would be the odd
- * thing, not the other way round.
+ * <p>乗員だけでなく搭乗者全員に聞こえる。計器が既にそうしているからだ。計器面でシーカーの枠が締まるのを見ながら
+ * 何も聞こえない搭乗者の方が、逆より奇妙だろう。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class SeekerSounds {
-    /** What the seeker is doing, as far as anybody listening can tell. */
+    /** 聞いている者に分かる範囲でのシーカーの状態。 */
     public enum Stage {
-        /** Armed with something that can lock, and looking at nothing. Silent. */
+        /** ロック可能な物を積んでいるが何も見ていない。無音。 */
         IDLE,
-        /** On something, and working on it. The growl, climbing as the lock closes. */
+        /** 何かを捉えて取り組み中。ロックが閉じるにつれ上がるうなり。 */
         SEEK,
-        /** It has it. The steady note, for as long as it lasts. */
+        /** 捉えた。続く間だけ鳴る定常音。 */
         LOCK
     }
 
     /**
-     * What the seeker says this tick, on whichever machine the player is riding.
+     * プレイヤーが搭乗している機体で、シーカーがこのtickに伝えること。
      *
-     * @param vehicle which machine, by entity number, so that climbing into another starts afresh
-     * @param weapon  the weapon whose seeker this is, or null for a launcher's single round
-     * @param stage   what it is doing
-     * @param progress how far along the lock is, from 0 to 1
+     * @param vehicle どの機体か。エンティティ番号。別の機体へ乗り換えたら最初からやり直すため
+     * @param weapon このシーカーを持つ兵装。発射機の単一弾なら null
+     * @param stage 現在の状態
+     * @param progress ロックの進行度。0〜1
      */
     public record Readout(int vehicle, @Nullable ResourceLocation weapon, Stage stage, float progress) {
     }
 
-    /** A tone, and what to do with it: the note it starts on, where it climbs to, and how loud. */
+    /** トーンとその扱い方。開始音程、上昇先、音量。 */
     private record Voice(SoundEvent sound, float base, float climb, float volume) {
     }
 
     /**
-     * The search tone as it was cut, and the little it moves. Sixteen hundredths across the whole
-     * lock is under three semitones — plainly audible as a tightening, and nowhere near enough to
-     * make a recorded growl sound like it is being played at the wrong speed.
+     * 切られたままの捜索音と、その僅かな変化幅。ロック全域で0.16は3半音未満——締まっていくのがはっきり聞き取れ、かつ
+     * 録音したうなりが誤った速度で再生されているように聞こえるにはまるで足りない量だ。
      */
     private static final float SEEK_PITCH = 0.92F;
     private static final float SEEK_CLIMB = 0.16F;
-    /** And a tone borrowed from elsewhere, which has nothing to spoil: low, and climbing the lot. */
+    /** そして他所から借りたトーン。台無しにする物が無いので、低く始めて全域を上がる。 */
     private static final float BORROWED_SEEK_PITCH = 0.7F;
     private static final float BORROWED_SEEK_CLIMB = 0.5F;
 
-    /** The lock tone as it was cut, and a borrowed one shifted up to say it is the good news. */
+    /** 切られたままのロック音と、良い知らせだと示すため上げた借り物。 */
     private static final float LOCK_PITCH = 1.0F;
     private static final float BORROWED_LOCK_PITCH = 1.3F;
-    /** A lock falling away, when the game's own note is standing in for one nobody has recorded. */
+    /** ロックが外れた音。誰も録音していないためゲーム自身の音が代役を務める場合。 */
     private static final float LOST_PITCH = 0.7F;
-    /** Neither the lock tone nor the note a lock goes out on climbs anywhere. */
+    /** ロック音もロック喪失音も、どこへも上がらない。 */
     private static final float NO_CLIMB = 0.0F;
 
-    /** Under the engine and under the warning receiver: this is the good news, not the bad. */
+    /** エンジンより、警戒受信機より小さく。これは悪い知らせではなく良い知らせだ。 */
     private static final float SEEK_VOLUME = 0.4F;
     private static final float LOCK_VOLUME = 0.55F;
     private static final float LOST_VOLUME = 0.55F;
 
     /**
-     * What the game has that sounds most like a seeker working, until a pack has better: a drone for
-     * the growl and a clear note for the lock. Deliberately not the note the receiver falls back on
-     * — the one thing these two instruments must never do is sound like each other.
+     * パックがより良い物を持つまでの間、シーカーの作動音に最も近いゲーム内の音。うなりには低い持続音、ロックには澄んだ
+     * 音。受信機のフォールバック音とは意図的に別にしてある——この2つの計器が決してやってはならないのは、互いに似た音に
+     * なることだ。
      */
     private static final ResourceLocation SEARCH_FALLBACK =
             SoundEvents.NOTE_BLOCK_DIDGERIDOO.value().getLocation();
     private static final ResourceLocation LOCK_FALLBACK = SoundEvents.NOTE_BLOCK_PLING.value().getLocation();
 
-    /** What the seeker was last saying, so that a lock going away is heard and a held one is not. */
+    /** シーカーが最後に伝えていた内容。ロックの喪失は鳴らし、保持中は鳴らさないため。 */
     @Nullable
     private static Readout sounding;
-    /** The tone running now, if the seeker has anything to say. */
+    /** シーカーに伝えることがあれば、現在鳴っているトーン。 */
     @Nullable
     private static SeekerSoundInstance tone;
 
@@ -137,8 +128,8 @@ public final class SeekerSounds {
 
         Readout now = readout();
 
-        // Out of the machine, or onto a weapon with no seeker at all: nothing to say, and nothing to
-        // say it about. A tone still running notices the same thing for itself and stops.
+        // 機体から降りたか、シーカーを持たない兵装へ切り替えた。伝えることも、伝える対象も無い。鳴っているトーンも
+        // 自分で同じことに気付いて止まる。
         if (now == null) {
             sounding = null;
 
@@ -148,10 +139,9 @@ public final class SeekerSounds {
         Readout was = sounding;
         sounding = now;
 
-        // A lock that was had and is now gone. Worth one note: it is the difference between a shot
-        // and no shot, and it happens at exactly the moment the crew have stopped watching the box.
-        // Only counted against the same seeker on the same machine, so selecting another weapon or
-        // climbing out is the silence it ought to be rather than a lock breaking.
+        // 得ていたロックが外れた。音1つ分の価値がある。撃てるか撃てないかの違いであり、乗員が枠を見るのをやめた
+        // まさにその瞬間に起きるからだ。同じ機体の同じシーカーに対してのみ数えるので、別の兵装を選ぶことや降車は
+        // ロック喪失ではなく、あるべき沈黙になる。
         if (was != null && was.stage() == Stage.LOCK && now.stage() != Stage.LOCK
                 && was.vehicle() == now.vehicle() && Objects.equals(was.weapon(), now.weapon())) {
             chirp(minecraft, now.weapon());
@@ -161,8 +151,8 @@ public final class SeekerSounds {
             return;
         }
 
-        // Started when it changes, and started again if the sound engine has dropped it — for a full
-        // channel, a resource reload, or a volume slider that has come back up since.
+        // 変化時に開始し、サウンドエンジンが落とした場合は再開する——チャンネル満杯、リソースリロード、あるいは
+        // その後に戻された音量スライダーのため。
         SoundManager sounds = minecraft.getSoundManager();
 
         if (tone == null || !tone.matches(now) || tone.isStopped() || !sounds.isActive(tone)) {
@@ -174,13 +164,11 @@ public final class SeekerSounds {
     }
 
     /**
-     * What the seeker on the machine the player is riding says this tick, or null if there is no
-     * seeker in front of them at all.
+     * プレイヤーが搭乗している機体のシーカーがこのtickに伝えること。目の前にシーカーが無ければ null。
      *
-     * <p>Null and {@link Stage#IDLE} are different answers and the difference matters. Idle is a
-     * seeker that is armed and looking at nothing, which is what a lock breaking leaves behind; null
-     * is no seeker, which is what selecting the gun leaves behind. Only the first of the two is a
-     * lost lock.
+     * <p>null と {@link Stage#IDLE} は別の答えであり、その違いが重要だ。IDLE は「武装済みで何も見ていない」状態で、
+     * ロックが外れた後に残る物。null は「シーカーが無い」状態で、機関砲を選んだ後に残る物。ロック喪失にあたるのは
+     * 前者だけだ。
      */
     @Nullable
     public static Readout readout() {
@@ -204,9 +192,8 @@ public final class SeekerSounds {
     }
 
     /**
-     * An aeroplane's seeker, which is the selected weapon's own and is sent whole: the client has
-     * the target, whether it has taken and how long it has been held, so how far along the lock is
-     * can be worked out here exactly as the instruments work it out.
+     * 機体のシーカー。選択中の兵装が持つ物で、丸ごと送られる。クライアントは目標・捕捉済みか・どれだけ保持している
+     * かを持つので、ロックの進行度は計器が求めるのとまったく同じようにここで求められる。
      */
     @Nullable
     private static Readout aboard(AircraftEntity aircraft) {
@@ -229,12 +216,11 @@ public final class SeekerSounds {
     }
 
     /**
-     * A launcher's seeker, which is the one round its tubes hold. The lock itself lives on the
-     * server; every other side reads the target and the progress out of the synched data, the same
-     * two figures the sight is drawn from.
+     * 発射機のシーカー。発射筒が保持する1発分だ。ロック自体はサーバー上にあり、他の側は同期データから目標と進行度を
+     * 読む。照準が描かれる元と同じ2つの値だ。
      *
-     * <p>Silent while the gun is selected, which is what the sight does: a crew laying the main
-     * armament are not being offered a missile shot, whatever the seeker happens to be holding.
+     * <p>機関砲を選択中は無音。照準の挙動と同じで、主兵装を据えている乗員には、シーカーが何を捉えていようとミサイル
+     * 射撃は提示されない。
      */
     @Nullable
     private static Readout aboard(GroundVehicleEntity vehicle) {
@@ -260,14 +246,12 @@ public final class SeekerSounds {
     }
 
     /**
-     * One short sound, played and forgotten: a lock that has fallen away.
+     * 短い音を1つ鳴らして忘れる。ロックが外れたことを示す音だ。
      *
-     * <p><b>This one borrows from nothing.</b> The other two tones are loops — the mod's own run four
-     * seconds and a resource pack's may run twenty — and a loop played once is not a short sound, it
-     * is the same drone going on over the growl that has already started again underneath it. So
-     * either there is a recording cut for a lock breaking or the game's own note is used, and the
-     * lock tone is left where it belongs. The same reasoning the other way round as
-     * {@link ModSounds}, which will not loop a recording that was not cut to loop.
+     * <p><b>これは何からも借りない。</b>他の2つのトーンはループ——MOD 自身の物で4秒、リソースパックの物なら20秒に
+     * なりうる——であり、ループを1回鳴らしても短い音にはならない。下でまた始まったうなりの上に同じ持続音が重なるだけ
+     * だ。だからロック喪失用に切られた録音があるか、無ければゲーム自身の音を使い、ロック音は本来の場所に残す。ループ
+     * 用に切っていない録音をループさせない {@link ModSounds} と同じ理屈を逆から見た物だ。
      */
     private static void chirp(Minecraft minecraft, @Nullable ResourceLocation weapon) {
         SoundManager sounds = minecraft.getSoundManager();
@@ -275,20 +259,20 @@ public final class SeekerSounds {
         SoundEvent recording = SoundEvent.createVariableRangeEvent(
                 playing == null ? LOCK_FALLBACK : playing);
 
-        // A recording cut for a lock breaking is already the right note. The game's note is not, and
-        // is dropped: what it has to say is that something has gone, and a note that falls says so.
+        // ロック喪失用に切られた録音は既に正しい音程だ。ゲームの音はそうではないので下げる。伝えるべきは「何かが
+        // 失われた」ことであり、下がる音がそれを言う。
         sounds.play(SimpleSoundInstance.forUI(recording, playing == null ? LOST_PITCH : 1.0F, LOST_VOLUME));
     }
 
     /**
-     * The tone to run for this stage: its own recording if there is one, else the nearest to hand,
-     * else the game's own — and, either way, what to do with whichever of the three answered.
+     * この段階で鳴らすトーン。専用録音があればそれ、無ければ最も近い物、それも無ければゲーム自身の物。そしていずれの
+     * 場合も、答えた物をどう扱うか。
      */
     private static Voice voice(SoundManager sounds, Readout readout) {
         Stage stage = readout.stage();
         ResourceLocation own = ModSounds.firstPresent(sounds, cutFor(stage, readout.weapon()));
 
-        // Cut for this stage: played at the note it was cut at.
+        // この段階用に切られた物。切られた音程のまま鳴らす。
         if (own != null) {
             return new Voice(SoundEvent.createVariableRangeEvent(own),
                     stage == Stage.SEEK ? SEEK_PITCH : LOCK_PITCH,
@@ -296,8 +280,8 @@ public final class SeekerSounds {
                     stage == Stage.SEEK ? SEEK_VOLUME : LOCK_VOLUME);
         }
 
-        // Cut for the other stage, or not cut for a seeker at all: shifted, so that the two stages
-        // are still told apart by ear even when one recording is doing the work of both.
+        // 別段階用に切られた物か、そもそもシーカー用でない物。音程をずらすので、1つの録音が両方の仕事をしていても
+        // 2つの段階を耳で区別できる。
         ResourceLocation borrowed = ModSounds.firstPresent(sounds, cutFor(other(stage), readout.weapon()));
         SoundEvent recording = SoundEvent.createVariableRangeEvent(borrowed != null
                 ? borrowed
@@ -309,19 +293,17 @@ public final class SeekerSounds {
                 stage == Stage.SEEK ? SEEK_VOLUME : LOCK_VOLUME);
     }
 
-    /** The other of the two tones, which is what a stage with no recording of its own borrows. */
+    /** 2つのトーンのうちもう一方。専用録音を持たない段階が借りる相手。 */
     private static Stage other(Stage stage) {
         return stage == Stage.SEEK ? Stage.LOCK : Stage.SEEK;
     }
 
     /**
-     * Everything that counts as cut for this stage, this weapon's own first: {@code
-     * weapon.<weapon>.<role>}, then the mod's {@code seeker.<role>}.
+     * この段階用に切られたと見なせる物すべて。まずこの兵装専用の {@code weapon.<weapon>.<role>}、次に MOD の
+     * {@code seeker.<role>}。
      *
-     * <p>Which is what lets one weapon growl differently from the rest without anybody recording a
-     * whole set for it — a heat-seeking head and a radar one do not sound alike, and giving one of
-     * them {@code weapon.<weapon>.seek} and nothing else leaves it borrowing the mod's own for
-     * everything else it has to say.
+     * <p>これのおかげで、一式を録音せずとも1つの兵装だけ他と違ううなりにできる——赤外線シーカーとレーダーシーカーは
+     * 同じ音ではないし、片方に {@code weapon.<weapon>.seek} だけを与えれば、他の伝達内容は MOD 自身の物を借りて済む。
      */
     private static ResourceLocation[] cutFor(Stage stage, @Nullable ResourceLocation weapon) {
         String role = switch (stage) {

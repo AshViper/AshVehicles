@@ -11,14 +11,13 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * The key that opens the hold of the machine the crew are aboard.
+ * 搭乗中の機体の弾庫を開くキー。
  *
- * <p>One key for every seat of everything in the mod, and for the seats only. From outside, a hold
- * is opened by crouching and right-clicking the machine — a click names which aeroplane on the apron
- * was meant, and a key press would have to guess.
+ * <p>MOD 内の全機体の全座席で共通の1キーであり、座席にいるときだけ有効。外からはスニーク＋右クリックで開く
+ * ——クリックならエプロン上のどの機体かを指定できるが、キー押下では推測するしかないからだ。
  *
- * <p>All this does is say that the key went down. Which machine that meant and what is in it are the
- * server's, and are settled in {@link OpenVehicleHoldPayload}.
+ * <p>このクラスがするのはキーが押されたと伝えることだけ。どの機体を指し中に何があるかはサーバーの管轄で、
+ * {@link OpenVehicleHoldPayload} で決まる。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class VehicleHoldHandler {
@@ -34,8 +33,8 @@ public final class VehicleHoldHandler {
 
         boolean asked = false;
 
-        // Drained rather than read, so a press is never left in the queue to fire later; and only
-        // one menu is opened however many presses have piled up in one tick.
+        // 読むのではなく吸い出すので、後で発火する押下がキューに残ることはない。1tickに何回押されても開く
+        // メニューは1つだけ。
         while (ModKeyMappings.OPEN_HOLD.consumeClick()) {
             asked = true;
         }

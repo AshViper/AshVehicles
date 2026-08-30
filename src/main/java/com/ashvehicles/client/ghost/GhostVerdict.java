@@ -1,23 +1,22 @@
 package com.ashvehicles.client.ghost;
 
 /**
- * Why a ghost was, or was not, drawn last frame.
+ * 前フレームでゴーストが描かれた、あるいは描かれなかった理由。
  *
- * <p>Kept for the debug read-outs, and worth keeping: "nothing is on the screen" has half a dozen
- * causes that look identical from the outside — the tier, the frustum, the draw budget, terrain in
- * the way — and guessing between them from a screenshot is how an afternoon goes missing.
+ * <p>デバッグ表示用に保持している。保持する価値はある。「画面に何も出ない」には外から見て区別の付かない原因が
+ * 半ダースあり——階層、視錐台、描画予算、遮る地形——スクリーンショットから推測しようとすると午後が消える。
  */
 public enum GhostVerdict {
-    /** The game's own entity loop is drawing it; the pass left it alone. */
+    /** ゲーム自身のエンティティループが描いている。ゴーストパスは手を出さなかった。 */
     GAME,
-    /** The pass drew it. */
+    /** ゴーストパスが描いた。 */
     DRAWN,
-    /** Terrain stands between it and the camera — the game's own, or Distant Horizons'. */
+    /** カメラとの間に地形がある。ゲーム自身の地形か Distant Horizons の地形。 */
     OCCLUDED,
-    /** Outside the frustum, as it would be drawn. */
+    /** 描かれるはずの位置が視錐台の外。 */
     CULLED,
-    /** Past {@link GhostConfig#maxGhosts()} for this frame; the nearer ghosts had the budget. */
+    /** このフレームの {@link GhostConfig#maxGhosts()} を超えた。予算は手前のゴーストが取った。 */
     BUDGET,
-    /** Beyond {@code ghostEndDistance}, or otherwise in no drawn tier. */
+    /** {@code ghostEndDistance} の外、またはそれ以外の理由で描画対象の階層に無い。 */
     HIDDEN
 }

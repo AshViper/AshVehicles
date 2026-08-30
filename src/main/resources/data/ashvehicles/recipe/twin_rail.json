@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_rack",
+  "key": {
+    "M": {
+      "item": "ashvehicles:machine_parts"
+    },
+    "R": {
+      "item": "ashvehicles:single_rail"
+    }
+  },
+  "pattern": [
+    " M ",
+    "R R"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:twin_rail"
+  }
+}

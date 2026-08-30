@@ -11,103 +11,134 @@ import software.bernie.geckolib.animatable.GeoAnimatable;
 import software.bernie.geckolib.model.GeoModel;
 
 /**
- * Draws any weapon, in flight or hanging under a wing, from its own geometry file.
+ * あらゆる兵装を、飛翔中でも主翼に吊られていても、自身のジオメトリファイルから描く。
  *
- * <p>Nothing here is specific to one weapon: the geometry and texture are found by the weapon's own
- * name, so {@code r60} is drawn from {@code geo/weapon/r60.geo.json} and
- * {@code textures/weapon/r60.png} without being told where they are. That is the same arrangement
- * the aircraft use, and it means a new weapon needs no Java at all — a JSON file in
- * {@code data/}, a model, and a texture.
+ * <p>ここに特定の兵装専用の物は無い。ジオメトリとテクスチャは兵装自身の名前で見つかるので、{@code r60} は
+ * 場所を教えられずとも {@code geo/weapon/r60.geo.json} と {@code textures/weapon/r60.png} から描かれる。機体と
+ * 同じ仕組みであり、新しい兵装に Java は一切要らない——{@code data/} の JSON、モデル、テクスチャだけだ。
  *
- * <p>A weapon with no model of its own falls back to a plain one rather than to a missing-texture
- * cube or a crash, in the same way a weapon with no firing sound falls back to a default. Somebody
- * adding a weapon gets something that flies and is visible from the first minute, and can draw it
- * properly later.
+ * <p><b>しかも兵装だけではない。</b>機体に吊られる3種——兵装、それを吊る
+ * {@link com.ashvehicles.weapon.RackDefinition ラック}、特殊ステーションの
+ * {@link com.ashvehicles.weapon.EquipmentDefinition ポッド}——はまさにこれによって、種類名のディレクトリから描か
+ * れる。サブクラスがIDの他に述べる唯一の事柄がどのディレクトリかだ。{@link #folder} 参照。
  *
- * @param <T> whatever is being drawn: a missile in the air, or a store on a pylon
+ * <p>自前のモデルを持たない兵装は、テクスチャ欠落の立方体やクラッシュではなく素のモデルへフォールバックする。
+ * 発射音を持たない兵装が既定へ落ちるのと同じだ。兵装を追加した人は最初の1分から飛んで見える物を手にし、きちんと
+ * 描くのは後回しにできる。
+ *
+ * @param <T> 描かれる対象。空中のミサイルか、パイロン上の兵装
  */
 public abstract class WeaponModel<T extends GeoAnimatable> extends GeoModel<T> {
-    /** Used by any weapon that has no geometry of its own. */
-    private static final ResourceLocation DEFAULT_GEOMETRY =
-            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "geo/weapon/default.geo.json");
-    private static final ResourceLocation DEFAULT_TEXTURE =
-            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "textures/weapon/default.png");
+    /** 兵装の描画元ディレクトリ。別途指定しない物は全てこれを使う。 */
+    public static final String WEAPONS = "weapon";
+    /** レールと投下ラック。兵装の隣の専用ディレクトリにある。 */
+    public static final String RACKS = "rack";
+    /** ポッド。こちらも専用ディレクトリ。 */
+    public static final String EQUIPMENT = "equipment";
+
     private static final ResourceLocation DEFAULT_ANIMATION =
             ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "animations/weapon/default.animation.json");
 
     /**
-     * Which files each weapon is drawn from, worked out once and then remembered.
+     * 各兵装がどのファイルから描かれるか。一度求めて記憶する。
      *
-     * <p>Both halves of that were being paid for far too often. Building the name meant a string
-     * joined and then validated character by character; deciding whether a pack provides it meant
-     * asking the resource manager, which walks the whole pack stack and ends in a file being looked
-     * for on disk. GeckoLib asks for the geometry and the texture of everything it draws on
-     * <em>every frame</em>, and a laden aircraft is a dozen of those — so a wing full of missiles
-     * was several dozen file-system lookups a frame, for an answer that only a resource reload can
-     * change.
+     * <p>その両半分に対する支払い頻度が高すぎた。名前の構築は文字列連結の後に1文字ずつの検証を伴い、パックが提供
+     * しているかの判定はリソースマネージャへの問い合わせ——パックスタック全体を歩き、最後はディスク上のファイル
+     * 検索——を伴う。GeckoLib は描く物すべてのジオメトリとテクスチャを<em>毎フレーム</em>要求するし、満載の機体
+     * ならそれが十数個ある——つまりミサイルで一杯の主翼は毎フレーム数十回のファイルシステム検索であり、しかも
+     * 答えはリソースリロードでしか変わらない。
      *
-     * <p>Cleared by {@link #clearCache()} when one does. Concurrent because the render thread and
-     * the client tick both reach it, and a stale half-built map would be worse than the lookup.
+     * <p>リロード時は {@link #clearCache()} が消す。レンダースレッドとクライアントtickの両方が触れるので並行
+     * コレクションにしてある。半端に構築された古いマップは、検索コストより悪い。
      */
-    private static final Map<ResourceLocation, Files> FILES = new ConcurrentHashMap<>();
+    private static final Map<Key, Files> FILES = new ConcurrentHashMap<>();
 
-    /** The three files one weapon is drawn from, each already resolved against the packs. */
+    /** 描画対象1つ。どのディレクトリの、どのファイルか。 */
+    private record Key(String folder, ResourceLocation id) {
+    }
+
+    /** 1つの物を描く元の3ファイル。いずれもパックに対して解決済み。 */
     private record Files(ResourceLocation geometry, ResourceLocation texture, ResourceLocation animation) {
     }
 
-    /** Which weapon the thing being drawn is. */
+    /** 描画対象がどの兵装か。 */
     protected abstract ResourceLocation weaponId(T animatable);
+
+    /**
+     * どのディレクトリから描くか。サブクラスが別途指定しない限り weapon。おかげでラックもポッドも、ミサイルと
+     * 同じ3行で描ける。
+     */
+    protected String folder(T animatable) {
+        return WEAPONS;
+    }
 
     @Override
     public ResourceLocation getModelResource(T animatable) {
-        return geometryFile(this.weaponId(animatable));
+        return geometryFile(this.folder(animatable), this.weaponId(animatable));
     }
 
     @Override
     public ResourceLocation getTextureResource(T animatable) {
-        return textureFile(this.weaponId(animatable));
+        return textureFile(this.folder(animatable), this.weaponId(animatable));
     }
 
-    /** Only consulted if a controller ever plays a named animation, and no weapon has one. */
+    /** コントローラが名前付きアニメーションを再生する場合のみ参照される。ここにはそれを持つ物は無い。 */
     @Override
     public ResourceLocation getAnimationResource(T animatable) {
-        return files(this.weaponId(animatable)).animation();
+        return files(this.folder(animatable), this.weaponId(animatable)).animation();
     }
 
-    /** The geometry a weapon is drawn from, by its id; what {@link #getModelResource} answers. */
+    /** ID から引く兵装の描画元ジオメトリ。{@link #getModelResource} の答え。 */
     public static ResourceLocation geometryFile(ResourceLocation weapon) {
-        return files(weapon).geometry();
+        return geometryFile(WEAPONS, weapon);
     }
 
-    /** The texture a weapon is drawn with, by its id; what {@link #getTextureResource} answers. */
+    /** ID から引く兵装の描画用テクスチャ。{@link #getTextureResource} の答え。 */
     public static ResourceLocation textureFile(ResourceLocation weapon) {
-        return files(weapon).texture();
+        return textureFile(WEAPONS, weapon);
+    }
+
+    /** これらのディレクトリにある物の描画元ジオメトリ。 */
+    public static ResourceLocation geometryFile(String folder, ResourceLocation id) {
+        return files(folder, id).geometry();
+    }
+
+    /** これらのディレクトリにある物の描画用テクスチャ。 */
+    public static ResourceLocation textureFile(String folder, ResourceLocation id) {
+        return files(folder, id).texture();
     }
 
     /**
-     * Forgets which files each weapon is drawn from. Called when the resource packs are reloaded,
-     * which is the only thing that can change the answer — so a pack added at runtime is picked up
-     * exactly as it was when every draw asked afresh.
+     * 各兵装の描画元ファイルを忘れる。リソースパックのリロード時に呼ばれる。答えを変えうるのはそれだけなので、
+     * 実行中に追加されたパックも、毎回問い直していた頃とまったく同じように反映される。
      */
     public static void clearCache() {
         FILES.clear();
     }
 
-    private static Files files(ResourceLocation weapon) {
-        return FILES.computeIfAbsent(weapon, id -> new Files(
-                found(file("geo/weapon/", id, ".geo.json"), DEFAULT_GEOMETRY),
-                found(file("textures/weapon/", id, ".png"), DEFAULT_TEXTURE),
+    private static Files files(String folder, ResourceLocation id) {
+        return FILES.computeIfAbsent(new Key(folder, id), key -> new Files(
+                found(file("geo/" + key.folder() + "/", key.id(), ".geo.json"),
+                        fallback("geo/", key.folder(), ".geo.json")),
+                found(file("textures/" + key.folder() + "/", key.id(), ".png"),
+                        fallback("textures/", key.folder(), ".png")),
                 DEFAULT_ANIMATION));
     }
 
-    private static ResourceLocation file(String directory, ResourceLocation weapon, String suffix) {
-        return ResourceLocation.fromNamespaceAndPath(weapon.getNamespace(),
-                directory + weapon.getPath() + suffix);
+    private static ResourceLocation file(String directory, ResourceLocation id, String suffix) {
+        return ResourceLocation.fromNamespaceAndPath(id.getNamespace(),
+                directory + id.getPath() + suffix);
+    }
+
+    /** ディレクトリごとのフォールバック先。同ディレクトリの {@code default} で、種類ごとに1つ。 */
+    private static ResourceLocation fallback(String root, String folder, String suffix) {
+        return ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID,
+                root + folder + "/default" + suffix);
     }
 
     /**
-     * The weapon's own file if any resource pack provides it, otherwise the fallback. Asked once per
-     * weapon per resource reload; see {@link #FILES}.
+     * どれかのリソースパックが提供していれば専用ファイル、無ければフォールバック。問い合わせは物1つにつき
+     * リソースリロード1回あたり1度。{@link #FILES} 参照。
      */
     private static ResourceLocation found(ResourceLocation wanted, ResourceLocation fallback) {
         return Minecraft.getInstance().getResourceManager().getResource(wanted).isPresent()

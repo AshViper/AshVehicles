@@ -2,7 +2,6 @@
   "replace": false,
   "values": [
     "#minecraft:leaves",
-    "#minecraft:flowers",
     "#minecraft:saplings",
     "#minecraft:crops",
     "minecraft:short_grass",

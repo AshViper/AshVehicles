@@ -1,0 +1,22 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_pod",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "c": {
+      "item": "minecraft:coal"
+    }
+  },
+  "pattern": [
+    "SSc",
+    "Scc",
+    "SSS"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:drop_tank"
+  }
+}

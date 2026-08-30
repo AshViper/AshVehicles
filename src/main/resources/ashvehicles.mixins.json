@@ -13,7 +13,8 @@
     "CameraMixin",
     "HitboxMixin",
     "MountHintMixin",
-    "MouseLookMixin"
+    "MouseLookMixin",
+    "PilotChunkGateMixin"
   ],
   "injectors": {
     "defaultRequire": 1

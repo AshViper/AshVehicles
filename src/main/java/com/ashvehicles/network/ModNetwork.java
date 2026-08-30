@@ -10,14 +10,13 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 @EventBusSubscriber(modid = AshVehicles.MODID)
 public final class ModNetwork {
     /**
-     * Bump this whenever a payload's wire format changes.
+     * ペイロードの通信形式を変えたら必ずこの番号を上げること。
      *
-     * <p>Including the spawn data an entity of the mod's own writes for itself: that rides on
-     * NeoForge's own payload rather than one of the ones registered below, but a client reading it
-     * to a different recipe than the server wrote it is the same broken connection. See
-     * {@link com.ashvehicles.entity.VehicleProjectile#writeSpawnData}.
+     * <p>MOD 独自エンティティが自前で書く spawn データも含む。あちらは下で登録するペイロードではなく
+     * NeoForge 自身のペイロードに乗るが、サーバーが書いた形式と違う形式でクライアントが読めば、結果は
+     * 同じ「接続が壊れる」。{@link com.ashvehicles.entity.VehicleProjectile#writeSpawnData} 参照。
      */
-    private static final String PROTOCOL_VERSION = "12";
+    private static final String PROTOCOL_VERSION = "15";
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
@@ -29,6 +28,11 @@ public final class ModNetwork {
                 OpenVehicleHoldPayload::handle);
         registrar.playToServer(SwitchSeatPayload.TYPE, SwitchSeatPayload.STREAM_CODEC,
                 SwitchSeatPayload::handle);
+        registrar.playToServer(DesignatePayload.TYPE, DesignatePayload.STREAM_CODEC,
+                DesignatePayload::handle);
+        registrar.playToServer(GunTriggerPayload.TYPE, GunTriggerPayload.STREAM_CODEC,
+                GunTriggerPayload::handle);
+        registrar.playToServer(EjectPayload.TYPE, EjectPayload.STREAM_CODEC, EjectPayload::handle);
         registrar.playToClient(DefinitionSyncPayload.TYPE, DefinitionSyncPayload.STREAM_CODEC,
                 DefinitionSyncPayload::handle);
         registrar.playToClient(BlastSoundPayload.TYPE, BlastSoundPayload.STREAM_CODEC, BlastSoundPayload::handle);

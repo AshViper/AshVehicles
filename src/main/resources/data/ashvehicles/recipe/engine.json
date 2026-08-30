@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_material",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "M": {
+      "item": "ashvehicles:machine_parts"
+    },
+    "P": {
+      "item": "minecraft:piston"
+    }
+  },
+  "pattern": [
+    "SMS",
+    "MPM",
+    "SMS"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:engine"
+  }
+}

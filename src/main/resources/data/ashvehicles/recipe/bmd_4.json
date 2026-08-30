@@ -1,19 +1,24 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 5
     },
-    "Q": {
-      "tag": "c:storage_blocks/diamond"
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 2
     },
-    "H": {
-      "item": "minecraft:chain"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 6
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     }
-  },
-  "pattern": ["###", "#Q#", "H H"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:bmd_4"

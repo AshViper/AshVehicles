@@ -4,18 +4,17 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
 
 /**
- * One round from an aircraft's gun.
+ * 機体の機銃から出る弾1発。
  *
- * <p>Fast, straight and short-lived. It is given its whole speed at the muzzle and does nothing
- * afterwards but fall, which is the whole of what a bullet does; everything else it needs is in
- * {@link VehicleProjectile}.
+ * <p>速く、真っ直ぐで、短命。砲口で全速度を与えられ、その後は落ちる以外に何もしない。弾がすることはそれが
+ * 全部で、必要な残りは {@link VehicleProjectile} にある。
  */
 public class BulletEntity extends VehicleProjectile {
     public BulletEntity(EntityType<? extends BulletEntity> type, Level level) {
         super(type, level);
     }
 
-    /** Nothing steers a bullet. Gravity is applied for it after the move, as for everything else. */
+    /** 弾を誘導する物は無い。重力は他と同じく移動後に適用される。 */
     @Override
     protected void steer() {
     }

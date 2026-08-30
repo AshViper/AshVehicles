@@ -9,13 +9,10 @@ import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.util.Mth;
 
 /**
- * Something small thrown out of an impact, in two kinds: a spark, which is burning and so lights
- * itself, and a chip of whatever was struck, which is not and does not.
+ * 着弾から飛び散る小片。2種類ある。燃えていて自ら発光する火花と、被弾した物の破片で燃えても光りもしない方だ。
  *
- * <p>They are one class because they behave identically. Both are flung outwards, both are dragged
- * down by their own weight, both bounce off the ground rather than sinking through it, and both
- * shrink to nothing rather than fading, which is what makes a handful of them read as debris and not
- * as a puff of dust.
+ * <p>挙動が同一なので1つのクラスにしてある。どちらも外向きに飛ばされ、自重で引き下ろされ、地面をすり抜けず
+ * 跳ね、フェードせず縮んで消える。ひと掴みのそれらが土埃ではなく破片に見えるのはそのためだ。
  */
 public class SparkParticle extends WeaponParticle {
     private static final int LIFE = 10;
@@ -44,7 +41,7 @@ public class SparkParticle extends WeaponParticle {
     public void tick() {
         super.tick();
 
-        // A spark cools as it goes out; a chip of stone does not, so it is only ever taken away.
+        // 火花は消えながら冷える。石の破片は冷えないので、単に取り除かれるだけ。
         if (this.burning) {
             float left = 1.0F - this.lived(0.0F);
             this.gCol = Math.min(this.gCol, 0.25F + left * 0.75F);
@@ -57,7 +54,7 @@ public class SparkParticle extends WeaponParticle {
         return this.quadSize * (1.0F - this.lived(partialTick) * 0.8F);
     }
 
-    /** A spark is its own light wherever it is; a chip is lit by whatever is around it. */
+    /** 火花はどこにいても自前の光源。破片は周囲の光で照らされる。 */
     @Override
     protected int getLightColor(float partialTick) {
         return this.burning ? LightTexture.FULL_BRIGHT : super.getLightColor(partialTick);

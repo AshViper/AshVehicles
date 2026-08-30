@@ -15,31 +15,29 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
 
 /**
- * The undercarriage: whatever an aircraft sounds like while its legs are on their way up or down.
+ * 降着装置。脚が上げ／下げ作動中に機体が出す音。
  *
- * <p>Nothing is sent about this. The gear lever is already synched, and both sides run the same
- * count from stowed to down, so a client can see the legs travelling for itself and start a sound
- * the moment they do. See {@link AircraftEntity#isGearSettled()}.
+ * <p>これについて送信する物は無い。脚レバーは既に同期されており、格納から展開までのカウントも両側で同じなので、
+ * クライアントは脚の作動を自分で見て、その瞬間に音を鳴らし始められる。{@link AircraftEntity#isGearSettled()}
+ * 参照。
  *
- * <p><b>Which recording.</b> The event the aircraft's file names under {@code sound.gear}; else the
- * one named after the aircraft, {@code <namespace>:gear.<name>}; else the mod's
- * {@code ashvehicles:gear.default}. <b>None of the three is shipped</b>, and if a resource pack
- * provides none of them the gear is silent — a loop is either cut to loop or it is worse than
- * nothing, and there is no recording in the game that would do. Providing one is the whole of what
- * it takes; see {@link ModSounds}.
+ * <p><b>どの録音を使うか。</b>機体ファイルが {@code sound.gear} で指定するイベント、無ければ機体名のイベント
+ * {@code <namespace>:gear.<name>}、無ければ MOD の {@code ashvehicles:gear.default}。<b>3つとも同梱していない</b>
+ * ので、リソースパックがどれも提供しなければ脚は無音になる。ループはループ用に切ってあるか、さもなくば無い方が
+ * ましであり、ゲーム内に流用できる録音は無い。1つ用意すればそれで足りる。{@link ModSounds} 参照。
  */
 public final class GearSounds {
     /**
-     * How often an aircraft with no live gear sound is looked at again. Short, because a gear cycle
-     * is a couple of seconds and starting the sound a quarter of one late would be heard.
+     * 脚の音が鳴っていない機体を再確認する間隔。短い。脚の作動は2秒程度で、0.5秒遅れて鳴らし始めれば気付かれる
+     * からだ。
      */
     private static final int RETRY_TICKS = 2;
 
-    /** Every aircraft this client can see, and its undercarriage, while that has anything to say. */
+    /** このクライアントから見える全機体と、その降着装置（音を出す間だけ）。 */
     public static final LiveSounds<AircraftEntity> SOUNDS =
             new LiveSounds<>(AircraftEntity.class, RETRY_TICKS, GearSounds::start);
 
-    /** Requested recordings already complained about, so a missing file is one line in the log. */
+    /** 既に警告した要求済み録音。欠落ファイルについてのログを1行に留めるため。 */
     private static final Set<ResourceLocation> WARNED = new HashSet<>();
 
     @Nullable
@@ -57,8 +55,8 @@ public final class GearSounds {
     }
 
     /**
-     * The gear recording for an aircraft, or null if no resource pack provides one at all. Resolved
-     * afresh each time a sound is started, so a resource pack change is picked up without a restart.
+     * 機体の脚の録音。どのリソースパックも提供しなければ null。音を鳴らすたびに解決し直すので、リソースパックの
+     * 変更は再起動なしで反映される。
      */
     @Nullable
     public static ResourceLocation gearSound(SoundManager sounds, AircraftEntity aircraft) {

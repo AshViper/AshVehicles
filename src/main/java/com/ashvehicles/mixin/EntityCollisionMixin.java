@@ -10,25 +10,20 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Puts the mod's machines in the way of anything that moves.
+ * この MOD の機体を、動く物すべてに対する障害物として立てる。
  *
- * <p>They are not in the game's own way. A machine's boxes lie at whatever angle the machine is
- * lying at, and the game's collision knows only upright boxes, so the parts a machine is made of
- * refuse to be collided with at all — see {@code VehiclePart.canBeCollidedWith} — and are put back
- * here, as the shapes they really are.
+ * <p>ゲーム標準の障害物にはなっていない。機体の箱は機体が傾いている角度のまま傾いており、ゲームの
+ * 当たり判定は直立した箱しか知らない。そのため機体を構成するパーツは衝突自体を拒否しており
+ * （{@code VehiclePart.canBeCollidedWith} 参照）、本来の形のままここで復活させる。
  *
- * <p>This is the last word on a move rather than a share of it. Minecraft settles the move against
- * the blocks and against everything else first; what arrives here is how far it has decided
- * something may go, and all that happens is that it may be cut down further. Nothing is handed back
- * that the world has already taken away, so a player wedged in a corner is not let out of it by a
- * tank driving past.
+ * <p>これは移動処理の一部ではなく最終決定。Minecraft がまずブロックや他の物との衝突を解決し、ここへ
+ * 来るのは「どこまで動いてよいか」の結論で、ここでできるのはそれをさらに削ることだけ。世界が既に奪った
+ * 分を返しはしないので、隅に嵌まったプレイヤーが横を通る戦車のおかげで抜け出せることはない。
  *
- * <p>What comes of it is what anyone would expect and could not otherwise have: standing on a deck
- * that is tilted and standing on the tilt, walking round a wing rather than round the slab drawn
- * about it, and being lifted onto a track by the same step up that gets a player onto a slab.
- * Minecraft works out whether it has landed from how much of the move survived, and this is inside
- * that reckoning, so a player standing on a hull is standing on the ground as far as the game is
- * concerned.
+ * <p>結果は誰もが期待し、他の方法では得られないもの。傾いた甲板の上に、傾いたまま立てる。翼の周りを、
+ * 翼を囲む直方体ではなく翼の形に沿って歩ける。ハーフブロックに上がるのと同じ段差処理で履帯に乗れる。
+ * Minecraft は移動がどれだけ残ったかで着地を判定し、この処理はその計算の内側にあるので、船体の上に
+ * 立つプレイヤーはゲームから見て地面に立っている。
  */
 @Mixin(Entity.class)
 public abstract class EntityCollisionMixin {

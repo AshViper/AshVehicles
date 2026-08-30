@@ -7,33 +7,29 @@ import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Aircraft controls. The three rotation axes are flown directly: W and S pitch, A and D roll, Q and
- * E yaw, with shift and control on the throttle.
+ * 機体の操作。3つの回転軸を直接操縦する。W/S がピッチ、A/D がロール、Q/E がヨー、シフトとコントロールがスロットル。
  *
- * <p>Several of these sit on keys vanilla already uses. That is deliberate - shift and control fall
- * under the fingers for a throttle - and {@link AircraftInputHandler} swallows what vanilla would
- * otherwise do with them while the player is flying. Shift in particular no longer means "get out";
- * alt does, in every seat of every machine here — see {@link VehicleDismountHandler}.
+ * <p>いくつかはバニラが既に使っているキーに置いてある。意図的だ——シフトとコントロールはスロットルとして指が届く
+ * 位置にある——し、飛行中にバニラがそれらでやることは {@link AircraftInputHandler} が飲み込む。特にシフトはもう
+ * 「降りる」を意味しない。ここでは全機体の全座席で alt がそれだ——{@link VehicleDismountHandler} 参照。
  */
 public final class ModKeyMappings {
     private static final String CATEGORY = "key.categories.ashvehicles";
 
     /**
-     * The stick.
+     * 操縦桿。
      *
-     * <p>These four used to be read straight off the vanilla movement keys instead of having
-     * bindings of their own. That flew perfectly well and could not be changed: pitch and roll never
-     * appeared in the controls screen at all, so a pilot who wanted the nose on a different pair of
-     * keys had nowhere to say so, and anyone who had moved <em>walking</em> off WASD found the
-     * aeroplane still answering to keys that no longer did anything else.
+     * <p>この4つは以前、自前のバインドを持たずバニラの移動キーから直接読んでいた。飛ぶには何の問題も無かったが
+     * 変更できなかった。ピッチとロールが操作設定画面にまったく現れないので、機首を別のキー組に置きたいパイロットに
+     * はそう言う場所が無かったし、<em>歩行</em>を WASD から移した人は、他に何もしなくなったキーに機体がまだ応える
+     * ことに気付いた。
      *
-     * <p>They keep the movement keys as their defaults, so nothing changes for anybody who was happy
-     * with them, and the controls screen marks them as clashing with walking — which is true, is
-     * deliberate, and is the same thing the throttle and the flaps already do here. Nobody walks
-     * while strapped into an aeroplane.
+     * <p>既定値は移動キーのままなので、それで満足していた人には何も変わらない。操作設定画面では歩行と衝突している
+     * と表示される——それは事実であり、意図的であり、ここのスロットルやフラップが既にやっていることと同じだ。機体に
+     * 固定されている間に歩く者はいない。
      *
-     * <p>Stick forward drops the nose, as in any flight simulator, so the walk-forwards key is
-     * {@code pitch_down} rather than {@code pitch_up}.
+     * <p>フライトシミュレータと同様、操縦桿を前へ倒すと機首が下がるので、前進キーは {@code pitch_up} ではなく
+     * {@code pitch_down} だ。
      */
     public static final KeyMapping PITCH_DOWN = create("pitch_down", GLFW.GLFW_KEY_W);
     public static final KeyMapping PITCH_UP = create("pitch_up", GLFW.GLFW_KEY_S);
@@ -47,119 +43,121 @@ public final class ModKeyMappings {
     public static final KeyMapping AIR_BRAKE = create("air_brake", GLFW.GLFW_KEY_B);
     public static final KeyMapping TOGGLE_GEAR = create("toggle_gear", GLFW.GLFW_KEY_G);
     public static final KeyMapping TOGGLE_FLAPS = create("toggle_flaps", GLFW.GLFW_KEY_F);
-    /** Swings the nozzle of a lift-capable aircraft down, and back up again. Nothing on the rest. */
+    /** 揚力系を持つ機体のノズルを下げ、また上げる。それ以外の機体では何もしない。 */
     public static final KeyMapping TOGGLE_VTOL = create("toggle_vtol", GLFW.GLFW_KEY_R);
-    /** Steps through whatever is on the pylons. The trigger itself is the vanilla attack button. */
+    /** パイロン上の物を順送りする。トリガー自体はバニラの攻撃ボタン。 */
     public static final KeyMapping CYCLE_WEAPON = create("cycle_weapon", GLFW.GLFW_KEY_X);
     /**
-     * The two countermeasure handles. Separate keys rather than one, because which of them is the
-     * right one is the question the warning receiver has just answered: a flare for a seeker homing
-     * on heat, chaff for one homing on a radar return. Held down, they keep dispensing.
+     * 吊っている増槽を全部切り離す。飛行中でも構わないし、むしろそのためにある。
+     *
+     * <p>落とした物は返らない——投棄であって取り外しではない。持ち帰りたければ地上でレンチを使う。空になった
+     * 増槽も抗力を払い続けるので、いつ落とすかはパイロットの判断として残る。
+     */
+    public static final KeyMapping JETTISON = create("jettison", GLFW.GLFW_KEY_J);
+    /**
+     * 2つの対抗手段のハンドル。1つではなく別々のキーにしてある。どちらが正解かは警戒受信機が今答えた問いだからだ。
+     * 赤外線誘導にはフレア、レーダー反射誘導にはチャフ。押し続ければ放出し続ける。
      */
     public static final KeyMapping RELEASE_FLARE = create("release_flare", GLFW.GLFW_KEY_C);
     public static final KeyMapping RELEASE_CHAFF = create("release_chaff", GLFW.GLFW_KEY_V);
 
     /**
-     * Held to let the seeker take a target, rather than merely hold whichever it has already got.
+     * 押している間、シーカーに目標を捕捉させる。既に捉えている物を保持するだけではない。
      *
-     * <p>Without this a radar-guided weapon would lock onto whatever sits in the cone the moment it
-     * is selected, with nothing for the pilot to do about it — which is neither how a radar works
-     * nor much of a decision to hand somebody. Held rather than tapped, because a lock the pilot
-     * lets go of before it closes is a lock that was never taken; once it has closed the seeker
-     * holds it on its own and the key can be let go. See {@link com.ashvehicles.weapon.TargetLock}.
+     * <p>これが無いと、レーダー誘導兵器は選択した瞬間に円錐内の何かへロックしてしまい、パイロットには手の出しよう
+     * が無い——レーダーの働き方でもなければ、人に委ねる判断としても物足りない。連打ではなく押し続けにしてあるのは、
+     * 閉じる前に離したロックは最初から取っていないロックだからだ。閉じた後はシーカーが自力で保持するのでキーは離せる。
+     * {@link com.ashvehicles.weapon.TargetLock} 参照。
      */
     public static final KeyMapping RADAR_LOCK = create("radar_lock", GLFW.GLFW_KEY_L);
 
     /**
-     * Held to stop the mouse flying the aeroplane and let it look around instead.
+     * 押している間、マウスによる操縦をやめて見回しに使う。
      *
-     * <p>On the middle mouse button, where the hand already is. Flying by pointing costs the pilot
-     * the one thing the mouse used to be for — a look over the shoulder — and a fight is mostly
-     * spent wanting to know what is behind you. Let go and the view comes back to the mark.
+     * <p>手が既に置かれているマウス中ボタンに割り当てる。ポインティング飛行は、マウス本来の用途——肩越しに振り返る
+     * こと——をパイロットから奪うが、戦闘の大半は後ろに何がいるかを知りたい時間だ。離せば視界はマークへ戻る。
      *
-     * <p>It sits on vanilla's pick-block, which is of no use from inside a cockpit and is swallowed
-     * while flying by {@link AircraftInputHandler}.
+     * <p>バニラのブロック選択に重なるが、あれはコックピット内では無用であり、飛行中は
+     * {@link AircraftInputHandler} が飲み込む。
      */
     public static final KeyMapping FREE_LOOK = create("free_look", InputConstants.Type.MOUSE,
             GLFW.GLFW_MOUSE_BUTTON_MIDDLE);
-    /** Hands the aircraft back to the keys entirely, and the mouse back to looking around. */
+    /** 機体の操縦を完全にキーへ、マウスを見回しへ戻す。 */
     public static final KeyMapping TOGGLE_MOUSE_AIM = create("toggle_mouse_aim", GLFW.GLFW_KEY_M);
     /**
-     * Held to bring the sight up: the view narrows on whatever the gun is laid on, and the mouse
-     * slows to match. One key for every seat at the controls of anything; see {@link AimZoom}.
+     * 押している間、照準を上げる。砲が据えられている物へ視界が狭まり、マウスもそれに合わせて遅くなる。あらゆる物の
+     * 操縦席で共通の1キー。{@link AimZoom} 参照。
      *
-     * <p>On the right mouse button, where every other game puts it. That is vanilla's use key,
-     * which from inside a cockpit or a turret has nothing to use and is swallowed at the controls
-     * by {@link AircraftInputHandler} and {@link GroundVehicleInputHandler}, the same as the attack
-     * button under it.
+     * <p>他のどのゲームもそうしているマウス右ボタンに割り当てる。これはバニラの使用キーだが、コックピットや砲塔の
+     * 内側では使う物が無く、その下の攻撃ボタンと同様に {@link AircraftInputHandler} と
+     * {@link GroundVehicleInputHandler} が操縦席で飲み込む。
      */
     public static final KeyMapping AIM = create("aim", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_RIGHT);
 
     /**
-     * The driver's controls, which are a different set from the pilot's and are bound separately.
+     * ターゲティングポッドのマークを十字線の下の物へ据え、また解放する。
      *
-     * <p>They fall on the same four keys by default, because those are the four keys anybody reaches
-     * for to make something move, and a player is never flying and driving at once. Sharing the
-     * bindings instead would be worse than the duplication: a stick and a pair of tillers do
-     * different things — forward on a stick drops the nose, forward on a tiller drives ahead — and
-     * anybody who wanted the two on different keys would have had nowhere to say so.
+     * <p>意味を持つのはポッド視界が上がっている間だけ。{@link PodCamera} 参照。ジャンプキーに割り当てるが、
+     * コックピット内では跳ぶ足場が無く、攻撃・使用ボタンと同様に {@link AircraftInputHandler} が操縦席で飲み込む。
+     */
+    public static final KeyMapping DESIGNATE = create("designate", GLFW.GLFW_KEY_SPACE);
+
+    /**
+     * 運転手の操作。パイロットとは別の組で、バインドも別々。
+     *
+     * <p>既定では同じ4キーに落ちる。物を動かすとき誰もが手を伸ばすのがその4キーだし、プレイヤーが飛行と運転を同時
+     * にすることは無いからだ。バインドを共有する方が、重複より悪い。操縦桿と操向レバーは別の物だ——操縦桿を前へ倒す
+     * と機首が下がり、レバーを前へ倒すと前進する——し、両者を別のキーに置きたい人にはそう言う場所が無くなる。
      */
     public static final KeyMapping DRIVE_FORWARD = create("drive_forward", GLFW.GLFW_KEY_W);
     public static final KeyMapping DRIVE_BACK = create("drive_back", GLFW.GLFW_KEY_S);
     public static final KeyMapping STEER_LEFT = create("steer_left", GLFW.GLFW_KEY_A);
     public static final KeyMapping STEER_RIGHT = create("steer_right", GLFW.GLFW_KEY_D);
-    /** Holds the vehicle still, and holds it on a slope. */
+    /** 車両をその場に止め、坂でも保持する。 */
     public static final KeyMapping VEHICLE_BRAKE = create("vehicle_brake", GLFW.GLFW_KEY_SPACE);
     /**
-     * The coaxial machine gun's trigger, on a vehicle that carries one.
+     * 同軸機銃のトリガー（搭載車両のみ）。
      *
-     * <p>Its own key rather than a place in the weapon cycle, because a coaxial is not one of the
-     * things a crew choose between: it is clamped to the main gun, it is laid wherever the main gun
-     * is laid, and the whole use of one is a burst into something the gunner is already holding
-     * without putting the cannon away to do it. The attack button stays what it was — whichever
-     * armament is selected — and this is the other barrel in the same mantlet.
+     * <p>兵装サイクルの一員ではなく専用キーにしてある。同軸機銃は乗員が選ぶ選択肢の1つではないからだ。主砲に固定
+     * され、主砲が据えられた所へ据えられ、その用途の全ては「砲手が既に捉えている物へ、主砲を仕舞わずに掃射する」
+     * ことだ。攻撃ボタンは従来通り——選択中の兵装——で、これは同じ防盾のもう1本の銃身である。
      *
-     * <p>{@code Z} is clear of vanilla's in-game keys and falls under the hand already on the
-     * driving keys, which is the hand that is not on the mouse laying the turret.
+     * <p>{@code Z} はバニラのゲーム内キーと衝突せず、運転キーに置かれた手——砲塔を据えるマウスに置かれていない方の
+     * 手——の下に来る。
      */
     public static final KeyMapping FIRE_COAXIAL = create("fire_coaxial", GLFW.GLFW_KEY_Z);
 
     /**
-     * The way out of anything in the mod, cockpit or driver's seat, front seat or back.
+     * MOD 内のあらゆる物から降りる手段。コックピットでも運転席でも、前席でも後席でも。
      *
-     * <p>Not shift, which is what vanilla gets out on and is the throttle in here: a pilot climbing
-     * away from the ground with the power on would step out of the aeroplane doing it. One key for
-     * every seat rather than one per machine, because a crew member who has to remember which seat
-     * they are in before they can get out of it has been given the wrong key.
-     * {@link VehicleDismountHandler} is what reads it.
+     * <p>シフトではない。あれはバニラの降車キーだが、ここではスロットルだ。出力を入れて上昇中のパイロットは、その
+     * 操作で機外へ出てしまう。機体ごとに1キーではなく全座席で1キーにしてある。降りる前にどの座席にいるか思い出さ
+     * ねばならない乗員には、間違ったキーが割り当てられているからだ。読むのは {@link VehicleDismountHandler}。
      */
     public static final KeyMapping DISMOUNT = create("dismount", GLFW.GLFW_KEY_LEFT_ALT);
 
     /**
-     * Opens the hold of the machine the crew are aboard. From outside one, the hold is opened by
-     * crouching and right-clicking the machine itself.
+     * 乗員が搭乗している機体の弾庫を開く。機外からはスニーク＋機体本体の右クリックで開く。
      *
-     * <p>Not on the inventory key, which is where a hand would go for it. That one opens the
-     * player's own inventory, is bound to whatever each player has bound it to, and is read by the
-     * game before anything here would see it; taking it away from a pilot would be taking away the
-     * one screen every player expects to be able to open. {@code I} is the next key along and is
-     * free.
+     * <p>手が伸びるであろうインベントリキーには置かない。あれはプレイヤー自身のインベントリを開くし、各プレイヤーが
+     * 好きに割り当てているし、ここが見る前にゲームが読んでしまう。パイロットからそれを奪うのは、全プレイヤーが開ける
+     * と期待している唯一の画面を奪うことだ。{@code I} は隣のキーで空いている。
      */
     public static final KeyMapping OPEN_HOLD = create("open_hold", GLFW.GLFW_KEY_I);
 
     /**
-     * Moves the crew member to the next seat of the machine they are aboard — the driver's included,
-     * so a lone rider can walk the whole thing seat by seat. One key for every seat of everything in
-     * the mod, and only while aboard: which seat is next is the server's to settle, see
-     * {@link com.ashvehicles.network.SwitchSeatPayload}. {@code K} is clear of vanilla's in-game keys
-     * and sits under the hand that is already on the movement keys.
+     * 乗員を、搭乗中の機体の次の座席へ移す——運転席も含むので、1人でも全座席を順に渡り歩ける。MOD 内すべての全座席
+     * で共通の1キーで、搭乗中のみ有効。次がどの座席かはサーバーが決める。
+     * {@link com.ashvehicles.network.SwitchSeatPayload} 参照。{@code K} はバニラのゲーム内キーと衝突せず、既に移動
+     * キーに置かれている手の下に来る。
      */
     public static final KeyMapping SWITCH_SEAT = create("switch_seat", GLFW.GLFW_KEY_K);
 
     public static final KeyMapping[] ALL = {PITCH_UP, PITCH_DOWN, ROLL_LEFT, ROLL_RIGHT,
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
-            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_VTOL, CYCLE_WEAPON, RELEASE_FLARE, RELEASE_CHAFF,
-            RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM,
+            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_VTOL, CYCLE_WEAPON, JETTISON,
+            RELEASE_FLARE, RELEASE_CHAFF,
+            RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,
             DISMOUNT, OPEN_HOLD, SWITCH_SEAT};
 

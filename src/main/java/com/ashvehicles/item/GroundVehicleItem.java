@@ -7,7 +7,7 @@ import com.ashvehicles.entity.GroundVehicleEntity;
 
 import net.minecraft.world.entity.EntityType;
 
-/** Places the ground vehicle it was registered with onto the clicked block, facing the player. */
+/** 登録時に紐づけられた地上車両を、クリックしたブロックの上へプレイヤー向きで設置する。 */
 public class GroundVehicleItem extends VehicleItem<GroundVehicleEntity> {
     public GroundVehicleItem(Supplier<? extends EntityType<? extends GroundVehicleEntity>> type,
             Properties properties) {
@@ -15,9 +15,8 @@ public class GroundVehicleItem extends VehicleItem<GroundVehicleEntity> {
     }
 
     /**
-     * A ship floats and is launched onto the water like a boat; a tank rests on the ground and is
-     * set down on the block that was clicked. Which of the two this is comes from the same file
-     * everything else about it does.
+     * 艦は浮くのでボートと同じく水面へ進水させ、戦車は地面に乗るのでクリックしたブロックへ置く。どちら
+     * かは、他の全情報と同じファイルから来る。
      */
     @Override
     protected boolean floatsOnWater() {
@@ -25,8 +24,8 @@ public class GroundVehicleItem extends VehicleItem<GroundVehicleEntity> {
     }
 
     /**
-     * Flat on the heading it was put down on. It does not stay flat for long: the first tick reads
-     * the ground under its tracks and lies the hull down on whatever is really there.
+     * 置いた向きのまま水平。ただし水平でいるのは一瞬で、最初の tick が履帯の下の地面を読み、車体を実際
+     * の地形に沿って寝かせる。
      */
     @Override
     protected void point(GroundVehicleEntity vehicle, float yaw) {

@@ -30,113 +30,96 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
 
 /**
- * Finds something to play for any of the mod's one-shot weapon sounds that a resource pack has not
- * provided.
+ * リソースパックが提供していない、MOD の単発兵装音の代わりに鳴らす物を見つける。
  *
- * <p>The server decides what to play and names a sound event, because that is all it can do: sounds
- * live in resource packs, which the server has never seen. So a weapon with no recording would
- * simply be silent, and only the client is in a position to notice. This catches any of the mod's
- * {@code weapon.*} events that the resource packs cannot resolve and puts the nearest thing that
- * does exist in its place, at the same position.
+ * <p>サーバーは何を鳴らすかを決めてサウンドイベント名を指す。それしかできないからだ。音はリソースパックにあり、
+ * サーバーはそれを見たことがない。だから録音の無い兵装は単に無音になるし、それに気付ける立場にいるのはクライアント
+ * だけだ。ここでは、リソースパックが解決できない MOD の {@code weapon.*} イベントを捕まえ、実在する最も近い物を
+ * 同じ位置で代わりに鳴らす。
  *
- * <p>What the nearest thing is depends on the event:
+ * <p>「最も近い物」はイベントによる。
  *
  * <ul>
- * <li>An event named after a weapon, {@code weapon.<name>}, falls back on the mod's default for that
- *     sort of weapon: {@code weapon.gun} for a gun, {@code weapon.launch} for anything with a motor,
- *     and {@code weapon.release} for a bomb, which is let go rather than fired and sounds like a rack
- *     banging open rather than like anything going off.
- * <li>{@code weapon.release} itself falls back on {@code weapon.launch}, which the mod does ship. So
- *     a bomb sounds like something leaving the aeroplane until somebody records the clunk it should
- *     be, rather than sounding like nothing.
- * <li>{@code weapon.<name>.ricochet}, a round skidding off armour, falls back on the mod's shared
- *     {@code weapon.ricochet} and then on the game's own anvil, which is the nearest thing it has to
- *     something hard glancing off plate.
- * <li>{@code weapon.<name>.impact}, a round going into one of the mod's boxes rather than off it,
- *     falls back on the mod's shared {@code weapon.impact} and then on the game's anvil being set
- *     down — the duller of its two anvil sounds, because the use of a strike is telling it from a
- *     ricochet by ear. See {@link Impact}.
- * <li>{@code weapon.load}, the ground crew at work, falls back on the game's own metal-on-metal.
- * <li>{@code weapon.gun} and {@code weapon.launch} fall back on nothing: the mod ships both, and a
- *     pack that has taken them away has said what it wants.
+ * <li>兵装名のイベント {@code weapon.<name>} は、その種別の MOD 既定へ落ちる。銃なら {@code weapon.gun}、モーター
+ *     付きなら {@code weapon.launch}、爆弾なら {@code weapon.release}。爆弾は発射ではなく投下で、何かが炸裂する音
+ *     ではなくラックが跳ね上がる音になる。
+ * <li>{@code weapon.release} 自体は、MOD が同梱している {@code weapon.launch} へ落ちる。だから爆弾は、あるべき
+ *     打撃音を誰かが録音するまでの間、無音ではなく「何かが機体を離れる音」になる。
+ * <li>装甲を滑って跳ねる {@code weapon.<name>.ricochet} は、MOD 共通の {@code weapon.ricochet} へ、次にゲーム自身の
+ *     金床音へ落ちる。硬い物が板に当たって逸れる音にゲームで最も近い物だ。
+ * <li>跳ねずに MOD の箱へ食い込む {@code weapon.<name>.impact} は、MOD 共通の {@code weapon.impact} へ、次にゲームの
+ *     金床設置音へ落ちる——2つある金床音のうち鈍い方だ。命中音の用途は跳弾と耳で区別することだからである。
+ *     {@link Impact} 参照。
+ * <li>地上員の作業音 {@code weapon.load} は、ゲーム自身の金属衝突音へ落ちる。
+ * <li>{@code weapon.gun} と {@code weapon.launch} は何へも落ちない。MOD が両方同梱しており、それらを取り除いた
+ *     パックは自らの意思を表明している。
  * </ul>
  *
- * <p>Giving a weapon a sound of its own therefore needs nothing but the files: add
- * {@code weapon.<name>} to {@code sounds.json} with an {@code .ogg} beside it, and it is used
- * instead. The engine note works the same way; see {@link EngineSounds}. What a weapon sounds like
- * in the air rather than at the moment of firing is not here at all, because a loop cannot be
- * substituted for sensibly; see {@link ProjectileSounds}.
+ * <p>したがって兵装に専用音を与えるにはファイルだけで足りる。{@code sounds.json} に {@code weapon.<name>} と
+ * {@code .ogg} を追加すればそちらが使われる。エンジン音も同じ仕組みだ。{@link EngineSounds} 参照。発射の瞬間ではなく
+ * 飛翔中の音はここには一切無い。ループはまともに代替できないからだ。{@link ProjectileSounds} 参照。
  *
- * <p>How loud and at what pitch comes from the weapon's own file rather than from the sound being
- * replaced. It has to: this event is fired before the sound engine has looked the recording up, so
- * the instance cannot yet say how loud it is and asking would throw.
+ * <p>音量とピッチは、置き換えられる音ではなく兵装自身のファイルから取る。そうするほかない。このイベントはサウンド
+ * エンジンが録音を引く前に発火するので、インスタンスはまだ音量を答えられず、問えば例外になる。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class WeaponSounds {
     /**
-     * What ground crew fall back on: the game's own iron trapdoor, which is the closest it has to
-     * something heavy being clamped onto something else.
+     * 地上員作業のフォールバック。ゲーム自身の鉄のトラップドア音で、重い物が別の物へ固定される音に最も近い。
      */
     private static final ResourceLocation LOAD_FALLBACK =
             ResourceLocation.withDefaultNamespace("block.iron_trapdoor.close");
 
     /**
-     * And what the countermeasure dispenser falls back on: the game's own firework, which is the
-     * nearest thing it has to something being thrown out of an aeroplane and set alight.
+     * 対抗手段ディスペンサーのフォールバック。ゲーム自身の花火音で、機体から放り出された物に火が付く音に最も近い。
      */
     private static final ResourceLocation DECOY_FALLBACK =
             ResourceLocation.withDefaultNamespace("entity.firework_rocket.launch");
 
     /**
-     * And a ricochet: the game's own anvil landing, which is the only thing in it that sounds like a
-     * hard heavy object meeting plate. Pitched up by {@link Ricochet#PITCH}, which is what turns a
-     * blacksmith's thump into a shell skidding off a turret.
+     * 跳弾のフォールバック。ゲーム自身の金床落下音で、硬く重い物が板に当たる音に聞こえる唯一の物だ。
+     * {@link Ricochet#PITCH} で上げてある。それが鍛冶屋の打撃音を、砲塔を滑る砲弾に変える。
      */
     private static final ResourceLocation RICOCHET_FALLBACK =
             ResourceLocation.withDefaultNamespace("block.anvil.land");
 
     /**
-     * And a hit that went in: the game's own anvil being set down, which is the nearest thing it has
-     * to something heavy arriving in metal and staying there. Deliberately the duller of the two
-     * anvil sounds, since the whole use of a strike is being able to tell it from a ricochet by ear;
-     * {@link Impact#PITCH} drops it further still.
+     * 食い込んだ命中のフォールバック。ゲーム自身の金床設置音で、重い物が金属へ到達しそこに留まる音に最も近い。2つある
+     * 金床音のうち意図的に鈍い方を選んでいる。命中音の用途の全てが跳弾と耳で区別できることだからだ。{@link Impact#PITCH}
+     * がさらに下げる。
      */
     private static final ResourceLocation IMPACT_FALLBACK =
             ResourceLocation.withDefaultNamespace("block.anvil.place");
 
     /**
-     * How loud the ground crew are. The same figures the server asked for, taken from the one place
-     * that owns them, because they cannot be read back off the sound at this point. The pitch is the
-     * one used for hanging a store: a stand-in for a sound the pack does not have is not worth
-     * telling apart from the one used for taking one off.
+     * 地上員作業の音量。サーバーが要求したのと同じ値を、それを所有する唯一の場所から取る。この時点では音から読み戻せ
+     * ないからだ。ピッチは兵装を吊るときの物を使う。パックが持たない音の代役を、取り外しの音と区別する価値は無い。
      */
     private static final WeaponDefinition.SoundSetup LOAD_SETUP = new WeaponDefinition.SoundSetup(
             Optional.empty(), WeaponMounts.LOAD_VOLUME, WeaponMounts.LOAD_PITCH);
 
-    /** The same, for the dispenser, whose figures live with the dispenser. */
+    /** ディスペンサー向けの同じ値。値はディスペンサー側にある。 */
     private static final WeaponDefinition.SoundSetup DECOY_SETUP = new WeaponDefinition.SoundSetup(
             Optional.empty(), Dispenser.RELEASE_VOLUME, Dispenser.RELEASE_PITCH);
 
     /**
-     * How a report quietens with distance. Under one, so it drops away sharply at first and then
-     * hangs on a long way out, which is both what loudness does to the ear and what makes the far
-     * end of the carry worth having.
+     * 発砲音が距離とともに小さくなる指数。1未満なので最初は急に落ちてから遠方まで粘る。耳に対する音量の振る舞いで
+     * あり、遠方まで届かせることに意味を持たせている要素でもある。
      */
     private static final float FALLOFF = 0.85F;
-    /** And how much of its edge it loses over the whole carry: a crack up close is a thud a mile off. */
+    /** 全到達距離で失う鋭さの量。近くでの破裂音は1マイル先では鈍い音になる。 */
     private static final float DULLING = 0.45F;
 
     private static final Set<ResourceLocation> WARNED = new HashSet<>();
-    /** Whether the log already carries one report of this going wrong. */
+    /** この不具合の報告が既にログに1件あるか。 */
     private static final AtomicBoolean FAILED = new AtomicBoolean();
 
     /**
-     * Nothing that happens in here is worth losing the world over.
+     * ここで起きることに、ワールドを失う価値のある物は無い。
      *
-     * <p>This event is fired from inside the handling of the packet that asked for the sound, so an
-     * exception thrown here does not merely lose the sound: it fails the packet and drops the player
-     * out of the game. Which recording a gun uses is not worth that, so anything unexpected leaves
-     * the sound exactly as the server asked for it and says so once.
+     * <p>このイベントは音を要求したパケットの処理内部から発火するので、ここで投げた例外は音を失うだけでは済まない。
+     * パケットが失敗しプレイヤーがゲームから切断される。銃がどの録音を使うかにその価値は無いので、想定外の事態では音を
+     * サーバーの要求通りに残し、1度だけその旨を記録する。
      */
     @SubscribeEvent
     public static void onPlaySound(PlaySoundEvent event) {
@@ -164,13 +147,12 @@ public final class WeaponSounds {
 
         SoundManager sounds = Minecraft.getInstance().getSoundManager();
         WeaponDefinition firing = weaponFor(id);
-        // Whether the server put a reach in the volume slot rather than a loudness, which is the one
-        // thing deciding how this has to be played. See instance.
+        // サーバーが volume 欄へ音量ではなく到達距離を入れたか。これが再生方法を決める唯一の要素だ。instance 参照。
         boolean carried = firing != null || isRicochet(id) || isImpact(id);
 
         if (ModSounds.exists(sounds, id)) {
-            // The recording is there; only how loud it should be at this distance is wrong, and only
-            // for the sounds that were sent further than the game would ever send one.
+            // 録音は存在する。誤っているのはこの距離での音量だけであり、しかもゲームが本来送るより遠くまで送られた
+            // 音に限られる。
             if (carried) {
                 event.setSound(instance(SoundEvent.createVariableRangeEvent(id), sound,
                         setupFor(id, firing), true));
@@ -190,33 +172,28 @@ public final class WeaponSounds {
             AshVehicles.LOGGER.info("No resource pack provides {}; falling back on {}", id, fallback);
         }
 
-        // Same place and the same figures whatever asked for it wanted: only the recording changes.
+        // 要求元が何を望んでいようと位置も数値も同じ。変わるのは録音だけだ。
         event.setSound(instance(SoundEvent.createVariableRangeEvent(fallback), sound,
                 setupFor(id, weapon), carried));
     }
 
     /**
-     * Puts a weapon's report where it belongs at the distance it is being heard from.
+     * 兵装の発砲音を、聞いている距離にふさわしい形へ置き直す。
      *
-     * <p>The sound arrived carrying a volume that is not a volume: the server had to put the reach in
-     * that slot, because the reach is all that slot decides — see
-     * {@link WeaponDefinition.SoundSetup#packetVolume()}. Played as sent, a cannon three hundred
-     * blocks away would be as loud as one in the cockpit.
+     * <p>届いた音は volume 欄に音量ではない値を載せている。サーバーはその欄へ到達距離を入れるほかなかった。その欄が
+     * 決めるのは到達距離だけだからだ——{@link WeaponDefinition.SoundSetup#packetVolume()} 参照。送られたまま鳴らすと、
+     * 300ブロック先の機関砲がコックピット内と同じ音量になる。
      *
-     * <p>So the figure is thrown away and the real one worked out here, from the one thing only this
-     * side knows: how far the listener is standing from where it went off. The shape is the one the
-     * blast uses, for the same reasons — it quietens sharply at first and then carries a long way,
-     * and it loses its edge as it goes, because air swallows the high frequencies first and a crack
-     * across a valley is a thud. See {@link BlastSounds}.
+     * <p>だからその値を捨て、この側しか知らない唯一の情報——聞き手が発生地点からどれだけ離れて立っているか——から本当の
+     * 値をここで求める。曲線の形は爆発音と同じで、理由も同じだ。最初は急に小さくなってから遠方まで届き、進むにつれ鋭さ
+     * を失う。空気は高周波から先に吸うので、谷を越えた破裂音は鈍い音になる。{@link BlastSounds} 参照。
      *
-     * <p>Attenuation is switched off, since the distance is already in the volume, but the sound is
-     * still placed where it happened so it comes from the right direction.
+     * <p>距離は既に音量へ織り込んであるので減衰は切るが、位置は発生地点に置いたままにして方向を正しく保つ。
      */
     private static SimpleSoundInstance instance(SoundEvent recording, SoundInstance sound,
             WeaponDefinition.SoundSetup setup, boolean carried) {
         if (!carried) {
-            // Sent no further than the game would send anything: ground crew and the like, which are
-            // heard where they happen and whose volume really is a volume.
+            // ゲームが本来送る距離を超えていない音。地上員作業などで、発生地点で聞かれ、volume が本当に音量である物だ。
             return new SimpleSoundInstance(recording, sound.getSource(), setup.volume(), setup.pitch(),
                     SoundInstance.createUnseededRandom(), sound.getX(), sound.getY(), sound.getZ());
         }
@@ -233,8 +210,7 @@ public final class WeaponSounds {
     }
 
     /**
-     * The nearest thing to this event that a resource pack does provide, or null if there is nothing
-     * worth putting in its place.
+     * このイベントに最も近く、リソースパックが実際に提供している物。代わりに置く価値のある物が無ければ null。
      */
     @Nullable
     private static ResourceLocation fallbackFor(SoundManager sounds, ResourceLocation id,
@@ -251,68 +227,66 @@ public final class WeaponSounds {
             return ModSounds.firstPresent(sounds, ModSounds.LAUNCH);
         }
 
-        // The two the mod ships. If neither is there, the pack has replaced the mod's sounds with
-        // nothing at all, and putting one of the game's own in its place would be second-guessing it.
+        // MOD が同梱している2つ。どちらも無いなら、パックは MOD の音を「無し」に置き換えたということであり、そこへ
+        // ゲームの音を入れるのは差し出口になる。
         if (id.equals(ModSounds.GUN) || id.equals(ModSounds.LAUNCH)) {
             return null;
         }
 
         if (weapon == null && isImpact(id)) {
-            // The same arrangement a ricochet gets, and it has to be kept out of the switch below for
-            // the same reason: an impact that fell through to weapon.gun would be the cannon firing
-            // a second time, at the far end of the shot.
+            // 跳弾と同じ仕組みで、下の switch から外しておく理由も同じだ。weapon.gun へ落ちた命中音は、射線の遠端で
+            // 機関砲がもう一度撃つ音になってしまう。
             return ModSounds.firstPresent(sounds, ModSounds.IMPACT, IMPACT_FALLBACK);
         }
 
         if (weapon == null && isRicochet(id)) {
-            // One weapon's clang, then the mod's shared one, then the game's. Never the switch below:
-            // a ricochet that fell through to weapon.gun would be the cannon firing a second time.
-            // A weapon that has claimed this event by name wins, as it does everywhere else here.
+            // まず個別兵装の金属音、次に MOD 共通、次にゲームの物。下の switch へは決して落とさない。weapon.gun へ
+            // 落ちた跳弾は機関砲がもう一度撃つ音になる。ここの他所と同様、この名前でイベントを主張した兵装が勝つ。
             return ModSounds.firstPresent(sounds, ModSounds.RICOCHET, RICOCHET_FALLBACK);
         }
 
-        // Anything else under weapon.* is a weapon's own name, which nothing answers to.
+        // weapon.* の下のそれ以外は兵装自身の名前であり、応える物は無い。
         return switch (weapon == null ? WeaponDefinition.Type.GUN : weapon.type()) {
             case GUN -> ModSounds.firstPresent(sounds, ModSounds.GUN);
             case ROCKET, MISSILE -> ModSounds.firstPresent(sounds, ModSounds.LAUNCH);
-            case BOMB -> ModSounds.firstPresent(sounds, ModSounds.RELEASE, ModSounds.LAUNCH);
+            // 増槽は撃たれないので、ここへ来るのは投棄の音を要求された場合だけ。爆弾と同じ「切り離し」の
+            // 音で正しい——どちらもレールから物が離れる音であって、点火の音ではない。
+            case BOMB, TANK -> ModSounds.firstPresent(sounds, ModSounds.RELEASE, ModSounds.LAUNCH);
         };
     }
 
     /**
-     * Whether this is one weapon's ricochet, or the shared one everything falls back on.
+     * これが個別兵装の跳弾音か、全てが落ちてくる共通の跳弾音か。
      *
-     * <p>Both are named for the role rather than for the weapon — {@code weapon.rh120.ricochet} and
-     * {@code weapon.ricochet} — so the tail of the name is the whole test.
+     * <p>どちらも兵装ではなく役割で名付けられている——{@code weapon.rh120.ricochet} と {@code weapon.ricochet}——ので、
+     * 名前の末尾だけで判定できる。
      */
     private static boolean isRicochet(ResourceLocation id) {
         return id.getPath().endsWith("." + ModSounds.RICOCHET_ROLE);
     }
 
     /**
-     * Whether this is one weapon's hit on a machine, or the shared one everything falls back on.
+     * これが個別兵装の命中音か、全てが落ちてくる共通の命中音か。
      *
-     * <p>Named for the role rather than for the weapon, exactly as a ricochet is —
-     * {@code weapon.120mm_cannon.impact} and {@code weapon.impact} — so the tail is the whole test.
+     * <p>跳弾とまったく同様、兵装ではなく役割で名付けられている——{@code weapon.120mm_cannon.impact} と
+     * {@code weapon.impact}——ので、末尾だけで判定できる。
      */
     private static boolean isImpact(ResourceLocation id) {
         return id.getPath().endsWith("." + ModSounds.IMPACT_ROLE);
     }
 
-    /** How loud and at what pitch: the weapon's own figures, or the ones whoever asked for it used. */
+    /** 音量とピッチ。兵装自身の値か、要求元が使った値。 */
     private static WeaponDefinition.SoundSetup setupFor(ResourceLocation id, @Nullable WeaponDefinition weapon) {
         if (weapon != null) {
             return weapon.sound();
         }
 
-        // A ricochet is not the gun going off and was not sent as though it were: its own figures
-        // are the ones both ends of it were written against.
+        // 跳弾は発砲音ではないし、そのように送られてもいない。両端が基準にしたのは跳弾自身の値だ。
         if (isRicochet(id)) {
             return Ricochet.SOUND_SETUP;
         }
 
-        // And a strike is not the gun going off either, and carries its own distance for the same
-        // reason: the gunner it matters to is at the other end of the shot.
+        // 命中音も発砲音ではないし、同じ理由で自前の距離を持つ。それが重要になる砲手は射線の反対端にいる。
         if (isImpact(id)) {
             return Impact.SOUND_SETUP;
         }
@@ -325,12 +299,11 @@ public final class WeaponSounds {
     }
 
     /**
-     * Whichever weapon asks for this event, or null if none does.
+     * このイベントを要求している兵装。無ければ null。
      *
-     * <p>Needed because a {@link PlaySoundEvent} arrives before the sound engine has resolved the
-     * recording, so the instance cannot yet say how loud it is and asking would throw; the figures
-     * have to come from the weapon instead. Every weapon is checked rather than only the one the
-     * event is named after, so a weapon that names some other event by hand is still matched.
+     * <p>必要なのは、{@link PlaySoundEvent} がサウンドエンジンの録音解決より前に届くからだ。インスタンスはまだ音量を
+     * 答えられず、問えば例外になるので、値は兵装から取るしかない。イベント名が指す兵装だけでなく全兵装を調べるので、
+     * 手作業で別のイベントを指定した兵装も照合できる。
      */
     @Nullable
     private static WeaponDefinition weaponFor(ResourceLocation event) {

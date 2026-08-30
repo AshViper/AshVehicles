@@ -15,63 +15,52 @@ import net.neoforged.neoforge.client.event.CalculateDetachedCameraDistanceEvent;
 import net.neoforged.neoforge.client.event.ViewportEvent;
 
 /**
- * Sits the chase camera back off a ground vehicle and tips it down onto it.
+ * 三人称カメラを地上車両から後ろへ下げ、車両へ向けて下向きに倒す。
  *
- * <p>Vanilla's four blocks are measured from the rider's eyes, and a tank is longer than that: the
- * camera comes out somewhere over the engine deck, with the hull filling the screen and nothing of
- * the ground the crew are fighting over. The camera is placed outright instead, at {@code camera.pos}
- * from the middle of the vehicle — see {@link ChaseCamera}, which is the same placement an aircraft
- * gets and for the same reasons.
+ * <p>バニラの4ブロックは搭乗者の目から測られるが、戦車はそれより長い。カメラはエンジンデッキの上あたりに出て、
+ * 画面は車体で埋まり、乗員が奪い合っている地面は何も映らない。代わりにカメラを直接、車両中心から
+ * {@code camera.pos} の位置へ置く——{@link ChaseCamera} 参照。機体と同じ配置で、理由も同じだ。
  *
- * <p>What is different here is the tip. An aeroplane looks along its own line of sight because what
- * matters is out in front of it at its own height; a tank's targets are on the ground it is standing
- * on, and a view laid flat along the barrel spends its top half on sky. {@code camera.tilt} rotates
- * the whole view down by a few degrees, which lifts the camera as it goes — the offset is measured
- * along the axes being looked down — so the vehicle is seen from above and there is ground on the
- * screen where the sky was.
+ * <p>ここで違うのは傾きだ。機体が自身の視線に沿って見るのは、重要な物が同じ高度の前方にあるから。戦車の目標は
+ * 乗っている地面の上にあり、砲身に沿って水平に置いた視界は上半分を空に費やす。{@code camera.tilt} は視界全体を
+ * 数度下へ回し、それに伴ってカメラも持ち上がる——オフセットは見下ろしている軸に沿って測るからだ——ので、車両を
+ * 上から見る形になり、空だった場所に地面が入る。
  *
- * <p>It is the view that is tipped and not the crew: the mouse still moves the head, and this does
- * not touch it. What the gun does about it is lay itself down by the same amount — see
- * {@code GroundVehicleEntity.setSightTilt}, which {@link GroundVehicleInputHandler} feeds the tilt
- * to every tick — so that the middle of the screen goes on being the line of the gun. Left alone,
- * the two would be the whole of the tilt apart: the crew put the middle of the screen on a target,
- * the gun points ten degrees over the top of it, and the round goes there. The gun's own mark is
- * still drawn out in the world at the point the round will reach, which is what makes it a range as
- * well as a direction — see {@link GroundVehicleHud} — and it now sits where the crew are looking.
+ * <p>倒れるのは視界であって乗員ではない。マウスは従来通り頭を動かすし、ここはそれに触れない。砲がそれに対して
+ * 行うのは同じ量だけ下げることだ——{@code GroundVehicleEntity.setSightTilt} 参照。{@link GroundVehicleInputHandler}
+ * が毎tick傾きを渡している——ので、画面中央は引き続き砲の線であり続ける。放っておけば両者は傾きの分そのままずれ、
+ * 乗員が画面中央を目標に合わせても砲はその10度上を向き、弾はそちらへ飛ぶ。砲自身のマークは今も、弾が到達する点に
+ * ワールド上で描かれる。それが方向だけでなく距離をも示す仕組みであり——{@link GroundVehicleHud} 参照——今やそれが
+ * 乗員の見ている場所に来る。
  *
- * <p>First person is the opposite case and gets the opposite treatment, the same as an aircraft's:
- * the camera is placed outright at {@code camera.cockpit}, in the vehicle's own axes, so the file
- * decides which hatch the crew are looking out of rather than wherever vanilla happens to put a
- * rider's eyes — which for a seat written at the floor of the hull is a view of the inside of the
- * armour. The point rides the <em>turret</em>, swung about the ring with the gun, because that is
- * where a tank's hatches are: lay the gun abeam and the view comes round over the side of the hull
- * with it, as it does from a real cupola. Only the place is taken from the machine; the direction
- * is still the crew's, because that is what lays the turret in the first place.
+ * <p>一人称は逆の場合で、機体と同じく逆の扱いを受ける。カメラを車両座標系の {@code camera.cockpit} へ直接置くので、
+ * どのハッチから外を見るかはファイルが決める。バニラが搭乗者の目を置く場所任せにはしない——車体の床に書かれた座席
+ * では装甲の内側を眺めることになる。その点は<em>砲塔</em>に乗り、砲と共に旋回輪の周りを回る。戦車のハッチはそこに
+ * あるからだ。砲を真横へ据えれば視界も車体側面越しに回り込む。実物のキューポラと同じだ。機体から取るのは位置だけ
+ * で、方向は依然として乗員の物。そもそも砲塔を据えているのがそれだからだ。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class GroundVehicleCameraHandler {
     /**
-     * How near the vertical the tipped view may look, in degrees. The same shade short of straight
-     * up that vanilla puts on every other view in the game: past it a bearing stops meaning anything
-     * and the picture slews.
+     * 倒した視界が垂直へどこまで近付けるか（度）。ゲームの他の全視点にバニラが課すのと同じ「真上の少し手前」だ。
+     * それを越えると方位が意味を失い、画が滑る。
      */
     private static final float POLE = 89.5F;
 
     @SubscribeEvent
     public static void onCalculateCameraDistance(CalculateDetachedCameraDistanceEvent event) {
         if (riddenVehicle(event.getCamera()) != null) {
-            // The camera is placed outright below, so vanilla should leave it on the crew's eyes.
+            // 位置は下で直接設定するので、バニラには乗員の目の位置に置いたままにしてもらう。
             event.setDistance(0.0F);
         }
     }
 
     /**
-     * Tips the chase view down by the vehicle's own {@code camera.tilt}.
+     * 三人称視界を車両自身の {@code camera.tilt} だけ下へ倒す。
      *
-     * <p>This has to go through the event rather than being done alongside the placement, because
-     * the event is the only thing that can set the camera's angles — and it is the right order in
-     * any case: the tip is applied first, and the offset is then measured along the axes it leaves
-     * behind, so the camera climbs into the tip instead of hanging below it.
+     * <p>配置と一緒にではなくイベント経由で行う必要がある。カメラの角度を設定できるのはイベントだけだからだ——
+     * どのみち順序としても正しい。先に傾きを適用し、オフセットはそれが残した軸に沿って測るので、カメラは傾きの
+     * 下にぶら下がるのではなく傾きへ登っていく。
      */
     @SubscribeEvent
     public static void onComputeCameraAngles(ViewportEvent.ComputeCameraAngles event) {
@@ -88,17 +77,16 @@ public final class GroundVehicleCameraHandler {
             return;
         }
 
-        // Vanilla turns the reversed view upside down after this event has run — it negates the
-        // elevation to look back at the rider — so the tip has to go in negated to come out of that
-        // still pointing down.
+        // バニラはこのイベントの後に反転視点を上下逆にする——搭乗者を振り返るため仰角を反転する——ので、傾きは
+        // 反転して入れておかないと、そこを抜けた後に下を向いたままにならない。
         boolean reversed = Minecraft.getInstance().options.getCameraType() == CameraType.THIRD_PERSON_FRONT;
 
         event.setPitch(Mth.clamp(event.getPitch() + (reversed ? -tilt : tilt), -POLE, POLE));
     }
 
     /**
-     * Called from {@link com.ashvehicles.mixin.CameraMixin} once vanilla has finished placing the
-     * camera, which is the first moment a new position will actually stick.
+     * {@link com.ashvehicles.mixin.CameraMixin} から、バニラがカメラ配置を終えた後に呼ばれる。新しい位置が実際に
+     * 定着する最初の瞬間がそこだ。
      */
     public static void placeCamera(Camera camera, Entity viewer, boolean detached, float partialTick) {
         if (!(viewer.getVehicle() instanceof GroundVehicleEntity vehicle)) {
@@ -106,11 +94,9 @@ public final class GroundVehicleCameraHandler {
         }
 
         if (!detached) {
-            // The eye of the seat this one is actually in, carried by whatever that seat's eye is
-            // bolted to: the commander's is in the turret roof and comes round with the gun, the
-            // driver's is in the glacis and does not, and a rifleman in the back of a CV90 has no
-            // business seeing out of either. Which is which is the machine's file's to say; where
-            // it does not, every seat gets what the machine has always given them.
+            // 実際に座っている座席の視点を、その座席の視点が固定されている物に乗せて運ぶ。車長の視点は砲塔上面
+            // にあり砲と共に回る。操縦手の視点は前面装甲にあり回らない。CV90 後部の歩兵にはそのどちらから外を見る
+            // 筋合いも無い。どれがどれかは機体ファイルが述べる。述べていない場合、各座席は従来通りの物を受け取る。
             camera.setPosition(vehicle.eyeOf(viewer, partialTick));
 
             return;
@@ -119,7 +105,7 @@ public final class GroundVehicleCameraHandler {
         ChaseCamera.place(camera, vehicle, vehicle.getStats().camera().pos(), partialTick);
     }
 
-    /** The vehicle the camera's owner is riding, or null if they are not aboard one. */
+    /** カメラの持ち主が搭乗している車両。搭乗していなければ null。 */
     private static GroundVehicleEntity riddenVehicle(Camera camera) {
         Entity viewer = camera.getEntity();
 

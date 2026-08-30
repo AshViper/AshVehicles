@@ -5,33 +5,30 @@ import com.mojang.serialization.Codec;
 import net.minecraft.util.StringRepresentable;
 
 /**
- * What a gun is fed out of: which of the ammunition items goes into it, and how many rounds one of
- * them is worth.
+ * 火砲が何から給弾されるか。どの弾薬アイテムが入り、その1個が何発分か。
  *
- * <p>A tank's main armament is loaded a shell at a time by hand, and one shell is one round; an
- * autocannon is fed from a belt, and nobody hands a Pantsir its fourteen hundred rounds one by one.
- * So one item is one shell or one belt, and a belt is worth {@link #AUTOCANNON}'s many rounds.
+ * <p>戦車の主砲は手で1発ずつ装填するので、砲弾1個＝1発。機関砲はベルト給弾で、パーンツィリに1400発を
+ * 1発ずつ手渡す者はいない。よってアイテム1個は砲弾1発かベルト1本で、ベルトは {@link #AUTOCANNON} の
+ * 定める発数分の価値を持つ。
  *
- * <p>A launcher's tubes are the shell's case again rather than the belt's: a rocket is craned into
- * its tube one at a time, and there is nothing else a rocket could sensibly be counted in. Guided
- * and unguided share the one item, which is a simplification and a deliberate one — a file that
- * wants them apart says so with {@code ammo_item} and gets its own kind here.
+ * <p>発射筒はベルトではなく砲弾側の扱い。ロケットは1本ずつ筒へ吊り込む物で、他に数え方も無い。誘導型と
+ * 無誘導型は同じアイテムを共有する。これは簡略化であり意図的でもある——分けたいファイルは
+ * {@code ammo_item} でそう書き、ここに自分の種類を得ればよい。
  *
- * <p><b>Rounds are the currency and the item is the purse</b>, exactly as they are for the stores an
- * aircraft carries — see {@code WeaponMounts.draw}. A belt the crew have only half emptied goes back
- * in the hold as a half belt rather than being thrown away, so topping a magazine off costs what it
- * takes and nothing more.
+ * <p><b>通貨は「発」で、アイテムは財布。</b> 機体の搭載兵装とまったく同じ考え方
+ * （{@code WeaponMounts.draw} 参照）。半分だけ使ったベルトは捨てずに半分のベルトとして弾庫へ戻るので、
+ * 弾倉を満たすコストは必要な分だけで済む。
  *
- * <p>Which kind a weapon takes is its own file's to say, under {@code ammo_item}; a file that leaves
- * it out is read off how the weapon fires, which gets every weapon in the mod right without a line
- * being added to any of them. See {@link WeaponDefinition#ammoKind()}.
+ * <p>どの種類を取るかは兵装ファイルの {@code ammo_item} が言う。書かれていなければ発射方式から判定し、
+ * それで MOD 内の全兵装が正しくなる。どのファイルにも1行足さずに。{@link WeaponDefinition#ammoKind()}
+ * 参照。
  */
 public enum AmmoKind implements StringRepresentable {
-    /** Loaded by hand, one shell at a time. A tank gun, or the low-velocity gun on a BMD. */
+    /** 手で1発ずつ装填する。戦車砲や、BMD の低初速砲など。 */
     CANNON("cannon", "cannon_shell", 1),
-    /** Fed from a belt. An autocannon, whether it is on a turret or under a wing. */
+    /** ベルト給弾。砲塔上でも翼下でも、機関砲はこれ。 */
     AUTOCANNON("autocannon", "autocannon_belt", 30),
-    /** Craned into a tube, one at a time. Anything a launcher fires, guided or not. */
+    /** 筒へ1本ずつ吊り込む。誘導・無誘導を問わず発射筒が撃つ物。 */
     ROCKET("rocket", "launcher_rocket", 1);
 
     public static final Codec<AmmoKind> CODEC = StringRepresentable.fromEnum(AmmoKind::values);
@@ -52,14 +49,14 @@ public enum AmmoKind implements StringRepresentable {
     }
 
     /**
-     * What the item is called, which is what the thing is rather than what it feeds: one is a shell
-     * and the other is a belt, and a belt called a round would be lying about thirty of them.
+     * アイテム名。給弾先ではなく物そのものの名前になっている。一方は砲弾、他方はベルトで、ベルトを
+     * 「1発」と呼べば30発分嘘をつくことになる。
      */
     public String itemName() {
         return this.itemName;
     }
 
-    /** How many rounds one full item of this kind holds. */
+    /** この種類のアイテム1個が満載時に持つ発数。 */
     public int roundsPerItem() {
         return this.roundsPerItem;
     }

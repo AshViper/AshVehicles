@@ -13,46 +13,38 @@ import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.model.GeoModel;
 
 /**
- * Draws any ground vehicle. Nothing here is specific to one: the geometry, texture and animation
- * files are found by the vehicle's own name, and which bone is a turret or a road wheel comes from
- * its file.
+ * あらゆる地上車両を描く。ここに特定の車両専用の物は無い。ジオメトリ・テクスチャ・アニメーションのファイルは車両
+ * 自身の名前で見つかるし、どのボーンが砲塔か転輪かは車両のファイルが決める。
  *
- * <p>Everything that moves is driven from code in {@link #setCustomAnimations}, which GeckoLib calls
- * once per frame after the animation controllers have run. There is nothing here that is a sequence
- * rather than an angle: a turret is somewhere, a gun is at some elevation, and a wheel has gone
- * round so far. Hatches, which are a sequence, will belong in the vehicle's animation file.
+ * <p>可動部は全て {@link #setCustomAnimations} のコードで駆動する。GeckoLib はアニメーションコントローラの実行後に
+ * 毎フレーム1回これを呼ぶ。ここには角度ではなく手順である物は1つも無い。砲塔はどこかを向き、砲はある仰角にあり、
+ * 車輪はここまで回った、という具合だ。手順であるハッチは車両のアニメーションファイルに属することになる。
  *
- * <p>A bone the vehicle does not name, or names wrongly, is skipped rather than crashing; it just
- * sits rigid.
+ * <p>車両が名前を指定していないボーンや指定を誤ったボーンはクラッシュせず飛ばされ、単に固定されたままになる。
  */
 public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
     /**
-     * Which way round each part is turned, in the <em>vehicle's</em> axes.
+     * <em>車両</em>座標系での各部品の回転方向。
      *
-     * <p>Which way round that is in any one model's own axes is nobody's business here:
-     * {@link #turnAboutX}, {@link #turnAboutY} and {@link #slideAlongZ} work that out per bone from
-     * the geometry, so the same figure drives a hull built facing forwards and one built facing
-     * backwards and turned round on its root bone. See {@link VehicleGeoModel#turnAboutX} for how,
-     * and for why a per-vehicle flag would not have been enough.
+     * <p>それが個々のモデル自身の軸でどちら向きになるかはここの管轄ではない。{@link #turnAboutX}、
+     * {@link #turnAboutY}、{@link #slideAlongZ} がジオメトリからボーン単位で判断するので、前向きに作られた車体でも、
+     * 後ろ向きに作ってルートボーンで回した車体でも、同じ値が駆動する。仕組みと、車両単位のフラグでは足りない理由は
+     * {@link VehicleGeoModel#turnAboutX} 参照。
      *
-     * <p>What is left to settle is only the frame those three work in, which is GeckoLib's: the
-     * model faces its own −Z and its +X is the vehicle's <em>left</em>. So bringing the turret right
-     * means turning the nose from −Z towards −X, a positive turn about Y, so negative here; a road
-     * wheel rolling the vehicle forwards carries its top towards −Z, a negative turn about X, so
-     * negative here; and the barrel runs back towards +Z, so positive here. Raising the gun lifts
-     * the muzzle from −Z towards +Y, a positive turn about X.
+     * <p>ここで決めるべきは、その3つが働く座標系だけであり、それは GeckoLib の物だ。モデルは自身の −Z を向き、+X は
+     * 車両の<em>左</em>になる。よって砲塔を右へ振るとは機首を −Z から −X へ回すことで、Y 軸周りの正の回転——だから
+     * ここでは負。車両を前進させる転輪は上端を −Z へ運ぶので X 軸周りの負の回転——だからここでも負。砲身は +Z 方向へ
+     * 後座するのでここでは正。砲を上げると銃口が −Z から +Y へ上がり、X 軸周りの正の回転になる。
      *
-     * <p>Flip one of these if a part goes the wrong way <em>on every vehicle at once</em>. One part
-     * wrong on one vehicle is not this; that is a bone the geometry has square to the axis it is
-     * being turned about, and it is fixed in Blockbench.
+     * <p><em>全車両で一斉に</em>部品が逆向きに動くならここの符号を反転する。1台の1部品だけが逆なのはこれではない。
+     * それはジオメトリがそのボーンを回転軸に対して直交させている場合で、Blockbench で直す。
      */
     private static final float TURRET_SIGN = -1.0F;
     private static final float GUN_SIGN = 1.0F;
     private static final float WHEEL_SIGN = -1.0F;
     /**
-     * Which way a steered wheel turns. The turret's sign, and for the turret's reason: both are a
-     * turn about the vehicle's vertical, and a wheel pointing right is the same rotation as a gun
-     * laid right.
+     * 操舵輪の回転方向。砲塔と同じ符号で、理由も砲塔と同じだ。どちらも車両の鉛直軸周りの回転であり、右を向いた車輪は
+     * 右へ据えた砲と同じ回転になる。
      */
     private static final float STEER_SIGN = -1.0F;
     private static final float RECOIL_SIGN = 1.0F;
@@ -72,17 +64,15 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
     }
 
     /**
-     * The figures out of a vehicle's file that decide how its model is posed, taken from the file
-     * once and carried about together.
+     * モデルのポーズを決める、車両ファイル由来の数値群。ファイルから一度取り、まとめて持ち回る。
      *
-     * <p>They come from four different blocks of the file and are wanted in one place, and a ghost —
-     * which has no vehicle left to ask — has to carry the lot along with its photograph. Gathered
-     * here rather than passed one by one, which is how {@link #applyPose} came to be taking four
-     * loose floats behind the thing they all describe.
+     * <p>ファイルの4つの異なるブロックから来るのに1か所で必要になるし、問い合わせる車両を持たないゴーストは写真と
+     * 一緒にこれらを全部運ぶ必要がある。1つずつ渡すのではなくここへ集約した。{@link #applyPose} が、それらが記述する
+     * 対象の後ろに float 4つを裸で並べて受け取っていた経緯もそれだ。
      *
-     * @param recoilTravel how far the barrel runs back when the gun fires, in blocks
-     * @param wheelTravel how far a road wheel moves on its springs, in blocks. Nothing pins the
-     *                    running gear to the body, which is a vehicle with no suspension to draw
+     * @param recoilTravel 発砲時に砲身が後座する距離（ブロック）
+     * @param wheelTravel 転輪がバネ上で動く距離（ブロック）。0なら走行装置を車体に固定せず、描くサスペンションを
+     *                    持たない車両になる
      */
     public record Setup(VehicleChassis.Model model, float recoilTravel, float wheelTravel) {
         public static Setup of(GroundVehicleDefinition stats) {
@@ -91,16 +81,14 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
     }
 
     /**
-     * Everything a ground vehicle does with itself, taken from the vehicle once and then applied to
-     * any model of it.
+     * 地上車両が自身に対して行うこと全て。車両から一度取り、その車両のどのモデルにも適用する。
      *
-     * @param turretYaw where the turret is pointing, in degrees from dead ahead of the hull
-     * @param gunPitch how far the gun is elevated above the turret roof line, in degrees
-     * @param wheelAngle how far the road wheels have gone round, in degrees
-     * @param steerAngle how far the steered wheels are turned, in degrees, positive to the right
-     * @param recoil how far the barrel has run back, from nothing to one
-     * @param ride how far the body has moved on its springs, which the running gear is put back down
-     *             by so that it stays on the ground while the hull above it moves
+     * @param turretYaw 砲塔の指向。車体正面からの角度（度）
+     * @param gunPitch 砲塔上面線からの砲の仰角（度）
+     * @param wheelAngle 転輪の回転角（度）
+     * @param steerAngle 操舵輪の切れ角（度）。右が正
+     * @param recoil 砲身の後座量。0〜1
+     * @param ride バネ上の車体の変位。走行装置はこの分だけ戻され、上で車体が動いても地面に留まる
      */
     public record Pose(float turretYaw, float gunPitch, float wheelAngle, float steerAngle, float recoil,
             Ride ride) {
@@ -115,20 +103,18 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
         }
 
         /**
-         * The pose between two snapshots, for a ghost, which has no vehicle to ask.
+         * 2つのスナップショットの間のポーズ。問い合わせる車両を持たないゴースト用。
          *
-         * <p>Between two rather than from the newest, because that is what the game draws for the
-         * tank standing next to the ghost: what is on the screen at any moment is the tick before
-         * last blended into the last one. A ghost posed from the newest alone would run a tick ahead
-         * of it and jump once a tick besides.
+         * <p>最新の1つではなく2つの間で求めるのは、ゴーストの隣に立つ戦車に対してゲームが描くのがそれだからだ。任意の
+         * 瞬間に画面に出ているのは、前々tickを前tickへブレンドした物である。最新だけでポーズを付けたゴーストは1tick
+         * 先行し、しかも毎tick跳ねる。
          *
-         * <p>The turret is wound the short way round. It is an angle that wraps, and a turret
-         * crossing dead astern would otherwise spin the long way home once a tick. The road wheels
-         * are not wrapped: the figure is how far the tracks have run in total, so it grows without
-         * bound and the plain blend between two of them is the distance covered in between.
+         * <p>砲塔は近い側の経路で回す。折り返す角度なので、真後ろを横切る砲塔は放っておくと毎tick遠回りで戻ってしまう。
+         * 転輪は折り返さない。あの値は履帯の総走行距離であり、上限なく増えるので、2つの単純なブレンドがその間に進んだ
+         * 距離になる。
          *
-         * @param previous the pose at the end of the tick before last
-         * @param now the pose at the end of the last tick
+         * @param previous 前々tick終端でのポーズ
+         * @param now 前tick終端でのポーズ
          */
         public static Pose between(Pose previous, Pose now, float partialTick) {
             return new Pose(
@@ -141,55 +127,47 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
         }
     }
 
-    /** Poses any model of a ground vehicle. */
+    /** 地上車両のモデルにポーズを付ける。 */
     public static void applyPose(GeoModel<?> model, Setup figures, Pose pose) {
         VehicleChassis.Model setup = figures.model();
         String turretBone = setup.bone(GroundVehicleDefinition.Bone.TURRET);
 
         turnAboutY(model, turretBone, TURRET_SIGN * pose.turretYaw());
 
-        // The gun and the mantlet elevate together, and both are children of the turret in the
-        // geometry, so neither of them knows or needs to know which way the turret is pointing.
+        // 砲と防盾は一緒に俯仰し、ジオメトリ上どちらも砲塔の子なので、砲塔がどちらを向いているかを知らないし知る
+        // 必要も無い。
         turnAboutX(model, setup.bone(GroundVehicleDefinition.Bone.GUN), GUN_SIGN * pose.gunPitch());
         turnAboutX(model, setup.bone(GroundVehicleDefinition.Bone.MANTLET), GUN_SIGN * pose.gunPitch());
-        // And the machine gun with them, which is what makes it a coaxial: a barrel clamped to the
-        // gun looks where the gun looks. Every model here hangs it off the turret rather than off
-        // the gun bone, so it is elevated here rather than coming round for nothing — and it has to
-        // be, or the rounds would leave a barrel lying level while going where the cannon points.
-        // See GroundVehicleDefinition.Coaxial, which is where they come from.
+        // 機関銃も一緒に。それが「同軸」たる所以だ。砲に固定された銃身は砲が見る方を見る。ここのモデルは全て機関銃を
+        // 砲ボーンではなく砲塔にぶら下げているので、ただ旋回するだけでなくここで俯仰させる——そうしないと、弾は水平の
+        // ままの銃身から出て砲の指す方へ飛ぶことになる。出所である GroundVehicleDefinition.Coaxial 参照。
         turnAboutX(model, setup.bone(GroundVehicleDefinition.Bone.MG), GUN_SIGN * pose.gunPitch());
 
-        // The barrel runs back. Slid rather than rotated, and slid in the turret's axes rather than
-        // the gun's, since a bone's offset is applied before its own elevation. The travel is
-        // written in blocks like everything else in these files and the bone wants model units,
-        // which are sixteen to the block before the vehicle's own scale is applied.
+        // 砲身が後座する。回転ではなく平行移動で、しかも砲ではなく砲塔の軸で動かす。ボーンのオフセットは自身の俯仰
+        // より前に適用されるからだ。後座量はこの種のファイルの他の値と同様ブロック単位で書かれているが、ボーンが要求
+        // するのはモデル単位——車両自身のスケールを掛ける前で1ブロック16単位——である。
         float travel = RECOIL_SIGN * pose.recoil() * figures.recoilTravel() * BakedGeometry.UNITS
                 / Math.max(setup.scale(), 0.01F);
         slideAlongZ(model, setup.bone(GroundVehicleDefinition.Bone.GUN), travel);
 
-        // Any further mounts laid on the same target as the main one — a warship's second turret,
-        // slaved to the same fire control. Each is swung about its own ring, so a pair of guns set
-        // apart along the deck comes round together to the one aim rather than about a shared pivot.
+        // 主砲架と同じ目標に据えられる追加の砲架——同じ射撃指揮に従う軍艦の第2砲塔など。各々を自分の旋回輪の周りに
+        // 回すので、甲板上に離れて置かれた2門は共有の支点周りではなく、それぞれ回って1つの照準へ揃う。
         for (String turret : setup.slavedTurrets()) {
             turnAboutY(model, turret, TURRET_SIGN * pose.turretYaw());
             turnAboutX(model, turret, GUN_SIGN * pose.gunPitch());
         }
 
-        // All of them at once, at the same angle. Which wheel is which does not matter: they are the
-        // same size and they are all driven by the same track. Which way round each one was built
-        // does not matter either, and on at least one of these vehicles it differs from wheel to
-        // wheel down the same side.
+        // 全輪を同じ角度で一斉に回す。どれがどの車輪かは問題にならない。同じ大きさで、同じ履帯に駆動されるからだ。
+        // 各輪がどちら向きに作られたかも問題にならないし、少なくとも1台では同じ側の車輪ごとにそれが違っている。
         for (String wheel : setup.roadWheels()) {
             turnAboutX(model, wheel, WHEEL_SIGN * pose.wheelAngle());
             plant(model, wheel, pose.ride(), setup.scale(), figures.wheelTravel());
         }
 
-        // And the ones that steer, turned about their own upright. A wheel is usually in both lists,
-        // and both rotations land on the one bone -- which is exactly right and only because of the
-        // order GeckoLib applies them in. It builds a bone matrix as Z, then Y, then X, so the X
-        // comes out innermost: the wheel rolls about its axle first and the whole of it is then swung
-        // about the kingpin. The other way round the wheel would roll about a vertical it no longer
-        // has, and a steered wheel at speed would wobble instead of turning.
+        // そして操舵輪を、自身の鉛直軸周りに回す。車輪は大抵両方のリストに入っており、2つの回転が1つのボーンに載る
+        // ——それはまったく正しいのだが、GeckoLib の適用順序のおかげでそうなっている。ボーン行列を Z→Y→X で組むので
+        // X が最内になる。車輪はまず車軸周りに転がり、その全体がキングピン周りに振られる。逆順だと車輪は、もはや持って
+        // いない鉛直軸の周りに転がることになり、高速の操舵輪は曲がる代わりにぶれる。
         for (String wheel : setup.steeredWheels()) {
             turnAboutY(model, wheel, STEER_SIGN * pose.steerAngle());
         }
@@ -197,25 +175,20 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
 
 
     /**
-     * Puts one road wheel back on the ground after the body above it has moved.
+     * 上の車体が動いた後、転輪1つを地面へ戻す。
      *
-     * <p>The suspension is drawn by rocking the <em>whole</em> model on the pose stack — see
-     * {@code GroundVehicleRenderer.applyRotations} — which is the only way to do it on models that
-     * have no one bone for the hull: on the vehicles here the hull, the turret, the stowage and the
-     * wheels are all children of the same root, so there is nothing to move that is not everything.
-     * That carries the running gear up and down with the body, which is precisely backwards. So each
-     * wheel is moved down by exactly what the body's movement lifted it, and the two cancel: the
-     * wheels stay where they were on the ground and the hull moves above them, which is what a
-     * suspension looks like.
+     * <p>サスペンションは pose stack 上で<em>モデル全体</em>を揺らして描く——{@code GroundVehicleRenderer.applyRotations}
+     * 参照——が、車体専用のボーンを持たないモデルではそれ以外に方法が無い。ここの車両では車体・砲塔・車載品・車輪が
+     * 全て同じルートの子であり、「全部ではない何か」を動かす手立てが無いのだ。その結果、走行装置も車体と一緒に上下する
+     * が、それはまさに逆である。だから各車輪を、車体の動きが持ち上げた分だけちょうど下げ、両者を打ち消す。車輪は地面の
+     * 元の位置に留まり、車体がその上で動く。それがサスペンションの見た目だ。
      *
-     * <p>Held inside the wheel's own travel. Past that the wheel is against its bump stops and the
-     * whole vehicle really does move — which is right, and is what makes a hard landing throw a tank
-     * about rather than being swallowed silently by its springs.
+     * <p>車輪自身のストローク内に収める。それを超えると車輪はバンプストップに当たり、車両全体が本当に動く——それが正しい
+     * し、着地の衝撃が戦車を跳ねさせ、バネに黙って吸収されない理由でもある。
      *
-     * <p>Written on every frame, including the frames where the body has not moved. A bone is one
-     * object shared by every vehicle of the kind on the screen and by every pass over each of them,
-     * so a wheel left displaced because there was nothing to do this frame is a wheel displaced for
-     * the next vehicle drawn — which is the same reason the run of track puts its link back.
+     * <p>車体が動いていないフレームも含め、毎フレーム書き込む。ボーンは画面上の同種の全車両と、各車両への全パスで共有
+     * される1つのオブジェクトなので、「今フレームはやることが無かった」からとずらしたまま残した車輪は、次に描かれる
+     * 車両でもずれたままになる。履帯の敷設がリンクを戻すのと同じ理由だ。
      */
     private static void plant(GeoModel<?> model, String bone, Ride ride, float scale, float travel) {
         if (bone.isEmpty()) {

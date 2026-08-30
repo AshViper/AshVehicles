@@ -3,14 +3,18 @@
   "category": "equipment",
   "group": "ashvehicles_bomb",
   "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+    "S": {
+      "item": "ashvehicles:steel_plate"
     },
     "X": {
       "item": "minecraft:tnt"
     }
   },
-  "pattern": [" # ", "#X#", "#X#"],
+  "pattern": [
+    " S ",
+    "SXS",
+    "SXS"
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:fab_500"

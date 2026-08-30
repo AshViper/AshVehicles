@@ -5,20 +5,18 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.ModList;
 
 /**
- * The one door to Distant Horizons, and the only class outside this package that the rest of the
- * ghost system talks to about it.
+ * Distant Horizons への唯一の窓口。ゴーストシステムの残りがそれについて話す相手は、このパッケージ外ではこのクラス
+ * だけだ。
  *
- * <p>Every method here first asks whether the mod is present and answers "no" or "nothing" when it
- * is not. Only behind that check is {@link DHRendererBridge} touched, and that class is the only one
- * that names a {@code com.seibel} type — so it is never loaded, let alone resolved, in a game that
- * does not have Distant Horizons, and the ghost system carries on drawing without it.
+ * <p>ここの各メソッドはまず当該 MOD の有無を問い、無ければ「no」か「何も無い」と答える。そのチェックの奥でだけ
+ * {@link DHRendererBridge} に触れる。あのクラスは {@code com.seibel} 型を名指しする唯一のクラスなので、Distant
+ * Horizons の無いゲームでは解決どころかロードもされず、ゴーストシステムはそれ抜きで描画を続ける。
  *
- * <p>What Distant Horizons actually provides, as found in 3.2.0-b (see {@link DHRendererBridge}):
+ * <p>Distant Horizons が実際に提供する物（3.2.0-b で確認。{@link DHRendererBridge} 参照）:
  * <ul>
- *   <li>how far it is drawing terrain, which decides whether a ghost has ground behind it;</li>
- *   <li>its terrain data, column by column, which is the only way to know that one of its
- *       mountains stands between the camera and a ghost — it leaves no depth in the game's depth
- *       buffer.</li>
+ *   <li>地形をどこまで描いているか。ゴーストの背後に地面があるかを決める。</li>
+ *   <li>地形データ（列単位）。DH の山がカメラとゴーストの間に立っていることを知る唯一の手段だ——DH はゲームの深度
+ *       バッファに深度を残さない。</li>
  * </ul>
  */
 public final class DHIntegration {
@@ -27,42 +25,41 @@ public final class DHIntegration {
     private DHIntegration() {
     }
 
-    /** Whether the mod is in the mod list at all. */
+    /** そもそも MOD リストに存在するか。 */
     public static boolean isLoaded() {
         return LOADED;
     }
 
-    /** Whether it is loaded, initialised, and drawing terrain right now. */
+    /** ロード済み・初期化済みで、今まさに地形を描いているか。 */
     public static boolean isActive() {
         return LOADED && DHRendererBridge.isActive();
     }
 
-    /** How far it is drawing terrain, in blocks; zero when it is not. */
+    /** 地形をどこまで描いているか（ブロック）。描いていなければ0。 */
     public static double drawnRadius() {
         return LOADED ? DHRendererBridge.drawnRadius() : 0.0;
     }
 
     /**
-     * Whether its terrain stands between two points.
+     * DH の地形が2点の間に立っているか。
      *
-     * @param level the client level, to find the matching DH level
-     * @param from where the eye is
-     * @param to the point looked at
-     * @param skip how far along the line, from {@code from}, has already been checked against the
-     *        game's own blocks and need not be asked about again
+     * @param level クライアントレベル。対応する DH レベルを見つけるため
+     * @param from 視点位置
+     * @param to 見ている点
+     * @param skip {@code from} から線に沿ってどこまでが、ゲーム自身のブロックで既に判定済みで再問い合わせ不要か
      */
     public static boolean isOccluded(ClientLevel level, Vec3 from, Vec3 to, double skip) {
         return LOADED && DHRendererBridge.isOccluded(level, from, to, skip);
     }
 
-    /** Forgets everything tied to the old level. */
+    /** 旧レベルに紐付く物を全て忘れる。 */
     public static void onLevelChanged() {
         if (LOADED) {
             DHRendererBridge.reset();
         }
     }
 
-    /** One word for the debug overlay. */
+    /** デバッグオーバーレイ用の一語。 */
     public static String status() {
         if (!LOADED) {
             return "ABSENT";
@@ -71,7 +68,7 @@ public final class DHIntegration {
         return DHRendererBridge.isActive() ? "ACTIVE" : "INACTIVE";
     }
 
-    /** A little more than {@link #status()}: what the bridge has and has not managed to reach. */
+    /** {@link #status()} より少し詳しい情報。ブリッジが到達できた物とできなかった物。 */
     public static String detail(ClientLevel level) {
         return LOADED ? DHRendererBridge.detail(level) : "absent";
     }

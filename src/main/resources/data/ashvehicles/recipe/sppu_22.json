@@ -3,17 +3,21 @@
   "category": "equipment",
   "group": "ashvehicles_pod",
   "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+    "S": {
+      "item": "ashvehicles:steel_plate"
     },
-    "R": {
-      "tag": "c:dusts/redstone"
+    "M": {
+      "item": "ashvehicles:machine_parts"
     },
     "G": {
       "item": "minecraft:gunpowder"
     }
   },
-  "pattern": ["###", "#R#", "#G#"],
+  "pattern": [
+    "SSS",
+    "SMS",
+    "SGS"
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:sppu_22"

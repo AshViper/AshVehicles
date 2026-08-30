@@ -15,16 +15,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
- * One sweep of the radar and one reading of the warning receiver, for the pilot.
+ * レーダー1掃引分と警戒受信機1回分の読み取り結果を、パイロットへ。
  *
- * <p>Sent to that one player rather than to everybody tracking the aircraft. A radar picture is an
- * instrument in a cockpit: nobody outside it has any business with the contents, and there is rather
- * a lot of it to be sending to people who cannot see the scope anyway.
+ * <p>機体を追跡している全員ではなく、その1人にだけ送る。レーダー画面はコックピット内の計器で、外にいる
+ * 者に中身は関係ないし、スコープを見られない相手へ送るには量が多い。
  *
- * <p>Everything arrives as figures — a bearing, a range, a height difference — rather than as
- * entities to look up. It has to: the radar reaches several hundred blocks, and most of what it
- * finds out there is not being sent to this client as an entity at all. See
- * {@link com.ashvehicles.sensor.Sensors}.
+ * <p>中身は全部数値（方位・距離・高度差）で届き、参照すべきエンティティとしては届かない。そうするしか
+ * ない。レーダーは数百ブロック届き、そこで見つかる物の大半はこのクライアントへエンティティとして送られ
+ * てすらいない。{@link com.ashvehicles.sensor.Sensors} 参照。
  */
 public record SensorPayload(List<Contact> contacts, List<Threat> threats) implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<SensorPayload> TYPE =
@@ -41,8 +39,8 @@ public record SensorPayload(List<Contact> contacts, List<Threat> threats) implem
     }
 
     /**
-     * Registered as client-bound only, so this runs on a client and nowhere else; a dedicated server
-     * never resolves {@link RadarReadout}.
+     * クライアント向けとしてのみ登録されているので、これはクライアントでしか走らない。専用サーバーが
+     * {@link RadarReadout} を解決することはない。
      */
     public static void handle(SensorPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> RadarReadout.accept(payload.contacts(), payload.threats()));

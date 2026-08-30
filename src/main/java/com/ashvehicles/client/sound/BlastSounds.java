@@ -21,50 +21,42 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
- * Explosions heard from a long way off.
+ * 遠方から聞こえる爆発音。
  *
- * <p>Three things are wrong with the sound the game would otherwise make, and all three are what
- * makes a distant explosion sound distant:
+ * <p>ゲームが本来出す音には3つの誤りがあり、その3つこそが「遠い爆発が遠く聞こえる」理由だ。
  *
  * <ul>
- * <li><b>It arrives too early.</b> Sound crosses about seventeen blocks a tick, so a bomb three
- *     hundred blocks away should be heard the best part of a second after the flash. Seeing the
- *     flash and hearing the bang together is the single strongest cue that something is close, and
- *     the game gives that cue to everything.
- * <li><b>It is too quiet, then suddenly silent.</b> The sound engine fades a sound linearly to
- *     nothing over {@code max(volume, 1) * 16} blocks, which for an explosion is sixty-four. Past
- *     that there is no sound at all, at any size of blast.
- * <li><b>It is too sharp.</b> Air swallows the high frequencies first, so what is a crack up close
- *     is a low roll a long way off.
+ * <li><b>届くのが早すぎる。</b>音速は約17ブロック/tick なので、300ブロック先の爆弾は閃光の1秒近く後に聞こえる
+ *     はずだ。閃光と轟音が同時に来ることは「近い」ことを示す最も強い手掛かりであり、ゲームはその手掛かりを全てに
+ *     与えてしまう。
+ * <li><b>小さすぎ、そして突然無音になる。</b>サウンドエンジンは {@code max(volume, 1) * 16} ブロックにわたって
+ *     線形に音量を0まで落とす。爆発なら64ブロックだ。それを超えると、どんな規模の爆発でも音は一切しない。
+ * <li><b>鋭すぎる。</b>空気は高周波から先に吸うので、近くでは破裂音でも遠くでは低い轟きになる。
  * </ul>
  *
- * <p>So the arrival is timed, the volume is worked out here rather than left to the engine's
- * falloff, and the pitch is dropped with distance. The sound is played with attenuation switched
- * off — the distance is already accounted for — but at the blast's real position, so it still comes
- * from the right direction.
+ * <p>よって到達時刻を計り、音量はエンジンの減衰に任せずここで算出し、ピッチを距離とともに下げる。減衰を切って
+ * 再生する——距離は既に織り込み済み——が、位置は爆発の実位置にするので、方向は正しいままだ。
  *
- * <p>Vanilla's own explosion noise is kept out of the way at the other end; see
- * {@link com.ashvehicles.weapon.WeaponEffects}.
+ * <p>バニラ自身の爆発音は反対側で退けている。{@link com.ashvehicles.weapon.WeaponEffects} 参照。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class BlastSounds {
-    /** Blocks a tick: three hundred and forty-three metres a second, at twenty ticks to the second. */
+    /** ブロック/tick。秒速343m を、毎秒20tick で換算した値。 */
     private static final double SPEED_OF_SOUND = 17.15;
     /**
-     * How it quietens with distance. Under one, so it drops away sharply at first and then hangs on
-     * a long way out, which is both what loudness does to the ear and what makes the far end of the
-     * carry worth having at all.
+     * 距離による減音の指数。1未満なので最初は急に落ちてから遠方まで粘る。耳に対する音量の振る舞いでもあり、
+     * 遠方まで届かせることに意味を持たせている要素でもある。
      */
     private static final double FALLOFF = 0.85;
-    /** Pitch of a blast right on top of you, and how much of that is lost over the whole carry. */
+    /** 真上での爆発のピッチと、全到達距離でそのうちどれだけ失われるか。 */
     private static final float NEAR_PITCH = 1.05F;
     private static final float DULLING = 0.5F;
-    /** Nothing is held longer than this, in case the player is somewhere else entirely by then. */
+    /** これ以上は保持しない。その頃にはプレイヤーがまったく別の場所にいるかもしれないからだ。 */
     private static final int LONGEST_WAIT = 200;
 
     private static final List<Pending> WAITING = new ArrayList<>();
 
-    /** A blast has gone off. Whether it is heard, and when, is worked out from where it was. */
+    /** 爆発が起きた。聞こえるか・いつ聞こえるかは発生位置から算出する。 */
     public static void hear(Vec3 at, float power) {
         Minecraft minecraft = Minecraft.getInstance();
 
@@ -89,8 +81,7 @@ public final class BlastSounds {
 
         Minecraft minecraft = Minecraft.getInstance();
 
-        // Leaving the world takes the pending sounds with it. A bang from the last one arriving in
-        // the next would be a strange thing to hear.
+        // ワールドを離れるとき保留中の音も捨てる。前のワールドの轟音が次のワールドで届くのは妙な話だ。
         if (minecraft.level == null) {
             WAITING.clear();
 
@@ -110,10 +101,10 @@ public final class BlastSounds {
     }
 
     /**
-     * How much of the blast is left where the player is standing now.
+     * プレイヤーが今いる場所に爆発がどれだけ残っているか。
      *
-     * <p>Measured again on arrival rather than kept from when it was sent, because in an aeroplane a
-     * second is a hundred blocks and the player has been flying for the whole of the sound's journey.
+     * <p>送信時の値を保持せず到達時に測り直す。機体では1秒＝100ブロックであり、音の旅路の間ずっとプレイヤーは
+     * 飛んでいたからだ。
      */
     private static void play(Minecraft minecraft, Vec3 at, float power) {
         double fade = Mth.clamp(earTo(minecraft, at) / BlastSoundPayload.carry(power), 0.0, 1.0);
@@ -131,14 +122,14 @@ public final class BlastSounds {
         return minecraft.gameRenderer.getMainCamera().getPosition().distanceTo(at);
     }
 
-    /** The mod's own boom if a resource pack provides one, else the game's. */
+    /** リソースパックが提供していれば MOD 自身の轟音、無ければゲームの物。 */
     private static ResourceLocation recording(Minecraft minecraft) {
         return ModSounds.exists(minecraft.getSoundManager(), ModSounds.BLAST)
                 ? ModSounds.BLAST
                 : SoundEvents.GENERIC_EXPLODE.value().getLocation();
     }
 
-    /** A blast on its way, and how many ticks of flight it has left. */
+    /** 到達途中の爆発音と、残りの飛行tick数。 */
     private static final class Pending {
         private final Vec3 at;
         private final float power;
@@ -152,9 +143,8 @@ public final class BlastSounds {
     }
 
     /**
-     * Positioned, so it comes from the right direction, but not attenuated: the engine's falloff
-     * reaches nothing at sixty-four blocks and everything interesting here happens further away
-     * than that. How far off it was is already in the volume and the pitch.
+     * 位置は指定するので方向は正しいが、減衰はさせない。エンジンの減衰は64ブロックで0になるのに、ここで面白い
+     * ことが起きるのは全てそれより遠くだからだ。距離は既に音量とピッチに織り込んである。
      */
     private static final class BlastSoundInstance extends AbstractSoundInstance {
         private BlastSoundInstance(ResourceLocation recording, float volume, float pitch, Vec3 at) {

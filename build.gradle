@@ -42,6 +42,15 @@ repositories {
             includeGroup('maven.modrinth')
         }
     }
+    // JEI. Only its API is compiled against, so that the recipe viewer can show what the vehicle
+    // workbench makes; the mod itself never asks whether JEI is there.
+    maven {
+        name = 'BlameJared'
+        url = 'https://maven.blamejared.com/'
+        content {
+            includeGroup('mezz.jei')
+        }
+    }
 }
 
 base {
@@ -184,12 +193,11 @@ dependencies {
     compileOnly "maven.modrinth:distanthorizons:${distant_horizons_version}-${minecraft_version}"
     localRuntime "maven.modrinth:distanthorizons:${distant_horizons_version}-${minecraft_version}"
 
-    // Example optional mod dependency with JEI
-    // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
-    // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
-    // compileOnly "mezz.jei:jei-${mc_version}-neoforge-api:${jei_version}"
-    // We add the full version to localRuntime, not runtimeOnly, so that we do not publish a dependency on it
-    // localRuntime "mezz.jei:jei-${mc_version}-neoforge:${jei_version}"
+    // JEI's API, compile time only. The plugin class under compat/jei is loaded by JEI itself and by
+    // nothing else, so a client without JEI never touches it. The full JEI jar is not pulled in: the
+    // development client picks it up from run/mods like the rest of the mods it runs beside.
+    compileOnly "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
+    compileOnly "mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}"
 
     // Example mod dependency using a mod jar from ./libs with a flat dir repository
     // This maps to ./libs/coolmod-${mc_version}-${coolmod_version}.jar

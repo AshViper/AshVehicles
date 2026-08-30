@@ -9,25 +9,22 @@ import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.util.Mth;
 
 /**
- * A lick of flame off something that is on fire and going to be for a while.
+ * しばらく燃え続ける物から立つ炎の舌。
  *
- * <p>Deliberately not {@link BlastParticle}, which is the same texture doing the opposite job. A
- * detonation opens white-hot at nearly full size and is gone inside a second, and a row of those is
- * a string of small explosions rather than a fire. A flame is the other way round: it starts where
- * it started, climbs, narrows as it climbs, and goes out red — so what a burning wreck looks like is
- * a column of these leaving it one after another, each of them a little tongue on its way to
- * becoming the smoke above.
+ * <p>{@link BlastParticle} とは意図的に別物だ。あちらは同じテクスチャで正反対の仕事をする。起爆はほぼ最大サイズ
+ * で白熱して開き1秒以内に消えるので、それを並べても火事ではなく小爆発の連なりになる。炎は逆だ。出た場所から
+ * 始まり、昇り、昇りながら細くなり、赤くなって消える——燃える残骸の見た目は、そこから次々に立つこれらの柱であり、
+ * 各々が上の煙になる途中の小さな舌だ。
  *
- * <p>Fire is its own light, wherever it is. That matters twice here: a wreck lies on the ground,
- * where the night would otherwise take the flame with it, and one that came down beyond the loaded
- * world has no chunk to be lit by at all.
+ * <p>炎はどこにいても自前の光源。ここではそれが二重に効く。残骸は地上に横たわるので、さもないと夜が炎ごと闇に
+ * 沈める。そしてロード範囲外に落ちた残骸には、照らすチャンクがそもそも無い。
  */
 public class FlameParticle extends WeaponParticle {
     private static final int LIFE = 14;
     private static final int LIFE_JITTER = 12;
-    /** What a lick has left of its width by the time it goes out. Flames taper as they rise. */
+    /** 消える時点で残る幅の割合。炎は昇りながら細くなる。 */
     private static final float TAPERS_TO = 0.2F;
-    /** How much of its life is spent yellow-white at the root before it starts to cool. */
+    /** 冷え始める前、根元が黄白色でいる時間の割合。 */
     private static final float HOT_FOR = 0.35F;
 
     private final float tintRed;
@@ -43,9 +40,9 @@ public class FlameParticle extends WeaponParticle {
         this.lifetime = LIFE + this.random.nextInt(LIFE_JITTER);
         this.quadSize = options.scale() * (0.7F + this.random.nextFloat() * 0.6F);
         this.friction = 0.91F;
-        // Negative, so it climbs. Fire is hot air and goes where hot air goes.
+        // 負値なので昇る。炎は熱気であり、熱気の行く所へ行く。
         this.gravity = -0.055F;
-        // Flame is not made of anything, and one that bounced off a wing would sit on it.
+        // 炎は物質ではない。主翼で跳ね返る炎は主翼の上に乗ってしまう。
         this.hasPhysics = false;
         this.xd = xd;
         this.yd = yd;
@@ -59,9 +56,8 @@ public class FlameParticle extends WeaponParticle {
     public void tick() {
         super.tick();
         float lived = this.lived(0.0F);
-        // White at the root and the fire's own colour a moment above it, then down through orange
-        // into red as it climbs: a flame gives up its blue first and its red last, which is what
-        // stops the top of the column reading as a second, smaller fire.
+        // 根元は白、その少し上は炎固有の色、昇るにつれてオレンジから赤へ落ちる。炎は青を最初に、赤を最後に
+        // 手放す。それが柱の頂点を「2つ目の小さな火」に見せないための要素だ。
         float hot = 1.0F - Mth.clamp(lived / HOT_FOR, 0.0F, 1.0F);
         float cool = 1.0F - lived * 0.55F;
 
@@ -81,7 +77,7 @@ public class FlameParticle extends WeaponParticle {
         return LightTexture.FULL_BRIGHT;
     }
 
-    /** How far through its life it is, from zero to one. */
+    /** 寿命のどこまで来たか。0〜1。 */
     private float lived(float partialTick) {
         return Mth.clamp(((float) this.age + partialTick) / (float) this.lifetime, 0.0F, 1.0F);
     }

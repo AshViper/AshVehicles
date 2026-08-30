@@ -5,35 +5,32 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 
 /**
- * What a vehicle has to be able to answer for the boxes it is made of.
+ * 機体が、自分を構成する箱のために答えられなければならないこと。
  *
- * <p>{@link VehiclePart} is an entity in its own right, and the game hands it hits, clicks and pick
- * results as if it were the whole machine. Almost all of those it passes straight through to
- * whatever it belongs to, which it reaches through {@code Entity}'s own interface; this is the short
- * list of questions that only the vehicle can answer, and the reason a box can belong equally to an
- * aeroplane or to a tank.
+ * <p>{@link VehiclePart} はそれ自体が独立したエンティティで、ゲームは被弾・クリック・視線判定の結果を
+ * 「機体そのもの」であるかのようにパーツへ渡す。その大半はパーツが所属先へそのまま流し、所属先へは
+ * {@code Entity} 自身のインターフェースで辿り着く。ここにあるのは機体にしか答えられない短い一覧であり、
+ * 1つの箱が飛行機にも戦車にも等しく属せる理由でもある。
  *
- * <p>Nothing here is about the shape any more. A part carries its own {@link
- * com.ashvehicles.vehicle.Hitbox} from the moment the machine places it, and answers for itself.
+ * <p>形状の話はもうここには無い。パーツは機体が配置した瞬間から自分の
+ * {@link com.ashvehicles.vehicle.Hitbox} を持ち、自分で答える。
  *
- * <p>Implemented by {@link AircraftEntity} and {@link GroundVehicleEntity}. Anything implementing it
- * must also be an {@code Entity} — {@link VehiclePart}'s constructor is where the two are required
- * together.
+ * <p>実装するのは {@link AircraftEntity} と {@link GroundVehicleEntity}。実装する物は {@code Entity}
+ * でもなければならない——両方を要求しているのは {@link VehiclePart} のコンストラクタ。
  */
 public interface PartHost {
     /**
-     * A click on one particular pylon, which means that pylon and nothing else.
+     * 特定のパイロン1本へのクリック。そのパイロンだけを指す。
      *
-     * <p>Only an aircraft has any. Anything else lets the click carry on down and mean whatever it
-     * usually means.
+     * <p>パイロンを持つのは機体だけ。それ以外はクリックをそのまま下へ通し、普段通りの意味にさせる。
      */
     default InteractionResult interactPylon(Player player, InteractionHand hand, int slot) {
         return InteractionResult.PASS;
     }
 
     /**
-     * Whether a pylon is worth reaching for: one with nothing that can be done with it stands aside
-     * and lets the click reach the machine behind.
+     * そのパイロンに手を伸ばす価値があるか。できることが何も無いパイロンは脇へ退き、クリックを後ろの機体へ
+     * 通す。
      */
     default boolean isLoadablePylon(int slot) {
         return false;

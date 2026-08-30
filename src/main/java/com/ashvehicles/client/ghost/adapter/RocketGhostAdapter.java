@@ -18,26 +18,22 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Rockets and missiles as ghosts.
+ * ゴーストとしてのロケットとミサイル。
  *
- * <p>The same arrangement as the aircraft: the snapshot carries where it is, which way it is
- * going, and which weapon's geometry to draw it from, and the ghost is drawn from those alone.
- * That matters more here than it does for an aeroplane — the interesting part of a missile's
- * flight is the part that happens over ground nobody has loaded, and a missile is aimed at
- * something a long way off by definition.
+ * <p>機体と同じ仕組みだ。スナップショットが位置・進行方向・描画元となる兵装のジオメトリを運び、ゴーストはそれだけ
+ * から描かれる。機体よりここでの重要度は高い。ミサイルの飛翔の面白い部分は誰もロードしていない地面の上で起きるし、
+ * ミサイルは定義上遠くの物を狙うからだ。
  *
- * <p>There is nothing to pose and nothing to animate, so every tier draws the same model; the
- * tiers still decide how far out it is drawn at all, and the pass still pulls it inside the far
- * plane and keeps it out of the fog.
+ * <p>ポーズを付ける物もアニメーションする物も無いので、どの階層でも同じモデルを描く。階層が決めるのは「そもそも
+ * どこまで描くか」であり、パスは今も遠方面の内側へ引き寄せ、霧から外す。
  */
 public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
     /**
-     * Unlike an aircraft or a ground vehicle, a rocket is not sent to every client wherever it is —
-     * see {@code EntityTrackingMixin}, which gives it the finite range its entity type was
-     * registered with rather than an unlimited one. A missile at the edge of that range, still
-     * flying, is exactly the case this ghost exists for: kept and drawn on from its last snapshot
-     * rather than dropped the instant the client stops hearing about it, so the far half of a
-     * long shot is not silently cut off.
+     * 機体や地上車両と違い、ロケットはどこにいても全クライアントへ送られるわけではない——
+     * {@code EntityTrackingMixin} 参照。あちらはロケットに、無制限ではなくエンティティタイプ登録時の有限の範囲を
+     * 与える。その範囲の縁でまだ飛んでいるミサイルこそ、このゴーストが存在する理由そのものだ。クライアントが受信を
+     * やめた瞬間に捨てるのではなく、最後のスナップショットから保持して描き続けるので、長射程の後半が黙って切り
+     * 捨てられない。
      */
     @Override
     public boolean keepAfterLeave(RocketEntity entity) {
@@ -49,9 +45,8 @@ public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
         Vec3 position = rocket.position();
         Vec3 travel = rocket.getDeltaMovement();
         AABB bounds = rocket.getBoundingBox().move(position.reverse());
-        // Heading and elevation along the flight path, in the turns the renderer applies rather
-        // than in the game's own convention: a missile has no yaw of its own to speak of, it simply
-        // lies along the way it is going.
+        // 飛行経路に沿った方位と仰角。ゲーム流儀ではなくレンダラーが適用する回転の形で持つ。ミサイルに語るべき
+        // 自前のヨーは無く、単に進行方向へ寝ているだけだ。
         float yaw = 0.0F;
         float pitch = 0.0F;
 
@@ -96,8 +91,8 @@ public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
         PoseStack poseStack = context.poseStack();
 
         poseStack.pushPose();
-        // Along the flight path, then the model's own half turn: geometry is authored facing north,
-        // which is -Z, and the heading worked out above points +Z along the path.
+        // まず飛行経路に沿わせ、次にモデル由来の半回転。ジオメトリは北——つまり -Z——を向いて作られるが、上で求めた
+        // 方位は経路方向を +Z とする。
         poseStack.mulPose(Axis.YP.rotationDegrees(snapshot.yaw()));
         poseStack.mulPose(Axis.XP.rotationDegrees(snapshot.pitch()));
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));

@@ -4,10 +4,13 @@ import java.util.List;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.vehicle.Attitude;
+import com.ashvehicles.aircraft.AircraftDefinition;
+import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.sensor.Contact;
+import com.ashvehicles.sensor.Iff;
+import com.ashvehicles.weapon.GunStations;
 import com.ashvehicles.weapon.WeaponDefinition;
-import com.ashvehicles.weapon.WeaponMounts;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 
@@ -28,23 +31,18 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 import org.joml.Quaternionf;
 
 /**
- * The instruments, drawn over the world while the player is aboard an aircraft.
+ * 機体に搭乗している間、世界の上に描かれる計器類。
  *
- * <p>What is here is what a pilot actually reads: how fast, how high, which way up, which way round,
- * and what the engine and the moving parts are doing. Two marks sit in the middle of the screen and
- * are worth knowing apart. The boresight is where the nose is pointing. The flight path marker is
- * where the aircraft is actually going, which in a climb or a hard turn is not the same place, and
- * the gap between the two is the angle of attack made visible. With a gun selected there is a
- * third: the pipper, which is where the rounds would land, and which from the chase camera is not
- * where the boresight is either — see {@link GunSight}.
+ * <p>ここにあるのはパイロットが実際に読む物だ。速度、高度、上下の向き、方位、そしてエンジンと可動部の状態。画面中央
+ * には2つのマークがあり、区別する価値がある。ボアサイトは機首の指す方向。飛行経路マーカーは機体が実際に進んでいる
+ * 方向で、上昇中やきつい旋回中は同じ場所ではない。両者の隙間が可視化された迎角だ。機関砲を選択すると3つ目が加わる。
+ * ピッパー、つまり弾が落ちる位置で、三人称カメラからはこれもボアサイトの位置とは違う——{@link GunSight} 参照。
  *
- * <p>In the top right-hand corner, {@link HitReadout}: where the last few rounds landed on whatever
- * they were fired at. Everything else here is about getting a round away; that is the only thing
- * that says what happened when one arrived, and a burst at a mile is not something the pilot can
- * see the end of for themselves.
+ * <p>右上隅には {@link HitReadout}。直近数発が撃った相手のどこに当たったかを示す。ここの他の全ては「弾を撃ち出す」
+ * ことについての物だが、これだけが「着弾したとき何が起きたか」を伝える。1マイル先への連射の結末は、パイロットが自分で
+ * 見届けられる物ではない。
  *
- * <p>Everything is read from state that reaches every client, so a passenger sees the same
- * instruments as the pilot rather than a panel of zeroes.
+ * <p>全て、全クライアントへ届く状態から読む。だから搭乗者にもパイロットと同じ計器が見え、0並びのパネルにはならない。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class AircraftHud implements LayeredDraw.Layer {
@@ -54,29 +52,77 @@ public final class AircraftHud implements LayeredDraw.Layer {
     static final int DIM = 0xB03BE86A;
     static final int WARNING = 0xFFFF5A3B;
     static final int SHADOW = 0x90000000;
+    /** 射出ハンドルの目盛りの、まだ引けていない側。 */
+    private static final int EJECT_EMPTY = 0x50FF5A3B;
+    /** 同じ目盛りの幅（ピクセル）。 */
+    private static final int EJECT_BAR = 60;
 
-    /** Fraction of the airframe left below which the readout goes amber. */
+    /**
+     * IFF の色。味方は青、敵は琥珀、判定の付かない相手は計器の地の色そのまま。
+     *
+     * <p>敵に赤を使わない。赤はこの計器では「今すぐ何かしろ」の色——ロック、被ロック、ミサイル——であり、
+     * チーム戦のスコープに載る物の大半は敵になる。そこを赤で埋めれば、本当に赤くなった1件を見つけられ
+     * なくなる。琥珀は緑から十分離れていて、しかもまだ警報ではない。
+     *
+     * <p>{@link com.ashvehicles.sensor.Iff#UNKNOWN} が緑なのも同じ理由の裏返しで、チームを作っていない
+     * ワールドでは全接触がこれになる。そこで画が変わらないことが正しい。
+     */
+    static final int IFF_FRIEND = 0xFF4FC3F7;
+    static final int IFF_HOSTILE = 0xFFE8B33B;
+
+    /**
+     * 接触1件を描く色。スコープの点も HMD の菱形も、これ1つから取る。
+     *
+     * <p><b>味方はロックしていても青のまま。</b> 他は従来どおりロックすれば赤になる。ここが IFF の入って
+     * いる意味そのものだ——両方を色で表そうとすると、この計器が最も伝えなければならない1件、つまり味方を
+     * 捉えてしまっている接触が、敵を捉えている接触と同じ画になる。ロックされていること自体はスコープなら
+     * 上下の括弧が、HMD なら菱形の大きさが言う。
+     */
+    static int contactColour(Iff iff, boolean locked) {
+        if (iff == Iff.FRIEND) {
+            return IFF_FRIEND;
+        }
+
+        return locked ? WARNING : switch (iff) {
+            case HOSTILE -> IFF_HOSTILE;
+            default -> GREEN;
+        };
+    }
+
+    /** 同じ色を、計器の地に沈む明るさで。まだ何も起きていない接触のため。 */
+    static int dim(int colour) {
+        return (colour & 0x00FFFFFF) | (DIM & 0xFF000000);
+    }
+
+    /** 表示が琥珀色に変わる、機体残存率の閾値。 */
     private static final float LOW_HEALTH = 0.3F;
 
     /**
-     * Rotor speed, as a percentage, at which a helicopter's readout goes green.
+     * 燃料計が琥珀色に変わる残量の割合。
      *
-     * <p>Not a hundred. Lift goes as the square of it, so the last few per cent are worth very
-     * little, and a needle that only ever settles on the mark at the exact instant it arrives is a
-     * needle nobody can read. This is the point at which pulling collective will do something.
+     * <p>実機で BINGO と呼ぶ物——「今引き返せば帰り着ける残量」——にあたる。2割にしてあるのは、この世界の
+     * 機体が概ね全開10分を積んでいるからで、残り2分は基地が見える範囲に居るなら足り、居ないなら足りない。
+     * その線が引かれていること自体が、燃料を数字から判断に変えている。
+     */
+    private static final float BINGO_FUEL = 0.2F;
+
+    /**
+     * ヘリの表示が緑に変わるローター回転数（%）。
+     *
+     * <p>100ではない。揚力はその2乗に比例するので最後の数%はほとんど価値が無いし、到達した瞬間にしか目盛りに乗らない
+     * 針は誰にも読めない。これは「コレクティブを引けば何かが起きる」点だ。
      */
     private static final int ROTOR_READY = 95;
 
-    /** Screen pixels the horizon slides for every degree of pitch. */
+    /** ピッチ1度あたり水平線が滑る画面ピクセル数。 */
     private static final float PIXELS_PER_DEGREE = 3.0F;
-    /** Rungs of the pitch ladder, in degrees. */
+    /** ピッチラダーの目盛り間隔（度）。 */
     private static final int[] LADDER = {10, 20, 30, 45, 60};
     private static final int LADDER_WIDTH = 34;
     private static final int HORIZON_WIDTH = 60;
     /**
-     * How wide the bomb impact ring is on the ground, in blocks. Drawn at a size in the world rather
-     * than a size on the screen, so it shrinks with distance like the ground it is lying on, and so
-     * it says something: roughly what the bomb will take out when it gets there.
+     * 爆弾の着弾環の地上での幅（ブロック）。画面上の大きさではなくワールド上の大きさで描くので、乗っている地面と同様に
+     * 距離とともに縮むし、意味も持つ——爆弾が到達したときおおよそ何を吹き飛ばすか、である。
      */
     private static final double BOMB_RING_BLOCKS = 6.0;
 
@@ -105,36 +151,53 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int centreX = graphics.guiWidth() / 2;
         int centreY = graphics.guiHeight() / 2;
 
+        // ターゲティングポッドを覗いている間、以下は一切描かない。下の各マークはキャノピー越しのパイロット自身の視線
+        // に対して配置されるが、ポッドは8倍のレンズでまったく別の方向を見ている。PodDisplay 参照。
+        if (PodDisplay.draw(graphics, minecraft, aircraft, partialTick, centreX, centreY)) {
+            HitReadout.draw(graphics, minecraft.font);
+
+            return;
+        }
+
         drawAttitude(graphics, attitude, centreX, centreY);
         drawMarkers(graphics, minecraft, aircraft, attitude, velocity, speed, centreX, centreY);
         drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawNumbers(graphics, minecraft.font, aircraft, attitude, velocity, speed);
         drawStatus(graphics, minecraft.font, aircraft, attitude, velocity, speed);
         drawStores(graphics, minecraft.font, aircraft, centreX, centreY);
+        drawStations(graphics, minecraft.font, minecraft, aircraft, centreX, centreY);
         drawLock(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawHMDCues(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
         drawCrew(graphics, minecraft.font, aircraft);
-        // What the last few rounds did, if any of them have landed lately. The same instrument the
-        // tank crews get and for the same reason: at the range a gun is fired at from the air, a
-        // burst that connected and a burst that went past look identical from behind the sight.
+        drawEject(graphics, minecraft.font, centreX, centreY);
+        // 直近の着弾があれば、その結果。戦車乗員が得るのと同じ計器で、理由も同じだ。空から機関砲を撃つ距離では、
+        // 当たった連射と外れた連射は照準の後ろからは見分けが付かない。
         HitReadout.draw(graphics, minecraft.font);
         RadarDisplay.draw(graphics, minecraft.font, aircraft);
     }
 
     /**
-     * The seeker: a box round whatever the selected missile is looking at, closing as the lock takes
-     * and turning solid once it has. Nothing is drawn for a weapon with no seeker, which is every
-     * gun and every rocket.
+     * シーカー。選択中のミサイルが見ている物を囲む枠で、ロックが進むにつれ締まり、成立すると実線になる。シーカーを持た
+     * ない兵装——全ての機関砲とロケット——では何も描かない。
      *
-     * <p>The box is drawn where the target actually is on screen rather than at a fixed place, so it
-     * is also how the pilot finds a target they have not spotted yet.
+     * <p>枠は固定位置ではなく目標が実際に画面上にある場所へ描く。だからパイロットがまだ見つけていない目標を発見する
+     * 手段にもなる。
      */
     private static void drawLock(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
             float partialTick, int centreX, int centreY) {
         WeaponDefinition weapon = aircraft.getWeapons().selectedWeapon();
 
         if (weapon == null || weapon.guidance().isEmpty()) {
+            return;
+        }
+
+        // レーザー誘導兵器は何も探していない。追うのはターゲティングポッドが捉えている物であり、ポッドはシーカーが
+        // 見つけるのではなくパイロットが据える。ポッド内だけでなくここにも描くので、進入はキャノピー越しに飛べる——
+        // 指示し、ポッドを仕舞い、機体を飛ばしても、マークは計器面に残っている。
+        if (weapon.guidance().get().seeker() == WeaponDefinition.Guidance.Seeker.LASER) {
+            drawDesignation(graphics, minecraft, aircraft, partialTick, centreX, centreY);
+
             return;
         }
 
@@ -149,17 +212,21 @@ public final class AircraftHud implements LayeredDraw.Layer {
         }
 
         boolean locked = aircraft.getWeapons().lock().isLocked();
+        // シーカーは味方を避けない。避けさせずに、代わりに知らせる。判定はここで自分で出す——枠が描ける
+        // 相手は手元にいる相手なので、スコープと違ってサーバーに訊く必要が無い。
+        boolean friendly = Iff.between(aircraft, target) == Iff.FRIEND;
         Vec3 middle = target.getPosition(partialTick).add(0.0, target.getBbHeight() * 0.5, 0.0);
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
         int[] at = project(minecraft, middle.subtract(camera).normalize(), focalLength(minecraft, graphics),
                 centreX, centreY);
+        // 味方を捉えている間は、ロックの赤より身元の青を優先する。ロックが閉じたことは分かっていて、
+        // 分かっていないのは相手が誰かの方だから。
+        int colour = friendly ? IFF_FRIEND : locked ? WARNING : GREEN;
 
         if (at != null) {
-            // The box tightens as the lock closes, so how far along it is can be read without
-            // looking away from the target.
+            // ロックが閉じるにつれ枠が締まるので、目標から目を離さずに進行度を読める。
             float progress = aircraft.getWeapons().lock().progress(weapon.guidance().get());
             int half = Math.round(Mth.lerp(progress, 26.0F, 11.0F));
-            int colour = locked ? WARNING : GREEN;
 
             corner(graphics, at[0] - half, at[1] - half, 1, 1, colour);
             corner(graphics, at[0] + half, at[1] - half, -1, 1, colour);
@@ -167,8 +234,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
             corner(graphics, at[0] + half, at[1] + half, -1, -1, colour);
         }
 
-        String status = locked ? "LOCK" : "SEEK";
-        int colour = locked ? WARNING : GREEN;
+        String status = friendly ? "FRIENDLY" : locked ? "LOCK" : "SEEK";
         graphics.drawString(minecraft.font, status, centreX - minecraft.font.width(status) / 2,
                 centreY + 54, colour, true);
 
@@ -178,34 +244,73 @@ public final class AircraftHud implements LayeredDraw.Layer {
                 centreY + 64, DIM, true);
     }
 
-    /** The sweep this aircraft's cues were last rebuilt from, so a new one is noticed by identity. */
+    /**
+     * ターゲティングポッドの捕捉位置を、捕捉している地面の上に描く。
+     *
+     * <p>シーカーが「探す頭」ではなく「光の点」である兵装向けの、{@link #drawLock} の対になる物。枠ではなく菱形にして
+     * あるので、パイロットが手で置いたマークが、何かが自力で見つけたロックには見えない。締まるアニメーションも無い。
+     * 締まる物が無いからだ——指示は保持されているか、いないかのどちらかである。
+     *
+     * <p>ポッドを積んでいなければ何も描かない。積んでいる兵装をそもそも使えない機体の計器面を、二度言わずに済ませる
+     * ためだ。兵装表示の行が既に NO POD と伝えている。{@link com.ashvehicles.weapon.WeaponMounts#missingPod} 参照。
+     */
+    private static void drawDesignation(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
+            float partialTick, int centreX, int centreY) {
+        if (aircraft.getWeapons().missingPod(aircraft.getWeapons().selectedWeapon()) != null) {
+            return;
+        }
+
+        Entity mark = aircraft.getDesignated();
+
+        if (mark == null) {
+            String none = "NO DESIG";
+            graphics.drawString(minecraft.font, none, centreX - minecraft.font.width(none) / 2,
+                    centreY + 54, DIM, true);
+
+            return;
+        }
+
+        Vec3 middle = mark.getPosition(partialTick).add(0.0, mark.getBbHeight() * 0.5, 0.0);
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        int[] at = project(minecraft, middle.subtract(camera).normalize(), focalLength(minecraft, graphics),
+                centreX, centreY);
+
+        if (at != null) {
+            diamond(graphics, at[0], at[1], 7, WARNING);
+        }
+
+        String status = "DESIG";
+        graphics.drawString(minecraft.font, status, centreX - minecraft.font.width(status) / 2,
+                centreY + 54, WARNING, true);
+
+        int range = (int) Math.round(aircraft.getPosition(partialTick).distanceTo(middle));
+        String reach = range + " m";
+        graphics.drawString(minecraft.font, reach, centreX - minecraft.font.width(reach) / 2,
+                centreY + 64, DIM, true);
+    }
+
+
+    /** この機体のキューを最後に組み直した元の走査結果。新しい走査を同一性で検出するため。 */
     private static List<Contact> cuedFrom = List.of();
-    /** Where each of {@link #cuedFrom} was worked out to be standing, in the same order. */
+    /** {@link #cuedFrom} の各要素が立っていると算出された位置。同じ順序。 */
     private static Vec3[] cuedAt = new Vec3[0];
 
     /**
-     * The wider picture: every contact the radar is currently holding, marked where it actually
-     * sits on the screen rather than only on the scope in the corner. Unlike {@link #drawLock}'s
-     * box, which exists only for whatever the seeker itself has taken, this is drawn for everything
-     * the radar has found — so a pilot sees a contact the moment it is painted, long before turning
-     * the nose onto it closes anything. The look of a helmet-mounted cue rather than a scope: what
-     * matters is which way to look, not the bearing and range a scope would spell out.
+     * より広い画。レーダーが現在保持している全接触を、隅のスコープ上だけでなく画面上の実際の位置へ印す。シーカー自身が
+     * 捉えた物にだけ存在する {@link #drawLock} の枠と違い、これはレーダーが見つけた全てに描かれる——だからパイロットは
+     * 描画された瞬間に接触を見られる。機首をそちらへ向けて何かが閉じるずっと前にだ。スコープではなくヘルメット装着型
+     * キューの見た目にしてある。重要なのはどちらを見るかであって、スコープが綴る方位と距離ではない。
      *
-     * <p>Worked out from the same bearing, range and altitude the scope itself draws from — see
-     * {@link Contact} for why that is all a client necessarily has for most of what is on it, and
-     * not the world position of an entity it may never have been told about. The reconstruction
-     * mirrors {@code Sensors.sweep} exactly: a flat bearing off the aim direction with the climb
-     * taken out of it, and the height made up again from the raw difference it was sent as.
+     * <p>スコープ自身が描く元と同じ方位・距離・高度から求める——それがクライアントの持つ全てである理由は {@link Contact}
+     * 参照。通知されたことすら無いかもしれないエンティティのワールド位置ではないのだ。再構成は {@code Sensors.sweep} を
+     * 正確に鏡写しにする。上昇成分を除いた照準方向からの水平方位と、生の差分として送られた高度差から高さを復元する。
      *
-     * <p><b>Fixed once a sweep, not chased every frame.</b> The radar does not see continuously —
-     * see {@code Radar.sweepTicks} — so a bearing this old is only honest against where this
-     * aircraft was standing and pointing when it arrived. Rebuilding the reconstruction from the
-     * <em>current</em> position and heading on every frame instead would drag every cue across the
-     * sky by however far this aircraft has since flown or turned, which on a fighter in the middle
-     * of using the thing is most of the point of a sweep interval's worth of motion. So the world
-     * point is worked out once, the moment a new sweep is noticed by {@link #cuedFrom} no longer
-     * matching what {@link RadarReadout} is holding, and held there — exactly as stale, and exactly
-     * as honestly, as the scope itself already is.
+     * <p><b>走査ごとに1度固定し、毎フレーム追いかけない。</b>レーダーは連続的には見ない——{@code Radar.sweepTicks}
+     * 参照——ので、この古さの方位が正直でいられるのは「届いた時点でこの機体が立って向いていた位置」に対してだけだ。代わりに
+     * <em>現在の</em>位置と方位から毎フレーム再構成すると、その後この機体が飛んだり回ったりした分だけ全キューが空を横切って
+     * 引きずられる。使っている最中の戦闘機では、それは走査間隔1回分の運動量の大半にあたる。よってワールド上の点は、
+     * {@link #cuedFrom} が {@link RadarReadout} の保持内容と一致しなくなって新しい走査が検出された瞬間に1度求め、
+     * そこに保持する——スコープ自身と正確に同じだけ古く、正確に同じだけ正直に。
      */
     private static void drawHMDCues(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
             float partialTick, int centreX, int centreY) {
@@ -248,12 +353,17 @@ public final class AircraftHud implements LayeredDraw.Layer {
             int[] at = project(minecraft, cuedAt[i].subtract(camera).normalize(), focal, centreX, centreY);
 
             if (at != null) {
-                diamond(graphics, at[0], at[1], contact.locked() ? 7 : 5, contact.locked() ? WARNING : DIM);
+                // まだ何も起きていないキューは沈めるが、身元は保つ。ロックした1件だけが地の明るさから
+                // 上がってくる。判定の付かない相手ではこれは従来どおりの DIM と WARNING になる。
+                int colour = contactColour(contact.iff(), contact.locked());
+
+                diamond(graphics, at[0], at[1], contact.locked() ? 7 : 5,
+                        contact.locked() ? colour : dim(colour));
             }
         }
     }
 
-    /** The aim direction with the climb taken out of it, for turning a flat bearing back into a world one. */
+    /** 上昇成分を除いた照準方向。水平方位をワールド方位へ戻すのに使う。 */
     private static Vec3 flatAim(AircraftEntity aircraft, float partialTick) {
         Vec3 direction = aircraft.getAimDirection(partialTick);
         Vec3 level = new Vec3(direction.x, 0.0, direction.z);
@@ -262,35 +372,31 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * The sight over the nose, which is a different instrument depending on what is selected.
+     * 機首上の照準。選択中の兵装によって別の計器になる。
      *
-     * <p>Every weapon is aimed differently and so deserves to be shown differently. A gun or a
-     * rocket is aimed by pointing the aeroplane, so over the nose there is only the plain cross that
-     * says where the nose is; the pipper that says where the rounds would <em>land</em> is a
-     * different mark in a different place, and is {@link #drawGunSight}'s. A missile is not aimed
-     * at all — it is <em>given</em> something — so what matters is where its seeker can see, and
-     * the ring drawn is exactly the cone it can lock inside. A bomb is aimed by flying, and its mark
-     * is on the ground where it would land rather than up here at all.
+     * <p>兵装ごとに照準方法が違うのだから、表示も違ってしかるべきだ。機関砲やロケットは機体を向けて狙うので、機首上には
+     * 機首の位置を示す素の十字だけを置く。弾が<em>落ちる</em>位置を示すピッパーは別の場所の別のマークであり、
+     * {@link #drawGunSight} の管轄だ。ミサイルはそもそも狙わない——<em>与えられる</em>——ので重要なのはシーカーがどこを
+     * 見られるかであり、描く環はまさにロック可能な円錐だ。爆弾は飛ぶことで狙うので、マークはここではなく落着する地面の
+     * 上にある。
      *
-     * @param focal how many screen pixels one radian off the line of sight comes to, which is what
-     *              turns the seeker's cone into a ring of the right size
+     * @param focal 視線から1ラジアン外れると画面上で何ピクセルになるか。シーカーの円錐を正しい大きさの環に変える値
      */
     private static void drawSight(GuiGraphics graphics, AircraftEntity aircraft, int x, int y, float focal) {
         WeaponDefinition weapon = aircraft.getWeapons().selectedWeapon();
         WeaponDefinition.Type type = weapon == null ? null : weapon.type();
 
         if (type == WeaponDefinition.Type.BOMB) {
-            // Nothing over the nose: a bomb is not aimed there, and the impact ring says everything.
+            // 機首上には何も描かない。爆弾はそこで狙う物ではないし、着弾環が全てを語る。
             return;
         }
 
         if (type == WeaponDefinition.Type.MISSILE && weapon.guidance().isPresent()) {
             WeaponDefinition.Guidance guidance = weapon.guidance().get();
 
-            // The cone this particular round is actually held to. A heat-seeker seeing for itself
-            // is the round's own narrow head; a radar-homing one is cued by the set before it ever
-            // leaves the rail, so what is drawn is the set's own, much wider arc instead — see
-            // TargetLock#bestCandidate, which is the same choice made the same way.
+            // この弾が実際に縛られている円錐。自力で見る赤外線誘導なら弾自身の狭いシーカー視野。レーダー誘導なら
+            // レールを離れる前にレーダーが指示するので、代わりに描くのはレーダー自身のはるかに広い走査範囲だ——
+            // TargetLock#bestCandidate 参照。同じ選択を同じやり方で行っている。
             boolean radarCued = guidance.seeker() == WeaponDefinition.Guidance.Seeker.RADAR
                     && aircraft.radar().fitted();
             float angle = radarCued ? aircraft.radar().arc() : guidance.lockAngle();
@@ -303,32 +409,47 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
-        // A gun, a rocket, or nothing selected at all: the plain boresight the instruments always
-        // had. Dim, because for a gun it is the nose and not the sight — from the cockpit the two
-        // lie on top of each other, but from the chase camera they do not, and the one to fire on
-        // is the other.
+        // 機関砲、ロケット、あるいは何も選択していない場合。計器が昔から持っている素のボアサイトだ。暗くしてある。
+        // 機関砲にとってこれは照準ではなく機首だからだ——コックピットからは両者が重なるが、三人称カメラからは重ならないし、
+        // 発砲の基準になるのはもう一方である。
         graphics.fill(x - 5, y, x + 5, y + 1, DIM);
         graphics.fill(x, y - 5, x + 1, y + 5, DIM);
     }
 
     /**
-     * The gunsight proper: where the rounds would land, and where the nose has to go to land them
-     * on something that is moving. See {@link GunSight} for how both are worked out.
+     * 本来のガンサイト。弾が落ちる位置と、動く物に当てるために機首をどこへ置くべきか。両者の求め方は {@link GunSight}
+     * 参照。
      *
-     * <p>The pipper is drawn on the point in the world the rounds would reach, not along a
-     * direction from the camera. From the cockpit those are the same mark; from a chase camera a
-     * dozen blocks back and several up they are not, and the difference is the difference between
-     * a strafing run and a furrow short of the target. Green with rounds left to fire, amber
-     * without, so whether the gun can be fired is the same glance as where it is pointing; and the
-     * range to whatever it is laid on beneath it, which is the number a pilot flies a gun pass to.
+     * <p>ピッパーはカメラからの方向ではなく、弾が到達するワールド上の点に描く。コックピットからは同じマークだが、
+     * 十数ブロック後ろかつ数ブロック上の三人称カメラからは別物であり、その差は「機銃掃射」と「目標手前の耕された溝」の
+     * 差になる。残弾があれば緑、無ければ琥珀にするので、撃てるかどうかと向きが一目で分かる。その下に据えた対象までの
+     * 距離も出す。パイロットが機銃掃射で目安にする数字だ。
      *
-     * <p>The lead is a diamond on the point the target will have reached by the time a round fired
-     * now arrives, raised by the round's drop. Put the pipper on the diamond and fire. Dim while
-     * the target is beyond the round's reach, green inside it, and amber — with the word — while
-     * the nose is close enough to the lead that firing now would hit.
+     * <p>見越し点は、今撃った弾が到達する頃に目標がいる位置へ置いた菱形で、弾の落下分だけ持ち上げてある。ピッパーを菱形へ
+     * 合わせて撃てばよい。目標が弾の到達距離の外なら暗く、内側なら緑、機首が見越し点に十分近く今撃てば当たる状態では——
+     * 文字付きで——琥珀になる。
      */
     private static void drawGunSight(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
             float partialTick, int centreX, int centreY) {
+        // 砲座を持っている乗員には、機体が向いている方向ではなくその砲の照準を出す。撃つ物が違えば狙う線も
+        // 違うのであり、1人で飛ぶパイロットはこの2つを兵装切り替えキーで行き来する。
+        GunStations stations = aircraft.getStations();
+        int station = stations.liveStationOf(minecraft.player);
+
+        if (station != GunStations.NONE) {
+            // 空の旋回パイロンでは何も描かない。引き金はその砲座に繋がっているので、パイロンの兵装の照準を
+            // 代わりに出せば「撃てない物への照準」を約束することになる。
+            ResourceLocation laidGun = stations.weaponOf(station);
+            GunSight.Solution laid = laidGun == null ? null : GunSight.solve(aircraft, station);
+
+            if (laid != null) {
+                drawSight(graphics, minecraft, laid, Definitions.weapon(laidGun),
+                        stations.rounds(station), partialTick, centreX, centreY);
+            }
+
+            return;
+        }
+
         WeaponDefinition weapon = aircraft.getWeapons().selectedWeapon();
 
         if (weapon == null || !GunSight.aims(weapon)) {
@@ -341,14 +462,26 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
+        drawSight(graphics, minecraft, sight, weapon, aircraft.getWeapons().selectedAmmo(),
+                partialTick, centreX, centreY);
+    }
+
+    /**
+     * 照準そのものを描く。どの砲の解であっても同じマークだ——ピッパーと見越し点は「弾がどこから、どちらへ、
+     * どれだけ落ちながら飛ぶか」だけでできており、それを撃つのがパイロットか砲手かは何も変えない。
+     *
+     * @param rounds その砲の残弾。ピッパーの色になる
+     */
+    private static void drawSight(GuiGraphics graphics, Minecraft minecraft, GunSight.Solution sight,
+            WeaponDefinition weapon, int rounds, float partialTick, int centreX, int centreY) {
         float focal = focalLength(minecraft, graphics);
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
-        // Rebuilt from this frame's nose rather than read off last tick's: only how far out the
-        // pipper sits is a tick old, and the mark itself follows the nose as smoothly as it moves.
+        // 前tickの値を読むのではなく、このフレームの機首方向から組み直す。1tick古いのはピッパーまでの距離だけであり、
+        // マーク自体は機首の動きと同じなめらかさで追従する。
         Vec3 muzzle = sight.bore().muzzle(partialTick);
         Vec3 nose = sight.bore().direction(partialTick);
         Vec3 pipper = muzzle.add(nose.scale(sight.pipperRange())).add(sight.pipperDrop());
-        int colour = aircraft.getWeapons().selectedAmmo() > 0 ? GREEN : WARNING;
+        int colour = rounds > 0 ? GREEN : WARNING;
         int[] at = project(minecraft, pipper.subtract(camera).normalize(), focal, centreX, centreY);
 
         if (at != null) {
@@ -356,11 +489,11 @@ public final class AircraftHud implements LayeredDraw.Layer {
             int y = at[1];
 
             if (weapon.type() == WeaponDefinition.Type.GUN) {
-                // The pipper, so a gunsight reads as a gunsight rather than as a stray dot.
+                // ピッパー。ガンサイトが迷子の点ではなくガンサイトとして読めるように。
                 circle(graphics, x, y, 9, colour);
             } else {
-                // Open at the top and bottom: rockets scatter more than a gun does, so the mark is
-                // deliberately not a closed promise of where each of them will go.
+                // 上下を開ける。ロケットは機関砲より散布するので、マークは「1発ごとの行き先の閉じた約束」に意図的に
+                // していない。
                 graphics.fill(x - 9, y, x - 3, y + 1, colour);
                 graphics.fill(x + 4, y, x + 10, y + 1, colour);
             }
@@ -379,8 +512,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
-        // The target has moved since the tick the lead was worked out; the offset has not, so the
-        // mark rides along with wherever the target is drawn this frame.
+        // 見越しを算出したtickから目標は動いているが、オフセットは動いていない。だからマークは、このフレームで目標が
+        // 描かれる位置に乗って一緒に動く。
         Vec3 lead = target.getPosition(partialTick).add(0.0, target.getBbHeight() * 0.5, 0.0).add(sight.leadOffset());
         int[] mark = project(minecraft, lead.subtract(camera).normalize(), focal, centreX, centreY);
 
@@ -403,8 +536,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * A diamond, one pixel thick: a square stood on its corner. Walked a pixel at a time, since the
-     * only thing the GUI draws is an upright rectangle and four of those make a box, not a diamond.
+     * 太さ1ピクセルの菱形。角で立てた正方形だ。GUI が描けるのは直立した矩形だけで、4つ並べても菱形ではなく箱にしか
+     * ならないので、1ピクセルずつ歩いて描く。
      */
     static void diamond(GuiGraphics graphics, int centreX, int centreY, int radius, int colour) {
         for (int step = 0; step < radius; step++) {
@@ -416,20 +549,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * A circle, one pixel thick, by the midpoint algorithm.
+     * 太さ1ピクセルの円を、中点アルゴリズムで描く。
      *
-     * <p>Written out because there is nothing to draw one with: everything the GUI offers is an
-     * upright rectangle, and a ring built out of a handful of those is a lozenge. This walks an
-     * eighth of the circle and mirrors it into the other seven, which is exact and needs no
-     * trigonometry per pixel.
+     * <p>描く手段が無いので自前で書いてある。GUI が提供するのは直立した矩形だけで、それを数個並べて作った環は菱形になる。
+     * ここでは円の1/8を歩き、残り7つへ鏡映する。厳密であり、ピクセルごとの三角関数も要らない。
      *
-     * <p><b>Drawn in runs rather than a pixel at a time.</b> A rectangle is the only thing the GUI
-     * can draw, so a pixel costs a whole one — four vertices and a look-up of the batch to put them
-     * in — and the seeker's cone is a ring of a couple of hundred pixels' radius, redrawn every
-     * frame a guided weapon is selected. But the algorithm holds {@code x} still for several steps
-     * at a time, and every step it holds it for lies in the same row as the last in four of the
-     * eight octants and the same column in the other four. So a whole run of them goes down as one
-     * rectangle, and the same pixels are lit for a third of the work.
+     * <p><b>1ピクセルずつではなく連続区間で描く。</b>GUI が描けるのは矩形だけなので、1ピクセルに矩形1つ分——頂点4つと、
+     * それを入れるバッチの検索——のコストがかかる。しかもシーカーの円錐は半径数百ピクセルの環で、誘導兵装を選択中は毎
+     * フレーム描き直される。だがアルゴリズムは {@code x} を数ステップ据え置くし、据え置いている間の各ステップは、8つの
+     * 八分円のうち4つでは前と同じ行に、残り4つでは同じ列に乗る。だから一続きの区間を矩形1つで置ける。同じピクセルが
+     * 1/3の作業量で点灯するわけだ。
      */
     static void circle(GuiGraphics graphics, int centreX, int centreY, int radius, int colour) {
         if (radius < 1) {
@@ -439,7 +568,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int x = radius;
         int y = 0;
         int error = 1 - radius;
-        // The run of steps that share the current x, as the y values it covers.
+        // 現在の x を共有するステップの連続区間を、覆う y 値の範囲として持つ。
         int runRow = x;
         int runFrom = 0;
 
@@ -453,7 +582,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
                 error += 2 * (y - x) + 1;
             }
 
-            // Only once x has moved — or the walk has finished — is the run it was on complete.
+            // x が動いたとき——あるいは走査が終わったとき——にだけ、それまでの区間が確定する。
             if (x != runRow || x < y) {
                 plotOctants(graphics, centreX, centreY, runRow, runFrom, y - 1, colour);
                 runRow = x;
@@ -463,9 +592,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * The run of points at one {@code x}, covering {@code from} to {@code to} in y, reflected into
-     * all eight octants: four upright runs at the columns {@code centreX ± x}, and four flat ones at
-     * the rows {@code centreY ± x}.
+     * ある {@code x} における点の連続区間（y は {@code from} から {@code to} まで）を、8つの八分円すべてへ反射する。
+     * 列 {@code centreX ± x} に縦の区間4つ、行 {@code centreY ± x} に横の区間4つ。
      */
     private static void plotOctants(GuiGraphics graphics, int centreX, int centreY, int x,
             int from, int to, int colour) {
@@ -485,21 +613,18 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * Where a bomb released now would land, drawn on the ground it would land on.
+     * 今投下した爆弾が落ちる位置を、落着する地面の上に描く。
      *
-     * <p>Only for a bomb, because only a bomb needs it: everything else is pointed at what it is
-     * meant to hit, and a bomb is let go and then watched. Without this, bombing is guesswork the
-     * pilot cannot even learn from, since the answer arrives seconds after the decision.
+     * <p>爆弾専用だ。必要とするのが爆弾だけだからである。他は当てたい物へ向けて撃つが、爆弾は手放してから見守る。これが
+     * 無いと爆撃は、パイロットが学ぶことすらできない当てずっぽうになる。答えが判断の数秒後に届くからだ。
      *
-     * <p>The mark falls off the bottom of the screen when the aircraft is climbing away and the
-     * bomb would land somewhere behind the viewer, which is the honest answer: from here, it would
-     * not land anywhere you can see.
+     * <p>機体が上昇していて爆弾が視聴者の後方へ落ちる場合、マークは画面下から外れる。それが正直な答えだ。ここからでは、
+     * 見える範囲のどこにも落ちない。
      *
-     * <p>From high up the bomb lands beyond the chunks the client has, and there {@link BombSight}
-     * can only work the fall out against an assumed floor rather than trace it against real blocks.
-     * The mark is still drawn — height is exactly when a pilot needs it — but dimmed, with a tilde
-     * on the range, so it reads as what it is: the right place if the ground out there is as high as
-     * the ground back here.
+     * <p>高高度からの爆弾はクライアントが持つチャンクの外へ落ちるので、そこでは {@link BombSight} が実ブロックへの
+     * トレースではなく仮定した床に対して落下を求めるしかない。マークは描き続ける——高度こそパイロットがそれを必要とする
+     * 場面だ——が暗くし、距離にチルダを付ける。ありのままに読めるようにするためだ。「向こうの地面がここの地面と同じ高さ
+     * なら、正しい場所」である。
      */
     private static void drawBombSight(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
             int centreX, int centreY) {
@@ -525,9 +650,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
-        // A ring drawn on the ground it would land on, with a dot in the middle of it. The ring is
-        // sized by how far away the impact is, so it sits over the ground the way a real mark would
-        // rather than staying the same size on the screen whether the target is near or a mile off.
+        // 落着する地面の上に描く環と、その中央の点。環の大きさは着弾までの距離で決めるので、目標が近くても1マイル先でも
+        // 画面上で同じ大きさに留まるのではなく、実際のマークのように地面に乗る。
         double away = impact.distanceTo(camera);
         int radius = Mth.clamp((int) Math.round(BOMB_RING_BLOCKS / Math.max(away, 1.0)
                 * focalLength(minecraft, graphics)), 4, 60);
@@ -535,21 +659,20 @@ public final class AircraftHud implements LayeredDraw.Layer {
         circle(graphics, at[0], at[1], radius, colour);
         graphics.fill(at[0] - 1, at[1] - 1, at[0] + 1, at[1] + 1, colour);
 
-        // How far ahead it would fall, which is the number a pilot actually flies to.
+        // どれだけ前方に落ちるか。パイロットが実際に目安にする数字だ。
         int range = (int) Math.round(aircraft.position().distanceTo(impact));
         String reach = (fall.estimated() ? "~" : "") + range + " m";
         graphics.drawString(minecraft.font, reach, at[0] - minecraft.font.width(reach) / 2, at[1] + 10, DIM, true);
     }
 
-    /** One corner of the target box: two short strokes meeting at a right angle. Shared with the
-     * ground vehicles, whose seeker draws the same box round the same sort of target. */
+    /** 目標枠の隅1つ。直角で交わる2本の短い線。同種の目標を同じ枠で囲む地上車両のシーカーと共有する。 */
     static void corner(GuiGraphics graphics, int x, int y, int alongX, int alongY, int colour) {
         int arm = 6;
         graphics.fill(Math.min(x, x + alongX * arm), y, Math.max(x, x + alongX * arm), y + 1, colour);
         graphics.fill(x, Math.min(y, y + alongY * arm), x + 1, Math.max(y, y + alongY * arm), colour);
     }
 
-    /** The artificial horizon: a line that rolls with the wings and slides with the nose. */
+    /** 人工水平儀。主翼と共にロールし、機首と共に上下する線。 */
     private static void drawAttitude(GuiGraphics graphics, Quaternionf attitude, int centreX, int centreY) {
         float bank = Attitude.bank(attitude);
         float elevation = -Attitude.elevation(attitude);
@@ -560,7 +683,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
         pose.mulPose(Axis.ZP.rotationDegrees(-bank));
         pose.translate(0.0F, elevation * PIXELS_PER_DEGREE, 0.0F);
 
-        // The horizon itself, with a gap in the middle so it never hides the aircraft symbol.
+        // 水平線本体。中央に隙間を空け、機体シンボルを隠さないようにする。
         graphics.fill(-HORIZON_WIDTH, -1, -14, 0, GREEN);
         graphics.fill(14, -1, HORIZON_WIDTH, 0, GREEN);
 
@@ -571,7 +694,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         pose.popPose();
 
-        // The aircraft itself, fixed to the screen: the horizon moves, this never does.
+        // 機体シンボル。画面に固定する。動くのは水平線であってこちらではない。
         graphics.fill(centreX - 13, centreY - 1, centreX - 4, centreY, GREEN);
         graphics.fill(centreX + 4, centreY - 1, centreX + 13, centreY, GREEN);
         graphics.fill(centreX - 1, centreY - 1, centreX + 1, centreY + 1, GREEN);
@@ -584,13 +707,13 @@ public final class AircraftHud implements LayeredDraw.Layer {
         if (degrees > 0) {
             graphics.fill(-half, y, half, y + 1, DIM);
         } else {
-            // Below the horizon the ladder is broken, the way it is on a real one.
+            // 水平線より下ではラダーを破線にする。実物と同じだ。
             graphics.fill(-half, y, -half + 10, y + 1, DIM);
             graphics.fill(half - 10, y, half, y + 1, DIM);
         }
     }
 
-    /** Where the nose points, and where the aircraft is actually going. */
+    /** 機首の指す方向と、機体が実際に進んでいる方向。 */
     private static void drawMarkers(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
             Quaternionf attitude, Vec3 velocity, double speed, int centreX, int centreY) {
         float focal = focalLength(minecraft, graphics);
@@ -609,7 +732,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int[] path = project(minecraft, velocity.scale(1.0 / speed), focal, centreX, centreY);
 
         if (path != null) {
-            // The classic circle and wings, near enough at this size.
+            // 古典的な円と翼。この大きさなら十分近い。
             graphics.fill(path[0] - 3, path[1] - 3, path[0] + 4, path[1] - 2, GREEN);
             graphics.fill(path[0] - 3, path[1] + 3, path[0] + 4, path[1] + 4, GREEN);
             graphics.fill(path[0] - 4, path[1] - 3, path[0] - 3, path[1] + 4, GREEN);
@@ -619,13 +742,13 @@ public final class AircraftHud implements LayeredDraw.Layer {
         }
     }
 
-    /** Airspeed on the left, altitude on the right, heading across the top: the usual places. */
+    /** 左に対気速度、右に高度、上に方位。いつもの配置。 */
     private static void drawNumbers(GuiGraphics graphics, Font font, AircraftEntity aircraft,
             Quaternionf attitude, Vec3 velocity, double speed) {
         int centreX = graphics.guiWidth() / 2;
         int centreY = graphics.guiHeight() / 2;
 
-        // Blocks are metres and there are twenty ticks in a second.
+        // 1ブロック=1m、1秒=20tick。
         int kmh = (int) Math.round(speed * 20.0 * 3.6);
         int altitude = (int) Math.round(aircraft.getY());
         int climb = (int) Math.round(velocity.y * 20.0);
@@ -643,29 +766,50 @@ public final class AircraftHud implements LayeredDraw.Layer {
         graphics.fill(centreX - 1, centreY - 66, centreX + 1, centreY - 62, GREEN);
     }
 
-    /** Engine, moving parts, and the two things that will bite: the angle of attack and the stall. */
+    /** エンジン、可動部、そして噛み付いてくる2つ——迎角と失速。 */
     private static void drawStatus(GuiGraphics graphics, Font font, AircraftEntity aircraft,
             Quaternionf attitude, Vec3 velocity, double speed) {
         int left = 8;
         int bottom = graphics.guiHeight() - 8;
 
-        // What is left of the airframe, and a warning colour once there is little enough of it that
-        // the pilot should be thinking about home rather than about the fight.
+        // 残燃料。割合と、その割合で燃料計に何が起きているか。
+        //
+        // 割合で出すのは、パイロットが実際に問うのがそれだからだ。「あと何単位あるか」は機種ごとに意味が
+        // 変わるが、「あと何割か」はどの機体でも同じことを意味する。BINGO——帰投を決める残量——を下回れば
+        // 琥珀になり、そこから先は「戦闘を続けるか帰るか」の判断が始まる。空になれば下の中央に警告が出る。
+        //
+        // 燃料を持たない機体では1行も割かない。動かない数字はパイロットが読むことを覚え、それから読むのを
+        // やめる物であり、そのとき隣の数字も一緒に読まれなくなる。
+        if (aircraft.fuelSetup().fitted()) {
+            float fuel = aircraft.getFuelFraction();
+            value(graphics, font, String.format("FUEL %d%%", Math.round(fuel * 100.0F)),
+                    left, bottom - 72, fuel <= BINGO_FUEL ? WARNING : GREEN);
+
+            // 増槽の残量。本体の割合とは別に、量そのもので出す。パイロットがこの数字に対して問うのは「あと
+            // 何割か」ではなく「まだ落とせないか」だからだ。0 になれば落としてよく、そこからは抗力だけを
+            // 払っていることになる——だから空でも表示は残す。吊っていなければ1文字も出さない。
+            if (aircraft.getWeapons().hasTank()) {
+                int tanks = aircraft.getTankFuel();
+                value(graphics, font, String.format("EXT %d", tanks), left + 84, bottom - 72,
+                        tanks > 0 ? GREEN : DIM);
+            }
+        }
+
+        // 機体の残存度。パイロットが戦闘より帰投を考えるべき量まで減ったら警告色にする。
         float health = aircraft.getHealth();
         int colour = aircraft.getHealthFraction() <= LOW_HEALTH ? WARNING : GREEN;
         value(graphics, font, String.format("HP %d/%d", Math.round(health), Math.round(aircraft.getMaxHealth())),
                 left, bottom - 62, colour);
 
-        // What is left to throw out. Both counts on one line, and amber once either magazine is
-        // empty: which of the two is gone is exactly what decides whether the next lock is survivable.
+        // 放出できる残量。両方の数を1行にまとめ、どちらかが尽きたら琥珀にする。どちらが尽きたかが、次のロックを生き延び
+        // られるかを決めるからだ。
         int flares = aircraft.getCountermeasures(true);
         int chaff = aircraft.getCountermeasures(false);
         value(graphics, font, String.format("CM  FL %d  CH %d", flares, chaff), left, bottom - 52,
                 flares > 0 && chaff > 0 ? GREEN : WARNING);
 
-        // What the aeroplane is returning to anyone looking for it, and what that has cost so far.
-        // Only worth a line on an airframe that was built to be hard to find: on anything else the
-        // figure never moves and never mattered.
+        // 探している者に対して機体が返している反射と、それが現時点でどれだけのコストになっているか。1行割く価値がある
+        // のは見つかりにくく作られた機体だけで、それ以外では値が動かず、意味を持ったこともない。
         float clean = aircraft.getStats().signature().radar();
 
         if (clean < 1.0F) {
@@ -678,19 +822,17 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int throttle = Math.round(aircraft.getThrottle() * 100.0F);
 
         if (aircraft.isRotorcraft()) {
-            // The same lever under the name it goes by on a helicopter, and beside it the one figure
-            // a helicopter pilot has that an aeroplane pilot does not: what the rotor is doing.
-            // Pulling collective before it is up to speed achieves nothing at all, so the wait needs
-            // to be something the pilot can watch rather than guess at. Amber until it is there.
+            // 同じレバーをヘリでの呼び名で表示し、その隣に、ヘリのパイロットだけが持つ値——ローターの状態——を置く。
+            // 回転が上がる前にコレクティブを引いてもまったく何も起きないので、待ち時間はパイロットが推測するのではなく
+            // 見られる物である必要がある。到達するまでは琥珀。
             int rotor = Math.round(aircraft.getRotorSpeed() * 100.0F);
 
             value(graphics, font, "COLL " + throttle + "%", left, bottom - 42);
             value(graphics, font, "RTR " + rotor + "%", left, bottom - 32,
                     rotor >= ROTOR_READY ? GREEN : WARNING);
         } else {
-            // The lever, and the one place past the top of it. Reheat is not a percentage — the
-            // pilot is through the gate or they are not — and "THR 100%" beside an aeroplane
-            // accelerating like that would say nothing whatever about why.
+            // レバーと、その上限の向こうの1段。アフターバーナーは百分率ではない——ゲートを抜けたか抜けていないかだ——
+            // し、あの加速をしている機体の隣の「THR 100%」は、その理由について何も語らない。
             boolean reheat = aircraft.isAfterburning();
 
             value(graphics, font, reheat ? "THR A/B" : "THR " + throttle + "%", left, bottom - 42,
@@ -699,9 +841,15 @@ public final class AircraftHud implements LayeredDraw.Layer {
             value(graphics, font, "FLAP " + (aircraft.isFlapsDown() ? "DOWN" : "UP"), left, bottom - 22);
         }
 
-        // Only for an aeroplane that can do it, and amber while the nozzle is on its way: a
-        // conversion is the one part of flying this thing where where the engine is pointing is the
-        // most important number on the panel.
+        // 可変翼を持つ機体のみ。翼はパイロットが動かす物ではないが、だからこそ今どこにあるかは見えている必要が
+        // ある——後退角は、この機体が同じ速度で何ができるかを丸ごと決めてしまう。作動中は琥珀。
+        if (aircraft.hasSweepWing()) {
+            value(graphics, font, "WING " + Math.round(aircraft.getWingSweep(1.0F)) + "°", left + 84, bottom - 32,
+                    aircraft.getWingSweep(1.0F) == aircraft.getWingSweep(0.0F) ? GREEN : WARNING);
+        }
+
+        // 転換可能な機体のみ。ノズルが動作中は琥珀にする。転換は、この機体の飛行のうち「エンジンがどこを向いているか」
+        // がパネル上で最も重要な数字になる唯一の局面だ。
         if (aircraft.isVtolCapable()) {
             int nozzle = Math.round(aircraft.getNozzleAngle());
             boolean settled = nozzle == 0 || nozzle == Math.round(aircraft.getStats().vtol().get().maxAngle());
@@ -724,17 +872,59 @@ public final class AircraftHud implements LayeredDraw.Layer {
             graphics.drawString(font, warning, centreX - font.width(warning) / 2,
                     graphics.guiHeight() / 2 + 42, WARNING, true);
         }
+
+        // 燃料切れ。失速の1行下に出すのは、両方同時に起こりうるからだ——エンジンが止まった機体は速度を失い、
+        // やがて主翼も止まる。そのときパイロットは2つとも知る必要がある。
+        if (aircraft.isOutOfFuel()) {
+            String warning = "FUEL OUT";
+            int centreX = graphics.guiWidth() / 2;
+            graphics.drawString(font, warning, centreX - font.width(warning) / 2,
+                    graphics.guiHeight() / 2 + 52, WARNING, true);
+        }
     }
 
     /**
-     * What is on the pylons: the selected weapon and its rounds, with everything else aboard listed
-     * dimly beneath it, so the pilot can see what cycling would bring up next.
+     * 射出座席のハンドル。引いている間だけ、引き具合と一緒に出る。
      *
-     * <p>Nothing is drawn for an aircraft carrying nothing, which keeps the instruments of an
-     * unarmed one exactly as they were.
+     * <p>この目盛りが無いと、長押しは「押しているつもりだが何も起きない1秒」になる。ハンドルを引く操作で
+     * 一番知る必要があるのは、あとどれだけ引けば座席が動くかだ。
+     *
+     * <p>失速と燃料切れの警告の下に置く。3つとも同じ列に並び、同じ色を持ち、同じ種類のこと——今すぐ何か
+     * しなければならない——を言う。順番もそのままで、ハンドルは最後の手段として一番下に来る。
+     */
+    private static void drawEject(GuiGraphics graphics, Font font, int centreX, int centreY) {
+        float charge = VehicleDismountHandler.ejectCharge();
+
+        if (charge <= 0.0F) {
+            return;
+        }
+
+        String label = "EJECT";
+
+        graphics.drawString(font, label, centreX - font.width(label) / 2, centreY + 66, WARNING, true);
+
+        int left = centreX - EJECT_BAR / 2;
+        int top = centreY + 78;
+
+        graphics.fill(left - 1, top - 1, left + EJECT_BAR + 1, top + 4, SHADOW);
+        graphics.fill(left, top, left + EJECT_BAR, top + 3, EJECT_EMPTY);
+        graphics.fill(left, top, left + Math.round(EJECT_BAR * charge), top + 3, WARNING);
+    }
+
+    /**
+     * パイロンの搭載物。選択中の兵装とその残弾を出し、その下に他の搭載物を暗く列挙するので、切り替えると次に何が来るか
+     * が分かる。
+     *
+     * <p>機体が使う手段を持たない兵装は、トリガーを押して発見させるのではなく明示する。指示装置を積んでいない機体の
+     * レーザー誘導爆弾がその例だ。吊られており、一覧にも出るが、投下されない。どれがどれかを地上で知らされる方が、目標
+     * 上空で気付くよりはるかに有用だ。{@link com.ashvehicles.weapon.WeaponDefinition#requires} 参照。
+     *
+     * <p>何も積んでいない機体では何も描かない。非武装機の計器を従来通りに保つためだ。
      */
     private static void drawStores(GuiGraphics graphics, Font font, AircraftEntity aircraft, int centreX, int centreY) {
-        List<ResourceLocation> carried = aircraft.getWeapons().carried();
+        // 撃てる物だけでなく吊っている物全部。増槽は選択されないが、翼の下にぶら下がっており、パイロットが
+        // 搭載一覧に対して問うのは「今この機体は何を持っているか」だ。
+        List<ResourceLocation> carried = aircraft.getWeapons().carriedStores();
 
         if (carried.isEmpty()) {
             return;
@@ -742,8 +932,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         ResourceLocation selected = aircraft.getWeapons().selected();
         int right = graphics.guiWidth() - 8;
-        // Clear of the warning receiver, which sits at the middle of this edge and takes its
-        // MISSILE and LOCKED calls a little way below itself.
+        // 警戒受信機を避ける。あれはこの辺の中央に座り、MISSILE と LOCKED の表示を自分の少し下に出す。
         int y = centreY + 52;
 
         label(graphics, font, "STORES", right - font.width("STORES"), y);
@@ -752,33 +941,74 @@ public final class AircraftHud implements LayeredDraw.Layer {
         for (ResourceLocation weapon : carried) {
             boolean armed = weapon.equals(selected);
             int rounds = armed ? aircraft.getWeapons().selectedAmmo() : ammoOf(aircraft, weapon);
-            String line = (armed ? "> " : "  ") + name(weapon) + "  " + rounds;
-            int colour = rounds > 0 ? (armed ? GREEN : DIM) : WARNING;
+            boolean unusable = aircraft.getWeapons().missingPod(weapon) != null;
+            String line = (armed ? "> " : "  ") + name(weapon)
+                    + (unusable ? "  NO POD" : "  " + rounds);
+            int colour = unusable || rounds <= 0 ? WARNING : (armed ? GREEN : DIM);
 
             graphics.drawString(font, line, right - font.width(line), y, colour, true);
             y += 10;
         }
     }
 
-    /** Rounds left across every mount carrying one particular weapon. */
+    /** 特定の兵装を積む全ステーションの残弾合計。 */
     private static int ammoOf(AircraftEntity aircraft, ResourceLocation weapon) {
-        int total = 0;
-
-        for (WeaponMounts.Mount mount : aircraft.getWeapons().mounts()) {
-            if (weapon.equals(mount.weapon())) {
-                total += mount.ammo();
-            }
-        }
-
-        return total;
+        return aircraft.getWeapons().ammoOf(weapon);
     }
 
-    /** A weapon's name as the instruments show it: its path, upper case, without the namespace. */
+    /** 計器が表示する兵装名。名前空間を除いたパスを大文字にした物。 */
     private static String name(ResourceLocation weapon) {
         return weapon.getPath().replace('_', '-').toUpperCase(java.util.Locale.ROOT);
     }
 
-    /** Who is aboard, pilot first. */
+    /**
+     * 砲座の一覧。各砲の名前・残弾・今それを持っているのが誰か。砲座を持たない機体では何も描かない。
+     *
+     * <p>この画面の持ち主が撃てる砲には矢印を付ける。1人で飛んでいれば全部が自分の物で、そのうち1つだけに
+     * 矢印が付く——兵装切り替えキーが選んでいる砲だ。誰かが砲手席に着いていれば、その砲の行はその人の名前に
+     * なり、矢印は消える。他人の砲だからだ。
+     */
+    private static void drawStations(GuiGraphics graphics, Font font, Minecraft minecraft,
+            AircraftEntity aircraft, int centreX, int centreY) {
+        GunStations stations = aircraft.getStations();
+
+        if (!stations.exists()) {
+            return;
+        }
+
+        int mine = stations.liveStationOf(minecraft.player);
+        int left = 8;
+        int y = centreY + 52;
+
+        label(graphics, font, "GUNS", left, y);
+        y += 11;
+
+        for (int index = 0; index < stations.count(); index++) {
+            AircraftDefinition.Station station = stations.station(index);
+            Entity crew = stations.operatorOf(index);
+            ResourceLocation gun = stations.weaponOf(index);
+            int rounds = stations.rounds(index);
+            boolean own = index == mine;
+            // 砲座の名前ではなく、そこに今載っている砲の名前を出す。空の旋回パイロンは「積んでいない」と
+            // 言うべきであって、砲座の名前だけを出せば「あるのに撃てない」に見える。
+            String line = (own ? "> " : "  ")
+                    + (gun == null ? station.label().toUpperCase(java.util.Locale.ROOT) : name(gun))
+                    + (gun == null ? "  --" : "  " + rounds);
+
+            graphics.drawString(font, line, left, y,
+                    gun == null || rounds <= 0 ? WARNING : own ? GREEN : DIM, true);
+
+            // 誰が撃つか。自分の砲では言うまでもないので、他人が持っている砲についてだけ名前を出す。
+            if (crew != null && crew != minecraft.player) {
+                graphics.drawString(font, crew.getName().getString(), left + 12, y + 9, DIM, true);
+                y += 9;
+            }
+
+            y += 10;
+        }
+    }
+
+    /** 搭乗者。パイロットが先頭。 */
     private static void drawCrew(GuiGraphics graphics, Font font, AircraftEntity aircraft) {
         List<Entity> aboard = aircraft.getPassengers();
         Entity pilot = aircraft.getControllingPassenger();
@@ -795,9 +1025,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * The angle the wing is meeting the airflow at. Worked out here rather than read off the
-     * aircraft because only the client flying it runs the aerodynamics; every other client, a
-     * passenger included, has to arrive at it from the attitude and where the aircraft is moving.
+     * 主翼が気流に対して成す角。機体から読まずここで求めるのは、空力を回すのが操縦中のクライアントだけだからだ。搭乗者を
+     * 含む他の全クライアントは、姿勢と機体の進行方向からこれに辿り着くしかない。
      */
     private static float angleOfAttack(Quaternionf attitude, Vec3 velocity, double speed) {
         if (speed < 1.0E-4) {
@@ -810,13 +1039,11 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * Where a direction in the world lands on the screen. The perspective is a simple one: how far
-     * off the line of sight something is, divided by how far along it, scaled by the focal length
-     * the field of view implies. Returns null for anything behind the viewer.
+     * ワールド上の方向が画面のどこに落ちるか。透視は単純だ。視線からの外れ量を視線方向の距離で割り、視野角が示す焦点距離
+     * で拡大する。視聴者の後方にある物には null を返す。
      */
     /**
-     * Where a direction out of the camera lands on the screen, or null if it is behind it. Shared
-     * with the ground vehicles' instruments, which have the same job to do with a gun barrel.
+     * カメラから出る方向が画面のどこに落ちるか。後方なら null。砲身に対して同じ仕事をする地上車両の計器と共有する。
      */
     static int[] project(Minecraft minecraft, Vec3 direction, float focal, int centreX, int centreY) {
         var camera = minecraft.gameRenderer.getMainCamera();
@@ -837,9 +1064,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * How many screen pixels one radian off the line of sight comes to, at the field of view the
-     * world is being drawn at this frame — which with the sight up is narrower than the one in the
-     * options, and everything placed by it has to agree with the world or it is placed wrongly.
+     * 視線から1ラジアン外れると画面上で何ピクセルになるか。このフレームで世界が描かれている視野角に基づく——照準を上げて
+     * いる間は設定の値より狭いし、これで配置される物はワールドと一致しなければ誤った位置に置かれる。
      */
     static float focalLength(Minecraft minecraft, GuiGraphics graphics) {
         double fov = minecraft.options.fov().get() / AimZoom.factor();
@@ -861,7 +1087,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
         value(graphics, font, text, x, y, GREEN);
     }
 
-    /** The same, in a colour of its own, for a reading that is worth noticing. */
+    /** 同じ物を専用の色で。注意に値する表示のため。 */
     static void value(GuiGraphics graphics, Font font, String text, int x, int y, int colour) {
         graphics.fill(x - 2, y - 2, x + font.width(text) + 2, y + 10, SHADOW);
         graphics.drawString(font, text, x, y, colour, true);

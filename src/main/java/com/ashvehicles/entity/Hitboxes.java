@@ -27,49 +27,46 @@ import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 
 /**
- * Where the mod's machines are, and everything the world asks of the boxes they are made of.
+ * この MOD の機体がどこにいるか、そして機体を構成する箱に対して世界が問うこと全部。
  *
- * <p>The game is not asked and is not told. Its own collision works in upright boxes and cannot be
- * given anything else, so the boxes are kept here instead, in a list of the machines in each level,
- * and the two questions that matter are answered against them directly: how far something moving
- * gets before it runs into a machine ({@link #limit}), and what a line aimed through a machine hits
- * ({@link #pick}). The mixins that ask are the whole of the join between this and Minecraft.
+ * <p>ゲームには問わないし教えもしない。ゲームの衝突は直立した箱で動き、それ以外を渡せない。だから箱は
+ * ここで、レベルごとの機体一覧として保持し、重要な2つの問いに直接答える。動いている物が機体にぶつかるまで
+ * どこまで進めるか（{@link #limit}）と、機体を貫いて狙った線が何に当たるか（{@link #pick}）。問い合わせて
+ * くる mixin 群が、これと Minecraft をつなぐ接合部の全部。
  *
- * <p><b>Why a list of machines rather than asking the level.</b> Both questions are asked of
- * everything that moves, every tick, and everything that is aimed, every frame. Asking the level for
- * nearby entities each time would double the work the game already does to answer the same question
- * about its own collision. There are never many machines in a level and they are kept in hand, so
- * the usual answer — there is not one anywhere near you — costs a walk down a list of three.
+ * <p><b>レベルに訊かず機体一覧を持つ理由。</b> どちらの問いも、動く物すべてに毎tick、狙われる物すべてに
+ * 毎フレーム投げられる。毎回レベルへ近傍エンティティを訊けば、ゲームが自前の衝突について既にやっている同じ
+ * 仕事をもう一度やることになる。1つのレベルに機体が多数いることは無く、手元に持っているので、通常の答え
+ * ——「近くには1機もいない」——は3要素のリストを歩くコストで済む。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID)
 public final class Hitboxes {
     /**
-     * How much of a step up onto a machine is worth trying, as vanilla would: nothing at all unless
-     * the mover is standing on something, so that nobody climbs a hull in mid-air.
+     * 機体への段差乗り上げをどこまで試す価値があるか。バニラと同じく、何かの上に立っていなければ一切試さ
+     * ない。空中で船体をよじ登る者が出ないように。
      */
     private static final double NOTHING = 1.0E-7;
 
     /**
-     * How near a machine's box something's feet have to be for it to be standing on it, in blocks.
+     * 足元が機体の箱にどれだけ近ければ「その上に立っている」と見なすか（ブロック）。
      *
-     * <p>A tenth, which is a little more than a tick of falling. Less than that and somebody standing
-     * perfectly still is dropped by the ship every time the arithmetic rounds the other way; much
-     * more and they are carried along by a deck they are hovering above.
+     * <p>0.1。1tick分の落下より少し大きい。これより小さいと、完全に静止している者が丸め誤差の向き次第で
+     * 毎回艦から落とされる。ずっと大きくすると、浮いている甲板に運ばれることになる。
      */
     private static final double CONTACT = 0.1;
 
     /**
-     * No ground to scrape over: every block stops the shape, which is what being in the air means.
-     * See {@link #throughBlocks(Entity, Hitbox, Vec3, double)}.
+     * こすって越える地面が無い状態。全ブロックが形状を止める。それが「空中にいる」ということ。
+     * {@link #throughBlocks(Entity, Hitbox, Vec3, double)} 参照。
      */
     public static final double UNDERSIDE_NONE = Double.NEGATIVE_INFINITY;
 
     /**
-     * The machines in each level.
+     * レベルごとの機体一覧。
      *
-     * <p>Weakly by level, so that a level that has gone takes its list with it. Each list belongs to
-     * the thread its level is ticked on — a client's and a server's are different levels and
-     * different lists — and only the map they hang in is shared, which is what is guarded.
+     * <p>レベルを弱参照キーにしてあるので、消えたレベルは自分のリストを連れて消える。各リストはそのレベルが
+     * tick されるスレッドの持ち物——クライアントとサーバーは別レベル・別リスト——で、共有されているのはそれ
+     * らを吊るすマップだけ。そこだけを同期する。
      */
     private static final Map<Level, Set<VehicleEntityBase>> MACHINES =
             Collections.synchronizedMap(new WeakHashMap<>());
@@ -96,31 +93,29 @@ public final class Hitboxes {
     }
 
     // ------------------------------------------------------------------
-    // Being run into
+    // ぶつかられる側
     // ------------------------------------------------------------------
 
     /**
-     * How much of a move the world's own collision has already allowed is left once the mod's
-     * machines have had their say.
+     * 世界自身の衝突が既に許可した移動のうち、この MOD の機体が口を出した後に残る分。
      *
-     * <p>Given the move Minecraft has settled on rather than the one that was asked for, because
-     * they are two separate obstacles and neither may hand back movement the other has taken away.
-     * What comes out is what a player standing on a sloping deck is held up by and what stops one
-     * walking into a hull.
+     * <p>渡されるのは要求された移動ではなく Minecraft が決着させた移動。両者は別々の障害物であり、どちらも
+     * 相手が奪った移動を返してはいけないから。ここから出てくる物が、傾いた甲板の上のプレイヤーを支え、船体
+     * への進入を止める。
      *
-     * @param mover whatever is moving. Its own machine is not an obstacle to it, nor to anything
-     *              riding in it, or a passenger would be shoved out of the seat they are sitting in
-     * @param box where it is now
-     * @param wanted the move as the world has already limited it
+     * @param mover 動いている物。自分の機体はその物にとっても、それに乗っている物にとっても障害ではない。
+     *              さもないと搭乗者が座っている席から押し出される
+     * @param box 現在位置
+     * @param wanted 世界が既に制限した後の移動
      */
     public static Vec3 limit(Entity mover, AABB box, Vec3 wanted) {
         if (wanted.lengthSqr() == 0.0) {
             return wanted;
         }
 
-        // A machine is stopped by the shape it really has rather than by the plain box it is filed
-        // under — an aeroplane setting down on a deck touches it with its wheels, not with the shed
-        // Minecraft thinks it is. Anything else is the box it is, which for a player is the truth.
+        // 機体を止めるのは、登録上の素の直方体ではなく本当に持っている形状だ——甲板に降りる機体はそこへ
+        // 車輪で触れるのであって、Minecraft の思う小屋で触れるのではない。それ以外の物は自分の箱そのもの
+        // で、プレイヤーにとってはそれが真値。
         List<Hitbox> mine = own(mover);
         AABB area = (mine.isEmpty() ? box : union(mine)).expandTowards(wanted);
         List<Hitbox> theirs = near(mover, area);
@@ -142,7 +137,7 @@ public final class Hitboxes {
         return step(mover, theirs, box, wanted, allowed);
     }
 
-    /** The boxes the mover is itself made of, or none for anything that is not one of the machines. */
+    /** 動いている物自身を構成する箱。この MOD の機体でなければ空。 */
     private static List<Hitbox> own(Entity mover) {
         if (!(mover instanceof VehicleEntityBase machine)) {
             return List.of();
@@ -178,11 +173,11 @@ public final class Hitboxes {
     }
 
     /**
-     * The boxes of every machine near enough to be worth testing.
+     * 判定する価値があるだけ近い全機体の箱。
      *
-     * <p>Each machine's boxes are where they were last put, which is where the machine's own tick
-     * left them. That is what the game does with its own multipart entities and it is what the
-     * player sees drawn, so a shot and a footstep land on the same box.
+     * <p>各機体の箱は最後に置かれた場所——その機体自身の tick が残した場所——にある。ゲームが自前の多パーツ
+     * エンティティに対してやっていることと同じで、プレイヤーが見ている描画とも同じなので、射撃と足音は同じ
+     * 箱に着く。
      */
     private static List<Hitbox> near(Entity mover, AABB area) {
         Set<VehicleEntityBase> machines = MACHINES.get(mover.level());
@@ -221,12 +216,10 @@ public final class Hitboxes {
     }
 
     /**
-     * A move worked out one axis at a time, in the order Minecraft works its own out in — the
-     * upright first, then whichever of the two flat ones is the shorter.
+     * 移動を1軸ずつ、Minecraft が自前の移動を解く順——まず垂直、次に水平2軸のうち短い方——で解く。
      *
-     * <p>Which is not arbitrary. Settling the fall first is what lets something land on a surface
-     * and then walk along it in the same tick, and taking the shorter of the two flat axes first is
-     * what lets something slide along a wall it is pressed against rather than catching on it.
+     * <p>この順は恣意的ではない。落下を先に決着させることが「同じ tick で面に着地してその上を歩く」ことを
+     * 可能にし、水平2軸のうち短い方を先に取ることが「押し付けられた壁に引っ掛からず滑る」ことを可能にする。
      */
     private static Vec3 resolve(List<Hitbox> boxes, AABB box, Vec3 wanted) {
         double x = wanted.x;
@@ -267,11 +260,11 @@ public final class Hitboxes {
     }
 
     /**
-     * The same for a mover that is itself made of boxes, which is every pair of shapes in the mod
-     * meeting: an aeroplane against a deck, a deck against an aeroplane.
+     * 動いている側自身が箱でできている場合の同じ処理。この MOD の形状同士が出会う全ての組み合わせ——甲板に
+     * 対する機体、機体に対する甲板——がこれ。
      *
-     * <p>Every box of the one against every box of the other, which is as many tests as it sounds
-     * and is why each pair is thrown out first if the two are nowhere near each other along the move.
+     * <p>一方の全箱を他方の全箱に対して試すので、判定数は聞こえる通り多い。だから移動区間で互いに近くもない
+     * 組は先に捨てる。
      */
     private static Vec3 resolve(List<Hitbox> theirs, List<Hitbox> mine, Vec3 wanted) {
         double x = wanted.x;
@@ -344,7 +337,7 @@ public final class Hitboxes {
         return moved;
     }
 
-    /** How much of a move along one axis is left once every box has been swept against. */
+    /** 全箱に対して掃引した後、1軸方向の移動がどれだけ残るか。 */
     private static double along(List<Hitbox> boxes, AABB box, double distance, int axis) {
         Vec3 motion = motion(distance, axis);
         double least = 1.0;
@@ -361,18 +354,14 @@ public final class Hitboxes {
     }
 
     /**
-     * One step up onto a machine, for something that was stopped by one and is standing on the
-     * ground.
+     * 機体に止められ、かつ地面に立っている物のための段差乗り上げ1回分。
      *
-     * <p>Minecraft does this for its own obstacles inside the move that has already happened by the
-     * time any of this is asked, so a machine's boxes have to do it for themselves or a player would
-     * be brought up short by the lip of a track they could have walked straight over. It is the same
-     * move: lift by as much of the step as there is room for, try the flat move again from up there,
-     * and settle back down as far as the way is clear.
+     * <p>Minecraft は自前の障害物についてこれを、ここが問われる時点で既に終わっている移動の内側でやって
+     * いる。だから機体の箱は自分でやらなければ、プレイヤーは普通に歩いて越えられるはずの履帯の縁で急停止
+     * する。動きは同じ——空いている分だけ持ち上げ、そこから水平移動をやり直し、道が空いている分だけ降ろす。
      *
-     * <p>The world is asked whether the lifted position is clear before it is taken, because nothing
-     * here knows about blocks and stepping onto a track with a wall behind it must not put anybody
-     * inside the wall.
+     * <p>持ち上げた位置が空いているかは、採用する前に世界へ訊く。ここには誰もブロックのことを知らないし、
+     * 背後に壁のある履帯へ乗り上げて誰かを壁の中へ入れるわけにはいかないから。
      */
     private static Vec3 step(Entity mover, List<Hitbox> boxes, AABB box, Vec3 wanted, Vec3 allowed) {
         double reach = mover.maxUpStep();
@@ -398,50 +387,42 @@ public final class Hitboxes {
         double settle = along(boxes, raised.move(over.x, 0.0, over.z), -lift, 1);
         Vec3 stepped = new Vec3(over.x, allowed.y + lift + settle, over.z);
 
-        // Nothing above knows what the blocks are doing, and a step that ends inside one is worse
-        // than a step that never happened.
+        // 上の処理は誰もブロックの状況を知らない。そしてブロックの中で終わる段差乗り上げは、乗り上げが
+        // 起きなかった場合より悪い。
         return mover.level().noCollision(mover, box.move(stepped)) ? stepped : allowed;
     }
 
     // ------------------------------------------------------------------
-    // Being stood on while it moves
+    // 動きながら上に立たれる側
     // ------------------------------------------------------------------
 
     /**
-     * Takes everything standing on a machine along with it.
+     * 機体の上に立っている物を一緒に運ぶ。
      *
-     * <p>Minecraft carries what is <em>sitting in</em> a vehicle and nothing else. Standing on one is
-     * not a thing it has a notion of: a player on a deck is a player standing in mid-air as far as
-     * the game is concerned, and the deck sliding out from under them is exactly what the game
-     * expects to happen. For a carrier under way that is the whole of the problem, so it is done
-     * here — every tick, whatever is resting on one of the machine's boxes is moved by however far
-     * that machine has moved, and turned by however far it has turned.
+     * <p>Minecraft が運ぶのは乗り物に<em>座っている</em>物だけ。「上に立っている」という概念を持っていない。
+     * 甲板の上のプレイヤーは、ゲームから見れば空中に立っているプレイヤーであり、甲板が足元から滑り出ていく
+     * のはゲームにとって当然の展開だ。航行中の空母にとってはそれが問題の全部なので、ここでやる——毎tick、
+     * 機体のどれかの箱の上に乗っている物を、その機体が動いた分だけ動かし、回った分だけ回す。
      *
-     * <p>Turned as well as moved, and turned <em>about the machine's middle</em>: a deck swinging
-     * through ten degrees carries somebody standing at the bow a good deal further than somebody
-     * amidships. Their own heading is brought round with it too, so that a player who was facing
-     * along the deck is still facing along the deck afterwards rather than watching the ship rotate
-     * away from under their feet.
+     * <p>動かすだけでなく回し、しかも<em>機体の中心回りに</em>回す。10度振れた甲板は、船首に立つ者を中央部
+     * に立つ者よりずっと大きく運ぶ。本人の向きも一緒に回すので、甲板に沿って向いていたプレイヤーは後も甲板
+     * に沿って向いている。足元で船が回っていくのを眺めることにはならない。
      *
-     * <p><b>Whose job it is.</b> Each side moves only what it is in charge of, which is what keeps
-     * the two from fighting: a player's own client carries them and reports where they ended up, and
-     * the server carries everything else and tells the clients. Both sides running it for everybody
-     * is what makes a moving platform stutter and shove people about — the server's idea of the deck
-     * and the client's are never quite the same, and whoever loses gets corrected twenty times a
-     * second.
+     * <p><b>誰の仕事か。</b> 各側は自分が担当している物だけを動かす。それが両者の喧嘩を防ぐ。プレイヤーは
+     * 自分のクライアントが運んで結果を報告し、サーバーはそれ以外を運んでクライアントへ伝える。両側が全員分
+     * を回すことが、動く足場をカクつかせ人を突き飛ばす原因だ。サーバーの考える甲板とクライアントの考える
+     * 甲板は決して完全には一致せず、負けた方が毎秒20回補正される。
      *
-     * <p><b>What is not a fall.</b> Being carried downwards is not falling, and both sides are told
-     * so however the carrying itself is divided up. A deck that descends moves out from under
-     * whoever is on it and is then put back, and to Minecraft's reckoning that is a tick of free
-     * fall every tick: an aircraft letting down from cruise banks a hundred blocks of it under a man
-     * who has not moved a muscle, and the moment the descent levels off it is all paid at once. The
-     * distance has to be dropped on the server as well as on the client that owns the mover —
-     * whether it kills anybody is the server's arithmetic, and it runs off the moves the client
-     * reports rather than off the client's own tally.
+     * <p><b>落下ではない物。</b> 下方向へ運ばれることは落下ではなく、運搬の分担がどうであれ両側にそう伝え
+     * る。降下する甲板はその上の者の足元から動き、また戻される。Minecraft の勘定ではそれが毎tick1tick分の
+     * 自由落下になる。巡航から降りる機体は、指一本動かしていない人間の下に100ブロック分を積み上げ、降下が
+     * 水平に戻った瞬間に一括請求する。この距離はクライアント側だけでなくサーバー側でも捨てる必要がある——
+     * それが誰かを殺すかどうかはサーバーの計算であり、それはクライアント自身の集計ではなくクライアントが
+     * 報告する移動から回るから。
      *
-     * @param from where the machine's middle was when its boxes were last placed
-     * @param shift how far it has come since
-     * @param turn how far it has come round since, in degrees
+     * @param from 箱を最後に配置した時点での機体中心の位置
+     * @param shift それ以降に進んだ距離
+     * @param turn それ以降に回った角度（度）
      */
     static void carry(VehicleEntityBase machine, Vec3 from, Vec3 shift, float turn) {
         AABB bounds = machine.placedBounds();
@@ -463,9 +444,8 @@ public final class Hitboxes {
                 continue;
             }
 
-            // Where they were relative to the machine, brought round and put down again against
-            // where the machine is now. One move rather than a turn and then a shift, so that
-            // whatever is in the way stops them once instead of twice.
+            // 機体に対する相対位置を回し、機体の現在位置に対して置き直す。回転と平行移動の2手ではなく
+            // 1回の移動にするので、進路上の障害物は2回ではなく1回だけ止める。
             Vec3 at = rider.position();
             Vec3 want = now.add(turned(at.subtract(from), turn));
 
@@ -478,19 +458,16 @@ public final class Hitboxes {
     }
 
     /**
-     * Whether something is up against one of the mod's machines: standing on it, leaning on it, or
-     * being shoved along by it.
+     * その物がこの MOD の機体に接しているか。上に立っている、寄りかかっている、押されて動かされている。
      *
-     * <p>Asked when somebody is about to be hurt by something a machine could have done to them.
-     * A machine is a moving wall the game does not know is there, and everything that follows from
-     * being pressed against a moving wall — being carried down and landing, being nudged into the
-     * side of a hill, being crowded — arrives as ordinary damage with nothing on it to say where it
-     * came from. Standing next to the thing at the moment it lands is as near an answer as there is,
-     * and it is the right one often enough that the alternative — crews quietly dying of the
-     * aeroplane they are riding on — is not worth keeping for the sake of it.
+     * <p>機体がやり得たことで誰かが傷つこうとしている時に問う。機体はゲームが存在を知らない「動く壁」で
+     * あり、動く壁に押し付けられた結果——下へ運ばれて着地する、丘の斜面へ押し込まれる、押し詰められる——は
+     * どれも「出所を示す物が何も付いていない普通のダメージ」として届く。ダメージが届いた瞬間にその物の隣に
+     * 立っていたという事実が、得られる中で最も近い答えだ。しかもそれが正しい頻度は十分高く、代案——乗って
+     * いる機体のせいで乗員が静かに死んでいく——を保つ価値は無い。
      *
-     * <p>The whole of the mover's box, grown by the same whisker its feet are judged by, rather than
-     * the feet alone: whoever a wing has just swept off the deck was never standing on anything.
+     * <p>足元だけでなく、足元の判定と同じ僅かな余裕を付けた箱全体で見る。翼に今甲板から払われた者は、その
+     * 時点で何の上にも立っていなかったのだから。
      */
     public static boolean touching(Entity entity) {
         Set<VehicleEntityBase> machines = MACHINES.get(entity.level());
@@ -525,18 +502,17 @@ public final class Hitboxes {
         return false;
     }
 
-    /** Parts are the machine; passengers are the seat's business; the rest is worth asking about. */
+    /** パーツは機体そのもの、搭乗者は座席の管轄、残りが問い合わせる価値のある対象。 */
     private static boolean carriable(Entity rider) {
         return !(rider instanceof VehiclePart) && !rider.isPassenger() && !rider.isRemoved();
     }
 
     /**
-     * Which side moves this one.
+     * この物をどちらの側が動かすか。
      *
-     * <p>A player is moved by their own client and nowhere else — the server takes their word for
-     * where they are, and a server that also moved them would be arguing with the client that has
-     * already done it. Everything else is moved by whichever side is in charge of it, which for an
-     * aeroplane parked on the deck is its pilot's client if it has one and the server if it has not.
+     * <p>プレイヤーを動かすのは自分のクライアントだけ——サーバーは位置について本人の申告を受け入れるので、
+     * サーバーも動かせば既に動かしたクライアントと言い争うことになる。それ以外は担当している側が動かす。
+     * 甲板に駐機した機体なら、パイロットがいればそのクライアント、いなければサーバー。
      */
     private static boolean owns(Entity rider) {
         if (rider instanceof Player player) {
@@ -547,11 +523,10 @@ public final class Hitboxes {
     }
 
     /**
-     * Whether something has its feet on one of the machine's boxes.
+     * その物が機体のどれかの箱に足を乗せているか。
      *
-     * <p>Only the sliver of world its feet are in is asked about, rather than the whole of it.
-     * Anything else would carry off whoever happened to be leaning against the hull from the
-     * quayside, which is a different thing from standing on it.
+     * <p>問い合わせるのは足元の薄い層だけで、全身ではない。全身にすれば、岸壁から船体に寄りかかっていた者
+     * まで運び去ってしまう。それは「上に立っている」とは別のこと。
      */
     private static boolean resting(VehicleEntityBase machine, Entity rider) {
         AABB box = rider.getBoundingBox();
@@ -568,7 +543,7 @@ public final class Hitboxes {
         return false;
     }
 
-    /** Brings something's own heading round with the deck under it, and its head with it. */
+    /** その物自身の向きを足元の甲板と一緒に回し、頭の向きも一緒に回す。 */
     private static void bringRound(Entity rider, float turn) {
         rider.setYRot(rider.getYRot() + turn);
         rider.yRotO += turn;
@@ -582,11 +557,10 @@ public final class Hitboxes {
     }
 
     /**
-     * An offset swung about the upright, which is the only way a deck turns under anybody.
+     * 垂直軸回りに振ったオフセット。甲板が人の下で回るのはこの向きだけ。
      *
-     * <p>The way Minecraft's headings go round, which is not the way the arithmetic goes round if it
-     * is written out without thinking: a heading winding on takes the nose from +Z towards −X, so a
-     * man standing at the bow goes that way too and not the other.
+     * <p>Minecraft の方位が回る向きに合わせてある。何も考えずに式を書いた時の回り方とは違う。方位が増える
+     * と機首は +Z から −X へ向かうので、船首に立つ人も同じ向きへ動く。逆ではない。
      */
     static Vec3 turned(Vec3 offset, float degrees) {
         if (degrees == 0.0F) {
@@ -601,22 +575,18 @@ public final class Hitboxes {
     }
 
     // ------------------------------------------------------------------
-    // Being aimed at
+    // 狙われる側
     // ------------------------------------------------------------------
 
     /**
-     * What a line aimed through the world hits first among the mod's machines, or null for one that
-     * misses all of them.
+     * 世界を貫いて狙った線が、この MOD の機体のうち最初に当たる物。どれにも当たらなければ null。
      *
-     * <p>Every shot, every crosshair. The machines' own boxes are not offered to the game's own
-     * search at all — see {@link VehiclePart#isPickable} — so this is not a second opinion about the
-     * same hit, it is the only one there is.
+     * <p>全ての射撃、全ての十字線が通る。機体の箱はゲーム自身の探索へそもそも提供されていない
+     * （{@link VehiclePart#isPickable} 参照）ので、これは同じ命中についての第2の意見ではなく、唯一の意見。
      *
-     * @param looker whatever is aiming. Neither the machine it is riding in nor that machine's own
-     *               boxes are in the way of it
-     * @param margin how much to allow round the box, matching whatever the caller allows round
-     *               everything else it is testing
-     * @param filter the caller's own view of what is worth hitting
+     * @param looker 狙っている物。乗っている機体も、その機体の箱も、この物にとって障害ではない
+     * @param margin 箱の周りに許す余裕。呼び出し側が他の判定対象に許している値と合わせる
+     * @param filter 呼び出し側の「何に当ててよいか」の判断
      */
     public static EntityHitResult pick(Level level, Entity looker, Vec3 from, Vec3 to, double margin,
             Predicate<Entity> filter) {
@@ -665,39 +635,35 @@ public final class Hitboxes {
     }
 
     // ------------------------------------------------------------------
-    // Running into the world
+    // 世界にぶつかる側
     // ------------------------------------------------------------------
 
     /**
-     * How far a machine may move before one of its own boxes runs into a block.
+     * 機体の箱がブロックにぶつかるまで、機体がどこまで動けるか。
      *
-     * <p>The same sweep as everything else, with the roles the other way round: the box is what is
-     * moving and the block is what is standing still, which to the arithmetic is the block coming
-     * the other way. Blocks are still asked of the world as blocks — they are the world, and they
-     * really are upright boxes.
+     * <p>掃引は他と同じで、役割が逆になるだけ。動いているのが箱、静止しているのがブロックで、計算上は
+     * 「ブロックが逆向きに来る」形になる。ブロックは今も世界にブロックとして問い合わせる——ブロックは世界
+     * そのものであり、本当に直立した箱だから。
      */
     public static Vec3 throughBlocks(Entity machine, Hitbox hitbox, Vec3 motion) {
         return throughBlocks(machine, hitbox, motion, UNDERSIDE_NONE);
     }
 
     /**
-     * The same, with a height below which the ground is scraped rather than run into.
+     * 同じ処理に、「これ以下なら地面をぶつからずにこすって越える」高さを与えた版。
      *
-     * <p>For a machine that is standing on its wheels, the ground it is standing on is not an
-     * obstacle — it is the floor, and the floor is already holding the machine up. Its own shape,
-     * though, does not all sit above the wheels: an aeroplane rotating for takeoff puts its tail
-     * below them, and swept against the runway in the ordinary way that tail is a wall. The
-     * aeroplane is stopped dead by ground it is rolling along, which reads as flying into a
-     * hillside and is treated as one.
+     * <p>車輪で立っている機体にとって、立っている地面は障害物ではない——それは床であり、床は既に機体を
+     * 支えている。ただし機体の形状は全部が車輪より上にあるわけではない。離陸で機首を上げた機体は尾部を車輪
+     * より下へ出し、普通に滑走路へ掃引すればその尾部は壁になる。機体は自分が転がっている地面に急停止させ
+     * られ、それは斜面への激突として読まれ、そう扱われる。
      *
-     * <p>So blocks that reach no higher than the wheels do not stop the shape at all. Nothing is
-     * given away by it: the machine's own upright box sits on those same wheels and is settled
-     * against the world by {@code move} in the usual way, so the floor still holds it up and a
-     * descent onto it is still an arrival. What stops being possible is being brought up short by
-     * ground that is underneath the undercarriage, which is the one thing the undercarriage is for.
+     * <p>だから車輪より高くならないブロックは形状を一切止めない。それで緩む物は無い。機体の素の直方体は
+     * その同じ車輪の上に乗っており、{@code move} が通常通り世界に対して決着させるので、床は今も機体を支え
+     * るし、そこへの降下は今も着地になる。できなくなるのは「降着装置の下にある地面に急停止させられる」こと
+     * だけで、それこそ降着装置が存在する唯一の理由。
      *
-     * @param underside the height at or below which blocks are scraped over instead of hit, or
-     *                  {@link #UNDERSIDE_NONE} for a machine in the air, which hits everything
+     * @param underside これ以下ならぶつからずにこすって越える高さ。空中の機体は
+     *                  {@link #UNDERSIDE_NONE} を渡し、その場合は全部にぶつかる
      */
     public static Vec3 throughBlocks(Entity machine, Hitbox hitbox, Vec3 motion, double underside) {
         if (motion.lengthSqr() == 0.0) {
@@ -753,23 +719,21 @@ public final class Hitboxes {
         return distance * least;
     }
 
-    /** Whether a box has room where it is standing, give or take a margin it may overlap by. */
+    /** その箱が今いる場所に収まる余地があるか。重なってよい余裕を差し引いて判定する。 */
     public static boolean clearOfBlocks(Entity machine, Hitbox hitbox, double margin) {
         return clearOfBlocks(machine, hitbox, margin, UNDERSIDE_NONE);
     }
 
     /**
-     * The same, with a height below which blocks are the floor the machine is standing on rather
-     * than world that has closed around it.
+     * 同じ処理に、「これ以下のブロックは機体を埋めた世界ではなく機体が立っている床である」高さを与えた版。
      *
-     * <p>The same line {@link #throughBlocks(Entity, Hitbox, Vec3, double)} scrapes over, asked the
-     * other question. A machine's shape does not all sit above its wheels: an aeroplane flaring for
-     * a touchdown has its tail well below them, and a banked one has a wingtip there, so half a
-     * metre of airframe is inside the runway on the way in to every landing. That is what standing
-     * on the ground looks like from underneath, and it is not a machine the world has buried.
+     * <p>{@link #throughBlocks(Entity, Hitbox, Vec3, double)} がこすって越えるのと同じ線に、別の問いを
+     * 投げる物。機体の形状は全部が車輪より上にあるわけではない。接地直前にフレアを掛けた機体は尾部を車輪
+     * よりかなり下へ出すし、バンクしていれば翼端がそこに来る。だから毎回の着陸で50cm 分の機体が滑走路の中
+     * にいる。それが下から見た「地面に立っている」の姿であって、世界に埋められた機体ではない。
      *
-     * @param underside the height at or below which blocks are floor, or {@link #UNDERSIDE_NONE} for
-     *                  a machine in the air, which is inside anything it overlaps
+     * @param underside これ以下のブロックを床と見なす高さ。空中の機体は {@link #UNDERSIDE_NONE} を渡し、
+     *                  その場合は重なった物すべての中にいることになる
      */
     public static boolean clearOfBlocks(Entity machine, Hitbox hitbox, double margin, double underside) {
         Hitbox room = hitbox.grow(-margin);
@@ -783,7 +747,7 @@ public final class Hitboxes {
         return true;
     }
 
-    /** The blocks of those that stand high enough to be worth stopping a machine's shape. */
+    /** そのうち、機体の形状を止める価値があるだけ高いブロックだけ。 */
     private static List<AABB> above(List<AABB> blocks, double height) {
         if (height == UNDERSIDE_NONE || blocks.isEmpty()) {
             return blocks;
@@ -800,7 +764,7 @@ public final class Hitboxes {
         return found;
     }
 
-    /** Every block face worth testing against in a stretch of world, as plain boxes. */
+    /** 世界のある範囲で判定する価値のある全ブロック面を、素の直方体として。 */
     private static List<AABB> blocksAround(Entity machine, AABB area) {
         List<AABB> found = new ArrayList<>();
 

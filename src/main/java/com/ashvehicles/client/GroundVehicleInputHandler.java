@@ -16,20 +16,17 @@ import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * Turns the driver's controls into vehicle input once a tick.
+ * 運転手の操作を毎tick車両入力へ変換する。
  *
- * <p>Two axes, a brake and two triggers — the attack button for whichever armament is selected, and
- * a key of its own for the coaxial machine gun, which is never selected. The mouse is not part of
- * driving at all: it is where the crew are looking, and where the crew are looking is what the
- * turret is laid on — see
- * {@code GroundVehicleEntity.tickTurret}. That is why a tank needs so much less of this than an
- * aeroplane: the only things taken away from vanilla are the two mouse buttons, the attack button
- * being the trigger now and the use button the sight — see {@link AimZoom}, which reads it for
- * itself. Getting out is alt, the same key as in a cockpit and for the same reason it was moved
- * there — one way out of everything in the mod; see {@link VehicleDismountHandler}.
+ * <p>2軸、ブレーキ、そして2つのトリガー——選択中の兵装用の攻撃ボタンと、決して選択されない同軸機銃用の専用キー。
+ * マウスは運転にまったく関与しない。マウスは乗員の視線であり、乗員の視線こそ砲塔を据える先だ——
+ * {@code GroundVehicleEntity.tickTurret} 参照。戦車で必要な処理が機体よりずっと少ないのはそのためで、バニラから
+ * 奪うのはマウス2ボタンだけ。攻撃ボタンは今やトリガー、使用ボタンは照準だ——{@link AimZoom} が自分で読む。降車は
+ * alt。コックピットと同じキーであり、そこへ移した理由も同じ——MOD 内のあらゆる物から降りる唯一の方法だ。
+ * {@link VehicleDismountHandler} 参照。
  *
- * <p>The vehicle is simulated on this client, so the resulting input is applied locally and sent to
- * the server, which mirrors the hull and the turret to everyone else.
+ * <p>車両はこのクライアントでシミュレートされるので、生成された入力はローカルで適用しつつサーバーへも送る。
+ * サーバーは車体と砲塔を他全員へ複製する。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class GroundVehicleInputHandler {
@@ -42,22 +39,18 @@ public final class GroundVehicleInputHandler {
             return;
         }
 
-        // One key steps through the weapons of everything in the mod, and a mapping hands a click to
-        // whichever caller asks for it first. Both this handler and AircraftInputHandler run every
-        // tick with no order between them, so the two conditions have to be exact mirrors of each
-        // other or they race: this one takes the press whenever the player is aboard a ground
-        // vehicle, that one whenever they are not, and exactly one of them takes it whatever order
-        // they run in.
+        // 1つのキーが MOD 内すべての兵装を順送りするが、キーマッピングはクリックを最初に要求した呼び出し元へ
+        // 渡す。このハンドラと AircraftInputHandler は順序の定めなく毎tick走るので、2つの条件は互いの正確な鏡で
+        // なければ競合する。こちらはプレイヤーが地上車両に乗っているとき押下を取り、あちらは乗っていないとき取る。
+        // 実行順に関わらず、ちょうど一方だけが取る。
         //
-        // Drained while merely riding as well as while driving — and thrown away in that case — so a
-        // press made in the back cannot queue up and switch weapons the moment the crew change
-        // seats.
+        // 運転中だけでなく単に同乗している間も吸い出し、その場合は捨てる。後席での押下がキューに残り、席を移った
+        // 瞬間に兵装を切り替えてしまうのを防ぐためだ。
         //
-        // Draining it unconditionally, which is what this used to do, ate the press out from under a
-        // pilot: in a cockpit this handler had no use for the click and took it anyway, and the
-        // aircraft's own handler found nothing left. Holding the key appeared to fix it because a
-        // held key repeats and makes a second click for the other handler to find, which is the
-        // whole of why switching weapons wanted a long press.
+        // 以前のように無条件で吸い出すと、パイロットの足元から押下を奪ってしまう。コックピットではこのハンドラは
+        // クリックに用が無いのに取ってしまい、機体側のハンドラには何も残らなかった。キーを押しっ放しにすると直る
+        // ように見えたのは、押しっ放しがリピートして2回目のクリックを作り、それを他方が拾えたからだ。兵装切り替え
+        // に長押しが要ると言われていた理由はそれが全てだ。
         boolean cycleWeapon = player.getVehicle() instanceof GroundVehicleEntity
                 && ModKeyMappings.CYCLE_WEAPON.consumeClick();
 
@@ -67,10 +60,9 @@ public final class GroundVehicleInputHandler {
             return;
         }
 
-        // The attack button is the trigger now, and vanilla would otherwise spend it swinging at the
-        // inside of the turret and mining whatever the hull is resting against. The use button is
-        // the sight, and what vanilla would do with it — eat, or click the tank from the inside —
-        // is not what a crew holding it down over a target meant.
+        // 攻撃ボタンは今やトリガーだ。放っておけばバニラはそれを砲塔の内側への殴打と、車体が寄りかかっている物の
+        // 採掘に費やす。使用ボタンは照準であり、バニラがそれでやること——食べる、内側から戦車をクリックする——は、
+        // 目標に対して押し続けている乗員の意図ではない。
         while (minecraft.options.keyAttack.consumeClick()) {
         }
 
@@ -85,22 +77,19 @@ public final class GroundVehicleInputHandler {
                 ModKeyMappings.FIRE_COAXIAL.isDown());
 
         vehicle.setInput(input);
-        // Before the vehicle is ticked, which is this event's whole reason for being Pre: the turret
-        // is laid inside that tick and has to know how the view it is being laid through is sitting.
+        // 車両のtickより前に行う。このイベントが Pre である理由はそれが全てだ。砲塔はそのtick内で据えられるので、
+        // 据える経路となる視界がどう傾いているかを知っている必要がある。
         vehicle.setSightTilt(sightTilt(minecraft, vehicle));
-        // The hull, the speed and the turret go with it because the server cannot see any of them:
-        // a vehicle driven from here is moved on the server by packets that land between its ticks,
-        // and vanilla's movement packet carries a heading and an elevation and nothing else.
+        // 車体・速度・砲塔も同送する。サーバーはそのどれも見られないからだ。ここから運転される車両はサーバー上で
+        // tickの合間に届くパケットによって動かされるが、バニラの移動パケットは方位と仰角しか運ばない。
         PacketDistributor.sendToServer(new GroundVehicleInputPayload(input, vehicle.getAttitude(),
                 vehicle.getSpeed(), vehicle.getTurretYaw(1.0F), vehicle.getGunPitch(1.0F), cycleWeapon));
     }
 
     /**
-     * Stops the attack button doing anything vanilla would do with it while the player is driving:
-     * no swinging, and no mining whatever the tank happens to be parked against. It is the trigger
-     * now, and the trigger is read in {@link #onClientTick}. The use button goes the same way, for
-     * the same reason: it is the sight, and using whatever is in the crew's hand is not what
-     * holding it down meant.
+     * 運転中、攻撃ボタンにバニラの動作を一切させない。殴打も、戦車がたまたま寄りかかっている物の採掘もしない。
+     * それは今やトリガーであり、トリガーは {@link #onClientTick} で読む。使用ボタンも同じ理由で同じ扱いだ。
+     * それは照準であって、乗員の手持ちを使うことは押し続けた意図ではない。
      */
     @SubscribeEvent
     public static void onInteractionKey(InputEvent.InteractionKeyMappingTriggered event) {
@@ -112,17 +101,14 @@ public final class GroundVehicleInputHandler {
     }
 
     /**
-     * How far the view the crew are using is tipped below their own line of sight, in degrees.
+     * 乗員が使っている視界が、自分の目線からどれだけ下へ倒されているか（度）。
      *
-     * <p>The chase view is rotated down by the machine's {@code camera.tilt} so that there is ground
-     * on the screen rather than sky; the first-person view is not rotated at all. What the gun does
-     * about it is {@code GroundVehicleEntity.setSightTilt}: it is laid down by the same amount, so
-     * the middle of the screen is the line of the gun in either view rather than only in one of
-     * them.
+     * <p>三人称視点は機体の {@code camera.tilt} だけ下へ回され、空ではなく地面が画面に入る。一人称視点はまったく
+     * 回されない。砲がそれに対して行うのが {@code GroundVehicleEntity.setSightTilt} だ。同じ量だけ下げるので、
+     * 画面中央はどちらの視点でも——片方だけでなく——砲の線になる。
      *
-     * <p>Switching between the two therefore moves the gun, and it moves at the turret's own
-     * elevation rate like any other lay. That is the honest thing for it to do — the two views are
-     * pointing at different places, and the gun follows whichever one the crew are looking through.
+     * <p>したがって視点を切り替えると砲が動くし、他の照準と同様に砲塔本来の俯仰速度で動く。それが正直な挙動だ。
+     * 2つの視点は別の場所を指しており、砲は乗員が覗いている方に従う。
      */
     private static float sightTilt(Minecraft minecraft, GroundVehicleEntity vehicle) {
         return minecraft.options.getCameraType().isFirstPerson() ? 0.0F : vehicle.getStats().camera().tilt();

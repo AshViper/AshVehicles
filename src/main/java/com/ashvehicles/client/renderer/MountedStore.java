@@ -14,34 +14,49 @@ import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.renderer.GeoObjectRenderer;
 
 /**
- * A weapon hanging on a pylon, as something GeckoLib can draw.
+ * ステーションに吊られている物を、GeckoLib が描ける形にした物。兵装、それを吊るラック、あるいは特殊ステーションの
+ * ポッド。
  *
- * <p>A store under a wing is not an entity and not a block: it is part of the aircraft's own
- * rendering. GeckoLib draws that sort of thing through {@link GeoObjectRenderer}, which needs
- * something animatable to point at, so this is that — a holder carrying nothing but which weapon is
- * being drawn.
+ * <p>3つともエンティティでもブロックでもない。機体自身の描画の一部だ。GeckoLib はその種の物を
+ * {@link GeoObjectRenderer} で描き、それは指し示す animatable を必要とする。だからこれがそれだ——描画元ディレクトリ
+ * とその中のファイル名しか持たないホルダーである。
  *
- * <p>One instance is reused for every pylon on every aircraft, its weapon set immediately before
- * each draw. That is safe because rendering happens on one thread and each draw is finished before
- * the next begins, and it avoids making a fresh object several times a frame for every armed
- * aircraft in sight.
+ * <p>1つのインスタンスを全機体の全ステーションで再利用し、各描画の直前に設定する。描画は単一スレッドで行われ、
+ * 各描画は次が始まる前に終わるので安全であり、視界内の武装機体ごとに毎フレーム数回オブジェクトを新規作成せずに済む。
  */
 public final class MountedStore implements GeoAnimatable {
-    /** The one shared holder, and the renderer that draws it. Both are client-render-thread only. */
+    /** 共有ホルダー1つと、それを描くレンダラー。どちらもクライアント描画スレッド限定。 */
     private static final MountedStore INSTANCE = new MountedStore();
     private static final GeoObjectRenderer<MountedStore> RENDERER = new StoreRenderer();
 
     private final AnimatableInstanceCache cache = new SingletonAnimatableInstanceCache(this);
     private ResourceLocation weapon = ResourceLocation.withDefaultNamespace("air");
+    private String folder = WeaponModel.WEAPONS;
 
     private MountedStore() {
     }
 
-    /** The shared holder, set to draw the given weapon. */
+    /** 指定の兵装を描くよう設定した共有ホルダー。 */
     public static MountedStore of(ResourceLocation weapon) {
-        INSTANCE.weapon = weapon;
+        return of(WeaponModel.WEAPONS, weapon);
+    }
+
+    /** 3つのディレクトリのいずれかから、指定名の物を描くよう設定した共有ホルダー。 */
+    public static MountedStore of(String folder, ResourceLocation id) {
+        INSTANCE.folder = folder;
+        INSTANCE.weapon = id;
 
         return INSTANCE;
+    }
+
+    /** ラックを描くよう設定した共有ホルダー。 */
+    public static MountedStore rack(ResourceLocation rack) {
+        return of(WeaponModel.RACKS, rack);
+    }
+
+    /** ポッドを描くよう設定した共有ホルダー。 */
+    public static MountedStore equipment(ResourceLocation equipment) {
+        return of(WeaponModel.EQUIPMENT, equipment);
     }
 
     public static GeoObjectRenderer<MountedStore> renderer() {
@@ -50,6 +65,10 @@ public final class MountedStore implements GeoAnimatable {
 
     public ResourceLocation weapon() {
         return this.weapon;
+    }
+
+    public String folder() {
+        return this.folder;
     }
 
     @Override
@@ -62,29 +81,33 @@ public final class MountedStore implements GeoAnimatable {
     }
 
     /**
-     * Stores do not animate, so there is no clock to report. GeckoLib only asks for this to drive
-     * animations, and a store has none.
+     * ステーションに吊られる物はアニメーションしないので、報告すべき時計は無い。GeckoLib がこれを問うのは
+     * アニメーション駆動のためだけであり、これらはどれもアニメーションを持たない。
      */
     @Override
     public double getTick(Object entity) {
         return 0.0;
     }
 
-    /** Draws whichever weapon the holder was last set to. */
+    /** ホルダーに最後に設定された物を、指定されたディレクトリから描く。 */
     private static class Model extends WeaponModel<MountedStore> {
         @Override
         protected ResourceLocation weaponId(MountedStore animatable) {
             return animatable.weapon();
         }
+
+        @Override
+        protected String folder(MountedStore animatable) {
+            return animatable.folder();
+        }
     }
 
     /**
-     * The object renderer, with its block-shaped assumption taken back out.
+     * オブジェクトレンダラー。ブロック前提の分を打ち消してある。
      *
-     * <p>GeckoLib's own {@link GeoObjectRenderer} shifts what it draws by half a block on each axis,
-     * because the objects it was written for sit in a block space whose origin is a corner. A store
-     * hangs at a point on a wing, given in the aircraft's own axes, so that shift would leave every
-     * pylon's load floating half a block up and to one side of the pylon.
+     * <p>GeckoLib の {@link GeoObjectRenderer} は描画対象を各軸へ半ブロックずらす。想定していたオブジェクトが、
+     * 原点を角に持つブロック空間に収まるからだ。兵装は機体座標系で与えられた主翼上の一点に吊られるので、そのずれを
+     * 放置すると、どのパイロンの搭載物もパイロンから半ブロック上かつ横へ浮いてしまう。
      */
     private static class StoreRenderer extends GeoObjectRenderer<MountedStore> {
         StoreRenderer() {

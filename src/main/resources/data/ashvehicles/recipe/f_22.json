@@ -1,28 +1,28 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 4
     },
-    "K": {
-      "tag": "c:storage_blocks/iron"
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 3
     },
-    "D": {
-      "tag": "c:gems/diamond"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "Q": {
-      "tag": "c:storage_blocks/diamond"
+    {
+      "item": "ashvehicles:jet_engine",
+      "count": 2
     },
-    "N": {
-      "tag": "c:ingots/netherite"
-    },
-    "E": {
-      "item": "minecraft:ender_eye"
+    {
+      "item": "ashvehicles:avionics",
+      "count": 3
     }
-  },
-  "pattern": ["#K#", "DQD", "NEN"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:f_22"

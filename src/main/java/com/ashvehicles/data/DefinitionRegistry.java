@@ -22,45 +22,41 @@ import net.minecraft.server.packs.resources.SimpleJsonResourceReloadListener;
 import net.minecraft.util.profiling.ProfilerFiller;
 
 /**
- * One directory of JSON files that describe something, read out of the mod at start-up and again out
- * of the data packs on every {@code /reload}.
+ * 何かを記述した JSON ファイルのディレクトリ1つ分。起動時に MOD 本体から、{@code /reload} のたびに
+ * データパックから読み直される。
  *
- * <p>Every kind of file in the mod wants exactly this and nothing more: aircraft, ground vehicles,
- * and the weapons both of them fire. Each used to have its own loader, its own manager, its own
- * version counter and its own sync packet — three copies of the same forty lines, and a fourth
- * waiting for whatever gets added next. This is that code once, with the directory, the codec and
- * the fallback handed to it.
+ * <p>MOD 内のどの種類のファイルも欲しいのはこれだけ——機体、地上車両、その双方が撃つ兵装。以前は種類
+ * ごとにローダー・マネージャー・バージョン番号・同期パケットを持っていた。同じ40行が3つ並び、次に何か
+ * 増えれば4つ目が控えていた。これはそのコードを1つにまとめ、ディレクトリ・コーデック・フォールバック
+ * を渡して使うもの。
  *
- * <p><b>Why a reload listener rather than a data pack registry.</b> A registry is read once while the
- * world is opening and {@code /reload} never touches it again, so retuning anything would mean
- * quitting to the title screen every time. What is loaded here is pushed straight back out to the
- * players, so an edited file takes effect on the machines already in the world.
+ * <p><b>データパックレジストリではなくリロードリスナーである理由。</b> レジストリはワールドを開く際に
+ * 一度読まれ、{@code /reload} では二度と触られない。つまり値の調整のたびにタイトル画面へ戻ることに
+ * なる。ここで読んだ内容はそのままプレイヤーへ送り返すので、編集したファイルはワールド内の機体に即
+ * 効く。
  *
- * <p><b>Why the files are also read out of the mod.</b> An entity type's size is fixed the moment it
- * is registered, and registration is over long before any data pack is touched. {@link #builtIn} is
- * that early read; it is also what anything falls back on when a pack has removed a file or a client
- * has not been sent the data yet.
+ * <p><b>MOD 本体からも読む理由。</b> エンティティ型の大きさは登録した瞬間に固定され、その登録はどの
+ * データパックに触れるよりずっと前に終わる。{@link #builtIn} がその早期読み込みであり、パックが
+ * ファイルを消した場合やクライアントがまだデータを受け取っていない場合の逃げ道でもある。
  */
 public final class DefinitionRegistry<T> {
     private static final Gson GSON = new Gson();
 
     /**
-     * Every registry there is, in the order they were declared.
+     * 存在する全レジストリを宣言順に。
      *
-     * <p>Kept so that the reload listeners and the sync packet can be built by walking the list
-     * rather than by naming each registry twice more. Copy-on-write because it is written once at
-     * class-init and read from the network thread.
+     * <p>リロードリスナーと同期パケットを、各レジストリを二度も名指しせずリストを歩いて組めるように保持
+     * する。クラス初期化時に一度書かれネットワークスレッドから読まれるので copy-on-write。
      */
     private static final List<DefinitionRegistry<?>> ALL = new CopyOnWriteArrayList<>();
 
     /**
-     * Which set of files is loaded, as a number that changes whenever any of them does.
+     * 今どのファイル群が読まれているかを表す番号。どれか1つでも変われば変わる。
      *
-     * <p>One counter for all the registries rather than one each. Everything that holds a definition
-     * rather than looking it up afresh — and everything does, because an aircraft asks for its own
-     * figures dozens of times a tick — holds this beside it and throws its copy away when the number
-     * moves. Sharing one counter costs a few needless re-reads after a reload that only touched one
-     * directory, and saves every caller from having to know which directory its answer came from.
+     * <p>レジストリごとではなく全体で1つ。定義を毎回引き直さず保持する側は——機体は1tickに何十回も自分
+     * の数値を訊くので実質全員そうする——この番号を横に持ち、値が動いたら手元の写しを捨てる。1つの
+     * ディレクトリしか変わらないリロードでも無駄な読み直しが少し出るが、その代わり呼び出し側は自分の
+     * 答えがどのディレクトリ由来かを知らずに済む。
      */
     private static volatile int version;
 
@@ -74,10 +70,10 @@ public final class DefinitionRegistry<T> {
     private Map<ResourceLocation, T> active = Map.of();
 
     /**
-     * @param directory the folder under {@code data/<namespace>/}
-     * @param fallback what {@link #get} answers when nobody has a file at all: something harmless,
-     *                 so that the game keeps running and the log says what went wrong
-     * @param what a word for the log — "aircraft", "weapons"
+     * @param directory {@code data/<namespace>/} 以下のフォルダ名
+     * @param fallback 誰もファイルを持っていないときに {@link #get} が返す値。ゲームが動き続け、ログに
+     *                 何が起きたか残るような無害な値
+     * @param what ログ用の語。"aircraft"、"weapons" など
      */
     public static <T> DefinitionRegistry<T> of(String directory, Codec<T> codec, T fallback, String what) {
         DefinitionRegistry<T> registry = new DefinitionRegistry<>(directory, codec, fallback, what);
@@ -102,7 +98,7 @@ public final class DefinitionRegistry<T> {
         return Collections.unmodifiableList(ALL);
     }
 
-    /** The registry that reads a given directory, or null if nothing does. */
+    /** そのディレクトリを読むレジストリ。無ければ null。 */
     public static DefinitionRegistry<?> byDirectory(String directory) {
         for (DefinitionRegistry<?> registry : ALL) {
             if (registry.directory.equals(directory)) {
@@ -121,7 +117,7 @@ public final class DefinitionRegistry<T> {
         return this.streamCodec;
     }
 
-    /** Everything shipped inside the mod, by id. Read once, on first use. */
+    /** MOD に同梱された全ファイル（ID 順）。初回使用時に一度だけ読む。 */
     public synchronized Map<ResourceLocation, T> builtIn() {
         if (this.builtIn == null) {
             this.builtIn = BuiltInFiles.read(this.directory, this.codec, this.what);
@@ -130,17 +126,17 @@ public final class DefinitionRegistry<T> {
         return this.builtIn;
     }
 
-    /** What the packs have loaded right now, which on a client is what the server last sent. */
+    /** 今パックが読み込んでいる内容。クライアントではサーバーが最後に送ってきたもの。 */
     public Map<ResourceLocation, T> all() {
         return this.active;
     }
 
     /**
-     * One entry's figures: the loaded copy, else the mod's own, else the fallback.
+     * 1件分の数値。読み込み済みの写し、無ければ MOD 同梱版、それも無ければフォールバック。
      *
-     * <p>The middle step matters more than it looks. Boxes are built in an entity's constructor and
-     * the level records them as it joins, so one built at a moment when no shape was known has none
-     * and can never be given any afterwards — a silent failure of exactly the wrong kind.
+     * <p>真ん中の段が見た目より重要。当たり判定の箱はエンティティのコンストラクタで組まれ、ワールド参加
+     * 時にレベルへ記録されるので、形状が不明な瞬間に組まれた個体は箱を持たず、後から与えることもできない
+     * ——最もたちの悪い、静かな失敗になる。
      */
     public T get(ResourceLocation id) {
         T loaded = this.active.get(id);
@@ -152,17 +148,17 @@ public final class DefinitionRegistry<T> {
         return this.builtIn().getOrDefault(id, this.fallback);
     }
 
-    /** Whether any file, from a pack or the mod itself, describes this. */
+    /** パックか MOD 本体のどちらかに、これを記述したファイルがあるか。 */
     public boolean has(ResourceLocation id) {
         return this.active.containsKey(id) || this.builtIn().containsKey(id);
     }
 
-    /** Applied on the server by a reload, and on a client by the sync. Bump the version afterwards. */
+    /** サーバーではリロード、クライアントでは同期で適用される。適用後にバージョンを進めること。 */
     void accept(Map<ResourceLocation, T> values) {
         this.active = Collections.unmodifiableMap(values);
     }
 
-    /** Reads a directory's worth of JSON, logging and skipping whatever will not parse. */
+    /** ディレクトリ1つ分の JSON を読む。解析できない物はログに出して飛ばす。 */
     private void load(Map<ResourceLocation, JsonElement> files) {
         Map<ResourceLocation, T> loaded = new LinkedHashMap<>();
 
@@ -175,7 +171,7 @@ public final class DefinitionRegistry<T> {
         this.accept(loaded);
     }
 
-    /** Everything a registry holds, as one value: what the sync packet is made of. */
+    /** レジストリの中身を丸ごと1つの値にしたもの。同期パケットの材料。 */
     public record Snapshot<T>(DefinitionRegistry<T> registry, Map<ResourceLocation, T> values) {
         public static Snapshot<?> of(DefinitionRegistry<?> registry) {
             return snapshot(registry);
@@ -190,13 +186,13 @@ public final class DefinitionRegistry<T> {
         }
     }
 
-    /** Takes a whole sync in, and moves the version once for the lot rather than once each. */
+    /** 同期を丸ごと受け取り、バージョンは件数分ではなく全体で1回だけ進める。 */
     public static void acceptAll(List<Snapshot<?>> snapshots) {
         snapshots.forEach(Snapshot::apply);
         version++;
     }
 
-    /** The reload listener for one registry. One of these is added per directory. */
+    /** レジストリ1つ分のリロードリスナー。ディレクトリごとに1つ追加される。 */
     public PreparableReloadListener reloadListener() {
         return new SimpleJsonResourceReloadListener(GSON, this.directory) {
             @Override

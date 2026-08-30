@@ -22,55 +22,45 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * A gun built into a vehicle rather than hung on it: a barrel, a magazine, and a wait between
- * rounds. There are two of them on a tank — the main armament in the turret and the machine gun
- * clamped beside it — and this is both.
+ * 車両に吊るのではなく組み込まれた火砲。砲身、弾倉、そして射撃間隔。戦車には2門ある——砲塔の主砲と、その
+ * 脇に固定された機銃——ので、これはその両方。
  *
- * <p>Deliberately not {@link WeaponMounts}. A pylon is a place a store is hung and taken off again,
- * and most of that class is about which station is selected, what is on it, and what the seeker is
- * holding. A tank's guns are none of those things: they are built in, there is one of each, and the
- * only questions are whether one is loaded and where it is pointing. What the two do share is the
- * weapon files — how hard a round hits, how fast it leaves and how often one can be fired are read
- * from {@code data/ashvehicles/weapon/} exactly as an aircraft reads them, so a gun is described in
- * one place whether it is bolted into a turret or hung under a wing.
+ * <p>意図的に {@link WeaponMounts} を使わない。パイロンは物を吊っては外す場所で、あのクラスの大半は
+ * 「どのステーションが選択されているか」「何が載っているか」「シーカーが何を捉えているか」の話だ。戦車の
+ * 砲はそのどれでもない。組み込みで、各1門ずつあり、問いは「装填されているか」と「どこを向いているか」
+ * だけ。共有するのは兵装ファイルの方で、威力・初速・発射速度は機体と同じく
+ * {@code data/ashvehicles/weapon/} から読む。だから火砲は、砲塔に埋め込まれていようと翼下に吊られていよう
+ * と1箇所で記述される。
  *
- * <p><b>Why one class for both guns.</b> Everything below is the same for either: rounds come out
- * of the same hold, the wait between them is the same figure read from the same file, the round
- * leaves the same way and scatters about the same cone. What differs is five things — which weapon
- * it is, which pair of counters it keeps, where its muzzles are, how many of them it has, and what
- * its rounds are called in the save — and those five are the whole of {@link Mount}. Written twice
- * instead, the pair would have drifted the first time either was fixed.
+ * <p><b>2門を1クラスで扱う理由。</b> 以下の処理はどちらでも同じだ。弾は同じ弾庫から出て、射撃間隔は同じ
+ * ファイルから読んだ同じ値で、弾は同じように出て同じ円錐に散る。違うのは5つ——どの兵装か、どの2つの
+ * カウンタを使うか、砲口はどこか、砲口は何本か、セーブで弾数を何と呼ぶか——で、その5つが
+ * {@link Mount} の全部。2回書いていれば、どちらかを直した最初の瞬間に食い違い始めていた。
  *
- * <p><b>Whether one press is one round is the weapon's to say.</b> A tank gun is read on the
- * trigger's rising edge: a loader takes several seconds, and one that let go the moment they were
- * finished is not how anybody fires one and takes the aiming out of it entirely. A machine gun or an
- * autocannon is the opposite — it is a thing you hold down, and a burst is the whole of how it is
- * aimed. Both are this class; which one a barrel is is {@link WeaponDefinition#isAutomatic()}, read
- * from the weapon's own file.
+ * <p><b>1押し1発かどうかは兵装が決める。</b> 戦車砲は引き金の立ち上がりで読む。装填手は数秒かかるし、
+ * 終わった瞬間に離す撃ち方をする者はおらず、それでは照準の要素が完全に消える。機銃や機関砲は逆で、押し
+ * っぱなしにする物であり、連射こそが照準の方法だ。どちらもこのクラスで、どちらであるかは兵装ファイルから
+ * 読む {@link WeaponDefinition#isAutomatic()}。
  *
- * <p><b>What it fires is what somebody loaded.</b> The magazine is filled out of the vehicle's own
- * hold, a shell or a belt at a time, and only while the vehicle is standing still — see
- * {@link #resupply}. There is no free load: a tank put down out of the creative tab has an empty gun
- * until somebody puts ammunition in it, which is the arrangement an aircraft's pylons have always
- * had.
+ * <p><b>撃てるのは誰かが積んだ分だけ。</b> 弾倉は車両自身の弾庫から、砲弾1発かベルト1本ずつ、しかも車両
+ * が停止している間だけ満たされる（{@link #resupply} 参照）。無料装填は無い。クリエイティブタブから出した
+ * 戦車は、誰かが弾薬を入れるまで砲が空のまま。機体のパイロンがずっとそうであったのと同じ取り決め。
  *
- * <p><b>Where the state lives.</b> Rounds and the reload counter are synched data on the vehicle
- * rather than fields here, because the client needs both: the main gun's reload counter is what the
- * barrel's recoil is drawn from, and it is enough on its own — a counter that has just jumped to its
- * maximum <em>is</em> the news that the gun has fired, so nothing else has to be sent to say so.
+ * <p><b>状態の置き場。</b> 残弾と再装填カウンタは、ここのフィールドではなく車両の同期データにある。
+ * クライアントが両方を必要とするから。主砲の再装填カウンタは砲身の後座を描く元であり、それだけで足りる
+ * ——最大値へ跳ね上がったカウンタ<em>そのもの</em>が「発砲した」という知らせなので、他に何も送らなくてよい。
  */
 public final class BuiltInGun {
     /**
-     * Which of a vehicle's two built-in guns this is: what it fires, what it keeps its count in, and
-     * where its rounds leave from.
+     * 車両の2門のうちどちらか。何を撃ち、どこに残弾を持ち、弾がどこから出るか。
      *
-     * <p>Everything a gun does is the same gun to gun. Everything a gun <em>is</em> is here, and it
-     * is five questions long.
+     * <p>火砲が「すること」は砲によらず同じ。火砲が「<em>何であるか</em>」がここにあり、それは5つの問いで
+     * 尽きる。
      */
     public enum Mount {
         /**
-         * The main armament: the gun the turret is built round, the one that recoils and shoves the
-         * hull about, and the one the crew put away when they select missiles instead.
+         * 主砲。砲塔がその周りに組まれている砲であり、後座して車体を揺らす砲であり、乗員がミサイルへ
+         * 切り替える時にしまう砲。
          */
         MAIN {
             @Override
@@ -114,11 +104,10 @@ public final class BuiltInGun {
             }
         },
         /**
-         * The machine gun clamped to the main gun, laid wherever it is laid and fired on a trigger
-         * of its own. Its muzzle is a fixed point on the gun rather than a length down a barrel:
-         * there is no recoil to slide it back and nothing that needs the barrel's length, so where
-         * the rounds leave is simply where the file says they do — see
-         * {@link com.ashvehicles.vehicle.GroundVehicleDefinition.Coaxial}.
+         * 主砲に固定された機銃。主砲が指向された方向へ指向され、独立した引き金で撃つ。砲口は「砲身に
+         * 沿った長さ」ではなく砲上の固定点。後座で下がることも砲身長を必要とすることも無いので、弾が出る
+         * 位置はファイルの記述そのままになる。
+         * {@link com.ashvehicles.vehicle.GroundVehicleDefinition.Coaxial} 参照。
          */
         COAXIAL {
             @Override
@@ -157,7 +146,7 @@ public final class BuiltInGun {
             }
         };
 
-        /** Which weapon file this barrel is, or empty for a vehicle that has not got one. */
+        /** この砲がどの兵装ファイルか。積んでいない車両では空。 */
         abstract Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle);
 
         abstract int rounds(GroundVehicleEntity vehicle);
@@ -168,58 +157,54 @@ public final class BuiltInGun {
 
         abstract void reload(GroundVehicleEntity vehicle, int ticks);
 
-        /** Where one of this gun's rounds leaves, in the world, as of this tick. */
+        /** この砲の弾が出る世界座標。この tick 時点で。 */
         abstract Vec3 muzzle(GroundVehicleEntity vehicle, int barrel);
 
         /**
-         * How many barrels this gun fires out of in turn. One, unless the file says otherwise, and
-         * a machine gun clamped to a mantlet has never had two.
+         * 順番に撃つ砲身の本数。ファイルが別を言わなければ1で、防盾に固定された機銃が2本だったことは
+         * 一度も無い。
          */
         int barrels(GroundVehicleEntity vehicle) {
             return 1;
         }
 
         /**
-         * What this barrel's counters are called in the vehicle's tag. Empty for the main gun, whose
-         * keys were written before there was a second barrel and are left exactly as they were, so
-         * that a tank saved by an older world comes back with its shells.
+         * この砲のカウンタが車両のタグ内で何と呼ばれるか。主砲は空文字。主砲のキーは2門目が存在する前に
+         * 書かれた物で、そのまま残してある。古いワールドで保存された戦車が砲弾を持って戻ってくるように。
          */
         abstract String tag();
     }
 
     /**
-     * Rounds between muzzle flashes on an automatic gun.
+     * 自動火器で発射炎を出す間隔（何発ごとか）。
      *
-     * <p>A flash is four bursts of particles, each of them a packet to everybody who can see the
-     * vehicle, and at twenty rounds a second one per round is eighty packets a second and several
-     * hundred particles for as long as the trigger is held. One in three still reads as a barrel
-     * firing continuously -- the bursts last longer than the gap between them -- and costs a third
-     * as much. A gun that fires one round at a time flashes for every one of them.
+     * <p>発射炎1回はパーティクルの4連射で、それぞれが車両を見られる全員へのパケットになる。毎秒20発で
+     * 1発1回なら毎秒80パケット、引き金を引いている限り数百個のパーティクル。3発に1回でも連続射撃に見える
+     * ——1回の発光は間隔より長く続く——うえコストは1/3になる。単発の砲は1発ごとに光る。
      */
     private static final int FLASH_EVERY = 3;
 
     /**
-     * Ticks a standing vehicle takes to fill an empty magazine out of its own hold. The loaders,
-     * abstracted, and the same ten seconds an aircraft's ground crew take over a pylon.
+     * 停止中の車両が空の弾倉を自分の弾庫から満たすのにかかる tick 数。装填手を抽象化した値で、機体の
+     * 地上要員がパイロン1本にかける10秒と同じ。
      */
     private static final int RESUPPLY_TICKS = 200;
 
-    /** Below this, in blocks a tick, the vehicle counts as standing still and can be loaded. */
+    /** この速度（1tickあたりブロック）未満なら停止中と見なし、装填できる。 */
     private static final float STANDING = 1.0E-4F;
 
     private final GroundVehicleEntity vehicle;
     private final Mount mount;
-    /** Whether the trigger was down last tick, so that holding it does not empty the magazine. */
+    /** 前 tick に引き金が引かれていたか。押しっぱなしで弾倉を空にしないため。 */
     private boolean triggerWasDown;
     /**
-     * Which barrel the next round comes out of, for a mount with more than one. Kept here rather
-     * than on the vehicle because nothing but this class has ever needed to know: the flash and the
-     * round are both put where they belong by the server, and what the clients draw of the mount
-     * itself — the recoil — is the whole thing running back, not one barrel of it. A gun that comes
-     * back from a save starting at its first barrel again is a gun nobody can tell was interrupted.
+     * 複数砲身の架台で、次の弾がどの砲身から出るか。車両ではなくここに持つのは、これを知る必要があるのが
+     * このクラスだけだから。発射炎も弾もサーバーが正しい位置へ置くし、クライアントが架台について描く物
+     * （後座）は砲身1本ではなく全体の動き。セーブから戻って1本目の砲身に戻る砲は、中断されたことを誰にも
+     * 気付かれない。
      */
     private int barrel;
-    /** Rounds until the next muzzle flash. See {@link #FLASH_EVERY}. */
+    /** 次の発射炎までの残り発数。{@link #FLASH_EVERY} 参照。 */
     private int untilFlash;
 
     public BuiltInGun(GroundVehicleEntity vehicle, Mount mount) {
@@ -228,8 +213,7 @@ public final class BuiltInGun {
     }
 
     /**
-     * Once a tick, on the server. The trigger is the crew's; the reload is the loader's, and runs
-     * whether or not anybody is aboard.
+     * サーバー側で毎tick。引き金は乗員の物、装填は装填手の物で、誰が乗っているかに関わらず進む。
      */
     public void tick(boolean trigger) {
         int reload = this.mount.reload(this.vehicle);
@@ -250,19 +234,16 @@ public final class BuiltInGun {
         ResourceLocation weaponId = fitted.get();
         WeaponDefinition weapon = Definitions.weapon(weaponId);
 
-        // The crew at work on a vehicle that is standing still: shells and belts out of the hold and
-        // into the magazine. Not on the move, because nobody passes a shell up while the hull is
-        // pitching about; and not out of nothing, which is what this used to be.
+        // 停止中の車両で乗員が働く。砲弾やベルトを弾庫から弾倉へ。走行中はやらない。車体が揺れている
+        // 最中に砲弾を手渡す者はいないから。そして空中からも湧かせない——以前はそうだった。
         if (Math.abs(this.vehicle.getSpeed()) < STANDING) {
             this.resupply(weapon);
         }
 
-        // Whether holding the trigger down keeps it firing is the weapon's own to say rather than
-        // this class's. A tank gun is a thing you press — a loader takes several seconds and letting
-        // go the instant they finish is not how anybody fires one — and that is still what a weapon
-        // file gets by leaving the field out and naming a rate of a fraction of a round a second.
-        // A machine gun in the same mantlet is the same class of thing, and is a thing you hold
-        // down. See WeaponDefinition.isAutomatic.
+        // 引き金を押し続けて撃ち続けられるかは、このクラスではなく兵装が決める。戦車砲は「押す」物だ
+        // ——装填手は数秒かかるし、終わった瞬間に離す撃ち方をする者はいない——ので、フィールドを省略して
+        // 毎秒1発未満の発射速度を書いたファイルは今もそうなる。同じ防盾の機銃は同じ種類の物であり、
+        // 「押しっぱなしにする」物。WeaponDefinition.isAutomatic 参照。
         boolean pressed = trigger && (weapon.isAutomatic() || !wasDown);
 
         if (!pressed || reload > 0 || this.mount.rounds(this.vehicle) <= 0) {
@@ -273,20 +254,16 @@ public final class BuiltInGun {
     }
 
     /**
-     * One tick of the loaders: a whole shell, or a whole belt, out of the hold and into the
-     * magazine — if one is due this tick and there is room for it.
+     * 装填手の1tick分。この tick に番が来ていて空きがあれば、砲弾1発かベルト1本を丸ごと弾庫から弾倉へ。
      *
-     * <p><b>A whole one or none.</b> The magazine is counted in rounds and the hold in items, and
-     * the crew do not cut a belt in half: a magazine with room for less than one more item is as
-     * full as it is going to get. Which costs almost nothing — every gun here but one holds a whole
-     * number of items, and the Pantsir's fourteen hundred rounds come to forty-six belts and a
-     * twentieth — and buys an ammunition item that is a plain stackable crate rather than one that
-     * has to remember how much of itself is left.
+     * <p><b>丸ごとか、無しか。</b> 弾倉は発数で、弾庫はアイテム数で数える。乗員はベルトを半分に切らない。
+     * アイテム1個分に満たない空きしか無い弾倉はもう満載扱い。コストはほぼ無く——ここの砲は1つを除き全部
+     * アイテム個数がちょうど整数で、パーンツィリの1400発も46.05本のベルトになる——引き換えに、弾薬アイテム
+     * は「自分の残量を覚える物」ではなく素朴にスタックできる箱でいられる。
      *
-     * <p>The rate is a full magazine in {@link #RESUPPLY_TICKS} however big it is, which for a tank
-     * that holds forty shells is one every four ticks and for an autocannon that holds forty-six
-     * belts is very nearly the same. So a gun is not loaded faster by being bigger, and nothing is
-     * loaded in a tick.
+     * <p>速度は大きさに関わらず「{@link #RESUPPLY_TICKS} で弾倉1つ分」。砲弾40発の戦車なら4tickに1発、
+     * ベルト46本の機関砲でもほぼ同じ。つまり大きい砲ほど速く装填されることはなく、1tickで満載になる物も
+     * 無い。
      */
     private void resupply(WeaponDefinition weapon) {
         AmmoKind kind = weapon.ammoKind();
@@ -307,9 +284,9 @@ public final class BuiltInGun {
     }
 
     /**
-     * Takes one item of ammunition out of the hold, in the order whoever packed it laid it out.
+     * 弾庫から弾薬アイテムを1個取る。取る順は積んだ者が並べた順。
      *
-     * @return whether there was one to take
+     * @return 取れる物があったか
      */
     private boolean take(AmmoKind kind) {
         VehicleHold hold = this.vehicle.getHold();
@@ -325,19 +302,19 @@ public final class BuiltInGun {
         return false;
     }
 
-    /** Whether this barrel is fitted at all. */
+    /** この砲がそもそも搭載されているか。 */
     public boolean exists() {
         return this.mount.weapon(this.vehicle).isPresent();
     }
 
-    /** How many rounds a full magazine holds, from the weapon's own file. */
+    /** 満載時の弾倉の発数。兵装自身のファイルから。 */
     public int capacity() {
         return this.mount.weapon(this.vehicle)
                 .map(id -> Definitions.weapon(id).ammo())
                 .orElse(0);
     }
 
-    /** How long the loader takes, in ticks, from the weapon's rate of fire. */
+    /** 装填手の所要時間（tick）。兵装の発射速度から。 */
     public int reloadTicks() {
         return this.mount.weapon(this.vehicle)
                 .map(id -> ticksFor(Definitions.weapon(id).firing().roundsPerSecond()))
@@ -349,21 +326,18 @@ public final class BuiltInGun {
     }
 
     /**
-     * Sends the round on its way, and does to the vehicle what firing does to it.
+     * 弾を送り出し、発砲が車両に与える影響を与える。
      *
-     * <p>The round leaves along the bore rather than along the hull: where a tank is pointing and
-     * where its gun is pointing are different questions, and the second one is the whole reason a
-     * turret exists. A coaxial is clamped to that same gun and so leaves along the same line — which
-     * is the whole of what makes it coaxial. The scatter is a cone about that, built across the bore
-     * rather than across the world, so a gun laid straight up scatters no differently from one laid
-     * flat.
+     * <p>弾は車体方向ではなく砲身方向へ出る。戦車がどこを向いているかと砲がどこを向いているかは別の問い
+     * で、後者こそ砲塔が存在する理由の全部。同軸機銃はその同じ砲に固定されているので同じ線へ出る——
+     * それが「同軸」であることの全部。散布は砲身を軸にした円錐で、世界基準ではなく砲身基準に作るので、
+     * 真上に向けた砲も水平の砲と同じように散る。
      */
     private void fire(ServerLevel level, ResourceLocation weaponId, WeaponDefinition weapon) {
-        // Round about the barrels, one round each. Every barrel of a mount is laid the same way and
-        // loaded off the same magazine at the same rate -- a twin mounting is two holes for the
-        // rounds to leave by, not two guns -- so the whole of being one is which muzzle this round
-        // comes out of. What a file wants instead when it wants two rounds at once is the weapon's
-        // own salvo, a few lines below.
+        // 砲身を順繰りに、1本1発ずつ。架台のどの砲身も同じ方向へ指向され、同じ弾倉から同じ速度で装填
+        // される——連装架台は2門の砲ではなく弾が出る穴が2つあるだけ——ので、砲身であることの全部は
+        // 「この弾がどの砲口から出るか」に尽きる。一度に2発撃ちたいファイルが使うのは兵装自身の salvo
+        // で、それは数行下。
         int barrels = Math.max(this.mount.barrels(this.vehicle), 1);
         int firing = this.barrel % barrels;
 
@@ -385,11 +359,10 @@ public final class BuiltInGun {
                     .add(up.scale(random.nextGaussian() * (scatter + spread)))
                     .normalize();
 
-            // What the barrel adds, plus what the vehicle was already doing along it. Only the part
-            // along the bore, never the whole velocity: a hull crabbing sideways down a slope would
-            // otherwise bend every round off the barrel by the angle it was sliding at. The same
-            // rule a pylon follows — see WeaponMounts.fireRound — and the same one GunSight flies
-            // its trajectory with, which is what makes the mark on the screen the truth.
+            // 砲が与える速度に、車両が既にその方向へ持っていた速度を足す。足すのは砲身方向の成分だけで
+            // 速度全体ではない。斜面を横滑りしている車体だと、滑っている角度の分だけ全弾が砲身から曲がって
+            // しまうから。パイロンが従う規則と同じ（WeaponMounts.fireRound 参照）で、GunSight が弾道を
+            // 飛ばす時の規則とも同じ。それが画面上の照準を真実にしている。
             Vec3 carried = direction.scale(Math.max(0.0, this.vehicle.getVelocity().dot(direction)));
 
             VehicleProjectile shot = weapon.type() == WeaponDefinition.Type.GUN
@@ -398,8 +371,8 @@ public final class BuiltInGun {
 
             shot.setup(weaponId, this.vehicle, crew);
             shot.setPos(muzzle);
-            // launch rather than setDeltaMovement: the speed has to reach the clients, and it is far
-            // too fast for the packets that would ordinarily carry it. See VehicleProjectile.
+            // setDeltaMovement ではなく launch。速度がクライアントへ届く必要があり、通常それを運ぶ
+            // パケットには速すぎるから。VehicleProjectile 参照。
             shot.launch(direction.scale(weapon.projectile().speed()).add(carried));
 
             level.addFreshEntity(shot);
@@ -417,15 +390,13 @@ public final class BuiltInGun {
     }
 
     /**
-     * A unit vector across the bore, for building the scatter cone.
+     * 散布円錐を作るための、砲身に直交する単位ベクトル。
      *
-     * <p>Taken against the world's vertical, which fails only for a gun laid exactly at the zenith.
-     * A tank cannot reach it and an anti-aircraft mounting very nearly can, so it is answered rather
-     * than left to divide by nothing: at the pole every direction across the bore is as good as
-     * every other, and any one of them will do.
+     * <p>世界の垂直軸を基準に取るので、真上ちょうどへ向けた砲でだけ破綻する。戦車は到達できず、対空架台
+     * はほぼ到達できるので、0除算に任せず答えを返す。天頂では砲身に直交するどの方向も等価なので、どれでも
+     * よい。
      *
-     * <p>Shared with {@link TurretLauncher}, whose tubes are laid by the same mounting and scatter
-     * about the same line.
+     * <p>{@link TurretLauncher} と共有。あちらの発射筒は同じ架台で指向され、同じ線を軸に散る。
      */
     static Vec3 across(Vec3 bore) {
         Vec3 right = bore.cross(new Vec3(0.0, 1.0, 0.0));
@@ -433,16 +404,15 @@ public final class BuiltInGun {
         return right.lengthSqr() < 1.0E-8 ? new Vec3(1.0, 0.0, 0.0) : right.normalize();
     }
 
-    /** How big the flash is, from what the round carries. Never nothing: every gun has a muzzle. */
+    /** 発射炎の大きさ。弾が持つ炸薬から決める。0にはならない。どの砲にも砲口はある。 */
     private static float blastPower(WeaponDefinition weapon) {
         return Mth.clamp(weapon.projectile().explosion(), 1.5F, 6.0F);
     }
 
     /**
-     * The report: the event the weapon's file names, else one named after the weapon. Sent with the
-     * reach in the volume slot rather than the loudness, for the reason set out in
-     * {@code WeaponMounts.playFireSound} — that slot is the only thing deciding who is told about
-     * the sound at all, and a tank gun is heard a long way further than thirty-two blocks.
+     * 発砲音。兵装ファイルが指定するイベント、無ければ兵装名から作った物。音量スロットには音量ではなく
+     * 到達距離を入れて送る。理由は {@code WeaponMounts.playFireSound} に書いた通りで、そのスロットだけが
+     * 「誰にこの音を知らせるか」を決めており、戦車砲は32ブロックよりはるかに遠くまで聞こえる。
      */
     private void playFireSound(WeaponDefinition weapon, ResourceLocation weaponId) {
         ResourceLocation event = weapon.sound().fire()
@@ -456,8 +426,8 @@ public final class BuiltInGun {
     public void load(CompoundTag tag) {
         String rounds = this.mount.tag() + "Rounds";
 
-        // A vehicle written to the world before this was a gun comes back with a full magazine
-        // rather than an empty one, which is the kinder of the two guesses.
+        // この砲が存在する前にワールドへ書かれた車両は、空ではなく満載の弾倉で戻ってくる。2つの推測の
+        // うち親切な方。
         this.mount.rounds(this.vehicle, tag.contains(rounds) ? tag.getInt(rounds) : this.capacity());
         this.mount.reload(this.vehicle, tag.getInt(this.mount.tag() + "Reload"));
     }

@@ -19,46 +19,40 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
- * The noise the warning receiver makes, which is most of what a warning receiver is.
+ * 警戒受信機が出す音。警戒受信機の実体はほぼこれだ。
  *
- * <p>The scope in {@link com.ashvehicles.client.RadarDisplay} says which way the trouble is coming
- * from, and a pilot in trouble is not looking at it. What tells them there is trouble at all is the
- * tone.
+ * <p>{@link com.ashvehicles.client.RadarDisplay} のスコープは脅威の来る方向を示すが、窮地のパイロットはそれを
+ * 見ていない。そもそも脅威があると伝えるのは音の方だ。
  *
- * <p><b>Two shapes, because a receiver makes two kinds of noise.</b> Being found by somebody's radar
- * is news: it happens once, and after that it is simply the state of the afternoon, so it gets one
- * chirp and then silence. Being locked, or being shot at, is a condition rather than an event, and
- * gets a continuous alarm that runs for exactly as long as the condition does. See
- * {@link WarningSoundInstance}.
+ * <p><b>受信機が出す音は2種類なので、形も2つ。</b>誰かのレーダーに捕捉されたことは知らせだ。1度起きればあとは
+ * その日の状態にすぎないので、短い一鳴りの後は無音になる。ロックされること、撃たれることは事象ではなく状態で
+ * あり、その状態が続く間だけ正確に鳴り続ける連続警報になる。{@link WarningSoundInstance} 参照。
  *
- * <p>That second part is the whole of the design, and it is worth saying why. The obvious way to
- * build an alarm out of a recording is to play it again every so often — but the recording is not a
- * beep. What anybody records for this is an alarm: a tone with its own rhythm already in it, running
- * for as long as the file lasts. Restarting one of those on a timer stacks copy on copy — a
- * twenty-second lock tone restarted twice a second is forty of it playing at once, which is not a
- * warning but a wall of noise. So one is started and left to run.
+ * <p>後者こそ設計の全てであり、理由を書いておく価値がある。録音から警報を作る自明な方法は一定間隔で鳴らし直す
+ * ことだが、録音はビープ音ではない。この用途に録られるのは警報そのもの——既にリズムを内包し、ファイル長の間
+ * 鳴り続けるトーンだ。それをタイマーで鳴らし直せばコピーが積み重なる。20秒のロックトーンを毎秒2回鳴らし直せば
+ * 40本が同時に鳴ることになり、それは警報ではなく騒音の壁だ。だから1本鳴らして流し続ける。
  *
- * <p>Nothing is heard by anyone but the pilot, because nobody else is sent a radar picture at all.
- * The tone is played flat into the cockpit rather than positioned anywhere: it is coming from a box
- * behind the seat, not from the aeroplane threatening you.
+ * <p>パイロット以外には誰にも聞こえない。そもそもレーダー画は他へ送られないからだ。トーンはどこにも定位させず
+ * コックピットへ平坦に流す。座席の後ろの箱から出ているのであって、脅かしてくる機体から出ているのではない。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class WarningSounds {
-    /** Playback speed for a recording that was cut for the warning it is being used for. */
+    /** その警報のために切られた録音を使う場合の再生速度。 */
     private static final float AS_RECORDED = 1.0F;
-    /** And for one standing in for another warning: a search is lower, trouble climbs. */
+    /** 別の警報の代役として使う場合の速度。捜索は低く、事態が悪化するほど高くなる。 */
     private static final float SEARCH_PITCH = 0.8F;
     private static final float LOCK_PITCH = 1.0F;
     private static final float MISSILE_PITCH = 1.45F;
     private static final float VOLUME = 0.6F;
 
-    /** What the game has that sounds most like an instrument warning, until a pack has better. */
+    /** パックがより良い物を持つまでの間、計器警報に最も近いゲーム内の音。 */
     private static final ResourceLocation FALLBACK = SoundEvents.NOTE_BLOCK_BIT.value().getLocation();
 
-    /** What the receiver was last saying, so that a change is heard and a repeat is not. */
+    /** 受信機が最後に伝えていた内容。変化は鳴らし、繰り返しは鳴らさないため。 */
     @Nullable
     private static Threat.Kind sounding;
-    /** The alarm running now, if the trouble is the sort that gets one. */
+    /** 現在鳴っている警報（脅威がそれに値する種類なら）。 */
     @Nullable
     private static WarningSoundInstance alarm;
 
@@ -66,9 +60,8 @@ public final class WarningSounds {
     public static void onClientTick(ClientTickEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
 
-        // Only the pilot has a receiver in front of them. A passenger is sent no picture at all, and
-        // somebody who has climbed out is no longer being warned about anything. An alarm already
-        // running notices the same thing for itself and stops.
+        // 受信機が目の前にあるのはパイロットだけ。搭乗者には画が一切送られないし、降りた者はもう何も警告されて
+        // いない。既に鳴っている警報も自分で同じことに気付いて止まる。
         if (minecraft.level == null || minecraft.player == null || minecraft.isPaused()
                 || !(minecraft.player.getVehicle() instanceof AircraftEntity)) {
             sounding = null;
@@ -87,8 +80,8 @@ public final class WarningSounds {
         boolean changed = sounding != worst;
         sounding = worst;
 
-        // News, once. Somebody having you on their scope is worth knowing when it starts; it is not
-        // worth being told again for as long as the two of you are in the same sky.
+        // 知らせは1度きり。相手のスコープに載ったことは、始まった時点では知る価値がある。同じ空にいる間ずっと
+        // 言われ続ける価値は無い。
         if (worst == Threat.Kind.SEARCH) {
             if (changed) {
                 chirp(minecraft, worst);
@@ -97,9 +90,8 @@ public final class WarningSounds {
             return;
         }
 
-        // A condition, held. Started when it changes, and started again if the sound engine has
-        // dropped it — for a full channel, a resource reload, or a volume slider that has come back
-        // up since.
+        // 状態は保持する。変化時に開始し、サウンドエンジンが落とした場合は再開する——チャンネル満杯、リソース
+        // リロード、あるいはその後に戻された音量スライダーのため。
         SoundManager sounds = minecraft.getSoundManager();
 
         if (changed || alarm == null || alarm.isStopped() || !sounds.isActive(alarm)) {
@@ -108,14 +100,14 @@ public final class WarningSounds {
         }
     }
 
-    /** One short sound, played and forgotten. */
+    /** 短い音を1つ鳴らして忘れる。 */
     private static void chirp(Minecraft minecraft, Threat.Kind kind) {
         SoundManager sounds = minecraft.getSoundManager();
 
         sounds.play(SimpleSoundInstance.forUI(recording(sounds, kind), pitch(sounds, kind), VOLUME));
     }
 
-    /** The recording to use for this warning: its own if there is one, else the nearest to hand. */
+    /** この警報に使う録音。専用の物があればそれ、無ければ最も近い物。 */
     private static SoundEvent recording(SoundManager sounds, Threat.Kind kind) {
         ResourceLocation playing = ModSounds.firstPresent(sounds, borrowing(kind));
 
@@ -123,9 +115,8 @@ public final class WarningSounds {
     }
 
     /**
-     * A recording made for this warning is already the right note and is played as it was cut. One
-     * borrowed from another warning, or the game's own, is shifted to say which of the three it is
-     * standing in for.
+     * この警報のために作られた録音は既に正しい音なので、切られたまま再生する。他の警報から借りた物やゲーム自身の
+     * 物は、3つのどれの代役かを示すためピッチをずらす。
      */
     private static float pitch(SoundManager sounds, Threat.Kind kind) {
         if (recordingFor(kind).equals(ModSounds.firstPresent(sounds, borrowing(kind)))) {
@@ -139,7 +130,7 @@ public final class WarningSounds {
         };
     }
 
-    /** The recording cut for this warning and no other. */
+    /** この警報専用に切られた録音。 */
     private static ResourceLocation recordingFor(Threat.Kind kind) {
         return switch (kind) {
             case SEARCH -> ModSounds.RWR_CONTACT;
@@ -149,8 +140,8 @@ public final class WarningSounds {
     }
 
     /**
-     * What to reach for, in order: this warning's own recording, then the others, nearest in meaning
-     * first. A pack that provides one name gets a receiver that works for all three.
+     * 探す順序。まずこの警報専用の録音、次に他の警報の物を意味の近い順に。1つでも名前を提供したパックは、3種
+     * すべてで動く受信機を手に入れる。
      */
     private static ResourceLocation[] borrowing(Threat.Kind kind) {
         return switch (kind) {

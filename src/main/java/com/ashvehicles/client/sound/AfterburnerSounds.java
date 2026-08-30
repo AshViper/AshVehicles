@@ -21,53 +21,48 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
 
 /**
- * Finds something to play when an afterburner lights and no resource pack has said what that sounds
- * like.
+ * アフターバーナー点火時、リソースパックがその音を定義していない場合に鳴らす物を探す。
  *
- * <p>The same arrangement as {@link WeaponSounds}, and for the same reason. The server is the side
- * that knows the burner has caught — it is the side the flying client reports to — and naming a
- * sound event is the whole of what it can do about it, resource packs being something it has never
- * seen. So the event goes out under this aircraft's own name,
- * {@code ashvehicles:engine.<aircraft>.afterburner}, and whether anything answers to that is a
- * question only this side can ask.
+ * <p>{@link WeaponSounds} と同じ仕組み・同じ理由。バーナーが点いたことを知っているのはサーバー側——操縦クライ
+ * アントが報告する相手——であり、サーバーにできるのはサウンドイベント名を指すことだけだ。リソースパックは
+ * サーバーが見たことのない物だからだ。よってイベントはこの機体自身の名前
+ * {@code ashvehicles:engine.<aircraft>.afterburner} で発行され、それに応える物があるかを問えるのはこちら側だけ
+ * になる。
  *
- * <p>What it falls back on, in order: the mod's own {@link ModSounds#AFTERBURNER}, if a pack
- * provides it; else the game's fire charge, which is the nearest thing vanilla has to a great deal
- * of fuel catching all at once. Unlike the engine note there is no reason to prefer silence here —
- * this is one short bang rather than a loop, and a stand-in bang is a good deal better than an
- * aeroplane that leaps forward for no audible reason.
+ * <p>フォールバックは順に、パックが提供していれば MOD 自身の {@link ModSounds#AFTERBURNER}、無ければゲームの
+ * ファイアチャージ。大量の燃料が一気に着火する音にバニラで最も近い物だ。エンジン音と違い、ここで無音を選ぶ理由は
+ * 無い。これはループではなく短い一発の破裂音であり、代役の破裂音は「聞こえる理由も無く前へ飛び出す機体」より
+ * はるかにましだ。
  *
- * <p>Giving an aircraft its own therefore needs nothing but the files: add
- * {@code engine.<aircraft>.afterburner} to {@code sounds.json} with an {@code .ogg} beside it, or
- * {@code engine.afterburner} to cover every aircraft at once.
+ * <p>したがって機体に専用の音を与えるにはファイルだけで足りる。{@code sounds.json} に
+ * {@code engine.<aircraft>.afterburner} と {@code .ogg} を追加するか、全機体を一度に賄うなら
+ * {@code engine.afterburner} を追加する。
  *
- * <p>How loud and at what pitch comes from {@link AircraftEntity} rather than from the sound being
- * replaced. It has to: this event is fired before the sound engine has looked the recording up, so
- * the instance cannot yet say how loud it is and asking would throw.
+ * <p>音量とピッチは、置き換えられる音ではなく {@link AircraftEntity} から取る。そうするほかない。このイベントは
+ * サウンドエンジンが録音を引く前に発火するので、インスタンスはまだ音量を答えられず、問えば例外になる。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class AfterburnerSounds {
     /**
-     * What a burner catching falls back on: the game's own fire charge, which is a lot of fuel going
-     * up in one go and is therefore very nearly the right noise already.
+     * バーナー点火のフォールバック。ゲーム自身のファイアチャージで、大量の燃料が一気に燃える音であり、既にほぼ
+     * 正しい音だ。
      */
     private static final ResourceLocation FALLBACK =
             ResourceLocation.withDefaultNamespace("item.firecharge.use");
 
-    /** The tail every one of these events is named with. See {@link ModSounds#AFTERBURNER_ROLE}. */
+    /** この種のイベント名に共通する末尾。{@link ModSounds#AFTERBURNER_ROLE} 参照。 */
     private static final String SUFFIX = "." + ModSounds.AFTERBURNER_ROLE;
 
     private static final Set<ResourceLocation> WARNED = new HashSet<>();
-    /** Whether the log already carries one report of this going wrong. */
+    /** この不具合の報告が既にログに1件あるか。 */
     private static final AtomicBoolean FAILED = new AtomicBoolean();
 
     /**
-     * Nothing that happens in here is worth losing the world over.
+     * ここで起きることに、ワールドを失う価値のある物は無い。
      *
-     * <p>This event is fired from inside the handling of the packet that asked for the sound, so an
-     * exception thrown here does not merely lose the sound: it fails the packet and drops the player
-     * out of the game. Which recording an afterburner uses is not worth that, so anything unexpected
-     * leaves the sound exactly as the server asked for it and says so once.
+     * <p>このイベントは音を要求したパケットの処理内部から発火するので、ここで投げた例外は音を失うだけでは済ま
+     * ない。パケットが失敗しプレイヤーがゲームから切断される。どの録音を使うかにその価値は無いので、想定外の事態
+     * では音をサーバーの要求通りに残し、1度だけその旨を記録する。
      */
     @SubscribeEvent
     public static void onPlaySound(PlaySoundEvent event) {
@@ -96,7 +91,7 @@ public final class AfterburnerSounds {
 
         SoundManager sounds = Minecraft.getInstance().getSoundManager();
 
-        // The pack has one. Nothing here to decide: the server's figures are the aircraft's own.
+        // パックが持っている。ここで決めることは無い。サーバーの数値は機体自身の物だ。
         if (ModSounds.exists(sounds, id)) {
             return;
         }
@@ -108,13 +103,13 @@ public final class AfterburnerSounds {
             AshVehicles.LOGGER.info("No resource pack provides {}; falling back on {}", id, recording);
         }
 
-        // Same place and the same figures: only the recording changes.
+        // 位置も数値も同じ。変わるのは録音だけ。
         event.setSound(new SimpleSoundInstance(SoundEvent.createVariableRangeEvent(recording),
                 sound.getSource(), AircraftEntity.AFTERBURNER_VOLUME, AircraftEntity.AFTERBURNER_LIGHT_PITCH,
                 SoundInstance.createUnseededRandom(), sound.getX(), sound.getY(), sound.getZ()));
     }
 
-    /** One of the mod's burner events: {@code engine.afterburner}, or one named after an aircraft. */
+    /** MOD のバーナーイベントか。{@code engine.afterburner} か、機体名を冠した物。 */
     private static boolean isAfterburner(@Nullable ResourceLocation id) {
         return id != null && AshVehicles.MODID.equals(id.getNamespace())
                 && id.getPath().startsWith(ModSounds.ENGINE_PREFIX) && id.getPath().endsWith(SUFFIX);

@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_rack",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "M": {
+      "item": "ashvehicles:machine_parts"
+    }
+  },
+  "pattern": [
+    "SSS",
+    " M "
+  ],
+  "result": {
+    "count": 2,
+    "id": "ashvehicles:single_rail"
+  }
+}

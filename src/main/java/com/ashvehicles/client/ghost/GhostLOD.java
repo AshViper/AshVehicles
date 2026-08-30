@@ -1,23 +1,21 @@
 package com.ashvehicles.client.ghost;
 
 /**
- * How much of an entity is drawn at a given distance.
+ * ある距離でエンティティをどこまで描くか。
  *
  * <pre>
- *   FULL        0 .. ghostStartDistance        the game's own entity renderer, nothing of ours
- *   GHOST       .. ghostEndDistance            our pass: the model, moving as the entity moves
- *   BILLBOARD   billboardDistance ..           our pass: a flat icon (only when enabled)
- *   HIDDEN      ghostEndDistance ..            nothing at all
+ *   FULL        0 .. ghostStartDistance        ゲーム自身のエンティティレンダラー。MOD 側は何もしない
+ *   GHOST       .. ghostEndDistance            MOD のパス: モデルを、エンティティの動きに合わせて描く
+ *   BILLBOARD   billboardDistance ..           MOD のパス: 平坦なアイコン（有効時のみ）
+ *   HIDDEN      ghostEndDistance ..            何も描かない
  * </pre>
  *
- * <p>There is one drawn tier and not three because there is nothing a nearer ghost is given that a
- * further one can do without: the model is the same model at any distance, and posing it and
- * playing its cycles costs a handful of bone rotations. What used to be the simplified tier drew
- * the model static, or handed it to Distant Horizons as a few boxes; the boxes are gone, and a
- * static model beside a moving one is the sort of difference that is noticed even when the aircraft
- * is a few pixels across.
+ * <p>描画階層が3つではなく1つなのは、近いゴーストに与えられて遠いゴーストが省ける物が無いからだ。モデルはどの
+ * 距離でも同じモデルだし、ポーズ付けとサイクル再生のコストはボーン回転数個分にすぎない。かつての簡略階層は
+ * モデルを静止させて描くか、箱数個として Distant Horizons へ渡していた。箱は廃止したし、動いているモデルの隣に
+ * ある静止モデルは、機体が数ピクセルの大きさでも気付かれる類の差だ。
  *
- * <p>Chosen from a squared distance, so the render loop never takes a square root.
+ * <p>2乗距離から選ぶので、描画ループが平方根を取ることは無い。
  */
 public enum GhostLOD {
     FULL,
@@ -25,7 +23,7 @@ public enum GhostLOD {
     BILLBOARD,
     HIDDEN;
 
-    /** The tier for something this far from the camera. */
+    /** カメラからこの距離にある物の階層。 */
     public static GhostLOD of(double distanceSq) {
         if (distanceSq < GhostConfig.startSq()) {
             return FULL;
@@ -42,7 +40,7 @@ public enum GhostLOD {
         return GHOST;
     }
 
-    /** Whether this tier is drawn by the ghost pass rather than by the game. */
+    /** この階層をゲームではなくゴーストパスが描くか。 */
     public boolean isGhost() {
         return this == GHOST || this == BILLBOARD;
     }

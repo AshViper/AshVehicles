@@ -8,6 +8,8 @@ import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.network.DefinitionSyncPayload;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 import com.ashvehicles.vehicle.VehicleShape;
+import com.ashvehicles.weapon.EquipmentDefinition;
+import com.ashvehicles.weapon.RackDefinition;
 import com.ashvehicles.weapon.WeaponDefinition;
 
 import net.minecraft.resources.ResourceLocation;
@@ -18,36 +20,41 @@ import net.neoforged.neoforge.event.OnDatapackSyncEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * Every kind of file the mod reads, and the one place they are all listed.
+ * MOD が読むファイルの種類すべてと、それらが一覧される唯一の場所。
  *
- * <p>Three directories, three registries, and nothing else: {@link DefinitionRegistry} does the
- * reading, the reloading and the falling back for all of them. Adding a fourth kind of file is a
- * line here and a codec, with no loader, no manager and no packet to write.
+ * <p>種類ごとにディレクトリ1つとレジストリ1つ、それだけ。読み込みもリロードもフォールバックも
+ * {@link DefinitionRegistry} が全種類分やる。新しい種類を足すのはここに1行とコーデック1つで済み、
+ * ローダーもマネージャーもパケットも書かなくてよい。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID)
 public final class Definitions {
-    /** Aircraft performance files live in {@code data/<namespace>/aircraft/}. */
+    /** 機体性能ファイルは {@code data/<namespace>/aircraft/} にある。 */
     public static final DefinitionRegistry<AircraftDefinition> AIRCRAFT = DefinitionRegistry.of(
             "aircraft", AircraftDefinition.CODEC, AircraftDefinition.FALLBACK, "aircraft");
-    /** Ground vehicles, in {@code vehicle/}. */
+    /** 地上車両は {@code vehicle/}。 */
     public static final DefinitionRegistry<GroundVehicleDefinition> VEHICLES = DefinitionRegistry.of(
             "vehicle", GroundVehicleDefinition.CODEC, GroundVehicleDefinition.FALLBACK, "ground vehicles");
-    /** What any of them fires, in {@code weapon/}. */
+    /** それらが撃つ物は {@code weapon/}。 */
     public static final DefinitionRegistry<WeaponDefinition> WEAPONS = DefinitionRegistry.of(
             "weapon", WeaponDefinition.CODEC, WeaponDefinition.FALLBACK, "weapons");
+    /** 兵装を吊るす物は {@code rack/}。レールと投下ラック。 */
+    public static final DefinitionRegistry<RackDefinition> RACKS = DefinitionRegistry.of(
+            "rack", RackDefinition.CODEC, RackDefinition.FALLBACK, "racks");
+    /** 撃つのではなく積む物は {@code equipment/}。ポッド類。 */
+    public static final DefinitionRegistry<EquipmentDefinition> EQUIPMENT = DefinitionRegistry.of(
+            "equipment", EquipmentDefinition.CODEC, EquipmentDefinition.FALLBACK, "equipment");
 
-    /** Which set of files is loaded, as a number that changes whenever any of them does. */
+    /** 今どのファイル群が読まれているかを表す番号。どれか1つでも変われば変わる。 */
     public static int version() {
         return DefinitionRegistry.version();
     }
 
     /**
-     * The boxes a machine is made of, whichever kind of machine it is.
+     * 機体・車両を構成する箱。どちらの種類でも同じ入口で取れる。
      *
-     * <p>Out of its own file, because that is where they live now. Which of the two files to look in
-     * is not something the caller has to know or could always say: everything with a shape is either
-     * a vehicle or an aircraft, an id belongs to exactly one of the two, and asking both costs a
-     * lookup in a map that was already read.
+     * <p>形状は今それぞれのファイルに入っているが、どちらのファイルを見るべきかは呼び出し側が知る必要
+     * も、常に言えることでもない。形を持つ物は車両か機体のどちらかで、ID はちょうど一方に属し、両方に
+     * 訊いても既に読んであるマップを1回引くだけ。
      */
     public static VehicleShape shape(ResourceLocation id) {
         if (VEHICLES.has(id)) {
@@ -65,18 +72,24 @@ public final class Definitions {
         return WEAPONS.get(id);
     }
 
+    public static RackDefinition rack(ResourceLocation id) {
+        return RACKS.get(id);
+    }
+
+    public static EquipmentDefinition equipment(ResourceLocation id) {
+        return EQUIPMENT.get(id);
+    }
+
     @SubscribeEvent
     public static void onAddReloadListener(AddReloadListenerEvent event) {
         DefinitionRegistry.registries().forEach(registry -> event.addListener(registry.reloadListener()));
     }
 
     /**
-     * Fired on login and again after every {@code /reload}, which is exactly when this has to go out.
+     * ログイン時と {@code /reload} のたびに飛ぶ。まさにこれを送るべきタイミング。
      *
-     * <p>One packet with everything in it rather than one per kind. The client runs the physics
-     * itself — for an aircraft and for a ground vehicle both — so if the two sides disagreed about
-     * any of these figures the server would spend its time dragging the machine back to where it
-     * thought it should be.
+     * <p>種類ごとに分けず全部を1パケットに入れる。クライアントは自分で物理計算をする——機体も地上車両も
+     * ——ので、これらの数値が両者で食い違えば、サーバーは機体を自分の思う位置へ引き戻し続けることになる。
      */
     @SubscribeEvent
     public static void onDatapackSync(OnDatapackSyncEvent event) {

@@ -24,51 +24,45 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The missiles in a launcher's tubes: a seeker, a magazine, and a wait between launches.
+ * 発射筒の中のミサイル。シーカー、弾倉、そして発射間隔。
  *
- * <p>The same relationship to {@link WeaponMounts} that {@link BuiltInGun} has, and for the same
- * reason. A pylon is a place a store is <em>hung</em>, and most of that class is about which station
- * is selected, what somebody loaded onto it, and putting it back on again out of the hold. A
- * launcher's tubes are none of those things: they are built in, they all hold the same round, and
- * the only questions are how many are left and whether the seeker has anything worth spending one
- * on. What the two do share is the weapon files — how hard the missile hits, how far its seeker
- * sees, how hard it can turn and what fools it are read from {@code data/ashvehicles/weapon/}
- * exactly as an aircraft reads them, so a missile is described in one place whether it is hanging
- * under a wing or standing in a tube.
+ * <p>{@link WeaponMounts} との関係は {@link BuiltInGun} と同じで、理由も同じ。パイロンは物を<em>吊る
+ * </em>場所で、あのクラスの大半は「どのステーションが選択されているか」「誰が何を積んだか」「弾庫から
+ * 積み直す」話だ。発射筒はそのどれでもない。組み込みで、全部同じ弾を持ち、問いは残数とシーカーが1発
+ * 使う価値のある物を捉えているかだけ。共有するのは兵装ファイルの方で、威力・シーカー探知距離・旋回性能・
+ * 何に騙されるかは機体と同じく {@code data/ashvehicles/weapon/} から読む。だからミサイルは、翼下に吊ら
+ * れていようと筒に入っていようと1箇所で記述される。
  *
- * <p><b>The seeker looks whether or not the tubes are selected.</b> That is deliberate and it is
- * most of what makes a battery frightening. A launcher tracking an aeroplane sets off the pilot's
- * warning receiver — see {@link com.ashvehicles.sensor.Sensors} — so the aircraft is told it is
- * being looked at well before anything leaves the rail, which is the warning that gives the pilot
- * something to do about it. A seeker that only woke up when the crew switched to missiles would
- * hand the aeroplane a launch out of a clear sky.
+ * <p><b>シーカーは発射筒が選択されているかに関わらず見ている。</b> これは意図的で、対空陣地の怖さの大半
+ * がそこにある。機体を追尾している発射機はパイロットの警戒受信機を鳴らす
+ * （{@link com.ashvehicles.sensor.Sensors} 参照）ので、機体は何かが発射される遥か前に「見られている」と
+ * 告げられる。それがパイロットに打つ手を与える警告になる。乗員がミサイルへ切り替えた時だけ起きるシーカー
+ * では、機体は晴天からの発射を食らうことになる。
  *
- * <p><b>Nothing is fired without a lock.</b> A guided round with nothing to steer at is a round
- * thrown away, and the crew are better told to keep tracking than allowed to waste a tube. What
- * carries the lock out to the missile is the same handover an aircraft makes: the target as it was
- * at the moment of launch, and nothing afterwards.
+ * <p><b>ロック無しでは撃たない。</b> 誘導弾に狙う相手が無ければ捨てるのと同じで、乗員には筒を無駄にさせ
+ * るより追尾を続けろと伝える方がよい。ロックをミサイルへ渡す方式は機体と同じ引き継ぎ——発射の瞬間の目標
+ * を渡し、その後は何も渡さない。
  *
- * <p><b>Where the state lives.</b> Rounds left, the wait, and what the seeker is on are synched data
- * on the vehicle rather than fields here, because the crew's instruments need all three and only the
- * server may decide any of them.
+ * <p><b>状態の置き場。</b> 残弾・待ち時間・シーカーの捉えている相手は、ここのフィールドではなく車両の
+ * 同期データにある。乗員の計器が3つとも必要とし、そのどれもサーバーだけが決めてよいから。
  */
 public final class TurretLauncher {
-    /** How big the flash of a launch is. A boost motor lighting, not a gun going off. */
+    /** 発射炎の大きさ。砲の発砲ではなくブースターの点火。 */
     private static final float BOOST_BLAST = 2.0F;
 
     /**
-     * Ticks a standing vehicle takes to fill an empty set of tubes out of its own hold. Twice what
-     * the gun's loaders take, because a rocket is craned in and a shell is passed up by hand.
+     * 停止中の車両が空の発射筒を自分の弾庫から満たすのにかかる tick 数。砲の装填手の2倍。ロケットは
+     * 吊り込む物で、砲弾は手渡しできるから。
      */
     private static final int RESUPPLY_TICKS = 400;
 
-    /** Below this, in blocks a tick, the vehicle counts as standing still and can be loaded. */
+    /** この速度（1tickあたりブロック）未満なら停止中と見なし、装填できる。 */
     private static final float STANDING = 1.0E-4F;
 
     private final GroundVehicleEntity vehicle;
-    /** What the crew have the seeker on. Only the server ever decides it. */
+    /** 乗員がシーカーで捉えている相手。決めるのは常にサーバーだけ。 */
     private final TargetLock lock;
-    /** Whether the trigger was down last tick, so that holding it does not empty the tubes. */
+    /** 前 tick に引き金が引かれていたか。押しっぱなしで筒を空にしないため。 */
     private boolean triggerWasDown;
 
     public TurretLauncher(GroundVehicleEntity vehicle) {
@@ -76,25 +70,25 @@ public final class TurretLauncher {
         this.lock = new TargetLock(vehicle);
     }
 
-    /** What the seeker is on. Read by the instruments; only the server ever decides it. */
+    /** シーカーが捉えている相手。計器が読む。決めるのは常にサーバーだけ。 */
     public TargetLock lock() {
         return this.lock;
     }
 
-    /** The figures of the round in the tubes, or null for a vehicle that carries none. */
+    /** 発射筒に入っている弾の諸元。積んでいない車両では null。 */
     @Nullable
     public WeaponDefinition missile() {
         return this.vehicle.getStats().launcher().missile().map(Definitions::weapon).orElse(null);
     }
 
-    /** How many tubes a full load fills, from the missile's own file. */
+    /** 満載時の筒の数。ミサイル自身のファイルから。 */
     public int capacity() {
         return this.vehicle.getStats().launcher().missile()
                 .map(id -> Definitions.weapon(id).ammo())
                 .orElse(0);
     }
 
-    /** How long the crew take between launches, in ticks, from the missile's rate of fire. */
+    /** 発射間隔（tick）。ミサイルの発射速度から。 */
     public int reloadTicks() {
         return this.vehicle.getStats().launcher().missile()
                 .map(id -> ticksFor(Definitions.weapon(id).firing().roundsPerSecond()))
@@ -102,23 +96,18 @@ public final class TurretLauncher {
     }
 
     /**
-     * One tick of the loading crew: one round out of the hold and into a tube, if one is due this
-     * tick and there is a tube to put it in.
+     * 装填手の1tick分。この tick に1発分の番が来ていて、入れる筒があれば、弾庫から1発を筒へ移す。
      *
-     * <p><b>By hand, one at a time, and only while the vehicle is standing still.</b> A rocket is
-     * craned in off a lorry — the real thing takes a transloader and the best part of half an hour —
-     * so a launcher fires what somebody loaded aboard it and no more. It used to fill itself out of
-     * the air the moment the vehicle was put down, which made a full salvo free and the hold a
-     * decoration.
+     * <p><b>手作業で、1発ずつ、車両が停止している間だけ。</b> ロケットはトラックから吊り込む物で、実物
+     * なら装填車と30分近くを要する。だから発射機は誰かが積んだ分しか撃てない。以前は車両を置いた瞬間に
+     * 空中から自分を満たしており、それでは一斉射が無料になり弾庫は飾りだった。
      *
-     * <p>Slower than the gun's, and deliberately: {@link #RESUPPLY_TICKS} is a full set of tubes,
-     * which for a launcher that holds two dozen is a round every few seconds. Long enough that
-     * emptying the tubes is a decision rather than a formality.
+     * <p>砲より遅いのは意図的で、{@link #RESUPPLY_TICKS} は筒1セット分。24発積む発射機なら数秒に1発。
+     * 筒を空にすることが形式ではなく判断になる程度には長い。
      *
-     * <p>The same shape as {@code BuiltInGun.resupply}, one floor apart from it because the two count
-     * different things: rounds and a reload against tubes and a wait, each in their own synched
-     * fields. What they share — the hold, the rate, the standing-still rule — is the arrangement
-     * rather than the code, and the arrangement is worth more than the half-dozen lines.
+     * <p>形は {@code BuiltInGun.resupply} と同じだが、数える物が違う（弾数と再装填 対 筒数と待ち時間、
+     * それぞれ自分の同期フィールド）ので1階層離してある。共有しているのは弾庫・速度・停止条件という
+     * 「取り決め」であってコードではなく、その取り決めの方が数行より価値がある。
      */
     private void resupply(WeaponDefinition missile) {
         if (Math.abs(this.vehicle.getSpeed()) >= STANDING || this.vehicle.getMissiles() >= missile.ammo()) {
@@ -135,9 +124,9 @@ public final class TurretLauncher {
     }
 
     /**
-     * Takes one rocket out of the hold, in the order whoever packed it laid it out.
+     * 弾庫からロケットを1本取る。取る順は積んだ者が並べた順。
      *
-     * @return whether there was one to take
+     * @return 取れる物があったか
      */
     private boolean take(AmmoKind kind) {
         VehicleHold hold = this.vehicle.getHold();
@@ -158,11 +147,10 @@ public final class TurretLauncher {
     }
 
     /**
-     * Once a tick, on the server. The seeker looks, the wait runs down, and a press sends one on its
-     * way if there is anything to send it at.
+     * サーバー側で毎tick。シーカーが見て、待ち時間が減り、押されていれば送る相手がいる場合に1発送り出す。
      *
-     * @param trigger whether the crew are holding the trigger <em>and</em> have the tubes selected.
-     *                Which weapon the trigger fires is the vehicle's business, not this class's
+     * @param trigger 乗員が引き金を引いており<em>かつ</em>発射筒を選択しているか。引き金がどの兵装を撃つ
+     *                かは車両側の判断で、このクラスの管轄ではない
      */
     public void tick(boolean trigger) {
         int reload = this.vehicle.getMissileReload();
@@ -183,14 +171,13 @@ public final class TurretLauncher {
         ResourceLocation missileId = tubes.missile().orElseThrow();
         WeaponDefinition missile = Definitions.weapon(missileId);
 
-        // Before the seeker and before the trigger, because loading is the one thing that goes on
-        // whether or not anybody is aboard: it is the ground crew's work and not the gunner's.
+        // シーカーより前、引き金より前。装填だけは誰が乗っているかに関わらず進む——それは地上要員の仕事
+        // であって砲手の仕事ではないから。
         this.resupply(missile);
 
-        // A battery with nobody in it is not tracking anything. Left looking, an abandoned launcher
-        // would go on sweeping a couple of kilometres of sky for ever and go on setting off warning
-        // receivers across the map, which is the same rule the radar itself keeps -- see
-        // Sensors.tick, which stands down for an empty machine for both of those reasons.
+        // 無人の陣地は何も追尾していない。見たままにすれば、放置された発射機が数km四方の空を永遠に掃引
+        // し、マップ中の警戒受信機を鳴らし続ける。レーダー自体が守っている規則と同じ——Sensors.tick 参照。
+        // あちらも同じ2つの理由で無人の機体では停止する。
         if (this.vehicle.getControllingPassenger() == null) {
             this.lock.clear();
             this.triggerWasDown = false;
@@ -198,7 +185,7 @@ public final class TurretLauncher {
             return;
         }
 
-        // The seeker looks all the time, not only while the tubes are selected. See the class note.
+        // シーカーは筒を選択している間だけでなく常に見ている。クラス冒頭の説明参照。
         this.lock.tick(missile.guidance().orElse(null));
 
         boolean pressed = trigger && (missile.isAutomatic() || !this.triggerWasDown);
@@ -208,7 +195,7 @@ public final class TurretLauncher {
             return;
         }
 
-        // Nothing leaves the tube without something to chase.
+        // 追う相手が無ければ筒からは何も出ない。
         if (missile.isGuided() && !this.lock.isLocked()) {
             return;
         }
@@ -219,24 +206,20 @@ public final class TurretLauncher {
     }
 
     /**
-     * Sends one on its way.
+     * 1発を送り出す。
      *
-     * <p>It leaves from the tubes and flies along the <em>bore</em>, which on anything carrying both
-     * is where the gun is laid: the barrels and the tubes are bolted to one mounting, so laying the
-     * gun on a target lays the tubes on it too. The rail itself is a point on the turret and comes
-     * round the ring with it, but it does not rise with the barrels — a tube is a box on the side of
-     * the mounting rather than something that recoils.
+     * <p>筒から出て<em>砲身方向</em>へ飛ぶ。両方積む車両ではそこが砲の指向方向だ——砲身と筒は同じ架台に
+     * 固定されているので、砲を目標に指向すれば筒も指向される。レール自体は砲塔上の点でリング回りに一緒に
+     * 回るが、砲身と一緒に俯仰はしない。筒は後座する物ではなく架台の側面の箱だから。
      *
-     * <p><b>Unless something is already locked.</b> The seeker takes a target well outside the
-     * bore now that a radar-cued one is held to the set's own arc rather than to its narrow head —
-     * see {@link TargetLock#bestCandidate} — so a tube that only ever fired down the bore would
-     * launch a locked missile pointed nowhere near what it is locked onto, and count on
-     * {@code turn_rate} to close a gap of tens of degrees before the seeker's own {@code
-     * track_angle} gives up on it, which for a wide lock it may never manage even once
-     * {@code turn_rate} starts working on it. A real rail does the same: the round is caged onto
-     * the designated track before it ever leaves, and comes off already pointed close to where it
-     * is going, with the fine work left to its own fins. Nothing about an unguided tube changes —
-     * one with nothing locked still leaves along the bore, exactly as it always did.
+     * <p><b>ただし既に何かをロックしている場合は別。</b> レーダー指示のロックが狭いシーカー視野ではなく
+     * レーダー自身の走査範囲で保持されるようになった今、シーカーは砲身方向からかなり外れた目標を捉える
+     * （{@link TargetLock#bestCandidate} 参照）。砲身方向へしか撃たない筒は、ロック対象からまるで外れた
+     * 方向へロック済みミサイルを撃ち出し、シーカー自身の {@code track_angle} が諦める前に数十度の差を
+     * {@code turn_rate} が詰めることに賭けることになる。広いロックでは、{@code turn_rate} が効き始めても
+     * 一度も間に合わないかもしれない。実物のレールも同じことをする。弾は発射前に指定目標へケージングされ、
+     * 出た時点で行き先の近くを向いており、細かい修正は自分の翼に任される。無誘導の筒は何も変わらない——
+     * 何もロックしていなければ従来通り砲身方向へ出る。
      */
     private void fire(ServerLevel level, ResourceLocation missileId, WeaponDefinition missile) {
         GroundVehicleDefinition.Launcher tubes = this.vehicle.getStats().launcher();
@@ -264,9 +247,8 @@ public final class TurretLauncher {
 
             shot.setup(missileId, this.vehicle, crew);
             shot.setPos(rail);
-            // launch rather than setDeltaMovement: the speed has to reach the clients, and the
-            // packets that would ordinarily carry it cannot express one this fast. See
-            // VehicleProjectile.
+            // setDeltaMovement ではなく launch。速度がクライアントへ届く必要があり、通常それを運ぶ
+            // パケットではこの速さを表現できないから。VehicleProjectile 参照。
             shot.launch(direction.scale(missile.projectile().speed()));
 
             if (shot instanceof RocketEntity rocket && locked != null) {
@@ -284,10 +266,9 @@ public final class TurretLauncher {
     }
 
     /**
-     * Where a caged round leaves from: at whatever is locked, if anything is, and along the bore
-     * otherwise — which is every unguided tube, and a guided one fired with nothing held. Falls
-     * back to the bore too on the one case a direction cannot be built from, which is a target
-     * standing exactly on the rail.
+     * ケージングされた弾が出ていく方向。ロックがあればその相手へ、無ければ砲身方向——無誘導の筒すべてと、
+     * 何も保持せず撃った誘導弾がそれ。方向を作れない唯一の場合（目標がレール上にちょうど重なっている）でも
+     * 砲身方向に戻す。
      */
     private static Vec3 cagedAim(@Nullable Entity locked, Vec3 rail, Vec3 bore) {
         if (locked == null) {
@@ -300,11 +281,9 @@ public final class TurretLauncher {
     }
 
     /**
-     * The launch: the event the weapon's file names, else one named after the weapon. Sent with the
-     * reach in the volume slot rather than the loudness, for the reason set out in
-     * {@code WeaponMounts.playFireSound} — that slot is the only thing deciding who is told about
-     * the sound at all, and a missile going off the rail is heard across the valley it was fired
-     * over.
+     * 発射音。兵装ファイルが指定するイベント、無ければ兵装名から作った物。音量スロットには音量ではなく
+     * 到達距離を入れて送る。理由は {@code WeaponMounts.playFireSound} に書いた通りで、そのスロットだけが
+     * 「誰にこの音を知らせるか」を決めており、レールを離れるミサイルは撃った谷の向こうまで聞こえるから。
      */
     private void playLaunchSound(WeaponDefinition missile, ResourceLocation missileId) {
         ResourceLocation event = missile.sound().fire()
@@ -315,7 +294,7 @@ public final class TurretLauncher {
                 missile.sound().packetVolume(), missile.sound().pitch());
     }
 
-    /** How far along the lock is, from nothing to one. What the instruments draw while it closes. */
+    /** ロックの進捗。0から1まで。閉じていく間に計器が描く値。 */
     public float progress() {
         WeaponDefinition missile = this.missile();
 
@@ -325,8 +304,8 @@ public final class TurretLauncher {
     }
 
     public void load(CompoundTag tag) {
-        // A vehicle written to the world before it had tubes comes back with them full rather than
-        // empty, which is the kinder of the two guesses.
+        // 発射筒を持つ前にワールドへ書かれた車両は、空ではなく満載で戻ってくる。2つの推測のうち親切な
+        // 方。
         this.vehicle.setMissiles(tag.contains("Missiles") ? tag.getInt("Missiles") : this.capacity());
         this.vehicle.setMissileReload(tag.getInt("MissileReload"));
     }

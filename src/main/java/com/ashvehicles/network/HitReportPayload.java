@@ -22,20 +22,16 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
- * One of the shooter's rounds arriving on a machine, and whereabouts on it.
+ * 撃った本人の弾が機体に着弾したこと、そして機体のどこに当たったか。
  *
- * <p>Sent to the one player who fired it and to nobody else. None of it can be worked out on the
- * client: a round is flown on every client from the figure it was given at the muzzle, but where it
- * <em>stopped</em> is decided on the server against boxes the client is not testing against, and
- * whether the armour let it in or threw it off is decided there too. So the answer is sent, and it
- * is the only thing sent — the shooter learns what their own round did, which they would have seen
- * for themselves at fifty metres and cannot possibly see at eight hundred.
+ * <p>撃った1人にだけ送り、他の誰にも送らない。この情報はクライアントでは出せない。弾は砲口で与えられた
+ * 値から各クライアントが自前で飛ばすが、どこで<em>止まった</em>かはクライアントが判定していない箱に対し
+ * てサーバーが決めるし、装甲が通したか弾いたかもサーバーが決める。だから答えを送る。送るのはそれだけ
+ * ——撃った本人は自分の弾が何をしたかを知る。50m なら自分の目で見えたはずで、800m では到底見えない情報。
  *
- * <p><b>The place is held against the box rather than in the air.</b> A point in the world would be
- * stale by the time it was drawn — the target is still driving, and its turret is still traversing —
- * so what goes over the wire is which of the machine's boxes the round went into and how far across
- * that box it landed, as a fraction of each half-length. See {@link HitReadout}, which puts the box
- * back where it now is and the mark back on it.
+ * <p><b>位置は空間座標ではなく箱に対して持たせる。</b> 世界座標では描く頃には古くなっている——目標は
+ * まだ走っており砲塔もまだ旋回している——ので、通信に載せるのは「機体のどの箱に入ったか」と「その箱の
+ * 中のどこか」（各半長に対する比率）。{@link HitReadout} が今の位置に箱を戻し、その上にマークを戻す。
  */
 public record HitReportPayload(int target, ResourceLocation vehicle, int box, Vec3 within, Vec3 line,
         float traverse, float gunPitch, float damage, boolean bounced) implements CustomPacketPayload {
@@ -46,8 +42,8 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
             (buf, payload) -> {
                 buf.writeVarInt(payload.target());
                 buf.writeResourceLocation(payload.vehicle());
-                // Shifted up by one so that the "no box at all" case is a zero rather than a varint
-                // spending five bytes on a minus sign.
+                // 1 足してから書く。「箱に当たっていない」場合を 0 にするため。そうしないと varint が
+                // マイナス符号のために5バイト使う。
                 buf.writeVarInt(payload.box() + 1);
                 write(buf, payload.within());
                 write(buf, payload.line());
@@ -76,17 +72,16 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
     }
 
     /**
-     * Tells whoever fired a round what it found, if it was a player and what it found was a machine.
+     * 撃った者がプレイヤーで、当たった相手が機体なら、弾が何に当たったかを伝える。
      *
-     * <p>Called from both ends of a round's life against armour — the hit that went in and the one
-     * that was thrown off — because the two are the same question answered differently, and a gunner
-     * who is only told about the first cannot tell a ricochet from a miss.
+     * <p>装甲に対する弾の結末の両方——貫通した場合と弾かれた場合——から呼ばれる。2つは同じ問いへの違う
+     * 答えであり、前者しか知らされない砲手は跳弾と外れを区別できない。
      *
-     * @param shooter whoever pulled the trigger, which is only a player some of the time
-     * @param struck what the round found: one of a machine's boxes, or a machine itself
-     * @param at where it struck, in the world
-     * @param travel the way it was going when it got there
-     * @param damage what it took off, or zero for a round the armour threw off
+     * @param shooter 引き金を引いた者。プレイヤーとは限らない
+     * @param struck 弾が当たった物。機体の箱の1つか、機体そのもの
+     * @param at 世界座標での着弾点
+     * @param travel 着弾時の進行方向
+     * @param damage 与えた損害。装甲に弾かれた弾では 0
      */
     public static void report(@Nullable Entity shooter, Entity struck, Vec3 at, Vec3 travel,
             float damage, boolean bounced) {
@@ -108,9 +103,8 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
 
             machine = parent;
             slot = part.getBox();
-            // Clamped to the box's own faces. The game finds the hit against the upright box it
-            // carries the part around in rather than against the plate as it is really lying, so a
-            // graze on a steeply angled one can be reported a little outside the metal.
+            // 箱の面に丸める。ゲームは実際に寝ている装甲板ではなく、パーツを運ぶ直立した箱に対して命中
+            // を求めるので、急傾斜した板への掠りが装甲の少し外側として報告されることがある。
             within = clamp(box.within(at));
         } else if (struck instanceof VehicleEntityBase hulk) {
             machine = hulk;
@@ -140,8 +134,8 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
     }
 
     /**
-     * Registered as client-bound only, so this runs on a client and nowhere else; a dedicated server
-     * never resolves {@link HitReadout}.
+     * クライアント向けとしてのみ登録されているので、これはクライアントでしか走らない。専用サーバーが
+     * {@link HitReadout} を解決することはない。
      */
     public static void handle(HitReportPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> HitReadout.report(payload.target(), payload.vehicle(), payload.box(),

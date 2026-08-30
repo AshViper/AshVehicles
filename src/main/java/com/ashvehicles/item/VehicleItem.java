@@ -27,23 +27,21 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Places the machine it was registered with onto the clicked block, facing the player.
+ * 登録時に紐づけられた機体を、クリックしたブロックの上へプレイヤー向きで設置する。
  *
- * <p>The one thing an aeroplane and a tank do differently here is how they are pointed, and that is
- * a line: both are pointed by an attitude rather than by the pair of angles Minecraft keeps, but a
- * tank is also lying on something and an aeroplane is not. So {@link #point} is the hook and the
- * rest — find the block, face the player, check the room, consume the item — is shared.
+ * <p>ここで機体と戦車が違うのは向きの付け方だけで、それも1行。どちらも Minecraft が持つ2つの角度では
+ * なく姿勢で向きを決めるが、戦車は何かの上に寝ており機体はそうではない。よって {@link #point} だけを
+ * フックにし、残り（ブロックを探す、プレイヤーの方を向く、空間を確認する、アイテムを消費する）は共通。
  *
- * <p>A ship is the exception, and floats where the others rest. It is put down like a boat: right
- * clicking open water sets it on the surface, and clicking through shallow water sets it on the
- * water rather than on the bottom under it. See {@link #floatsOnWater} and {@link #use}.
+ * <p>例外は艦で、他が「乗る」ところを「浮く」。設置もボートと同じで、開けた水面を右クリックすれば水面
+ * に乗り、浅瀬越しにクリックしても底ではなく水面に乗る。{@link #floatsOnWater} と {@link #use} 参照。
  *
- * @param <T> the machine this item places
+ * @param <T> このアイテムが設置する機体
  */
 public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
     /**
-     * How far a box may overlap the world and still count as clear, in blocks. Enough for a wingtip
-     * or a track to rest a little way into a slope, which is what they do.
+     * 箱が世界とどれだけ重なっても「空いている」と見なすか（ブロック）。翼端や履帯が斜面に少し食い込む
+     * 程度は許す。実際そうなるので。
      */
     private static final double PLACING_MARGIN = 0.25;
 
@@ -55,27 +53,26 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
     }
 
     /**
-     * The id everything about this machine is found under: its data file, its geometry, its texture,
-     * and the picture its own item is drawn as. Taken off the entity it places rather than off the
-     * item's own name, which is the same thing today and is not the thing that settles it.
+     * この機体に関する全て（データファイル、ジオメトリ、テクスチャ、アイテムの絵）が見つかる ID。
+     * アイテム自身の名前ではなく設置するエンティティから取る。今日は同じ値だが、決めているのは
+     * そちらではない。
      */
     public ResourceLocation vehicle() {
         return BuiltInRegistries.ENTITY_TYPE.getKey(this.type.get());
     }
 
     /**
-     * Points a freshly placed machine along the heading it was put down on.
+     * 設置直後の機体を、置いた向きへ向ける。
      *
-     * <p>Needed because {@code moveTo} only sets the pair of angles Minecraft keeps, and everything
-     * in the mod is pointed by an attitude instead. Without it a machine sits facing due south
-     * whichever way it was put down — and its boxes, which are placed from the attitude, sit facing
-     * south with it.
+     * <p>{@code moveTo} は Minecraft が持つ2つの角度しか設定せず、この MOD の向きは全部姿勢で決まるため
+     * 必要。これが無いと、どちら向きに置いても機体は真南を向いたままになり、姿勢から配置される当たり判定
+     * の箱も一緒に南を向く。
      */
     protected abstract void point(T vehicle, float yaw);
 
     /**
-     * Whether this machine is set down on water rather than on the ground: a ship, and nothing else.
-     * A machine that floats is put down like a boat rather than on the block that was clicked.
+     * 地面ではなく水面に置く機体か。該当するのは艦だけ。浮く機体はクリックしたブロックの上ではなく
+     * ボートと同じ流儀で置かれる。
      */
     protected boolean floatsOnWater() {
         return false;
@@ -87,9 +84,9 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
         BlockPos pos = context.getClickedPos().relative(context.getClickedFace());
         double y = pos.getY();
 
-        // A ship clicked in the shallows — through the water onto the bottom — is set on the surface
-        // over that bottom rather than on it, the same as one dropped straight onto open water. In
-        // deep water the block ray finds no bottom at all and this never fires; {@link #use} does.
+        // 浅瀬で（水越しに底を）クリックした艦は、その底の上ではなく上の水面に置く。開けた水面へ直接
+        // 落とした場合と同じ扱い。深い水ではブロック判定が底を見つけずここは動かない。その場合は
+        // {@link #use} が担当する。
         if (this.floatsOnWater()) {
             double surface = waterSurfaceAt(level, pos);
 
@@ -110,9 +107,8 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
     }
 
     /**
-     * Puts a ship down on open water, where there is no block under the cursor for {@link #useOn} to
-     * fasten onto. The ray is cast the way a boat's is — through the air and stopped by the water's
-     * own surface — so the vessel lands on the sea rather than passing through it.
+     * カーソル下に {@link #useOn} が掴めるブロックが無い、開けた水面へ艦を置く。判定はボートと同じ撃ち方
+     * （空気を貫き水面で止まる）なので、艦は海面に乗り、突き抜けない。
      */
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
@@ -130,9 +126,8 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
 
         BlockPos hitPos = ((BlockHitResult) hit).getBlockPos();
 
-        // Only the water is a place to launch from. A block hit here is a dry one the player is
-        // looking at over the top of a stretch of water, and putting a ship down on it is not what
-        // was meant; that is a job for useOn and the ground.
+        // 進水させてよいのは水の上だけ。ここでブロックに当たったなら、それは水面越しに見えている乾いた
+        // ブロックであり、そこへ艦を置くのは意図と違う。それは useOn と地面の仕事。
         if (!level.getFluidState(hitPos).is(FluidTags.WATER)) {
             return InteractionResultHolder.pass(held);
         }
@@ -149,9 +144,8 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
     }
 
     /**
-     * Creates the machine, points it, checks the whole of its shape is clear, and — if it is — adds
-     * it and takes the item. Shared by the two ways in: the block a tank is set on, and the water a
-     * ship is launched into.
+     * 機体を生成し、向きを付け、形状全体が空いているか確認し、空いていれば追加してアイテムを消費する。
+     * 入口2つ（戦車を乗せるブロックと、艦を進水させる水面）で共通。
      */
     private InteractionResult place(Level level, double x, double y, double z, float yaw,
             Player player, ItemStack held, BlockPos event) {
@@ -168,9 +162,9 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
         vehicle.moveTo(x, y, z, yaw, 0.0F);
         this.point(vehicle, yaw);
 
-        // The whole shape has to be clear, not just the middle of it. The boxes stop against the
-        // world now, so one set down with a wingtip or a track inside a hillside would be wedged
-        // there for good. Water is no obstacle — a hull sits in it, not against it.
+        // 空いている必要があるのは中央ではなく形状全体。今や箱は世界に対して止まるので、翼端や履帯が
+        // 斜面に埋まった状態で置けば永久に嵌まる。水は障害ではない。船体は水に「乗る」のではなく
+        // 「浸かる」。
         if (!vehicle.hasRoomHere(PLACING_MARGIN)) {
             return InteractionResult.FAIL;
         }
@@ -183,9 +177,8 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
     }
 
     /**
-     * The height of the surface of the water column standing on a block, or {@link Double#NaN} if
-     * that block holds no water. Climbs to the top of the column so a ship lands on the water rather
-     * than inside it.
+     * そのブロック上の水柱の水面高さ。水が無ければ {@link Double#NaN}。水柱の頂上まで登るので、艦は水中
+     * ではなく水面に着く。
      */
     private static double waterSurfaceAt(Level level, BlockPos at) {
         if (!level.getFluidState(at).is(FluidTags.WATER)) {

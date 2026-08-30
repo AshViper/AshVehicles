@@ -10,30 +10,27 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * A sound that belongs to a moving thing, and is over when the thing stops doing whatever makes it.
+ * 動く物に属し、その物が音の元になる動作をやめたら終わる音。
  *
- * <p>Everything the mod loops — an engine, a rocket motor, the air past a falling bomb, an
- * undercarriage winding up — is the same sound in this respect: it follows an entity, it is louder
- * or quieter depending on what that entity is doing, and it has to end itself, because nothing else
- * knows when it should.
+ * <p>MOD がループさせる物——エンジン、ロケットモーター、落下する爆弾を過ぎる風、作動中の降着装置——はこの点で全て
+ * 同じ音だ。エンティティに追従し、そのエンティティの動作次第で大きくも小さくもなり、そして自ら終わらねばならない。
+ * いつ終わるべきか他に知る者がいないからだ。
  *
- * <p>Distance is worked out here rather than left to the sound engine. The engine fades a sound to
- * nothing over {@code max(volume, 1) * 16} blocks, which is sixty-four at best; an aeroplane is
- * heard much further off than that and a missile crosses sixty-four blocks in two seconds. So these
- * are played with attenuation switched off, at the entity's real position so they still come from
- * the right direction, and with the falloff put into the volume against a range this side chooses.
+ * <p>距離はサウンドエンジンに任せずここで計算する。エンジンは {@code max(volume, 1) * 16} ブロック——せいぜい64
+ * ブロック——で音量を0まで落とすが、機体はそれよりはるかに遠くまで聞こえるし、ミサイルは64ブロックを2秒で横切る。
+ * よってこれらは減衰を切って再生し、位置はエンティティの実位置にして方向を正しく保ち、減衰はこちら側が選んだ到達
+ * 距離に対して音量へ織り込む。
  *
- * <p>Ending itself matters as much. A sound is a channel and channels are few, so a sound with
- * nothing left to say — out of earshot, or faded out — gives its channel back rather than looping
- * silently for the rest of the entity's life. {@link LiveSounds} starts another if the entity comes
- * back into earshot.
+ * <p>自ら終わることも同じくらい重要だ。音はチャンネルでありチャンネルは少ないので、言うことの無くなった音——可聴
+ * 範囲外、あるいはフェードアウト済み——はチャンネルを返す。エンティティの残りの生涯を無音でループし続けたりしない。
+ * エンティティが可聴範囲へ戻れば {@link LiveSounds} が別の音を開始する。
  */
 public abstract class EntitySoundInstance<T extends Entity> extends AbstractTickableSoundInstance {
-    /** Below this a fade-out is treated as finished. */
+    /** これを下回ったフェードアウトは完了と見なす。 */
     protected static final float SILENCE = 0.004F;
 
     private final T entity;
-    /** How long it must have had nothing to say before it gives up its channel. */
+    /** チャンネルを手放すまでに、言うことが無い状態が続くべき長さ。 */
     private final int quietTicksBeforeStop;
     private int quietTicks;
 
@@ -48,14 +45,14 @@ public abstract class EntitySoundInstance<T extends Entity> extends AbstractTick
         this.follow();
     }
 
-    /** How much of full volume is left at this distance from the listener, in [0, 1]. */
+    /** 聞き手からこの距離で全音量のうちどれだけ残るか（0〜1）。 */
     public static float falloff(Entity entity, double range) {
         Vec3 listener = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
 
         return (float) Mth.clamp(1.0 - listener.distanceTo(entity.position()) / Math.max(range, 1.0E-3), 0.0, 1.0);
     }
 
-    /** Closes part of the gap between where a figure is and where it should be, once. */
+    /** 現在値と目標値の差を一度だけ部分的に埋める。 */
     protected static float approach(float current, float target, float rate) {
         return current + (target - current) * rate;
     }
@@ -80,8 +77,8 @@ public abstract class EntitySoundInstance<T extends Entity> extends AbstractTick
 
     @Override
     public void tick() {
-        // Both worth checking: an entity that has gone leaves nothing to follow, and one in another
-        // level is one this client is no longer in earshot of by any measure.
+        // どちらも確認する価値がある。消えたエンティティには追従する物が無いし、別レベルにいるエンティティは
+        // どの尺度でもこのクライアントの可聴範囲外だ。
         if (this.entity.isRemoved() || this.entity.level() != Minecraft.getInstance().level) {
             this.stop();
 
@@ -92,10 +89,10 @@ public abstract class EntitySoundInstance<T extends Entity> extends AbstractTick
         this.update();
     }
 
-    /** One tick of whatever this sound is: set {@link #volume} and {@link #pitch}, then say {@link #heard}. */
+    /** この音の1tick分。{@link #volume} と {@link #pitch} を設定し、{@link #heard} を答える。 */
     protected abstract void update();
 
-    /** Whether there was anything to hear this tick. Enough of a run of nothing ends the sound. */
+    /** このtickに聞くべき物があったか。無い状態が続けば音は終わる。 */
     protected void heard(boolean audible) {
         this.quietTicks = audible ? 0 : this.quietTicks + 1;
 

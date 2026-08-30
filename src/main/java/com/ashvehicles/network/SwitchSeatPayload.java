@@ -10,13 +10,12 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
- * A crew member asking to move to the next seat of the machine they are aboard.
+ * 乗員が、乗っている機体の次の席へ移りたいという要求。
  *
- * <p>Naming nothing, exactly as {@link OpenVehicleHoldPayload} does: the machine is whichever one the
- * sender is riding, so the request cannot reach across the map to somebody else's aeroplane, and
- * which seat is next is the server's to work out — it owns the seating and the client has no honest
- * view of who is where until it is told. The move itself is
- * {@link VehicleEntityBase#switchToNextSeat}.
+ * <p>{@link OpenVehicleHoldPayload} と同じく何も名指ししない。機体は送信者が乗っている物なので、要求が
+ * マップの向こうの他人の機体に届くことはない。次がどの席かはサーバーが決める——席割りはサーバーの持ち物
+ * で、クライアントは知らされるまで誰がどこにいるかを正しく把握できない。移動処理自体は
+ * {@link VehicleEntityBase#switchToNextSeat}。
  */
 public record SwitchSeatPayload() implements CustomPacketPayload {
     public static final SwitchSeatPayload INSTANCE = new SwitchSeatPayload();
@@ -25,7 +24,7 @@ public record SwitchSeatPayload() implements CustomPacketPayload {
             new CustomPacketPayload.Type<>(
                     ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "switch_seat"));
 
-    /** Nothing on the wire: the press is the whole message. */
+    /** 通信内容は空。押されたという事実がメッセージの全て。 */
     public static final StreamCodec<FriendlyByteBuf, SwitchSeatPayload> STREAM_CODEC =
             StreamCodec.unit(INSTANCE);
 
@@ -36,8 +35,8 @@ public record SwitchSeatPayload() implements CustomPacketPayload {
 
     public static void handle(SwitchSeatPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            // The seat a rider is in belongs to the machine they are directly aboard, not to
-            // whatever that machine is itself riding, so the direct vehicle is the one asked.
+            // 搭乗者の席は「直接乗っている機体」の持ち物で、その機体がさらに何かに乗っていてもそちら
+            // には属さない。よって直接の乗り物に訊く。
             if (context.player().getVehicle() instanceof VehicleEntityBase machine) {
                 machine.switchToNextSeat(context.player());
             }

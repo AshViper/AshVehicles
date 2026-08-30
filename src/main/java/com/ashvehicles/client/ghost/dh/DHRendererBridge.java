@@ -17,69 +17,60 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The only class that names a Distant Horizons type. Loaded only through {@link DHIntegration},
- * and only when the mod is present.
+ * Distant Horizons の型を名指しする唯一のクラス。{@link DHIntegration} 経由でのみ、しかも当該 MOD が存在する場合
+ * のみロードされる。
  *
- * <h2>What was found in Distant Horizons 3.2.0-b, and what is used</h2>
+ * <h2>Distant Horizons 3.2.0-b で判明したことと、使っている物</h2>
  *
- * <p><b>There is no entity API.</b> Distant Horizons has no notion of entity LODs, and nothing
- * that would let a model be pushed through its pipeline. What its public API
- * ({@code com.seibel.distanthorizons.api}) does offer, and what this class uses:
+ * <p><b>エンティティ API は存在しない。</b>Distant Horizons にエンティティ LOD の概念は無く、モデルをその
+ * パイプラインへ流す手段も無い。公開 API（{@code com.seibel.distanthorizons.api}）が提供し、このクラスが使う物は
+ * 以下の通り。
  * <ul>
- *   <li>{@link DhApi.Delayed#configs} → {@code graphics().renderingEnabled()} and
- *       {@code chunkRenderDistance()}: whether and how far it draws. {@code configs} is null until
- *       the mod has initialised, so every read is null-checked.</li>
- *   <li>{@link DhApi.Delayed#worldProxy} → {@link IDhApiWorldProxy#getAllLoadedLevelWrappers()}:
- *       the {@link IDhApiLevelWrapper} for the client level, matched through
- *       {@code getWrappedMcObject()}. Every other call wants one.</li>
- *   <li>{@link DhApi.Delayed#terrainRepo} → {@link IDhApiTerrainDataRepo#getColumnDataAtBlockPos}:
- *       the LOD column at a block position, as {@link DhApiTerrainDataPoint}s with absolute
- *       {@code bottomYBlockPos}/{@code topYBlockPos} (the repo's own {@code raycast} compares world
- *       Y against them directly). This is how a ghost behind one of its mountains is found:
- *       Distant Horizons draws its terrain into its own framebuffer and merges only colour into
- *       the game's — its {@code shared/gl/apply.frag} writes no {@code gl_FragDepth}, and none of
- *       its shaders do — so the game's depth buffer knows nothing of its terrain and a depth test
- *       alone would draw a ghost straight through a hill. Its {@code raycast()} walks one block at a
- *       time through those columns, and blocks while the data loads, so it is called from a
- *       worker thread and rationed by the manager.</li>
+ *   <li>{@link DhApi.Delayed#configs} → {@code graphics().renderingEnabled()} と
+ *       {@code chunkRenderDistance()}。描画するか、どこまで描くか。{@code configs} は MOD 初期化まで null なので、
+ *       読むたび null チェックする。</li>
+ *   <li>{@link DhApi.Delayed#worldProxy} → {@link IDhApiWorldProxy#getAllLoadedLevelWrappers()}。
+ *       クライアントレベルに対応する {@link IDhApiLevelWrapper} を {@code getWrappedMcObject()} で照合する。
+ *       他の呼び出しは全てこれを要求する。</li>
+ *   <li>{@link DhApi.Delayed#terrainRepo} → {@link IDhApiTerrainDataRepo#getColumnDataAtBlockPos}。
+ *       ブロック座標の LOD 列を、絶対値の {@code bottomYBlockPos}/{@code topYBlockPos} を持つ
+ *       {@link DhApiTerrainDataPoint} として得る（リポジトリ自身の {@code raycast} もワールドYを直接それらと比較
+ *       する）。DH の山の背後にあるゴーストを見つける手段はこれだ。Distant Horizons は自前のフレームバッファへ地形
+ *       を描き、ゲームのバッファへは色だけを合成する——{@code shared/gl/apply.frag} は {@code gl_FragDepth} を書か
+ *       ないし、他のシェーダも書かない——ので、ゲームの深度バッファはその地形を知らず、深度テストだけではゴースト
+ *       が丘を突き抜けて描かれる。DH の {@code raycast()} はそれらの列を1ブロックずつ歩き、データのロード中は
+ *       ブロックするので、ワーカースレッドから呼び、マネージャが配給する。</li>
  * </ul>
  *
- * <p><b>Where it draws, and why ours draws where it does.</b> Its NeoForge
- * {@code MixinLevelRenderer} injects at the head of {@code LevelRenderer.renderSectionLayer} and
- * renders its terrain when the solid layer comes round — before the game's terrain, before any
- * entity — and then, at the head of the translucent and tripwire layers, runs its <em>vanilla
- * fade</em> ({@code renderFadeOpaque}/{@code renderFadeTransparent}), which repaints whatever the
- * game drew beyond its fade distance with its own terrain wherever it has any. The ghost pass
- * therefore runs at {@code RenderLevelStageEvent.Stage.AFTER_PARTICLES}, after both: by then the
- * game's depth buffer holds its own terrain and entities (against which the ghosts depth-test),
- * its colour buffer holds Distant Horizons' finished terrain (over which they are composited, with
- * the raycast above standing in for the depth it did not leave), and nothing of Distant Horizons'
- * runs afterwards to paint over them. Its {@code MixinGameRenderer} is empty: it does not move the
- * projection's far plane, which is why the far-plane pull in the ghost renderer is still needed
- * with it installed.
+ * <p><b>DH がどこで描き、こちらがなぜそこで描くか。</b>DH の NeoForge {@code MixinLevelRenderer} は
+ * {@code LevelRenderer.renderSectionLayer} の先頭へ注入し、solid レイヤーの番で自身の地形を描く——ゲームの地形より
+ * 前、どのエンティティより前だ。そして translucent と tripwire レイヤーの先頭で<em>バニラフェード</em>
+ * （{@code renderFadeOpaque}/{@code renderFadeTransparent}）を走らせ、自身のフェード距離より遠くでゲームが描いた物
+ * を、自前の地形がある所では自前の地形で塗り直す。よってゴーストパスは両方の後、
+ * {@code RenderLevelStageEvent.Stage.AFTER_PARTICLES} で走る。その時点でゲームの深度バッファには自前の地形と
+ * エンティティが入っており（ゴーストはそれに対して深度テストする）、色バッファには DH の完成した地形が入っており
+ * （ゴーストはその上に合成され、DH が残さなかった深度の代役は上記のレイキャストが務める）、そして DH の処理はもう
+ * 後から塗り重ねてこない。DH の {@code MixinGameRenderer} は空だ。投影の遠方面を動かさないので、DH を入れていても
+ * ゴーストレンダラーの遠方面引き寄せは依然として必要になる。
  *
- * <p>Nothing here is a mixin and nothing is reflection: the public API is enough. Version
- * dependence is on the {@code DhApi.Delayed} fields and the interfaces above, all of which are
- * part of the published API jar this mod compiles against.
+ * <p>ここに mixin もリフレクションも無い。公開 API で足りる。バージョン依存は {@code DhApi.Delayed} のフィールド
+ * と上記のインターフェースに対してのみで、いずれもこの MOD がコンパイル対象にしている公開 API jar の一部だ。
  */
 final class DHRendererBridge {
-    /** Blocks left off the end of an occlusion ray, so the ground under a target is not "in front" of it. */
+    /** 遮蔽レイの終端で差し引くブロック数。目標の下の地面を目標の「手前」と数えないため。 */
     private static final double TARGET_MARGIN = 2.5;
 
     /**
-     * The same margin as a fraction of the ray, which is what decides it on a long one.
+     * 同じ余白をレイ長に対する割合で。長いレイではこちらが効く。
      *
-     * <p>Distant Horizons draws its terrain at a detail that falls away with distance: a column a
-     * kilometre out stands for a good many blocks of real ground, and its top is an average of
-     * them. Stopping two and a half blocks short of an aeroplane a kilometre away therefore ends
-     * the ray inside the column the aeroplane is flying over, and the average ground the column
-     * reports is enough to call the aeroplane hidden. Ending it a fiftieth of the way short —
-     * twenty blocks at a kilometre, forty at two — leaves the ground beneath the target out of it
-     * while still catching the hill in between.
+     * <p>Distant Horizons は距離とともに落ちる詳細度で地形を描く。1km 先の列は実地形のかなりのブロック数を代表し、
+     * その頂点はそれらの平均だ。したがって1km 先の機体の2.5ブロック手前で止めると、レイは機体が飛んでいる列の内側
+     * で終わり、その列が報告する平均地面だけで機体は「隠れている」と判定されてしまう。1/50 手前——1km で20ブロック、
+     * 2km で40ブロック——で終えれば、目標直下の地面は外れつつ、途中の丘は依然として捉えられる。
      */
     private static final double TARGET_MARGIN_FRACTION = 0.02;
 
-    /** Re-resolve the level wrapper no more often than this, in ticks, when there is none. */
+    /** レベルラッパーが無いとき、再解決を試みる最短間隔（tick）。 */
     private static final long WRAPPER_RETRY_TICKS = 20L;
 
     @Nullable
@@ -94,7 +85,7 @@ final class DHRendererBridge {
     }
 
     // ------------------------------------------------------------------
-    // State
+    // 状態
     // ------------------------------------------------------------------
 
     static boolean isActive() {
@@ -138,7 +129,7 @@ final class DHRendererBridge {
         wrapperAskedAt = Long.MIN_VALUE / 2;
     }
 
-    /** The DH level standing for the client level, or {@code null} if it has none (yet). */
+    /** クライアントレベルに対応する DH レベル。（まだ）無ければ {@code null}。 */
     @Nullable
     private static IDhApiLevelWrapper wrapperFor(ClientLevel level) {
         if (wrapper != null && wrappedLevel == level) {
@@ -167,10 +158,9 @@ final class DHRendererBridge {
                 return null;
             }
 
-            // In multiplayer the wrapper wraps the client level itself. In singleplayer Distant
-            // Horizons runs one level for both sides and hands out the *server* level's wrapper, so
-            // the match falls back to the dimension; either wrapper serves the same DH level, and
-            // the terrain data and render register are that level's.
+            // マルチプレイではラッパーがクライアントレベル自体を包む。シングルプレイでは Distant Horizons が
+            // 両側で1つのレベルを回し、*サーバー*側レベルのラッパーを渡すので、照合はディメンションへフォール
+            // バックする。どちらのラッパーも同じ DH レベルに仕えるし、地形データも描画レジスタもそのレベルの物だ。
             IDhApiLevelWrapper sameDimension = null;
 
             for (IDhApiLevelWrapper candidate : world.getAllLoadedLevelWrappers()) {
@@ -191,7 +181,7 @@ final class DHRendererBridge {
                 wrapper = sameDimension;
             }
         } catch (IllegalStateException e) {
-            // "No world loaded": asked between worlds. Try again shortly.
+            // 「ワールド未ロード」。ワールドの切り替わりの合間に問われた。少し後に再試行する。
             return null;
         }
 
@@ -199,20 +189,17 @@ final class DHRendererBridge {
     }
 
     // ------------------------------------------------------------------
-    // Occlusion
+    // 遮蔽
     // ------------------------------------------------------------------
 
     /**
-     * Casts the line between two points through Distant Horizons' terrain, with its own
-     * {@link IDhApiTerrainDataRepo#raycast}.
+     * 2点間の線を Distant Horizons の地形に対して、DH 自身の {@link IDhApiTerrainDataRepo#raycast} で撃つ。
      *
-     * <p>Block by block, which is what makes it trustworthy — a one-block wall is found as surely
-     * as a mountain — and also what makes it unfit for the game thread: a few thousand column
-     * lookups, the first of each loaded by Distant Horizons on its own threads while the caller
-     * blocks. {@link com.ashvehicles.client.ghost.GhostOcclusion} calls this from a worker for
-     * exactly that reason. The part of the line inside the loaded world has already been checked
-     * against the game's own blocks and is skipped; the last couple of blocks are left off so that
-     * the ground the target stands on does not count as hiding it.
+     * <p>1ブロックずつ進むので信頼できる——1ブロックの壁も山と同じ確実さで見つかる——が、それゆえゲームスレッドには
+     * 不向きでもある。列検索が数千回あり、各列の初回は Distant Horizons が自前のスレッドでロードする間、呼び出し元
+     * がブロックする。{@link com.ashvehicles.client.ghost.GhostOcclusion} がこれをワーカーから呼ぶのはまさにその
+     * ためだ。線のうちロード範囲内の部分はゲーム自身のブロックで既に判定済みなので飛ばす。末尾の数ブロックも外し、
+     * 目標が立っている地面が目標を隠すと数えられないようにする。
      */
     static boolean isOccluded(ClientLevel level, Vec3 from, Vec3 to, double skip) {
         IDhApiTerrainDataRepo repo = DhApi.Delayed.terrainRepo;
@@ -253,16 +240,16 @@ final class DHRendererBridge {
 
             return result != null && result.success && result.payload != null;
         } catch (RuntimeException e) {
-            // The repo can be asked between level loads; a failed answer is "not hidden".
+            // レベルのロード合間にも問い合わせが来うる。失敗時の答えは「隠れていない」。
             return false;
         }
     }
 
     // ------------------------------------------------------------------
-    // Debug
+    // デバッグ
     // ------------------------------------------------------------------
 
-    /** A word or two more than "active", for the debug overlay: what, if anything, is missing. */
+    /** デバッグオーバーレイ用に「有効」より少し詳しい情報。何かが欠けているならそれが何か。 */
     static String detail(ClientLevel level) {
         if (!isActive()) {
             return "inactive";

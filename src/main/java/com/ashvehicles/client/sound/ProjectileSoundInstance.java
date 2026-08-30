@@ -11,33 +11,30 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 
 /**
- * What a weapon sounds like on its way to where it is going.
+ * 兵器が目標へ向かう途中の音。
  *
- * <p>Two things it can be, and which one is decided by the weapon rather than by the entity: the
- * noise a rocket or a missile makes for the whole of its flight, loudest while the motor is still
- * pushing, or the air past something falling, which is a bomb for the whole of the way down. A gun's
- * round makes neither; it is already there.
+ * <p>取りうる形は2つで、どちらかはエンティティではなく兵器が決める。ロケットやミサイルが全飛翔中に出す音——
+ * モーターが押している間が最も大きい——か、落下する物を過ぎる風の音、つまり爆弾が落ちる間ずっと出す音か。銃弾は
+ * どちらも出さない。既に着いているからだ。
  *
- * <p>Both are loops that follow the round, and both are worth having only because the sound engine's
- * own sixty-four blocks are useless here. A missile crosses that in two seconds and a bomb is
- * released from higher than that above the target; if either is to be heard at all it has to be
- * heard from much further off, which is why {@link EntitySoundInstance} does the distance.
+ * <p>どちらも弾に追従するループであり、どちらも価値があるのはサウンドエンジンの64ブロックがここでは役に立たない
+ * からだ。ミサイルはそれを2秒で越えるし、爆弾は目標のそれより高い位置から投下される。どちらも聞こえるべきなら
+ * はるかに遠くから聞こえねばならず、だから距離は {@link EntitySoundInstance} が扱う。
  */
 public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
-    /** Ticks of silence before the sound gives its channel back. */
+    /** チャンネルを返すまでの無音tick数。 */
     private static final int SILENT_TICKS_BEFORE_STOP = 20;
 
     private final Kind kind;
-    /** Loudness before distance is taken into account, in [0, 1] of the kind's volume. */
+    /** 距離を考慮する前の音量。種別の volume に対する 0〜1。 */
     private float gain;
 
     public ProjectileSoundInstance(RocketEntity projectile, SoundEvent sound, Kind kind) {
         super(projectile, sound, SoundSource.NEUTRAL, SILENT_TICKS_BEFORE_STOP);
         this.kind = kind;
-        // At its full loudness from the first tick rather than swelling into it. A motor is already
-        // burning when it leaves the rail, and a round that has to fade up over a quarter of a second
-        // has spent that quarter of a second travelling eight blocks a tick away from the listener:
-        // by the time it was loud it was too far off to hear.
+        // 徐々に上げるのではなく最初のtickから全音量で鳴らす。モーターはレールを離れる時点で既に燃えているし、
+        // 0.25秒かけてフェードインする弾は、その0.25秒を聞き手から毎tick 8ブロック離れながら過ごす。大きくなる頃
+        // には遠すぎて聞こえない。
         this.gain = kind.targetGain(projectile);
     }
 
@@ -53,23 +50,21 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
     }
 
     /**
-     * The sound a weapon makes in flight, and everything that is different about the two of them.
+     * 兵器が飛翔中に出す音と、2種類の間で異なる要素すべて。
      *
-     * @param role the tail of the name a weapon's own recording goes under, {@code weapon.<name>.<role>}
-     * @param fallback what everything without a recording of its own uses
-     * @param range how far it is heard, in blocks
-     * @param volume how loud it is at nothing
-     * @param rate fraction of the gap to its target loudness closed each tick
+     * @param role 兵器専用録音の名前の末尾。{@code weapon.<name>.<role>}
+     * @param fallback 専用録音を持たない物が使う音
+     * @param range 聞こえる距離（ブロック）
+     * @param volume 距離0での音量
+     * @param rate 毎tick、目標音量との差をどれだけ埋めるか
      */
     public enum Kind {
         /**
-         * A motor while it burns, and the air past the thing afterwards.
+         * 燃焼中のモーターと、その後に物体を過ぎる風。
          *
-         * <p>It does not stop at burnout. A rocket motor burns for a second, and a missile is in the
-         * air for ten or twenty — cutting the sound with the motor left the whole interesting part of
-         * the flight silent, which is not what anybody means by a flight sound. So the note drops
-         * back at burnout, to what something crossing thirty blocks a tick sounds like when nothing
-         * is pushing it, and stays there until it hits.
+         * <p>燃焼終了で止めはしない。ロケットモーターの燃焼は1秒だが、ミサイルは10〜20秒空中にいる——モーターと
+         * 一緒に音を切ると、飛翔の面白い部分が丸ごと無音になり、それは誰も飛翔音とは呼ばない。だから燃焼終了時に
+         * 音を落とし、押される物が何も無い状態で30ブロック/tick を進む物の音にして、着弾まで保つ。
          */
         MOTOR(ModSounds.FLIGHT_ROLE, ModSounds.FLIGHT, 480.0, 0.9F, 0.25F) {
             @Override
@@ -83,10 +78,9 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
             }
         },
         /**
-         * The air past something falling: quiet where it is let go, and rising the whole way down in
-         * both loudness and pitch as gravity has more and more of it. Measured against how fast it is
-         * going down rather than how fast it is going, because a bomb leaves with the whole of the
-         * aeroplane's speed and none of that is the sound of it falling.
+         * 落下する物を過ぎる風。投下地点では静かで、重力に掴まれるにつれ落下の全行程で音量もピッチも上がっていく。
+         * 速度ではなく落下速度で測る。爆弾は機体の速度をそのまま持って離れるが、そのどれ一つとして「落ちる音」では
+         * ないからだ。
          */
         FALL(ModSounds.FALL_ROLE, ModSounds.FALL, 400.0, 1.0F, 0.15F) {
             @Override
@@ -100,9 +94,9 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
             }
         };
 
-        /** How much of the motor's own note is left once it has burnt out and is merely travelling. */
+        /** 燃焼終了後、単に飛んでいる状態でモーター音がどれだけ残るか。 */
         private static final float COASTING = 0.55F;
-        /** Falling this fast, in blocks a tick, is as loud and as high as the whistle gets. */
+        /** この落下速度（ブロック/tick）で風切り音は最大の音量とピッチに達する。 */
         private static final float FULL_FALL = 2.0F;
         private static final float LOW_PITCH = 0.75F;
         private static final float HIGH_PITCH = 1.15F;
@@ -122,11 +116,10 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
         }
 
         /**
-         * Which of these a weapon makes in flight, or null for one that makes neither.
+         * 兵器が飛翔中にどちらを出すか。どちらも出さないなら null。
          *
-         * <p>A rocket or a missile with nothing pushing it falls into the last case rather than the
-         * first: a motor that does not burn has no note, and the round is coasting from the moment it
-         * leaves the rail.
+         * <p>押す物の無いロケットやミサイルは1つ目ではなく最後の場合に当たる。燃えないモーターに音は無く、弾は
+         * レールを離れた瞬間から惰性で飛んでいる。
          */
         @Nullable
         public static Kind of(WeaponDefinition weapon) {

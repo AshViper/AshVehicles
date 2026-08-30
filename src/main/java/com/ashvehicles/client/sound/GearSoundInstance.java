@@ -6,27 +6,25 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 
 /**
- * One aircraft's undercarriage, for as long as it is travelling.
+ * 1機の降着装置。作動している間だけ鳴る。
  *
- * <p>The gear is the one thing on an aeroplane that makes a noise only while it is moving, and it
- * moves for a known number of ticks — {@code landing_gear.cycle_ticks} out of the aircraft's file —
- * so there is nothing to work out here beyond whether it is on its way. It is a loop rather than a
- * single recording of a whole cycle because the cycle is not the same length on every aircraft, and
- * because a pilot who changes their mind halfway through one turns the gear round without waiting
- * for it to finish.
+ * <p>脚は機体で唯一、動いている間だけ音を出す物であり、動く時間も既知だ——機体ファイルの
+ * {@code landing_gear.cycle_ticks}——なので、ここで判断すべきは作動中かどうかだけ。1サイクル分の録音1本ではなく
+ * ループにしてあるのは、サイクル長が機体ごとに違うのと、途中で気が変わったパイロットが完了を待たず脚を反転
+ * させるからだ。
  *
- * <p>It starts the moment the lever moves, at full volume: a gear motor does not spool up. It fades
- * out instead of stopping dead, so that the loop is not cut off mid-cycle when the legs lock.
+ * <p>レバーが動いた瞬間に全音量で始まる。脚のモーターはスプールしない。急停止せずフェードアウトするので、脚が
+ * ロックしたときループが途中で切られない。
  */
 public class GearSoundInstance extends EntitySoundInstance<AircraftEntity> {
-    /** How far the gear is heard. Short: it is a motor in a wheel well, not an engine. */
+    /** 脚の音が届く距離。短い。ホイールウェル内のモーターであってエンジンではない。 */
     static final double RANGE = 48.0;
 
-    /** How loud, before distance. */
+    /** 距離減衰前の音量。 */
     private static final float VOLUME = 0.8F;
-    /** Fraction of what is left of the volume shed each tick once the legs are down or up. */
+    /** 脚が上げ／下げ完了した後、毎tick残り音量から削る割合。 */
     private static final float FADE_RATE = 0.3F;
-    /** Ticks of silence before the sound gives its channel back. */
+    /** チャンネルを返すまでの無音tick数。 */
     private static final int SILENT_TICKS_BEFORE_STOP = 10;
 
     private float gain = 1.0F;

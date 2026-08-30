@@ -9,47 +9,56 @@ import net.minecraft.world.entity.LivingEntity;
 import software.bernie.geckolib.animation.AnimatableManager;
 
 /**
- * How one kind of entity becomes a ghost and how that ghost is drawn.
+ * ある種類のエンティティがどうゴーストになり、そのゴーストがどう描かれるか。
  *
- * <p>This is the seam between the ghost system, which knows nothing about aircraft, and the mod,
- * which knows nothing about ghosts. One adapter is registered per entity type in
- * {@link EntityGhostRegistry}; it is asked to photograph the entity once a tick, and to draw the
- * photograph at whichever {@link GhostLOD} the camera distance calls for.
+ * <p>機体を何も知らないゴーストシステムと、ゴーストを何も知らない MOD の継ぎ目。アダプタは
+ * {@link EntityGhostRegistry} にエンティティタイプごとに1つ登録し、毎tickエンティティを撮影すること、そして
+ * カメラ距離が要求する {@link GhostLOD} でその写真を描くことを求められる。
  *
- * <p>Adapters draw from the snapshot, not from the entity. A ghost may outlive the entity on the
- * client that had it, and one that needed the entity would go with it.
+ * <p>アダプタが描く元はエンティティではなくスナップショットだ。ゴーストは、それを持っていたクライアント上の
+ * エンティティより長生きしうるので、エンティティを必要とするゴーストは一緒に消えてしまう。
  *
- * @param <T> the entity this adapter handles
+ * @param <T> このアダプタが扱うエンティティ
  */
 public interface GhostAdapter<T extends Entity> {
     /**
-     * Takes a snapshot of the entity. Game thread, once a tick.
+     * エンティティのスナップショットを撮る。ゲームスレッドで毎tick1回。
      *
-     * @param entity the live entity
-     * @param previous the last snapshot taken of it, or {@code null} for the first
-     * @param gameTime the current game tick
+     * @param entity 実体
+     * @param previous 直前のスナップショット。初回なら {@code null}
+     * @param gameTime 現在のゲームtick
      */
     GhostSnapshot snapshot(T entity, @Nullable GhostSnapshot previous, long gameTime);
 
     /**
-     * Draws the ghost. The pose stack is at the ghost's origin, facing the world's axes, with the
-     * far-plane pull already applied; the adapter supplies orientation and geometry.
+     * ゴーストを描く。pose stack はゴーストの原点にありワールド軸を向いていて、遠方面への引き寄せは適用済み。
+     * アダプタは姿勢とジオメトリを与える。
      */
     void render(EntityGhost ghost, GhostLOD lod, GhostRenderContext context);
 
     /**
-     * Whether a ghost should be kept, for {@link GhostConfig#timeoutTicks()}, after the client
-     * stops receiving the entity without it having died — an entity that merely went out of range
-     * is probably still out there. The default says no: ghosts are cheap, but leaving one behind for
-     * every mob that wandered away is not.
+     * エンティティが死んだわけでもなく受信が止まった後、{@link GhostConfig#timeoutTicks()} の間ゴーストを保持
+     * すべきか——単に範囲外へ出ただけのエンティティは恐らくまだそこにいる。既定は「保持しない」。ゴースト自体は
+     * 安いが、離れていったMob 全てに1つずつ残すのは安くない。
      */
     default boolean keepAfterLeave(T entity) {
         return false;
     }
 
     /**
-     * Whether the entity is dead or destroyed, as opposed to merely gone from this client. A dead
-     * entity's ghost is removed at once, whatever {@link #keepAfterLeave} says.
+     * 受信が止まったゴーストを何tick残すか。{@link #keepAfterLeave} が真と答えた場合にだけ意味を持つ。
+     *
+     * <p>既定は {@link GhostConfig#timeoutTicks()}——追跡範囲の縁を飛ぶ弾に与える短い猶予だ。駐機した機体の
+     * ように「誰もロードしていない土地では変わりようがない」物のアダプタは、ずっと長い答えを返してよい。
+     * 最後に見えた姿こそ、そこにある物の正確な絵だからだ。
+     */
+    default int orphanTicks() {
+        return GhostConfig.timeoutTicks();
+    }
+
+    /**
+     * エンティティが単にこのクライアントから消えたのではなく、死亡・破壊されたか。死んだエンティティのゴースト
+     * は {@link #keepAfterLeave} が何と言おうと即座に削除する。
      */
     default boolean isDead(T entity) {
         if (entity instanceof LivingEntity living && living.isDeadOrDying()) {
@@ -62,24 +71,21 @@ public interface GhostAdapter<T extends Entity> {
     }
 
     /**
-     * Whether the world should be traced between the camera and this ghost. Turning it off means
-     * the ghost is only ever hidden by the depth buffer, which is the right trade for something
-     * numerous and short-lived: the ray budget is small and shared.
+     * カメラとこのゴーストの間で世界をトレースすべきか。無効にするとゴーストは深度バッファでしか隠れなくなる
+     * が、数が多く短命な物にはそれが正しい取引だ。レイ予算は小さく、共有されている。
      */
     default boolean needsOcclusionCheck() {
         return true;
     }
 
     /**
-     * Registers the animation controllers a ghost of this kind plays, in the same way the entity
-     * itself registers its own. GeckoLib asks once per ghost, the first time it is drawn, and what
-     * it is given belongs to that ghost alone; a controller reads which ghost it is playing for out
-     * of the animatable it is handed, since one animatable serves them all.
+     * この種のゴーストが再生するアニメーションコントローラを、エンティティ自身が登録するのと同じ形で登録する。
+     * GeckoLib はゴーストごとに、最初の描画時に1回問い合わせ、渡された物はそのゴースト専用になる。animatable は
+     * 全ゴーストで共用なので、コントローラは渡された animatable からどのゴースト向けに再生しているかを読む。
      *
-     * <p>Most things have nothing to play — a missile is a missile all the way to the target — and
-     * the default registers nothing. An aircraft has its undercarriage, and registering the same
-     * controller here as the aircraft registers for itself is what keeps a ghost's legs doing what
-     * the aeroplane's are doing.
+     * <p>大半の物には再生する物が無い——ミサイルは目標まで終始ミサイルだ——ので既定は何も登録しない。機体には
+     * 降着装置があり、機体自身が登録するのと同じコントローラをここでも登録することが、ゴーストの脚を機体の脚と
+     * 同じ動きに保つ。
      */
     default void registerGhostControllers(AnimatableManager.ControllerRegistrar controllers,
             GhostAnimatable animatable) {

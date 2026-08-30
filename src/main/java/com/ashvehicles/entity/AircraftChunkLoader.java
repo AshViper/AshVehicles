@@ -1,5 +1,6 @@
 package com.ashvehicles.entity;
 
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -7,6 +8,7 @@ import com.ashvehicles.AshVehicles;
 
 import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.TicketType;
 import net.minecraft.util.Mth;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -17,45 +19,98 @@ import net.neoforged.neoforge.common.world.chunk.RegisterTicketControllersEvent;
 import net.neoforged.neoforge.common.world.chunk.TicketController;
 
 /**
- * Keeps an aircraft in the air once it has flown off the edge of everyone's chunks.
+ * 全員の chunk の縁を越えて飛んだ機体を、空に留め続ける。
  *
- * <p>Without this the long-range work upstream has nothing to work with. Minecraft only keeps chunks
- * loaded around players, and an entity in an unloaded chunk does not exist: it stops flying, and
- * there is nothing for the tracker to report or the client to draw. An aircraft therefore holds a
- * chunk ticket on whatever chunk it is over, handing it on as it goes, so it carries on flying and
- * stays visible however far it gets from anyone.
+ * <p>これが無いと、その先の長距離処理には材料が何も無い。Minecraft が chunk をロードしておくのはプレイヤー
+ * の周りだけで、アンロードされた chunk の中のエンティティは存在しない。飛ぶのをやめ、追跡機構が報告する物
+ * もクライアントが描く物も無くなる。だから機体は自分がいる chunk のチケットを持ち、進みながら手渡していく。
+ * そうすれば誰からどれだけ離れても飛び続け、見え続ける。
  *
- * <p>One aircraft holds one chunk, and only while it is actually going somewhere. A parked one lets
- * go, and an abandoned one lets go as soon as the engine winds down and it meets the ground, so the
- * cost is bounded by the number of aircraft in the air rather than the number ever built.
+ * <p>1機が持つのは1本の回廊で、しかも実際にどこかへ向かっている間だけ。駐機すれば手放すし、放棄された機体
+ * もエンジンが落ちて接地すればすぐ手放す。だからコストは「これまでに作られた機体数」ではなく「今空にいる
+ * 機体数」で頭打ちになる。
+ *
+ * <p><b>2種類の要求。</b> 保持チケットの回廊は約束だ——機体の下の地面と、その進路の数秒先は、何があろうと
+ * ロードされ tick している。ただし保持チケットの取得は同期的で、NeoForge は呼び出しが返る前に指定 chunk を
+ * ロードする。誰も訪れたことのない土地ではそれは「tick スレッド上で走るワールド生成の全部」であり、戦闘機
+ * の速度では「1tickに1回サーバーが時計を止めて風景を建てる」ことになる。だから新しい地面はまず安い方法で
+ * 要求する——飛行経路のかなり先へ置く素の region チケットで、chunk を<em>予約</em>するだけ。生成は生成器
+ * が自分のスレッドで行う。回廊がその地面を保持したくなる頃には既に存在しており、保持はただの帳簿処理に
+ * なる。先読みチケットは自前のタイムアウトを持つので、機体が要求した後に旋回して離れた地面は勝手に解放
+ * される。追跡する物は無く、必要も無い。
+ *
+ * <p>よって、まだ生成されていない回廊 chunk は取らない——先読みが既に作っているので、確保は1〜2tick後に
+ * 無料で成立する。例外は2つだけ。機体が今いる chunk と、次の tick で入る chunk は代償を問わず取る。この
+ * 2つが「飛行機」と「文鎮」の分かれ目だから。
+ *
+ * <p><b>チケットが再起動を生き延びるのは意図的。</b> 飛行を再起動の向こうへ運ぶのがそれだ。保存された
+ * チケットが回廊を戻し、回廊が chunk を戻し、chunk が機体を戻し、機体は飛び続ける。機体は保持している集合
+ * を自分の NBT に保存する（{@code AircraftEntity} 参照）ので、ディスクから戻った機体はどのチケットが自分の
+ * 物かを正確に知り、今も欲しい物と突き合わせる。それが「飛行より長生きするチケット」を防いでいる。同じ理由
+ * で、単にアンロードされただけの機体もチケットを保持し続ける。そこで手放すのはデッドロックだった。チケット
+ * こそが、その機体を再びロードする唯一の手段だったから。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID)
 public final class AircraftChunkLoader {
-    /** How far along the flight path the claim reaches, in ticks of flight. */
+    /** 保持する確保が飛行経路のどこまで届くか。飛行 tick 数で。 */
     private static final double LEAD_TICKS = 30.0;
-    /** How often the path is sampled, in blocks. Half a chunk, so no chunk on it is stepped over. */
+    /** 経路をサンプリングする間隔（ブロック）。半 chunk なので経路上の chunk を飛ばさない。 */
     private static final double SAMPLE = 8.0;
     /**
-     * The most chunks one aircraft will ever hold. Each carries a five-by-five island of loaded
-     * ground with it, so a dozen strung along a flight path is a corridor rather than a region, and
-     * the whole of it is let go the moment the aeroplane stops.
+     * 1機が保持する chunk 数の上限。1つにつき5×5のロード済み地面が付いてくるので、飛行経路に沿って12個
+     * 並べても「領域」ではなく「回廊」になる。しかも機体が止まった瞬間に全部手放される。
      */
     private static final int MOST_CHUNKS = 12;
 
-    /** Speed, squared, below which a wreck has finished arriving and is simply lying there. */
+    /** これ未満なら残骸は落ち終わってただ横たわっている、という速度の二乗。 */
     private static final double STOPPED = 1.0E-4;
 
-    /** The set {@link #update} works in. Reused; never held on to past the call that fills it. */
+    /**
+     * 先読みが保持回廊よりどれだけ先まで届くか。飛行 tick 数と chunk 数の両方で。
+     *
+     * <p>5秒・750m。先端で要求した地面が、回廊が保持したくなるまでに数秒の生成時間を得られる距離であり、
+     * 新規 chunk が実際に必要とする時間でもある。tick だけでなく chunk 数でも頭打ちにしてあるので、速い
+     * ジェットは「マップ全部」ではなく「より長い予告」を要求することになる。
+     */
+    private static final double PREFETCH_TICKS = 100.0;
+    private static final int PREFETCH_CHUNKS = 48;
+
+    /**
+     * 各機体が先読みを向け直す間隔（tick）。チケットの寿命はこの30倍なので、消える遥か前に更新される。
+     * これより頻繁に要求しても、既にあるチケットを付け直すだけ。
+     */
+    private static final int PREFETCH_EVERY = 4;
+
+    /**
+     * 先読みチケットが自分を生かしておく時間（tick）。更新間隔を数回分またげるだけ長く、急旋回で捨てられた
+     * 回廊が「どこでもないロード済みの帯」として居座らず数秒で消えるだけ短い。
+     */
+    private static final int PREFETCH_TIMEOUT = 300;
+
+    /**
+     * 先読みチケット。完全生成・非tick・自動解放。
+     *
+     * <p>NeoForge の強制ロードではなくバニラの region チケットを使う理由は3つあり、実のところ1つだ。非同期
+     * である——追加すれば chunk を予約して返り、生成は生成器が自分のスレッドで行う。自分でタイムアウトする
+     * ——機体がこれまでに行った全旋回の先の空が1時間後もロードされたままにならない。そして決して保存されない
+     * ——再起動はきれいな状態から始まる。保持回廊が持たない性質ばかりで、だから2つを併用する。
+     */
+    private static final TicketType<ChunkPos> PREFETCH = TicketType.create(
+            AshVehicles.MODID + ":aircraft_prefetch",
+            Comparator.comparingLong(ChunkPos::toLong), PREFETCH_TIMEOUT);
+
+    /** {@link #update} が作業に使う集合。使い回すが、埋めた呼び出しを越えて保持することは無い。 */
     private static final Set<ChunkPos> SCRATCH = new LinkedHashSet<>();
 
+    /**
+     * 検証コールバックを意図的に持たない。以前はあり、「まだ飛んでいる物は次の tick でまた要求する」という
+     * 理屈でワールド読み込み時に保存済みチケットを全部落としていた。アンロードされた機体に次の tick は無い。
+     * 保存されたチケットこそがその機体を再ロードする唯一の手段であり、それを落とすことで、停止時に空中に
+     * いた全機体がアンロードされた chunk の中で永久に凍り付いた。今はチケットを残し、それ自身がロードする
+     * 持ち主の機体が、自分の NBT と突き合わせて要らなくなった物を手放す。
+     */
     private static final TicketController CONTROLLER = new TicketController(
-            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "aircraft"),
-            (level, helper) -> {
-                // Tickets outlive a restart, but the aircraft that wanted them may not have. Drop the
-                // lot: anything still flying asks again on its next tick, and anything that is gone
-                // does not leave a chunk loaded forever.
-                helper.getEntityTickets().keySet().forEach(helper::removeAllTickets);
-            });
+            ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "aircraft"));
 
     @SubscribeEvent
     public static void onRegisterTicketControllers(RegisterTicketControllersEvent event) {
@@ -63,33 +118,52 @@ public final class AircraftChunkLoader {
     }
 
     /**
-     * Moves the aircraft's tickets onto the ground it is about to be over, or releases them if the
-     * aircraft has no business being loaded. Cheap to call every tick: it only does anything when the
-     * set of chunks changes.
+     * 機体のチケットを、これから上空に来る地面へ移す。あるいはロードしておく理由が無ければ解放する。毎tick
+     * 呼んで安い。chunk 集合が変わった時しか何もしないので。
      *
-     * <p>Only call this from the aircraft's own tick. Taking a ticket loads the chunk on the spot,
-     * which runs the chunk system's update loop; called from inside that loop (which is where entity
-     * load and unload callbacks fire from) it re-enters the loop mid-iteration and crashes the
-     * server. Callbacks should {@link #release} instead.
+     * <p>呼ぶのは機体自身の tick か、サーバーがパイロットの移動報告を処理する場所から。どちらも素のサーバー
+     * スレッドのコードだ。決して呼んではいけないのは chunk システム自身の更新ループの中（エンティティの
+     * ロード／アンロードコールバックはそこから飛ぶ）。チケットの取得はその場で chunk をロードし、それがその
+     * ループを走らせるので、反復の途中で再入するとサーバーが落ちる。コールバックからは {@link #release} を
+     * 使うこと。
      *
-     * @param held the chunks the aircraft currently holds
-     * @return the chunks it holds after this call, to be handed back next tick
+     * @param held 機体が現在保持している chunk
+     * @return この呼び出し後に保持している chunk。次の tick で渡し返す
      */
     public static Set<ChunkPos> update(AircraftEntity aircraft, Set<ChunkPos> held) {
         if (!(aircraft.level() instanceof ServerLevel level)) {
             return held;
         }
 
-        // Worked out into a set that is kept and reused, because the answer is nearly always the
-        // same as last tick's and a set built to be thrown away is the whole cost of the call. The
-        // copy is only made once it is known that the claim has actually moved, and it is made
-        // before a single ticket is touched, so nothing reached from inside the chunk system can
-        // find this half-built. Server thread only, which is where the aircraft tick runs.
+        boolean flying = shouldStayLoaded(aircraft);
+
+        // 回廊の後ではなく前に要求する。この tick が知り得た最も早い時点で、新しい地面のことを生成器へ
+        // 伝えるため。
+        if (flying) {
+            prefetch(aircraft, level);
+        }
+
+        // 保持・再利用する集合へ書き出す。答えはほぼ常に前 tick と同じで、捨てるために作る集合がこの呼び
+        // 出しのコストの全部だから。コピーを作るのは確保が実際に動いたと分かった後、しかもチケットに1つも
+        // 触れる前。だから chunk システムの内側から辿り着く物がこれを作りかけの状態で見ることは無い。
+        // サーバースレッド専用で、機体の tick はそこで走る。
         Set<ChunkPos> scratch = SCRATCH;
         scratch.clear();
 
-        if (shouldStayLoaded(aircraft)) {
+        if (flying) {
             ahead(aircraft, scratch);
+
+            // まだ生成されていない地面はこの tick では取らない。取れば tick スレッド上で生成することに
+            // なるし、上の先読みが既に別スレッドで作っている。確保は chunk が存在して保持が帳簿処理になった
+            // 後の tick で成立すればよい。代償を問わない例外が2つ——機体の下の chunk と、次の1歩が届く
+            // chunk。それが無ければ機体は存在しなくなるから。
+            Vec3 step = aircraft.position().add(aircraft.getVelocity());
+            ChunkPos own = aircraft.chunkPosition();
+            ChunkPos next = new ChunkPos(SectionPos.blockToSectionCoord(Mth.floor(step.x)),
+                    SectionPos.blockToSectionCoord(Mth.floor(step.z)));
+
+            scratch.removeIf(pos -> !pos.equals(own) && !pos.equals(next) && !held.contains(pos)
+                    && !level.getChunkSource().hasChunk(pos.x, pos.z));
         }
 
         if (scratch.equals(held)) {
@@ -117,21 +191,18 @@ public final class AircraftChunkLoader {
     }
 
     /**
-     * The ground the aircraft is over, and the ground it is about to be over.
+     * 機体が今いる地面と、これから来る地面。
      *
-     * <p>One chunk is enough for an aeroplane idling along and nowhere near enough for one that is
-     * not. A ticket does not put a chunk there; it asks for one, and the chunk system has to read it
-     * off the disk or make it from nothing, which takes a good deal longer than the two ticks a fast
-     * aircraft spends crossing the single chunk it was standing in. What the pilot sees when it
-     * cannot keep up is a hillside arriving around them.
+     * <p>chunk 1つで足りるのはゆっくり流している機体だけで、そうでない機体にはまるで足りない。チケットは
+     * chunk をそこへ置くのではなく要求する物で、chunk システムはディスクから読むか無から作るかしなければ
+     * ならず、それは速い機体が今いる1 chunk を横切る2tickよりずっと長くかかる。追い付けない時にパイロット
+     * が見るのは、自分の周りに到着してくる斜面だ。
      *
-     * <p>So the claim runs along the flight path rather than sitting under the aeroplane: far enough
-     * ahead to be a warning rather than a surprise, sampled closely enough that no chunk on the way
-     * is stepped over, and capped, because a claim that grows without limit with speed is a way of
-     * asking a server to generate the world.
+     * <p>だから確保は機体の下に留まらず飛行経路に沿って走る。不意打ちではなく予告になるだけ先まで、経路上の
+     * chunk を飛ばさないだけ細かく、そして上限付きで。速度とともに無制限に伸びる確保は「サーバーに世界を
+     * 生成させる方法」だから。
      *
-     * <p>Standing still costs nothing. A parked aircraft samples one chunk, which is the one it is
-     * parked in.
+     * <p>静止していればコストは無い。駐機中の機体がサンプリングするのは1 chunk——駐機している chunk だけ。
      */
     private static void ahead(AircraftEntity aircraft, Set<ChunkPos> chunks) {
         chunks.add(aircraft.chunkPosition());
@@ -143,10 +214,9 @@ public final class AircraftChunkLoader {
             return;
         }
 
-        // Half a chunk at a time, so nothing on the path is missed however the flight path happens
-        // to lie across the grid. Walked as two numbers rather than as points along it: the path is
-        // sampled a dozen times every tick of every aircraft in the air, and a Vec3 and a BlockPos
-        // per sample is a great deal of rubbish for an answer two integers wide.
+        // 半 chunk ずつ進む。飛行経路がグリッドに対してどう横たわっていても経路上の物を取りこぼさない
+        // ように。点の列ではなく2つの数値として歩くのは、空にいる全機体が毎tick十数回サンプリングするから。
+        // 1サンプルごとに Vec3 と BlockPos を作るのは、整数2つ分の答えに対してゴミが多すぎる。
         double stepX = velocity.x * SAMPLE / speed;
         double stepZ = velocity.z * SAMPLE / speed;
         double x = aircraft.getX();
@@ -162,12 +232,56 @@ public final class AircraftChunkLoader {
     }
 
     /**
-     * Lets go of whatever chunk the aircraft holds, without asking for another. Safe to call from
-     * anywhere on the server thread, including from inside the chunk system's own callbacks: dropping
-     * a ticket only queues a level change, it never loads anything.
+     * 飛行経路の数秒先の地面を、静かにバックグラウンドで生成器へ要求する。回廊がそのどれかを保持したくなる
+     * 頃には生成が済んでいるように。誰も訪れたことのない土地を戦闘機が全速で横断できるのはこれのおかげだ。
+     * 世界はサーバーのスレッドで機体の下に建てられるのではなく、生成器のスレッドで機体の前方に建てられる。
      *
-     * @param held the chunks the aircraft currently holds
-     * @return nothing, which is what it holds afterwards
+     * <p>毎tickではなく数tickごとに向け直す——チケットの付け直しは時刻の更新にしかならないし、4tickで線は
+     * ほとんど動かない。エンティティ ID でずらしてあるので、編隊は全機が同じ tick に要求せず tick を分け
+     * 合う。
+     */
+    private static void prefetch(AircraftEntity aircraft, ServerLevel level) {
+        if ((level.getGameTime() + aircraft.getId()) % PREFETCH_EVERY != 0) {
+            return;
+        }
+
+        Vec3 velocity = aircraft.getVelocity();
+        double speed = velocity.length();
+
+        if (speed < 1.0E-3) {
+            return;
+        }
+
+        double stepX = velocity.x * SAMPLE / speed;
+        double stepZ = velocity.z * SAMPLE / speed;
+        double x = aircraft.getX();
+        double z = aircraft.getZ();
+        double samples = Math.min(speed * PREFETCH_TICKS, PREFETCH_CHUNKS * 16.0) / SAMPLE;
+        ChunkPos last = null;
+
+        for (int i = 0; i < samples; i++) {
+            x += stepX;
+            z += stepZ;
+
+            ChunkPos pos = new ChunkPos(SectionPos.blockToSectionCoord(Mth.floor(x)),
+                    SectionPos.blockToSectionCoord(Mth.floor(z)));
+
+            // 距離0。指定 chunk を最後まで生成し、周囲は昇格させず、tick もさせない。tick は機体が到達
+            // した時に回廊自身の確保が連れてくる。先読みが買っているのは「生成が既に済んでいること」だけ。
+            if (!pos.equals(last)) {
+                level.getChunkSource().addRegionTicket(PREFETCH, pos, 0, pos);
+                last = pos;
+            }
+        }
+    }
+
+    /**
+     * 機体が保持している chunk を全部手放し、新たに要求しない。サーバースレッドのどこからでも安全に呼べる。
+     * chunk システム自身のコールバックの中からも。チケットを落とすのはレベル変更を予約するだけで、何も
+     * ロードしない。
+     *
+     * @param held 機体が現在保持している chunk
+     * @return 空集合。呼び出し後に保持している物
      */
     public static Set<ChunkPos> release(AircraftEntity aircraft, Set<ChunkPos> held) {
         if (!held.isEmpty() && aircraft.level() instanceof ServerLevel level) {
@@ -179,17 +293,16 @@ public final class AircraftChunkLoader {
         return Set.of();
     }
 
-    /** Flying, or at least trying to: a parked aircraft can unload with everything else. */
+    /** 飛んでいるか、少なくとも飛ぼうとしているか。駐機中の機体は他の物と一緒にアンロードしてよい。 */
     private static boolean shouldStayLoaded(AircraftEntity aircraft) {
         if (aircraft.isRemoved()) {
             return false;
         }
 
-        // A write-off holds its chunk open only for as long as it is still coming down, and lets go
-        // the moment it stops moving. Asked the ordinary question it would often never let go at all:
-        // a wreck lodged against a hillside, or lying on a wing rather than on its wheels, never
-        // reports itself on the ground, and one aeroplane shot down over open country would force a
-        // chunk open for the rest of the world's life.
+        // 全損機が chunk を開いたまま保つのは落下中だけで、動きが止まった瞬間に手放す。普通の判定を使う
+        // と多くの場合まったく手放さない。斜面に引っ掛かった残骸や、車輪ではなく翼の上に横たわった残骸は
+        // 決して「接地している」と報告せず、開けた土地で撃墜された機体1機がワールドの寿命いっぱい chunk を
+        // 開き続けることになる。
         if (aircraft.isWrecked()) {
             return aircraft.getVelocity().lengthSqr() > STOPPED;
         }

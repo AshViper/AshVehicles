@@ -14,35 +14,31 @@ import software.bernie.geckolib.cache.object.GeoQuad;
 import software.bernie.geckolib.cache.object.GeoVertex;
 
 /**
- * Reading a baked model as the artist left it: where a bone's geometry actually is, and the matrix
- * that takes its own axes into the model's.
+ * ベイク済みモデルを作者が残したまま読む。ボーンのジオメトリが実際にどこにあるか、そしてボーン自身の軸をモデルの
+ * 軸へ移す行列。
  *
- * <p>Everything here is about the model's <em>rest</em> pose rather than the frame being drawn. A
- * road wheel that is turning is a road wheel in the same place; a turret that has been slewed is
- * still a turret at the same height. What the callers want to know is where the artist put a part,
- * and that does not change from frame to frame — so it is worked out from the initial snapshots and
- * not from whatever the animation has the bone doing.
+ * <p>ここで扱うのは描画中のフレームではなくモデルの<em>静止</em>ポーズだ。回っている転輪も同じ場所の転輪だし、
+ * 旋回した砲塔も同じ高さの砲塔だ。呼び出し元が知りたいのは作者が部品を置いた場所であり、それはフレームごとに変わ
+ * らない——だからアニメーションがボーンにさせている事ではなく、初期スナップショットから求める。
  *
- * <p>The transforms are laid out exactly as GeckoLib lays them out when it draws a bone — see
- * {@code RenderUtil.prepMatrixForBone} — so a point worked out here is the point the pose stack will
- * put that bone's geometry at. That equivalence is the whole value of this class: the run of track
- * and the suspension both have to place things in the same space the model is drawn in, and
- * rederiving the order from the geometry files by hand is how the two would end up disagreeing.
+ * <p>変換は GeckoLib がボーンを描くときの並べ方とまったく同じ——{@code RenderUtil.prepMatrixForBone} 参照——なので、
+ * ここで求めた点は pose stack がそのボーンのジオメトリを置く点になる。この等価性こそこのクラスの価値の全てだ。
+ * 履帯の敷設もサスペンションも、モデルが描かれるのと同じ空間に物を置かねばならず、ジオメトリファイルから順序を
+ * 手作業で再導出すれば両者はいずれ食い違う。
  */
 public final class BakedGeometry {
-    /** Model units to the block, which is what everything in a geometry file is written in. */
+    /** 1ブロックあたりのモデル単位。ジオメトリファイルの全数値はこの単位で書かれる。 */
     public static final float UNITS = 16.0F;
 
     /**
-     * How far each bone's own geometry reaches in the model's axes, and where it turns, against the
-     * bone they were worked out from. Absent from {@link #REACHES} means a bone with no geometry of
-     * its own, which is a real answer and is kept as one.
+     * 各ボーン自身のジオメトリがモデル軸でどこまで届くか、どこで回るかを、算出元のボーンをキーに保持する。
+     * {@link #REACHES} に無いことは「自前のジオメトリを持たないボーン」を意味し、それも立派な答えとしてそのまま
+     * 扱う。
      *
      *
-     * <p>Weakly and by the bone object itself, which is what makes a resource reload correct for
-     * free: GeckoLib bakes new bones out of the reloaded geometry, the new bone is not this one, and
-     * the answer is worked out again from the geometry actually being drawn. Held without locking
-     * because every caller is the render thread.
+     * <p>弱参照で、キーはボーンオブジェクト自体。おかげでリソースリロードが無料で正しくなる。GeckoLib はリロード
+     * したジオメトリから新しいボーンをベイクし、新しいボーンはこれとは別物なので、実際に描かれるジオメトリから
+     * 答えが求め直される。呼び出し元が全てレンダースレッドなのでロック無しで保持する。
      */
     private static final Map<GeoBone, Optional<Bounds>> REACHES = new WeakHashMap<>();
     private static final Map<GeoBone, Vector3f> PIVOTS = new WeakHashMap<>();
@@ -51,44 +47,41 @@ public final class BakedGeometry {
     }
 
     /**
-     * Where the middle of a bone's own geometry sits in the model's axes, in blocks.
+     * ボーン自身のジオメトリの中心がモデル軸のどこにあるか（ブロック単位）。
      *
-     * <p>The geometry rather than the pivot. The two are usually close on a road wheel, whose pivot
-     * is its axle, and they are not on a bone built off to one side of the point it turns about — and
-     * what a caller placing something against a part wants is the part.
+     * <p>支点ではなくジオメトリの方。転輪では支点が車軸なので両者は大抵近いが、回転中心から片側へずらして作られた
+     * ボーンでは近くない——そして部品に合わせて何かを置く呼び出し元が欲しいのは部品の方だ。
      *
-     * <p>A bone with no cubes of its own falls back to its pivot, which is the only thing such a
-     * bone has to say about where it is.
+     * <p>自前の立方体を持たないボーンは支点へフォールバックする。そうしたボーンが自分の位置について言えるのは
+     * それだけだからだ。
      */
     public static Vector3f centreOf(GeoBone bone) {
         return reachOf(bone).map(Bounds::centre).orElseGet(() -> new Vector3f(pivotOf(bone)));
     }
 
     /**
-     * How far a bone's own geometry reaches, in the model's axes and in blocks, or empty for a bone
-     * that has none — a bare parent hung there to carry its children.
+     * ボーン自身のジオメトリがモデル軸でどこまで届くか（ブロック単位）。持たないボーン——子を運ぶためだけに吊られた
+     * 素の親——では空。
      *
-     * <p>Its own and not its children's. What a caller wants to know from this is where the part
-     * itself is, and a turret's box is the turret rather than the turret plus a barrel out over the
-     * bow.
+     * <p>自分の物であって子の物ではない。呼び出し元がここから知りたいのは部品自体の位置であり、砲塔の箱は砲塔で
+     * あって、砲塔＋車首方向へ突き出た砲身ではない。
      */
     public static Optional<Bounds> reachOf(GeoBone bone) {
         return REACHES.computeIfAbsent(bone, found -> Optional.ofNullable(bounds(found, toRoot(found))));
     }
 
     /**
-     * The point a bone turns about, in the model's axes and in blocks.
+     * ボーンが回る中心点。モデル軸・ブロック単位。
      *
-     * <p>The bone's pivot is where it is in its <em>own</em> axes as well as in its parent's — the
-     * rotation and the scale are both applied about it, so both leave it where it was — which is why
-     * carrying it up with {@link #toRoot} is the whole of the answer.
+     * <p>ボーンの支点は親の軸でもボーン<em>自身</em>の軸でも同じ位置にある——回転も拡大も支点を中心に適用され、
+     * どちらも支点を動かさない——ので、{@link #toRoot} で上へ運ぶだけで答えの全てになる。
      */
     public static Vector3f pivotOf(GeoBone bone) {
         return PIVOTS.computeIfAbsent(bone, found -> toRoot(found).transformPosition(
                 new Vector3f(found.getPivotX(), found.getPivotY(), found.getPivotZ()).div(UNITS)));
     }
 
-    /** How far a bone's geometry reaches, in blocks, once {@code into} has been applied to it. */
+    /** {@code into} を適用した後、ボーンのジオメトリがどこまで届くか（ブロック単位）。 */
     public record Bounds(Vector3f min, Vector3f max) {
         public Vector3f centre() {
             return new Vector3f(this.min).add(this.max).mul(0.5F);
@@ -104,14 +97,12 @@ public final class BakedGeometry {
     }
 
     /**
-     * The box a bone's own cubes fill, put through {@code into}.
+     * ボーン自身の立方体が埋める箱を {@code into} に通した物。
      *
-     * <p>Taken from the corners the cubes are actually drawn with rather than from the sizes written
-     * in the file, because a cube is turned about its own pivot before it is drawn and a wheel is
-     * usually built lying down and stood up. The box of the turned corners is the box that is on the
-     * screen.
+     * <p>ファイルに書かれた寸法ではなく、立方体が実際に描かれる隅から取る。立方体は描画前に自身の支点周りに回され
+     * るし、車輪は大抵寝かせて作ってから起こすからだ。回した隅の箱こそ画面に出る箱だ。
      *
-     * @return null for a bone with no geometry of its own
+     * @return 自前のジオメトリを持たないボーンでは null
      */
     public static Bounds bounds(GeoBone bone, Matrix4f into) {
         Vector3f min = new Vector3f(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
@@ -139,7 +130,7 @@ public final class BakedGeometry {
         return any ? new Bounds(min, max) : null;
     }
 
-    /** A cube is turned about its own pivot before it is drawn, and this is that turn. */
+    /** 立方体は描画前に自身の支点周りに回される。これがその回転だ。 */
     private static Matrix4f cubeTransform(GeoCube cube, Matrix4f into) {
         return new Matrix4f(into)
                 .translate((float) cube.pivot().x() / UNITS, (float) cube.pivot().y() / UNITS,
@@ -151,8 +142,8 @@ public final class BakedGeometry {
     }
 
     /**
-     * The matrix taking a bone's own axes into the model's, from the pose the geometry file settles
-     * on rather than the one an animation has the bone in this frame.
+     * ボーン自身の軸をモデル軸へ移す行列。このフレームでアニメーションがボーンに取らせているポーズではなく、
+     * ジオメトリファイルが落ち着くポーズから求める。
      */
     public static Matrix4f toRoot(GeoBone bone) {
         if (bone == null) {
@@ -163,8 +154,8 @@ public final class BakedGeometry {
     }
 
     /**
-     * One bone's own step of that, laid out exactly as GeckoLib lays it out when it draws the bone —
-     * offset, out to the pivot, turn, scale, back off the pivot. See {@code RenderUtil}.
+     * そのうちボーン1つ分のステップ。GeckoLib がボーンを描くときの並べ方とまったく同じ——オフセット、支点へ移動、
+     * 回転、拡大、支点から戻す。{@code RenderUtil} 参照。
      */
     public static Matrix4f restTransform(GeoBone bone) {
         BoneSnapshot rest = rest(bone);
@@ -180,14 +171,14 @@ public final class BakedGeometry {
                 .translate(-pivotX, -pivotY, -pivotZ);
     }
 
-    /** Z, then Y, then X, which is the order GeckoLib turns both a bone and a cube in. */
+    /** Z→Y→X の順。GeckoLib がボーンも立方体もこの順で回す。 */
     public static Matrix4f rotation(float x, float y, float z) {
         return new Matrix4f().rotateZ(z).rotateY(y).rotateX(x);
     }
 
     /**
-     * Where the geometry file left a bone. A bone GeckoLib has not taken its snapshot of yet is
-     * asked to take it, which for a bone nothing has moved is the same answer.
+     * ジオメトリファイルがボーンを残した位置。GeckoLib がまだスナップショットを撮っていないボーンには撮らせる。
+     * 何も動かしていないボーンなら同じ答えになる。
      */
     public static BoneSnapshot rest(GeoBone bone) {
         BoneSnapshot rest = bone.getInitialSnapshot();

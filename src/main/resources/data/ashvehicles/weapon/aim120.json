@@ -15,14 +15,14 @@
     "spool_ticks": 80,
     "top_speed": 68.1,
     "gravity": 0.000188,
-    "range": 6150.0,
+    "range": 0,
     "explosion": 5.0,
     "tracer": "FFEFC0",
     "trail": {
       "colour": "DCDAD4",
       "exhaust": "8E887E",
-      "density": 0.8,
-      "size": 0.9
+      "density": 1.8,
+      "size": 1.05
     }
   },
   "guidance": {

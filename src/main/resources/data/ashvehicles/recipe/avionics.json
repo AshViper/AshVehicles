@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_material",
+  "key": {
+    "C": {
+      "item": "ashvehicles:circuit_board"
+    },
+    "G": {
+      "item": "minecraft:glass_pane"
+    },
+    "D": {
+      "tag": "c:gems/diamond"
+    }
+  },
+  "pattern": [
+    "GCG",
+    "CDC",
+    "GCG"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:avionics"
+  }
+}

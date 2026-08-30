@@ -16,11 +16,11 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.cache.object.GeoBone;
 
-/** Draws any ground vehicle. Everything about how is {@link VehicleRenderer}'s. */
+/** あらゆる地上車両を描く。描き方に関する全ては {@link VehicleRenderer} の管轄。 */
 public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> {
     /**
-     * The model being drawn, kept from the start of the draw because the run of track needs to look
-     * the road wheels up in it and the bone loop is not handed it.
+     * 描画中のモデル。描画開始時から保持する。履帯敷設が転輪をここから引く必要がある一方、ボーンループには渡されて
+     * いないからだ。
      */
     @Nullable
     private BakedGeoModel drawing;
@@ -35,16 +35,15 @@ public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> 
     }
 
     /**
-     * Rocks the body on its springs.
+     * バネの上で車体を揺らす。
      *
-     * <p>Applied to the whole model rather than to a hull bone, because on these models there is no
-     * hull bone to apply it to: hull, turret, stowage and running gear all hang off one root, so
-     * there is nothing to move that is not everything. What that costs is that the wheels and the
-     * track are carried with it, and they are put back down on the ground one by one afterwards —
-     * see {@code GroundVehicleModel.plant} and {@link TrackBelt#draw}.
+     * <p>車体ボーンではなくモデル全体へ適用する。この種のモデルには適用先の車体ボーンが無いからだ。車体・砲塔・
+     * 車載品・走行装置が全て1つのルートにぶら下がっているので、「全部ではない何か」を動かす手立てが無い。その代償
+     * として車輪と履帯も一緒に運ばれるので、後から1つずつ地面へ戻す——{@code GroundVehicleModel.plant} と
+     * {@link TrackBelt#draw} 参照。
      *
-     * <p>Nothing but the picture moves. The collision boxes, the gun's aim and where the vehicle is
-     * standing are all worked out from the rigid hull and never see this; see {@link Ride}.
+     * <p>動くのは絵だけだ。当たり判定・砲の照準・車両の接地位置はいずれも剛体車体から求められ、これを見ることは
+     * ない。{@link Ride} 参照。
      */
     @Override
     protected void applyBodyMotion(GroundVehicleEntity animatable, PoseStack poseStack, float partialTick) {
@@ -54,9 +53,9 @@ public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> 
             return;
         }
 
-        // A turn about X takes the bow down, so lifting it wants the negative; a turn about Z drops
-        // the right-hand side, which is the sign the hull's own bank is written in, so the body and
-        // the ground read the same way round. See Attitude, whose frame this is.
+        // X 軸周りの回転は車首を下げるので、持ち上げるには負値が要る。Z 軸周りの回転は右側を下げるが、それは
+        // 車体自身のロールが書かれている符号と同じなので、車体と地面が同じ向きで読める。この座標系の主である
+        // Attitude 参照。
         poseStack.translate(0.0F, ride.heave(), 0.0F);
         poseStack.mulPose(Axis.XP.rotationDegrees(-ride.pitch()));
         poseStack.mulPose(Axis.ZP.rotationDegrees(ride.lean()));
@@ -73,15 +72,12 @@ public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> 
     }
 
     /**
-     * Draws the whole run of track wherever the model has the one link it is built out of, and
-     * everything else as it comes.
+     * モデルが構成元のリンク1つを持つ場所に履帯を1周分すべて描き、他はそのまま描く。
      *
-     * <p>Caught here rather than after the model is drawn because here is where the pose stack is
-     * already in the link's own parent's frame — which is the frame the run is worked out in — and
-     * because a link put somewhere and drawn is exactly what GeckoLib does with any bone. So each
-     * link is drawn through the same path with the same lighting, the same colour and the same
-     * layers as the rest of the vehicle: a wreck's track is charred with it, and nothing has to know
-     * that these particular cubes were drawn a hundred times.
+     * <p>モデル描画後ではなくここで捕まえるのは、ここでは pose stack が既にリンク自身の親の座標系——履帯の周回を
+     * 算出する座標系——にあるからだ。そして「リンクをどこかへ置いて描く」ことは GeckoLib がどのボーンに対しても行う
+     * ことそのものだからでもある。おかげで各リンクは車両の他の部分と同じ経路・同じ照明・同じ色・同じレイヤーで
+     * 描かれる。残骸の履帯は車体と一緒に焦げるし、これらの立方体が100回描かれたことを誰も知る必要が無い。
      */
     @Override
     public void renderRecursively(PoseStack poseStack, GroundVehicleEntity animatable, GeoBone bone,

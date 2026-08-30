@@ -5,32 +5,29 @@ import com.mojang.serialization.Codec;
 import net.minecraft.util.StringRepresentable;
 
 /**
- * What kind of machine a file describes, named in the file rather than left to be guessed at.
+ * ファイルが記述しているのがどの種類の機体か。推測させず、ファイルに明記する。
  *
- * <p>Until now the kind was implied by two things and never written down. Which directory the file
- * sat in said whether it flew or drove — {@code aircraft/} against {@code vehicle/} — and whether
- * the file had a {@code rotor} block said whether it was a helicopter. That is enough for the game
- * to run on and too little for anyone reading the file to see at a glance, and it has no room in it
- * at all for a third thing that neither flies nor drives on land. So the kind is a field: an
- * aeroplane and a helicopter are two values of it that share the aircraft's whole machinery, a tank
- * and a warship are two that share the ground vehicle's, and the one that is new — the ship — is a
- * ground vehicle held up by the water under it instead of the ground.
+ * <p>以前は種類が2つの事実から暗に決まっていて、どこにも書かれていなかった。ファイルの置き場
+ * （{@code aircraft/} か {@code vehicle/} か）が飛ぶか走るかを示し、{@code rotor} ブロックの有無が
+ * ヘリコプターかを示す。ゲームを動かすには足りるが、ファイルを読む人が一目で分かるには足りず、そして
+ * 「飛びも陸を走りもしない第三の物」の居場所がまったく無い。そこで種類をフィールドにした。飛行機と
+ * ヘリコプターは機体側の仕組みを丸ごと共有する2つの値、戦車と軍艦は地上車両側を共有する2つの値、そして
+ * 新しい艦は「地面ではなく水に支えられる地上車両」。
  *
- * <p>The value governs the physics and nothing about how the file is read: an aircraft file is
- * still an {@link com.ashvehicles.aircraft.AircraftDefinition} whether it is marked {@code aircraft}
- * or {@code helicopter}, and a {@code vehicle/} file is still a {@link GroundVehicleDefinition}
- * whether it is a {@code ground_vehicle} or a {@code ship}. What the value decides is what happens
- * once one is in the world — whether it holds itself up on a wing or a rotor, and whether it is
- * pressed against the ground or floated on the sea.
+ * <p>この値が支配するのは物理だけで、ファイルの読み方には関与しない。{@code aircraft} でも
+ * {@code helicopter} でも機体ファイルは {@link com.ashvehicles.aircraft.AircraftDefinition} のままだ
+ * し、{@code ground_vehicle} でも {@code ship} でも {@code vehicle/} のファイルは
+ * {@link GroundVehicleDefinition} のまま。値が決めるのはワールドに出た後の挙動——翼で浮くかローターで
+ * 浮くか、地面に押し付けられるか海に浮かべられるか。
  */
 public enum VehicleType implements StringRepresentable {
-    /** A fixed-wing aircraft, held up by a wing it has to fly to keep air over. */
+    /** 固定翼機。翼で浮くので、翼に空気を当て続けるために飛び続ける必要がある。 */
     AIRCRAFT("aircraft"),
-    /** A rotary-wing aircraft, held up by a rotor that makes its own lift standing still. */
+    /** 回転翼機。静止したままでも自分で揚力を作るローターで浮く。 */
     HELICOPTER("helicopter"),
-    /** A vehicle on the ground, pressed onto it by gravity and lying along whatever it drives over. */
+    /** 地上の車両。重力で地面に押し付けられ、走る地形に沿って寝る。 */
     GROUND_VEHICLE("ground_vehicle"),
-    /** A vessel on the water, floated at its waterline by the sea under it rather than the ground. */
+    /** 水上の艦艇。地面ではなく下の海に、喫水線で浮かべられる。 */
     SHIP("ship");
 
     public static final Codec<VehicleType> CODEC = StringRepresentable.fromEnum(VehicleType::values);
@@ -41,17 +38,17 @@ public enum VehicleType implements StringRepresentable {
         this.name = name;
     }
 
-    /** Whether this kind flies, on a wing or a rotor: an aircraft or a helicopter. */
+    /** 翼かローターで飛ぶ種類か（機体かヘリコプターか）。 */
     public boolean flies() {
         return this == AIRCRAFT || this == HELICOPTER;
     }
 
-    /** Whether this kind is a helicopter, held up by a rotor rather than a wing. */
+    /** 翼ではなくローターで浮くヘリコプターか。 */
     public boolean isHelicopter() {
         return this == HELICOPTER;
     }
 
-    /** Whether this kind is floated by the water under it rather than resting on the ground. */
+    /** 地面に乗るのではなく下の水に浮く種類か。 */
     public boolean floats() {
         return this == SHIP;
     }

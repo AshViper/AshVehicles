@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_rack",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "M": {
+      "item": "ashvehicles:machine_parts"
+    },
+    "R": {
+      "item": "ashvehicles:single_rail"
+    }
+  },
+  "pattern": [
+    "R R",
+    "SMS",
+    "R R"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:multiple_ejector"
+  }
+}

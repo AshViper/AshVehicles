@@ -30,39 +30,34 @@ import net.minecraft.world.flag.FeatureFlagSet;
 import net.neoforged.neoforge.event.AddPackFindersEvent;
 
 /**
- * Hands the game an item model for every machine, without one being written for each.
+ * 全機体分のアイテムモデルを、1つずつ書かずにゲームへ渡す。
  *
- * <p>Minecraft insists on a model file per item and will not draw one that has none. What a
- * machine's item needs one to say, though, is nothing about the machine: the picture is
- * {@link VehicleIcons taken from the machine's own geometry} at runtime and drawn by
- * {@link VehicleItemRenderer}, so the file is the same handful of lines for every machine in the mod
- * and would be the same handful of lines for the next one somebody adds. Twenty copies of a constant
- * kept in step by hand is exactly the sort of thing that ends with a new vehicle in the creative tab
- * as a black and violet cube.
+ * <p>Minecraft はアイテムごとのモデルファイルを要求し、無い物は描かない。ところが機体アイテムのモデルが述べる
+ * 必要のあることに、機体固有の物は何も無い。絵は実行時に
+ * {@link VehicleIcons 機体自身のジオメトリから撮影}され {@link VehicleItemRenderer} が描くので、ファイルは MOD
+ * の全機体で同じ数行になり、次に誰かが追加する機体でも同じ数行になる。同一の定数を20個手作業で同期させるのは、
+ * 新車両がクリエイティブタブで黒と紫の立方体になる典型的な原因だ。
  *
- * <p>So they are generated, out of the list of items that were actually registered, and served from
- * a resource pack that lives in memory. A machine needs its data file, its geometry and its texture,
- * and nothing else: no model, no icon, no line here.
+ * <p>そこで、実際に登録されたアイテムのリストから生成し、メモリ上に存在するリソースパックから配信する。機体に
+ * 必要なのはデータファイル、ジオメトリ、テクスチャだけ。モデルもアイコンも、ここへの1行も要らない。
  *
- * <p>The pack is always on and hidden from the resource pack screen, because it is not a pack
- * anybody chose and turning it off would only break the items.
+ * <p>このパックは常時有効でリソースパック画面には出さない。誰かが選んだパックではないし、無効にしてもアイテムを
+ * 壊すだけだからだ。
  */
 public final class VehicleItemModels {
     /**
-     * What every machine's item model says.
+     * 全機体のアイテムモデルの中身。
      *
-     * <p>{@code builtin/entity} is the only way to tell the game that something else will draw this
-     * item — it is what a chest and a shield use, and it is what makes it ask
-     * {@code IClientItemExtensions} for a renderer instead of looking for quads.
+     * <p>{@code builtin/entity} は「このアイテムは別の物が描く」とゲームへ伝える唯一の手段だ。チェストや盾が
+     * 使っている物であり、これがあるからゲームはクアッドを探さず {@code IClientItemExtensions} にレンダラーを
+     * 問い合わせる。
      *
-     * <p>{@code gui_light: front} is what a flat item uses, and this is one: the picture already has
-     * its shading painted into it, and lighting it a second time as though it were a block standing
-     * in the world would only darken it.
+     * <p>{@code gui_light: front} は平坦アイテムが使う設定で、これは平坦アイテムだ。絵には既に陰影が描き込まれて
+     * おり、世界に立つブロックのように二度目の照明を当てても暗くなるだけだ。
      *
-     * <p>The display block is vanilla's own for a flat item, so that a machine sits in the hand, on
-     * the ground and in a frame exactly where any other flat item does. The particle texture is
-     * never used by anything an item of this kind does; it is named only because a model without one
-     * is a warning in the log at every load.
+     * <p>display ブロックは平坦アイテム用のバニラそのままで、機体が手の中・地面・額縁で他の平坦アイテムと同じ
+     * 位置に収まるようにする。パーティクルテクスチャはこの種のアイテムの動作では一切使わない。指定しているのは、
+     * 無いモデルはロードのたびログに警告を出すからにすぎない。
      */
     private static final String MODEL = """
             {
@@ -93,14 +88,14 @@ public final class VehicleItemModels {
 
     private static final String NAME = AshVehicles.MODID + "/vehicle_item_models";
 
-    /** The files the pack serves, worked out once from the items that exist. */
+    /** パックが配信するファイル。存在するアイテムから一度だけ算出する。 */
     @Nullable
     private static Map<ResourceLocation, byte[]> files;
 
     private VehicleItemModels() {
     }
 
-    /** Puts the pack in front of the game, at the point where it is asking who has any. */
+    /** ゲームが「パックを持っているのは誰か」と尋ねる時点で、このパックを差し出す。 */
     public static void addTo(AddPackFindersEvent event) {
         if (event.getPackType() != PackType.CLIENT_RESOURCES) {
             return;
@@ -108,8 +103,8 @@ public final class VehicleItemModels {
 
         PackLocationInfo where = new PackLocationInfo(NAME,
                 Component.literal("AshVehicles vehicle item models"), PackSource.BUILT_IN, Optional.empty());
-        // Built rather than read: there is no pack.mcmeta to read it out of, and every answer it
-        // would have given is known here. Hidden, and always on.
+        // 読むのではなく構築する。読み出す pack.mcmeta は無いし、そこから得られたはずの答えは全てここで分かって
+        // いる。非表示かつ常時有効。
         Pack.Metadata about = new Pack.Metadata(Component.literal("Item models for the mod's machines"),
                 PackCompatibility.COMPATIBLE, FeatureFlagSet.of(), List.of(), true);
         Pack pack = new Pack(where, new Pack.ResourcesSupplier() {
@@ -128,11 +123,10 @@ public final class VehicleItemModels {
     }
 
     /**
-     * One model file per machine that has an item, named as the game will ask for it.
+     * アイテムを持つ機体1つにつきモデルファイル1つ。名前はゲームが要求する形にする。
      *
-     * <p>Read off the items rather than off the data files, because the items are what the game will
-     * be looking for models for: a machine whose file was there but whose item lost its name to
-     * something else has no item and needs no model.
+     * <p>データファイルではなくアイテムから読む。ゲームがモデルを探す対象はアイテムだからだ。ファイルはあっても
+     * アイテム名を他に取られた機体にはアイテムが無く、モデルも要らない。
      */
     private static synchronized Map<ResourceLocation, byte[]> files() {
         if (files == null) {
@@ -150,7 +144,7 @@ public final class VehicleItemModels {
         return files;
     }
 
-    /** The pack itself: a map of paths to bytes, and the seven answers a pack has to give. */
+    /** パック本体。パスからバイト列へのマップと、パックが答えるべき7つの応答。 */
     private static final class Models implements PackResources {
         private final PackLocationInfo where;
 

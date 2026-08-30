@@ -11,30 +11,30 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.StringRepresentable;
 
 /**
- * One weapon, described entirely in JSON. Drop a file in {@code data/ashvehicles/weapon/} and the
- * mod registers an item for it at start-up, so it can be hung on any aircraft's pylons; an aircraft's
- * own file can also name one as built in.
+ * 兵装1つを JSON だけで記述した物。{@code data/ashvehicles/weapon/} にファイルを置けば起動時に MOD が
+ * アイテムを登録し、どの機体のパイロンにも吊れるようになる。機体ファイル側が内蔵兵装として名指しすること
+ * もできる。
  *
- * <p>Like the aircraft, the file is read once at start-up to learn what exists, and again from the
- * data packs on every {@code /reload}, so a weapon can be retuned without restarting.
+ * <p>機体と同じく、起動時に「何が存在するか」を知るために一度、{@code /reload} のたびにデータパックから
+ * もう一度読まれるので、再起動なしで兵装を調整できる。
  *
- * <p>Speeds are in blocks per tick, as everywhere else in the mod.
+ * <p>速度は MOD 内の他と同じく1tickあたりブロック。
  *
- * @param type what kind of weapon this is, which decides how it flies and what it needs
- * @param item whether the mod should register an item for it. A gun built into an airframe has no
- *             business being carried about; a pod does
- * @param ammo rounds carried by one mount, when full
- * @param ammoItem which ammunition item feeds it, or empty to read it off how it fires. See
- *                 {@link #ammoKind()}
- * @param firing how it is fired
- * @param projectile what it fires
- * @param guidance how it steers, for a weapon that does. Absent means it does not
- * @param sound what it sounds like
+ * @param type 兵装の種類。飛び方と必要な物が決まる
+ * @param item MOD がアイテムを登録すべきか。機体に内蔵された砲を持ち歩く理由は無いが、ポッドにはある
+ * @param ammo 満載時に架台1つが持つ発数
+ * @param ammoItem どの弾薬アイテムで補給するか。空なら発射方式から判定する。{@link #ammoKind()} 参照
+ * @param firing 撃ち方
+ * @param projectile 撃つ物
+ * @param guidance 誘導方式。誘導する兵装のみ。無ければ誘導しない
+ * @param requires これを撃つ前に機体が積んでいなければならないポッドの種別。{@link #requires()} 参照
+ * @param sound 音
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
-        Firing firing, Projectile projectile, Optional<Guidance> guidance, SoundSetup sound) {
+        Firing firing, Projectile projectile, Optional<Guidance> guidance,
+        Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag) {
 
-    /** {@code RRGGBB}, with or without a leading hash, as everything in these files writes colour. */
+    /** {@code RRGGBB}。先頭の # は有っても無くてもよい。この種のファイルでの色表記はすべてこれ。 */
     static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
             text -> {
                 try {
@@ -53,46 +53,50 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             Firing.CODEC.fieldOf("firing").forGetter(WeaponDefinition::firing),
             Projectile.CODEC.fieldOf("projectile").forGetter(WeaponDefinition::projectile),
             Guidance.CODEC.optionalFieldOf("guidance").forGetter(WeaponDefinition::guidance),
-            SoundSetup.CODEC.optionalFieldOf("sound", SoundSetup.DEFAULT).forGetter(WeaponDefinition::sound)
+            EquipmentDefinition.Kind.CODEC.optionalFieldOf("requires").forGetter(WeaponDefinition::requires),
+            SoundSetup.CODEC.optionalFieldOf("sound", SoundSetup.DEFAULT).forGetter(WeaponDefinition::sound),
+            // 吊っている間ずっと機体が払う代償。省略すれば0で、これを書く前の全兵装がそうだった。
+            //
+            // 単位は機体ファイルの {@code wing.drag} と同じで、あちらへ直接足される。つまり戦闘機の
+            // 0.00003 前後が「機体まるごと1機分の抗力」であり、ここに書く値はその一部でなければならない。
+            // 増槽1本で1割、つまり 0.000003 あたりが妥当な出発点だ。桁を1つ間違えると機体は飛ばなくなる
+            // ——見慣れない大きさなので、書く前に対象機体の wing.drag を必ず見ること。
+            Codec.FLOAT.optionalFieldOf("drag", 0.0F).forGetter(WeaponDefinition::drag)
     ).apply(instance, WeaponDefinition::new));
 
     /**
-     * Used when a weapon has no file the game can read at all: something that shoots, so the game
-     * keeps running, but nothing anyone would mistake for a real weapon.
+     * ゲームが読めるファイルが1つも無い兵装に使う値。撃ちはするのでゲームは動き続けるが、誰も本物の兵装と
+     * は思わない物。
      */
     public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
-            new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(), SoundSetup.DEFAULT);
+            new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(),
+            Optional.empty(), SoundSetup.DEFAULT, 0.0F);
 
     /**
-     * Whether holding the trigger keeps it firing, rather than sending one for each press.
+     * 引き金を押し続けている間撃ち続けるか、それとも1押し1発か。
      *
-     * <p>The difference is not really about the weapon's kind, which is why it is a field rather
-     * than a rule. What decides it is the rate: a cannon at fifty rounds a second is a thing you
-     * hold down, and a hundred and twenty millimetres at one round every seven seconds is a thing
-     * you press — and both of those are guns. Left out, a gun is automatic and everything else goes
-     * one press at a time, which is what every weapon in the mod meant before the field existed.
+     * <p>この違いは実のところ兵装の種類の話ではない。だからこそ規則ではなくフィールドになっている。決める
+     * のは発射速度で、毎秒50発の機関砲は押しっぱなしにする物、7秒に1発の120mm は押す物——そしてどちらも
+     * 「gun」だ。省略すれば gun は自動、それ以外は1押し1発になり、それはこのフィールドが存在する前に MOD
+     * 内の全兵装が意味していた挙動そのもの。
      *
-     * <p>Read by both the aircraft's pylons and a vehicle's built-in gun, so that a weapon behaves
-     * the same way whichever machine it is bolted to.
+     * <p>機体のパイロンと車両の内蔵砲の両方が読むので、どちらに付けても同じ挙動になる。
      */
     public boolean isAutomatic() {
         return this.firing.automatic().orElse(this.type == Type.GUN);
     }
 
     /**
-     * Which ammunition item this gun is loaded out of.
+     * この砲がどの弾薬アイテムから補給されるか。
      *
-     * <p>Named outright by a file that wants to, and otherwise read off what the weapon is and how
-     * it fires. Anything that is not a gun goes in a tube one at a time; a gun you hold down is
-     * belt-fed and one you press is loaded by hand, which is the same distinction
-     * {@link #isAutomatic()} already draws. Between them they sort every weapon in the mod without a
-     * line being added to any of their files. Say {@code ammo_item} to overrule it — a revolver
-     * cannon loaded from a drum a shell at a time would want to, and so would anyone who wanted a
-     * guided missile to cost something an unguided rocket does not.
+     * <p>書きたいファイルは明示でき、無ければ兵装の種類と発射方式から判定する。gun でない物は筒へ1本ずつ。
+     * 押しっぱなしにする gun はベルト給弾、押す gun は手装填で、それは {@link #isAutomatic()} が既に引いて
+     * いる区別と同じ。この2つで MOD 内の全兵装が、どのファイルにも1行足さずに正しく分類される。覆したければ
+     * {@code ammo_item} を書く——ドラムから1発ずつ装填するリボルバーカノンはそうしたいだろうし、誘導ミサ
+     * イルに無誘導ロケットとは別のコストを課したい人も同じ。
      *
-     * <p>This is what a machine's <em>built-in</em> armament is resupplied out of. A store hung on
-     * an aircraft's pylon is resupplied out of the store itself, which is an item already; see
-     * {@code WeaponMounts.draw}.
+     * <p>これは機体の<em>内蔵</em>兵装の補給元。機体のパイロンに吊った物は兵装自体（既にアイテム）から補給
+     * される。{@code WeaponMounts.draw} 参照。
      */
     public AmmoKind ammoKind() {
         return this.ammoItem.orElseGet(() -> switch (this.type) {
@@ -101,75 +105,97 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
         });
     }
 
-    /** True if this weapon steers towards something, and so needs something to steer towards. */
+    /** この兵装が何かへ向かって誘導するか。つまり誘導先を必要とするか。 */
     public boolean isGuided() {
         return this.guidance.isPresent();
     }
 
     /**
-     * Whether firing takes the store itself off the pylon.
+     * この兵装を撃つ前に機体が積んでいなければならないポッドの種別。あれば。
      *
-     * <p>A missile or a bomb is the thing hanging there: let it go and the rail is bare. A pod is a
-     * container that stays bolted on however empty it is, and a gun is part of the airframe. So only
-     * the first sort stops being drawn once it has been used, and only until the ground crew hang
-     * another one.
+     * <p>レーザー誘導爆弾とは何か——尾翼と機首のシーカーを持つ爆弾で、誰かが目標に指示器を当てていなければ
+     * 狙う相手が一切無い物だ。ポッドがその指示器なので、{@code "requires": "targeting_pod"} と書くファイル
+     * は「この兵装は対の片方であり、もう片方が無ければ動かない」と言っている。ラックには吊れるし計器にも
+     * 出るしレンチで外せもする。ただ撃てないだけ。
+     *
+     * <p><b>ポッドを積める場所でのみ有効。</b> MOD 内でこの種の物が付くのは機体の専用ステーションだけなの
+     * で、判定するのは {@link WeaponMounts} だけ。地上車両の内蔵兵装（{@link BuiltInGun}、
+     * {@link TurretLauncher}）はいかなるステーションも持たず、要求を満たすことも「満たしていない」と告げ
+     * られることもできない。つまりこのフィールドを持つ兵装を車両の砲に指定すると、動くべきでない物が動く
+     * 状態で武装させることになる。やらないこと。
+     */
+    public Optional<EquipmentDefinition.Kind> requires() {
+        return this.requires;
+    }
+
+    /**
+     * 発射によって兵装自体がパイロンから無くなるか。
+     *
+     * <p>ミサイルや爆弾は、そこに吊られている物そのものだ。放てばレールは空になる。ポッドは中身が空でも
+     * 付いたままの容器で、砲は機体構造の一部。だから使用後に描かれなくなるのは最初の種類だけで、地上要員が
+     * 次を吊るまでの間だけ。
      */
     public boolean leavesRail() {
         return this.type == Type.MISSILE || this.type == Type.BOMB;
     }
 
     /**
-     * Whether this is released rather than fired, so that it leaves with the aircraft's own speed
-     * and takes no push of its own along the nose.
+     * 撃つのではなく投下する物か。投下する物は機体の速度だけを持って離れ、機首方向への自前の加速を持た
+     * ない。
      */
     public boolean isDropped() {
         return this.type == Type.BOMB;
     }
 
     /**
-     * Whether what this fires holds open the ground it is flying over.
+     * この兵装が撃つ物が、飛んでいく先の地面を開いたまま保持するか。
      *
-     * <p>Something has to, or a weapon aimed past the edge of the loaded world lands on nothing.
-     * Chunks exist around players and nowhere else, an aircraft holds open the corridor it is flying
-     * down and no more, and a bomb released from three thousand feet is a long way from either by the
-     * time it arrives. Blocks out there are not asked about at all — asking would generate the
-     * terrain on the spot and on the main thread — so without a claim of its own a round passes
-     * through the hillside it was aimed at and is given up on in the empty air behind it. See
-     * {@link com.ashvehicles.entity.WeaponChunkLoader}.
+     * <p>誰かが保持しなければ、ロード済み範囲の外を狙った兵装は何も無い所へ着弾する。chunk はプレイヤーの
+     * 周りにしか存在せず、機体は自分が飛ぶ回廊だけを開いており、900m 上空から投下された爆弾は着弾時には
+     * そのどちらからも遠い。その外側のブロックには一切問い合わせない——問い合わせればその場でメインスレッド
+     * が地形を生成する——ので、自前の確保が無ければ弾は狙った斜面を通り抜け、その裏の空中で見捨てられる。
+     * {@link com.ashvehicles.entity.WeaponChunkLoader} 参照。
      *
-     * <p>Left out, everything claims ground, because everything is aimed at something. It used to be
-     * only what was <em>dropped</em>, and that was a limit of the machinery rather than a decision
-     * about weapons: a claim was one ticket per round, moved every tick, and a bomb spends ten
-     * seconds coming down through the same two chunks while a gun crosses a chunk boundary twenty
-     * times a second from thirty rounds at once. What made that affordable was making the claims
-     * shared, unticked and rationed rather than making the guns shorter-ranged; the loader has the
-     * detail.
+     * <p>省略すれば全部が地面を確保する。全部が何かを狙っているから。以前は<em>投下</em>物だけだったが、
+     * それは兵装についての判断ではなく仕組みの限界だった。確保は1発1チケットで毎tick移動させる方式で、爆弾
+     * は同じ2 chunk を10秒かけて降りるのに対し、砲は30発同時に毎秒20回 chunk 境界を跨ぐ。それを現実的に
+     * したのは、砲の射程を縮めることではなく、確保を共有・非tick・配給制にしたこと。詳細はローダー側に。
      *
-     * <p>Say {@code chunk_loading} outright to overrule it either way — {@code false} for something
-     * that is only ever fired at aircraft, since an aeroplane is loaded wherever it is and the ground
-     * under a missile chasing one is nobody's business.
+     * <p>どちら向きにも {@code chunk_loading} で明示できる——機体しか狙わない物には {@code false}。機体は
+     * どこにいてもロードされているし、それを追うミサイルの下の地面は誰の関心事でもない。
      */
     public boolean loadsChunks() {
         return this.projectile.chunkLoading().orElse(true);
     }
 
     /**
-     * What kind of weapon this is. The difference is in how what it fires behaves: a gun's round
-     * simply flies, a rocket's is pushed along by a motor first, and a missile's steers as well.
+     * 兵装の種類。違いは撃った物の挙動にある。gun の弾はただ飛び、rocket の弾は先にモーターで押され、
+     * missile の弾はさらに誘導する。
      */
     public enum Type implements StringRepresentable {
-        /** Rounds, many and fast, in a stream for as long as the trigger is held. */
+        /** 弾を多く速く、引き金を引いている間ずっと流し続ける。 */
         GUN("gun"),
-        /** Unguided, motor-driven, and gone where it was pointed when it left the rail. */
+        /** 無誘導・モーター推進で、レールを離れた時に向いていた方向へ行く。 */
         ROCKET("rocket"),
-        /** The same, but it steers towards whatever the pilot had locked when it launched. */
+        /** 同じだが、発射時にパイロットがロックしていた相手へ誘導する。 */
         MISSILE("missile"),
         /**
-         * Dropped rather than fired. It leaves with the aircraft's own speed and nothing else, and
-         * from there gravity has it: where it lands is decided at the moment of release, by how fast
-         * and how high and how level the aeroplane was. Aiming one is flying the aeroplane.
+         * 撃つのではなく投下する物。機体の速度だけを持って離れ、あとは重力に任される。着弾点は投下の瞬間
+         * に、機体の速度・高度・水平の度合いで決まる。これを狙うとは、機体を飛ばすことに他ならない。
          */
-        BOMB("bomb");
+        BOMB("bomb"),
+        /**
+         * 増槽。撃たない兵装であり、ここに並んでいるのはそのためだ。
+         *
+         * <p>吊るのはパイロンで、ラックの位置に収まり、レンチで外せて、レーダー反射を増やし、抗力を生む
+         * ——兵装が持つ性質を全部持っている。違うのは中身が炸薬ではなく燃料だという1点だけなので、兵装で
+         * ないことにすると、パイロンもラックも位置も搭載構成も全部もう一度書く羽目になる。
+         *
+         * <p>{@code ammo} が燃料の量だ。発数を数えるのと同じ数値で、同じように減り、同じように
+         * {@code WeaponItem} のスタックへ往復する。半分使った増槽を外して持ち歩けるのはそのおかげで、
+         * それは実機の運用そのものでもある。
+         */
+        TANK("tank");
 
         public static final Codec<Type> CODEC = StringRepresentable.fromEnum(Type::values);
 
@@ -184,22 +210,26 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             return this.name;
         }
 
-        /** Whether one press of the trigger sends one, rather than firing for as long as it is held. */
+        /** 引き金1押しで1発か、押している間撃ち続けるか。 */
         public boolean isSingleShot() {
             return this != GUN;
+        }
+
+        /** 引き金と関係があるか。増槽は吊られているだけで、選択もされず撃たれもしない。 */
+        public boolean isFired() {
+            return this != TANK;
         }
     }
 
     /**
-     * @param roundsPerSecond rate of fire while the trigger is held. Need not be a whole number of
-     *                        rounds a tick: the mount keeps count of the fraction
-     * @param spread half-angle of the cone the rounds leave in, in degrees. Zero is a laser
-     * @param salvo how many leave together for each round spent. A rocket pod ripples several off
-     *              at once; a missile rail lets go of one
-     * @param salvoSpread extra scatter across a salvo, in degrees, on top of {@code spread}. What
-     *                    makes a rocket salvo cover ground rather than land in one hole
-     * @param automatic whether the trigger fires for as long as it is held, or empty for the
-     *                  default. See {@link WeaponDefinition#isAutomatic()}
+     * @param roundsPerSecond 引き金を引いている間の発射速度。1tickあたりの発数が整数である必要は無い。
+     *                        端数は架台側が数える
+     * @param spread 弾が出る円錐の半頂角（度）。0 ならレーザーのように真っ直ぐ
+     * @param salvo 1発分の消費で同時に出る数。ロケットポッドは一度に複数を連射し、ミサイルレールは1発
+     * @param salvoSpread 一斉射内での追加散布（度）。{@code spread} に上乗せされる。ロケットの一斉射が
+     *                    1つの穴ではなく面を覆う理由
+     * @param automatic 引き金を引いている間撃ち続けるか。空なら既定。
+     *                  {@link WeaponDefinition#isAutomatic()} 参照
      */
     public record Firing(float roundsPerSecond, float spread, int salvo, float salvoSpread,
             Optional<Boolean> automatic) {
@@ -212,12 +242,11 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
         ).apply(instance, Firing::new));
 
         /**
-         * Ticks between rounds.
+         * 発射間隔（tick）。
          *
-         * <p>Need not be a whole number: a mount counts the fraction, so a rate that does not divide
-         * into twenty still averages out to the figure in the file. A weapon faster than one round a
-         * tick is written as a {@code salvo} instead, which is what a twin mounting physically is —
-         * two barrels letting go together rather than one barrel going twice as fast.
+         * <p>整数である必要は無い。架台が端数を数えるので、20 を割り切れない発射速度でも平均するとファイル
+         * の値になる。1tickに1発より速い兵装は代わりに {@code salvo} で書く。連装架台が物理的にそういう物
+         * だから——2本の砲身が同時に放つのであって、1本が2倍速く撃つのではない。
          */
         public float ticksPerRound() {
             return 20.0F / Math.max(this.roundsPerSecond, 1.0E-3F);
@@ -225,40 +254,36 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     }
 
     /**
-     * What leaves the weapon.
+     * 兵装から出ていく物。
      *
-     * <p>A gun's round is given its whole speed at the muzzle and slows from there. A rocket or a
-     * missile leaves slowly and is pushed by its motor for a while, which is why one fired from a
-     * standing start still gets going and why the aircraft can outrun its own rockets for a moment
-     * after launch.
+     * <p>gun の弾は砲口で全速度を与えられ、そこから減速する。rocket や missile はゆっくり出てしばらく
+     * モーターに押される。だから静止状態から撃っても加速していくし、発射直後の一瞬は機体が自分のロケットを
+     * 追い越せる。
      *
-     * <p>A motor need not arrive at its whole thrust the moment it lights. {@code spool_ticks} works
-     * it up from nothing rather than handing it over whole, so the missile gathers speed instead of
-     * jumping to it. Leave it out and the motor is at full power off the rail, as it always was.
+     * <p>モーターは点火の瞬間に全推力へ達する必要は無い。{@code spool_ticks} は推力を0から立ち上げるので、
+     * ミサイルは速度へ飛びつくのではなく積み上げていく。省略すればレールを離れた時点で全開。従来通り。
      *
-     * @param damage dealt to whatever it hits directly, in the same points a player is worth twenty
-     *               of. An airframe is worth a few hundred and takes it point for point
-     * @param speed the speed it leaves at, in blocks per tick. The aircraft's own speed is added on
-     * @param thrust acceleration from the motor, in blocks per tick squared, once it is at full power
-     * @param burnTicks how long the motor burns. Zero for something with no motor at all
-     * @param spoolTicks how long the motor takes to work up to {@code thrust} once it has lit. Zero
-     *                   gives the whole of it from the first tick
-     * @param topSpeed the fastest the motor will drive it, in blocks per tick
-     * @param gravity how fast it drops, in blocks per tick squared
-     * @param range how far it flies before it is given up on, in blocks
-     * @param explosion blast made where it lands, in the same units as TNT's four. Zero for
-     *                  something that simply hits
-     * @param tracer colour it is drawn in, as {@code RRGGBB}
-     * @param ricochet how obliquely this round has to strike armour before the armour throws it off
-     *                 instead of biting, in degrees from the plate's own normal: nought is a square
-     *                 hit and ninety is a graze along the surface. A long rod bites almost to the
-     *                 grazing angle and wants a high figure; a small round rolls off a slope and
-     *                 wants a low one. Zero, which is what anything without the field gets, means it
-     *                 is never thrown off — right for a shaped charge and for anything that goes off
-     *                 on contact rather than going through. See {@link com.ashvehicles.weapon.Ricochet}
-     * @param trail the smoke it leaves behind it, if it leaves any
-     * @param chunkLoading whether it holds the ground under it open, or empty for the default, which
-     *                     is that it does. See {@link WeaponDefinition#loadsChunks()}
+     * @param damage 直接当たった相手へのダメージ。プレイヤー20点分と同じ単位。機体は数百点あり、点数通りに
+     *               受ける
+     * @param speed 出ていく速度（1tickあたりブロック）。機体自身の速度が加算される
+     * @param thrust 全開時のモーターによる加速度（1tick二乗あたりブロック）
+     * @param burnTicks モーターの燃焼時間。モーターを持たない物は0
+     * @param spoolTicks 点火後 {@code thrust} に達するまでの時間。0 なら最初の tick から全開
+     * @param topSpeed モーターが出せる最高速度（1tickあたりブロック）
+     * @param gravity 落下加速度（1tick二乗あたりブロック）
+     * @param range 見捨てられるまでの飛翔距離（ブロック）。0以下なら決して見捨てられない。tick を数える物
+     *              が無く、終わらせるのは何かに当たることだけ——当たる物が無ければ世界の底を抜けて落ちる。
+     *              ミサイルの重力なら、射程が与える数秒ではなく1〜2分の飛翔になる
+     * @param explosion 着弾点で起こす爆発。TNT の4と同じ単位。ただ当たるだけの物は0
+     * @param tracer 描画色。{@code RRGGBB}
+     * @param ricochet 装甲が食い込ませず弾くのに必要な入射角。装甲板の法線からの度数で、0 が直角命中、
+     *                 90 が表面に沿った掠り。長い侵徹体は掠り角近くまで食い込むので大きな値を、小さな弾は
+     *                 傾斜を転がるので小さな値を取る。0（フィールドを書かない場合）は「決して弾かれない」
+     *                 の意味で、成形炸薬や、貫通ではなく接触で炸裂する物には正しい。
+     *                 {@link com.ashvehicles.weapon.Ricochet} 参照
+     * @param trail 後ろに残す煙。残すなら
+     * @param chunkLoading 下の地面を開いたまま保持するか。空なら既定（保持する）。
+     *                     {@link WeaponDefinition#loadsChunks()} 参照
      */
     public record Projectile(float damage, float speed, float thrust, int burnTicks,
             int spoolTicks, float topSpeed,
@@ -269,9 +294,8 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 0.0F, 0.02F, 200.0F, 0.0F, 0xFFC864, 0.0F, Optional.empty(), Optional.empty());
 
         /**
-         * Reads the whole description of a trail, or the plain {@code true} that used to be all
-         * there was to say. An older weapon file therefore still means what it meant, and gets the
-         * ordinary trail; a newer one can say what colour its motor's smoke is.
+         * 煙の完全な記述と、かつてはそれが全部だった素の {@code true} の両方を読む。だから古い兵装ファイル
+         * は従来通りの意味を保ち普通の煙を得るし、新しいファイルはモーターの煙の色を指定できる。
          */
         private static final Codec<Optional<Trail>> TRAIL =
                 Codec.either(Codec.BOOL, Trail.CODEC).xmap(
@@ -297,22 +321,35 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 Codec.BOOL.optionalFieldOf("chunk_loading").forGetter(Projectile::chunkLoading)
         ).apply(instance, Projectile::new));
 
-        /** Whether armour can throw this round off at all, or whether it always bites. */
+        /** この弾がそもそも装甲に弾かれ得るか、それとも常に食い込むか。 */
         public boolean canRicochet() {
             return this.ricochet > 0.0F;
         }
 
-        /** Whether a motor pushes this along after it has left. */
+        /** 発射後にモーターが押し続けるか。 */
         public boolean hasMotor() {
             return this.burnTicks > 0 && this.thrust > 0.0F;
         }
 
         /**
-         * Ticks it lives before it is given up on. Worked out from how far it should get: something
-         * under power covers its range at the speed its motor will reach, and something coasting at
-         * the speed it left with.
+         * 見捨てられるまでの生存 tick 数。到達すべき距離から求める。動力のある物は「モーターが達する速度」
+         * で射程を、惰性の物は「発射時の速度」で射程を進むものとして計算する。
+         *
+         * <p>射程が0以下なら決して見捨てず、tick カウントとしてはこれが上限になる。その種の弾を終わらせる
+         * のは、何かに当たるか、モーター燃焼後に世界の底を抜けて落ちるか。後者は必ず来る（惰性の弾を支える
+         * 物はここに無い）が、射程が許す数秒ではなく分単位でやって来る。だからこれは射程を省略して偶然そう
+         * なるのではなく、ファイルに明示して選ぶ物。省略した場合は従来通り300ブロック。
+         *
+         * <p><b>そして射程が一度もそうでなかった点。</b> tick への換算はモーターが<em>達する</em>速度で
+         * 行っており、そこへ立ち上がる途中の速度ではない。だから4秒かけてスプールするミサイルは、ファイルが
+         * 約束しているように見える距離のかなり内側で見捨てられる。ここで文字通りの意味を持つ唯一の値が
+         * 「無制限」。
          */
         public int lifetime() {
+            if (this.range <= 0.0F) {
+                return Integer.MAX_VALUE;
+            }
+
             float pace = this.hasMotor() ? Math.max(this.topSpeed, this.speed) : this.speed;
 
             return Math.max(1, Math.round(this.range / Math.max(pace, 1.0E-3F)));
@@ -320,23 +357,21 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     }
 
     /**
-     * The smoke a motor leaves behind it.
+     * モーターが後ろに残す煙。
      *
-     * <p>There are two halves to it, because there are two things to see. The plume is what is
-     * coming out of the nozzle now: thick, close, still moving with the missile, and only there
-     * while the motor is burning. The trail is what that plume turned into a second ago, hanging
-     * where the missile used to be and drifting apart. Nothing is drawn for a motor that has burnt
-     * out, which is how a rocket's smoke stops at the point it went ballistic and how anyone
-     * watching can tell.
+     * <p>見える物が2つあるので、半分ずつある。噴煙は今ノズルから出ている物——濃く、近く、まだミサイルと
+     * 一緒に動いており、モーターが燃えている間だけ存在する。航跡はその噴煙が1秒前に変化した物で、ミサイルが
+     * いた場所に留まり広がっていく。燃え尽きたモーターには何も描かない。それがロケットの煙が弾道飛行へ移った
+     * 地点で途切れる理由であり、見ている者がそれを見分けられる理由。
      *
-     * @param colour the trail proper, as {@code RRGGBB}: cold smoke, some way behind
-     * @param exhaust the plume at the nozzle, which is hotter and usually darker
-     * @param density puffs laid down per block flown. Below one leaves gaps on purpose
-     * @param size how big each puff is, against the ordinary one
+     * @param colour 航跡本体の色。{@code RRGGBB}。後方の冷えた煙
+     * @param exhaust ノズルの噴煙。より熱く、たいてい濃い
+     * @param density 1ブロック飛ぶごとに置く煙の数。1未満なら意図的に隙間が空く
+     * @param size 1つあたりの大きさ。標準に対する倍率
      */
     public record Trail(int colour, int exhaust, float density, float size) {
-        /** What a weapon file that says no more than {@code "trail": true} gets. */
-        public static final Trail DEFAULT = new Trail(0xD8D5CD, 0x9A958B, 1.3F, 1.0F);
+        /** {@code "trail": true} としか書かない兵装ファイルが得る値。 */
+        public static final Trail DEFAULT = new Trail(0xD8D5CD, 0x9A958B, 2.0F, 1.0F);
 
         public static final Codec<Trail> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 COLOUR.optionalFieldOf("colour", DEFAULT.colour()).forGetter(Trail::colour),
@@ -347,41 +382,48 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     }
 
     /**
-     * How a missile finds what it was fired at.
+     * ミサイルが発射対象をどう見つけるか。
      *
-     * <p>Locking is done before launch and is the pilot's work: hold the nose on something inside
-     * the seeker's cone and within its reach until it takes. Once away the missile is on its own,
-     * and what it can do is bounded by how hard it can turn, so a target that turns harder than the
-     * missile can follow will be missed. Nothing here homes unconditionally.
+     * <p>ロックは発射前に行うパイロットの仕事だ。シーカーの視野内かつ射程内の相手に機首を乗せ、成立するまで
+     * 保持する。放たれた後のミサイルは独りで、できることは旋回性能に縛られる。ミサイルが追える以上に強く
+     * 曲がる目標には外れる。ここには無条件に命中する物は一つも無い。
      *
-     * @param turnRate how far the missile can bend its flight path, in degrees per tick
-     * @param lockAngle half-angle of the seeker's cone, in degrees, measured off the nose
-     * @param lockRange how far the seeker can see, in blocks
-     * @param lockTicks how long the target must be held in the cone before the lock takes
-     * @param trackAngle how far off its own nose the missile will still follow a target, in degrees.
-     *                   Past this it has lost it and flies on ballistically
-     * @param proximity how close it must get before it goes off, in blocks. A missile need not hit
-     * @param navGain the navigation constant proportional navigation is named for: how many times
-     *                over the missile turns to null the line of sight's own rotation rather than
-     *                merely matching it. Three to five is what a real seeker head is built around;
-     *                much past that and a missile answers every flicker in the tracking as though
-     *                the target had actually moved, which is its own kind of miss
+     * @param turnRate ミサイルが飛行経路を曲げられる角度（1tickあたり度）
+     * @param lockAngle シーカー視野の半頂角（度）。機首基準
+     * @param lockRange シーカーが見える距離（ブロック）
+     * @param lockTicks ロック成立までに視野内へ保持し続ける必要のある時間
+     * @param trackAngle 自分の機首からどれだけ外れても目標を追い続けるか（度）。これを超えると失探し、
+     *                   以後は弾道飛行になる
+     * @param proximity 炸裂する近接距離（ブロック）。ミサイルは当たる必要が無い
+     * @param navGain 比例航法の名の由来である航法定数。視線の回転をただ打ち消すのではなく何倍で打ち消しに
+     *                行くか。実物のシーカーヘッドは3〜5を軸に作られている。それを大きく超えると、ミサイルは
+     *                追尾のちらつき一つ一つを「目標が実際に動いた」かのように扱い、それはそれで別種の外れ方
+     *                になる
      */
     public record Guidance(float turnRate, float lockAngle, float lockRange, int lockTicks,
             float trackAngle, float proximity, float navGain, Seeker seeker) {
 
         /**
-         * What the seeker is looking at, and so what will fool it.
+         * シーカーが何を見ているか。つまり何に騙されるか。
          *
-         * <p>The whole of the point of having two sorts of countermeasure. A pilot who has been told
-         * they are locked has a second or two to decide which handle to pull, and pulling the wrong
-         * one leaves the missile exactly where it was.
+         * <p>対抗手段が2種類ある意味の全部がこれ。ロックされたと告げられたパイロットには、どちらのレバーを
+         * 引くか決める1〜2秒がある。間違えて引けばミサイルは何も変わらないまま。
          */
         public enum Seeker implements StringRepresentable {
-            /** Homes on heat, and follows a flare instead. */
+            /** 熱源に向かう。代わりにフレアを追う。 */
             HEAT("heat"),
-            /** Homes on a radar return, and follows a cloud of chaff instead. */
-            RADAR("radar");
+            /** レーダー反射に向かう。代わりにチャフの雲を追う。 */
+            RADAR("radar"),
+            /**
+             * 誰かが目標に当て続けている光点へ向かう。代わりに追う物は無い。どちらのレバーも効かない。
+             * フレアも金属箔の雲も、これが見ている物ではないから。
+             *
+             * <p>そこまで騙されにくいことの代償は、機体がその「当て続ける物」を積まねばならないこと。
+             * このシーカーを持つ兵装には {@code "requires": "targeting_pod"} を併記すべきで
+             * （{@link WeaponDefinition#requires} 参照）、それが無ければ尾翼はあるが誘導の当てが無い
+             * 爆弾になる。
+             */
+            LASER("laser");
 
             public static final Codec<Seeker> CODEC = StringRepresentable.fromEnum(Seeker::values);
 
@@ -396,9 +438,16 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 return this.name;
             }
 
-            /** Whether a flare is what fools this one; chaff is what fools the other. */
-            public boolean foolLetsGoOfFlares() {
-                return this == HEAT;
+            /**
+             * その種類の対抗手段が、このシーカーが目標の代わりに追う物かどうか。熱源追尾ならフレア、
+             * レーダー追尾ならチャフ、光点を見ているヘッドにはどちらでもない。
+             */
+            public boolean fooledBy(boolean flare) {
+                return switch (this) {
+                    case HEAT -> flare;
+                    case RADAR -> !flare;
+                    case LASER -> false;
+                };
             }
         }
 
@@ -415,40 +464,38 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     }
 
     /**
-     * The firing sound is found the same way as an engine's: the event named here, else one named
-     * after the weapon ({@code <namespace>:weapon.<name>}), else a default chosen for the weapon's
-     * kind. Played once a tick while firing, however many rounds that is.
+     * 発砲音の探し方はエンジン音と同じ。ここで指定したイベント、無ければ兵装名から作った名前
+     * （{@code <namespace>:weapon.<name>}）、それも無ければ兵装の種類ごとの既定。発砲中は何発撃っていても
+     * 1tickに1回鳴らす。
      *
-     * @param fire the sound event, or empty to look one up by the weapon's name
-     * @param volume how loud, next to the weapon
-     * @param pitch playback speed
+     * @param fire 音イベント。空なら兵装名から探す
+     * @param volume 兵装のすぐ横での音量
+     * @param pitch 再生速度
      */
     public record SoundSetup(Optional<ResourceLocation> fire, float volume, float pitch) {
         public static final SoundSetup DEFAULT = new SoundSetup(Optional.empty(), 2.0F, 1.0F);
 
         /**
-         * How far a weapon this loud is heard, in blocks, per point of volume.
+         * 音量1点あたり、その兵装が聞こえる距離（ブロック）。
          *
-         * <p>Nothing to do with how loud it is next to the aeroplane, which is {@link #volume()}.
-         * A cannon in life is heard across a valley and an aeroplane fights across several of them,
-         * so a figure of a few hundred blocks is the one that matters and the loudness at the far end
-         * is worked out from it. See {@link com.ashvehicles.client.sound.WeaponSounds}.
+         * <p>機体のすぐ横での音量（{@link #volume()}）とは無関係。現実の火砲は谷を越えて聞こえるし、機体は
+         * その谷をいくつも跨いで戦う。だから重要なのは数百ブロックという数字の方で、遠方での音量はそこから
+         * 計算する。{@link com.ashvehicles.client.sound.WeaponSounds} 参照。
          */
         private static final float CARRY_PER_VOLUME = 160.0F;
 
-        /** How far this weapon is heard, in blocks. */
+        /** この兵装が聞こえる距離（ブロック）。 */
         public float carry() {
             return Math.max(this.volume, 0.0F) * CARRY_PER_VOLUME;
         }
 
         /**
-         * The loudness to hand the game when asking it to send the sound.
+         * 音の送信をゲームへ依頼する時に渡す「音量」。
          *
-         * <p>A fiction, and the only one available. The server sends a sound to everyone within
-         * {@code max(volume, 1) * 16} blocks and to nobody else, so the volume is not really a
-         * loudness at all — it is the only way to say how far a sound should travel. What arrives
-         * would be deafening if it were played as sent, so the client throws the figure away and
-         * works out the real loudness from the distance instead.
+         * <p>作り話であり、唯一使える作り話でもある。サーバーは {@code max(volume, 1) * 16} ブロック以内の
+         * 全員にだけ音を送るので、この音量は実のところ音量ではない——「音がどこまで届くべきか」を伝える唯一
+         * の手段だ。届いた値をそのまま鳴らせば耳をつんざくので、クライアントはこの値を捨て、距離から本当の
+         * 音量を計算する。
          */
         public float packetVolume() {
             return Math.max(this.carry() / 16.0F, 1.0F);

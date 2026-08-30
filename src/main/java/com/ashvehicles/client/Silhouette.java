@@ -12,30 +12,26 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /**
- * Where a machine's boxes are lying in its own axes, for the instruments that draw it flat.
+ * 機体の箱が機体座標系のどこに寝ているか。平面図として描く計器のため。
  *
- * <p>The mod already has this arithmetic twice over — {@code GroundVehicleEntity} does it every tick
- * to put the real boxes in the world, and {@code VehicleShapeRenderer} does it again to outline them
- * — but both of those want the answer <em>in the world</em>, with the hull's attitude on the end of
- * it. A picture of a tank drawn on the screen wants the step before that: where the turret has
- * carried a box to within the hull, with the hull itself held still. So it is here once, and the two
- * instruments that draw a machine — the plan view in the corner and the readout that says where a
- * round landed — share it rather than each keeping a copy of the signs.
+ * <p>MOD にはこの計算が既に2つある——{@code GroundVehicleEntity} は実箱をワールドへ置くため毎tick行い、
+ * {@code VehicleShapeRenderer} は輪郭を描くためもう一度行う——が、どちらも欲しいのは車体姿勢まで掛けた<em>ワールド
+ * 座標の</em>答えだ。画面に描く戦車の絵が欲しいのはその1歩手前、つまり車体自体を静止させたまま砲塔が箱をどこへ
+ * 運んだかである。よってここに1つ置き、機体を描く2つの計器——隅の平面図と着弾位置の表示——が符号のコピーを各自
+ * 持つ代わりに共有する。
  *
- * <p><b>The axes are the file's own</b>: x to the right, y up, z over the bow, exactly as a
- * {@code hitbox} block is written. That is not the frame the rotations work in — inside a quaternion
- * +X runs out to the <em>left</em>, which is why {@link com.ashvehicles.vehicle.Attitude#toWorld}
- * negates it — so {@link #turn} is the one place that crosses between the two, and everything else
- * here stays in the axes the file uses.
+ * <p><b>軸はファイル自身の物</b>。x が右、y が上、z が車首方向で、{@code hitbox} ブロックの書き方そのままだ。
+ * 回転が働く座標系はそれではない——クォータニオンの内側では +X が<em>左</em>を指す。だから
+ * {@link com.ashvehicles.vehicle.Attitude#toWorld} は符号を反転する——ので、両者を跨ぐのは {@link #turn} 1か所
+ * だけで、ここの他は全てファイルの軸のままに留まる。
  */
 final class Silhouette {
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
     /**
-     * How steeply a machine may be looked at, in radians.
+     * 機体を見下ろせる最大角（ラジアン）。
      *
-     * <p>A round that came down almost vertically would otherwise be drawn against a plan view whose
-     * "up" is whichever way the arithmetic happened to fall, and a picture that spins on the sign of
-     * a rounding is worse than one drawn from slightly the wrong angle.
+     * <p>これが無いと、ほぼ垂直に落ちてきた弾は「上」が計算の転び方次第で決まる平面図に対して描かれてしまう。
+     * 丸め誤差の符号で回転する絵は、少し違う角度から描いた絵より悪い。
      */
     private static final double STEEPEST = Math.toRadians(55.0);
 
@@ -43,12 +39,11 @@ final class Silhouette {
     }
 
     /**
-     * Where a box sits in the machine's own axes, with the turret where it is now.
+     * 現在の砲塔位置を反映した、機体座標系での箱の位置。
      *
-     * <p>The same three cases {@code GroundVehicleEntity.mountOffset} has, and for the same reason: a
-     * box on the hull is where the file says it is, one on the turret is swung about the ring, and
-     * one on the gun is rocked about the trunnion first and then swung round with the turret.
-     * {@code stats} is null for an aircraft, which has neither and whose every box is on the hull.
+     * <p>{@code GroundVehicleEntity.mountOffset} と同じ3つの場合分けで、理由も同じ。車体上の箱はファイル通りの
+     * 位置、砲塔上の箱は旋回輪の周りに回した位置、砲上の箱はまず耳軸周りに揺らしてから砲塔と共に回す。機体では
+     * {@code stats} が null になる。砲塔も砲も持たず、全ての箱が車体上にあるからだ。
      */
     static Vec3 centre(VehicleShape.Box box, @Nullable GroundVehicleDefinition stats,
             float traverse, float pitch) {
@@ -63,7 +58,7 @@ final class Silhouette {
         return onTurret(at, stats.turret().ring(), traverse);
     }
 
-    /** A point swung about the turret ring by however far the turret is traversed. */
+    /** 砲塔の旋回量だけ旋回輪の周りに回した点。 */
     private static Vec3 onTurret(Vec3 offset, Vec3 ring, float traverse) {
         Vec3 local = offset.subtract(ring);
         float radians = traverse * DEG_TO_RAD;
@@ -76,7 +71,7 @@ final class Silhouette {
                 -local.x * sin + local.z * cos));
     }
 
-    /** A point rocked about the trunnion by however far the gun is laid up or down. */
+    /** 砲の俯仰量だけ耳軸の周りに揺らした点。 */
     private static Vec3 onGun(Vec3 offset, Vec3 trunnion, float pitch) {
         Vec3 local = offset.subtract(trunnion);
         float radians = -pitch * DEG_TO_RAD;
@@ -90,11 +85,10 @@ final class Silhouette {
     }
 
     /**
-     * How a box is lying within the machine: the turret's traverse, the gun's elevation if it rides
-     * the barrel, and then the box's own angle inside whatever carries it.
+     * 機体内で箱がどう寝ているか。砲塔の旋回、砲身に乗るなら砲の俯仰、そして担い手の中での箱自身の角度。
      *
-     * <p>What comes back turns vectors in the quaternions' own frame. Hand it to {@link #turn}
-     * rather than to {@code transform} and the crossing is done for you.
+     * <p>戻り値はクォータニオン自身の座標系でベクトルを回す。{@code transform} ではなく {@link #turn} へ渡せば、
+     * 座標系の橋渡しは代わりにやってくれる。
      */
     static Quaternionf rotation(VehicleShape.Box box, @Nullable GroundVehicleDefinition stats,
             float traverse, float pitch) {
@@ -112,10 +106,10 @@ final class Silhouette {
     }
 
     /**
-     * A vector turned by one of those rotations, with both ends of it in the file's axes.
+     * 上記の回転でベクトルを回す。入口も出口もファイルの軸で扱う。
      *
-     * <p>The x is negated on the way in and again on the way out because the quaternions work in a
-     * frame whose +X is the left-hand side, and everything else here counts x to the right.
+     * <p>x を入口と出口で反転しているのは、クォータニオンが +X を左側とする座標系で働く一方、ここの他の部分は
+     * x を右として数えるからだ。
      */
     static Vec3 turn(Quaternionf rotation, Vec3 offset) {
         Vector3f turned = rotation.transform(
@@ -125,25 +119,22 @@ final class Silhouette {
     }
 
     /**
-     * Which way is right and which way is up, for somebody looking along a line.
+     * ある線に沿って見ている者にとっての右方向と上方向。
      *
-     * <p>Both in the machine's own axes, so a point on it is put on the screen by asking how far it
-     * lies along each of them. That is the whole of the projection: no perspective, because an
-     * instrument the size of a postage stamp gains nothing from it and a silhouette drawn flat is
-     * the one everybody already knows how to read.
+     * <p>どちらも機体座標系なので、機体上の点は「各方向にどれだけ沿っているか」を問うだけで画面に置ける。投影は
+     * それが全てだ。透視投影は使わない。切手大の計器では何も得られないし、平面に描いたシルエットこそ誰もが読み方
+     * を知っている物だからだ。
      */
     record View(Vec3 right, Vec3 up) {
         /**
-         * The view of somebody standing behind a line and looking along it — which, for the line a
-         * round came in on, is the machine as the gunner saw it.
+         * 線の後ろに立ってそれに沿って見る者の視点——弾が飛来した線について言えば、砲手が見た機体の姿だ。
          */
         static View along(Vec3 line) {
             double flat = Math.sqrt(line.x * line.x + line.z * line.z);
             Vec3 look;
 
             if (flat < 1.0E-4) {
-                // Straight up or straight down: there is no bearing to take, so it is drawn from
-                // dead astern rather than from an angle picked out of the rounding.
+                // 真上か真下。取るべき方位が無いので、丸め誤差から拾った角度ではなく真後ろから描く。
                 look = new Vec3(0.0, 0.0, 1.0);
             } else {
                 double climb = Mth.clamp(Math.atan2(line.y, flat), -STEEPEST, STEEPEST);
@@ -158,22 +149,21 @@ final class Silhouette {
         }
 
         /**
-         * The line being looked along, back out of the two axes that were built from it.
+         * 見ている線を、そこから作った2軸から復元した物。
          *
-         * <p>Kept this way round rather than held as a third field because it is the clamped line
-         * that matters — the one the picture was actually built on — and reading it back off the two
-         * axes cannot disagree with them.
+         * <p>3つ目のフィールドとして持たずこの形にしてあるのは、重要なのがクランプ後の線——絵が実際に組まれた線
+         * ——だからだ。2軸から読み戻せば、その2軸と食い違うことはありえない。
          */
         Vec3 look() {
             return this.right.cross(this.up);
         }
 
-        /** How far a point lies to the right of the middle of the picture. */
+        /** 点が絵の中心からどれだけ右にあるか。 */
         double across(Vec3 point) {
             return point.dot(this.right);
         }
 
-        /** How far up it. */
+        /** 同じく、どれだけ上にあるか。 */
         double aloft(Vec3 point) {
             return point.dot(this.up);
         }

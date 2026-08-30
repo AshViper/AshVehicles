@@ -10,44 +10,40 @@ import net.minecraft.client.particle.SpriteSet;
 import net.minecraft.util.Mth;
 
 /**
- * The blast wave of something big going off: a ring racing outwards across the ground with a wall of
- * dust dragged along behind it.
+ * 大きな物が起爆したときの爆風。地面を外向きに走る環と、その後ろへ引きずられる土埃の壁。
  *
- * <p>Two decisions make it read as a wave rather than as a puff. It lies <b>flat</b>, turned into
- * the ground rather than turned to face the camera, because a ring that always faces you is a
- * smoke ring and a ring lying on the ground is a shockwave — and the whole of what a bomb's blast
- * looks like from the air is a circle spreading across the landscape. And it <b>slows down</b>: most
- * of the growth is in the first two or three ticks and it is barely moving by the end, which is what
- * an overpressure front actually does as it spends itself.
+ * <p>塊ではなく波に見せているのは2つの判断だ。<b>水平に寝かせる</b>——カメラを向けず地面へ倒す。常にこちらを向く環
+ * は煙の輪だが、地面に寝た環は衝撃波だからだ。上空から見た爆弾の爆風の姿は、風景を広がっていく円がその全てである。
+ * そして<b>減速する</b>——成長の大半は最初の2〜3tickにあり、終盤ではほとんど動かない。過圧の前面が自らを使い果たす
+ * ときに実際にやることだ。
  *
- * <p>The dust is thrown from here rather than sent from the server, so one packet buys the whole
- * wave: the ring is the only thing that knows where its own edge is at any moment, and everything
- * else follows from that.
+ * <p>土埃はサーバーからの送信ではなくここから撒くので、パケット1つで波全体を賄える。任意の瞬間に自分の縁がどこかを
+ * 知っているのは環だけであり、他は全てそこから導かれる。
  */
 public class ShockwaveParticle extends WeaponParticle {
     /**
-     * Flat on the ground: the quad is built in the XY plane, so a quarter turn about X lays it into
-     * XZ. It is a circle, so which way round it lies makes no difference.
+     * 地面に水平に。クアッドは XY 平面で組まれるので、X 軸周りに90度回すと XZ 平面へ寝る。円なので、どちら向きに
+     * 寝ても違いは無い。
      */
     private static final SingleQuadParticle.FacingCameraMode FLAT =
             (quaternion, camera, partialTick) -> quaternion.rotationX(-Mth.HALF_PI);
 
-    /** Ticks it takes to spend itself, and how many more for every block it has to cover. */
+    /** 使い果たすまでのtick数と、覆うべき1ブロックあたりの追加tick数。 */
     private static final int LIFE = 8;
     private static final float LIFE_PER_BLOCK = 0.5F;
-    /** How white the ring is next to the dust it is raising: this is squeezed air, not the ground. */
+    /** 巻き上げる土埃に対して環がどれだけ白いか。これは圧縮された空気であって地面ではない。 */
     private static final float PALE = 0.75F;
     private static final float OPACITY = 0.55F;
 
-    /** How much of its life the front is still tearing dust off the ground for. */
+    /** 前面が地面から土埃を剥がし続ける、寿命に対する割合。 */
     private static final float RAISES_DUST = 0.6F;
-    /** Puffs a tick, more of them the further round the ring has to go. */
+    /** 1tickあたりの粒数。環が回るべき距離が長いほど増える。 */
     private static final float DUST_PER_BLOCK = 0.42F;
     private static final int FEWEST_PUFFS = 3;
     private static final int MOST_PUFFS = 10;
-    /** How much of the front's own speed the dust behind it keeps. */
+    /** 後ろの土埃が前面の速度をどれだけ受け継ぐか。 */
     private static final double DUST_DRAG = 0.35;
-    /** And how hard it rolls upwards, which is what makes a wall of it rather than a smear. */
+    /** そしてどれだけ強く上へ巻き上がるか。染みではなく壁になるのはこれのおかげだ。 */
     private static final double DUST_LIFT = 0.06;
     private static final float DUST_SIZE = 1.4F;
 
@@ -66,7 +62,7 @@ public class ShockwaveParticle extends WeaponParticle {
         this.lifetime = LIFE + (int) (this.radius * LIFE_PER_BLOCK);
         this.raisingDust = (int) (this.lifetime * RAISES_DUST);
         this.quadSize = this.radius;
-        // It neither moves nor falls: the front is drawn by growing, not by going anywhere.
+        // 移動も落下もしない。前面は「どこかへ行く」のではなく「成長する」ことで描かれる。
         this.hasPhysics = false;
         this.setSprite(sprites.get(this.random));
     }
@@ -83,7 +79,7 @@ public class ShockwaveParticle extends WeaponParticle {
         }
     }
 
-    /** A ragged wall of whatever the ground is made of, laid down just inside the front. */
+    /** 地面の材質でできた不揃いな壁。前面のすぐ内側に敷く。 */
     private void raiseDust(float lived) {
         double reach = this.radius * expansion(lived);
         double speed = this.frontSpeed(lived) * DUST_DRAG;
@@ -112,14 +108,14 @@ public class ShockwaveParticle extends WeaponParticle {
         return FLAT;
     }
 
-    /** How far out the front is, from nothing to its whole reach. Fast at first and always slowing. */
+    /** 前面がどこまで出たか。0から全到達距離まで。最初が速く、常に減速する。 */
     private static float expansion(float lived) {
         float left = 1.0F - lived;
 
         return 1.0F - left * left;
     }
 
-    /** How fast it is travelling, in blocks a tick: the same curve, differentiated. */
+    /** 進行速度（ブロック/tick）。同じ曲線を微分した物。 */
     private double frontSpeed(float lived) {
         return 2.0 * this.radius * (1.0F - lived) / this.lifetime;
     }

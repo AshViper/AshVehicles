@@ -12,12 +12,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Lets a vehicle say where the camera goes.
+ * カメラ位置を機体側から指定できるようにする。
  *
- * <p>NeoForge's only camera event, ViewportEvent.ComputeCameraAngles, fires at the top of
- * {@link Camera#setup} and the position is written further down, so anything the event moves is
- * overwritten a moment later. The angles survive; the position has to be applied out here, once
- * vanilla has finished placing it.
+ * <p>NeoForge にあるカメラ用イベント ViewportEvent.ComputeCameraAngles は {@link Camera#setup} の
+ * 冒頭で飛ぶが、位置はその後で書き込まれるため、イベントで動かした位置は直後に上書きされる。角度は
+ * 残る。位置はバニラが置き終わったここで適用するしかない。
  */
 @Mixin(Camera.class)
 public abstract class CameraMixin {
@@ -25,8 +24,8 @@ public abstract class CameraMixin {
             at = @At("TAIL"))
     private void ashvehicles$placeVehicleCamera(BlockGetter level, Entity entity, boolean detached, boolean flipped,
             float partialTick, CallbackInfo callback) {
-        // One of the two at most: the rider is in an aircraft or in a ground vehicle or in neither,
-        // and each handler stands down for anything that is not its own.
+        // 効くのは多くても片方。搭乗者がいるのは機体か地上車両かどちらでもないかで、各ハンドラは自分の
+        // 担当でなければ何もしない。
         AircraftCameraHandler.placeCamera((Camera) (Object) this, entity, detached, partialTick);
         GroundVehicleCameraHandler.placeCamera((Camera) (Object) this, entity, detached, partialTick);
     }

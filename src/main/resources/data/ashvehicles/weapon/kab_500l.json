@@ -1,0 +1,33 @@
+{
+  "type": "bomb",
+  "item": true,
+  "ammo": 1,
+  "requires": "targeting_pod",
+  "firing": {
+    "rounds_per_second": 2.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 60.0,
+    "speed": 0.15,
+    "gravity": 0.0245,
+    "range": 4000.0,
+    "explosion": 13.0,
+    "tracer": "7C806E",
+    "trail": false
+  },
+  "guidance": {
+    "turn_rate": 2.2,
+    "lock_angle": 30.0,
+    "lock_range": 400.0,
+    "lock_ticks": 10,
+    "track_angle": 140.0,
+    "proximity": 2.0,
+    "seeker": "laser"
+  },
+  "sound": {
+    "volume": 1.0,
+    "pitch": 0.55
+  }
+}

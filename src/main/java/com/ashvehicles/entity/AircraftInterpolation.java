@@ -8,118 +8,101 @@ import org.joml.Vector3f;
 import org.joml.Vector3fc;
 
 /**
- * How an aircraft nobody here is flying gets drawn.
+ * こちらで誰も操縦していない機体をどう描くか。
  *
- * <p>Every client except the one at the controls sees this aircraft second-hand, from a stream of
- * positions and attitudes the server sends. The obvious way to use them — move a fraction of the way
- * towards the newest one each tick, which is what vanilla's own vehicle interpolation does — is
- * wrong in two separate ways, and both of them get worse the faster the aircraft is going. This
- * class exists to do neither.
+ * <p>操縦席のクライアント以外は全員、この機体を又聞きで——サーバーが送る位置と姿勢の連なりから——見ている。
+ * その素直な使い方、つまり毎tick最新値へ一定割合だけ近づける方法（バニラの乗り物補間がやっていること）は
+ * 2つの別々の意味で間違っており、しかもどちらも機体が速いほど悪化する。このクラスはそのどちらもやらない
+ * ために存在する。
  *
- * <h2>The standing lag</h2>
+ * <h2>定常遅れ</h2>
  *
- * <p>Vanilla closes a fixed fraction of the gap to the target each tick. Aim a tenth of the way at a
- * target that is itself moving {@code v} blocks a tick and the gap does not close to nothing: it
- * settles wherever the closing rate matches the target's speed, which is ten times {@code v} behind.
- * That is a <em>permanent</em> error proportional to speed, not a decaying one. It is invisible on a
- * boat doing a tenth of a block a tick. On an aircraft at three blocks a tick it is thirty blocks;
- * at this pack's top speeds it is nearer eighty. Everyone except the pilot was watching an aeroplane
- * most of a chunk behind where it really was — shooting at it, being hit by it, and looking at empty
- * sky where it appeared to be.
+ * <p>バニラは毎tick目標との差の一定割合を詰める。1tickに {@code v} ブロック進む目標に対して1/10ずつ詰めて
+ * も差はゼロに収束しない。詰める速度が目標の速度と釣り合う位置——つまり {@code v} の10倍後方——で落ち着く。
+ * これは減衰する誤差ではなく速度に比例した<em>恒久的な</em>誤差だ。1tickに0.1ブロック進むボートでは見えな
+ * い。1tickに3ブロック進む機体では30ブロック、このパックの最高速度なら80ブロック近くになる。パイロット
+ * 以外の全員が、実際の位置よりほぼ1 chunk 後ろの機体を見ていた——そこへ撃ち、そこから撃たれ、そして機体が
+ * 見えている場所には空しか無かった。
  *
- * <p>The cure is to stop chasing and start predicting. This keeps its own dead-reckoned pose that
- * advances at the aircraft's velocity every tick, which by construction has no lag at all for
- * anything flying a straight line, and only ever has to absorb the difference between that guess and
- * the truth.
+ * <p>治療は「追いかけるのをやめて予測を始める」こと。このクラスは毎tick機体の速度で進む推測航法の姿勢を
+ * 自前で保持する。直線飛行している物に対しては構造上まったく遅れず、吸収すべきはその予測と真値の差だけに
+ * なる。
  *
- * <h2>Three clocks, and why the aircraft used to stutter anyway</h2>
+ * <h2>3つの時計と、それでも機体がカクついていた理由</h2>
  *
- * <p>The prediction is only as good as the velocity driving it, and the honest velocity is not
- * something this side can measure. A piloted aircraft is flown on the pilot's client, relayed by the
- * server, and watched here: three twenty-hertz clocks, none of them in step, with a network between
- * each pair. What arrives is <em>not</em> one position update per tick. It is one per tick on
- * average, with ticks that get two and ticks that get none, for ever, because the clocks drift past
- * each other — and that is before a single packet is late.
+ * <p>予測の質は、それを駆動する速度の質までしか上がらない。そして正直な速度はこちら側では測れない。操縦
+ * されている機体はパイロットのクライアントで飛ばされ、サーバーが中継し、ここで見られている——20Hz の時計が
+ * 3つ、どれも同期しておらず、各ペアの間にネットワークがある。届くのは<em>1tickに1回の位置更新ではない</em>。
+ * 平均すれば1tickに1回だが、2回来る tick と1回も来ない tick が永遠に続く。時計が互いにずれていくからだ。
+ * しかもこれは、パケットが1つも遅延していない状態での話。
  *
- * <p>Working the velocity out from consecutive positions therefore reads a stutter that is not
- * there: two updates in one tick and the aircraft appears to be doing twice its speed, none the next
- * and it appears to have stopped. Dead reckoning on that estimate does not merely fail to help, it
- * amplifies the jitter into the drawn motion. So the velocity is not guessed here at all: the side
- * that actually knows — the pilot's client, or the server for an aircraft nobody is flying — sends
- * it, and both the speed and the turn rate arrive alongside the position. A tick that brings no
- * update now costs nothing, because the prediction already knew what to do with it.
+ * <p>だから連続する位置から速度を求めると、存在しないカクつきを読み取ることになる。1tickに更新が2回来れば
+ * 機体は倍速で飛んでいるように見え、次の tick に来なければ止まったように見える。その推定値で推測航法を
+ * 回すのは助けにならないどころか、揺らぎを描画の動きへ増幅する。だから速度はここで推測しない。本当に知って
+ * いる側——パイロットのクライアント、あるいは無人機ならサーバー——が送り、速度と旋回率が位置と一緒に届く。
+ * 更新の来ない tick はもうコストにならない。予測が既にその tick で何をすべきか知っているから。
  *
- * <h2>Absorbing a correction without a visible surge</h2>
+ * <h2>補正を「目に見える急加速」なしに吸収する</h2>
  *
- * <p>What is left is the difference between the prediction and the truth, and how that difference is
- * taken up is the whole of whether the aircraft looks smooth. Closing a fixed fraction of it each
- * tick — the obvious thing, and what this class used to do — is smooth in <em>position</em> but not
- * in speed: the tick a correction lands, the drawn step is the aircraft's own travel plus most of
- * the error, and the tick after it is back to normal. A correction worth one tick of travel
- * therefore draws one tick at nearly double speed. That is exactly the stutter it was supposed to
- * cure, and at three blocks a tick it is a two-block jump.
+ * <p>残るのは予測と真値の差で、その差の取り込み方が「機体が滑らかに見えるか」の全部を決める。毎tick一定
+ * 割合を詰める方法——素直なやり方で、このクラスも以前はそうしていた——は<em>位置</em>については滑らかだが
+ * 速度については滑らかでない。補正が届いた tick の描画ステップは「機体自身の移動＋誤差の大半」になり、次の
+ * tick には元に戻る。1tick分の移動量に相当する補正は、1tickをほぼ倍速で描くことになる。それはまさに治そう
+ * としていたカクつきであり、1tick 3ブロックの機体では2ブロックの跳びだ。
  *
- * <p>So the error is not decayed, it is <em>flown out</em>, by a critically damped spring: it carries
- * a rate of its own, that rate can only change gradually, and the drawn velocity is therefore
- * continuous across a correction instead of spiking on the tick it arrives. A correction changes how
- * the error will be taken up over the next several ticks and never what is drawn this one. Nothing
- * an aircraft does can put a step in the drawn speed, because there is no longer anywhere for a step
- * to come from.
+ * <p>だから誤差は減衰させず、臨界減衰のバネで<em>飛ばして消す</em>。誤差は自分の速度を持ち、その速度は
+ * 徐々にしか変わらないので、描画速度は補正をまたいで連続になり、届いた tick に跳ねない。補正が変えるのは
+ * 「今後数tickで誤差をどう取り込むか」であって、この tick に描かれる物ではない。機体が何をしても描画速度に
+ * 段差は入らない。段差の出どころがもうどこにも無いので。
  *
- * <p>The attitude is run the same way, on the same spring, in the same frame: an aeroplane's roll is
- * far more visible than its position — a wingtip travels much further than the fuselage does — and
- * an attitude that snapped to each update while the position was smoothed would put back, in the
- * part of the picture that shows it most, the stutter the position had just been rid of.
+ * <p>姿勢も同じやり方で、同じバネで、同じ枠組みで回す。機体のロールは位置よりずっと目立つ——翼端は胴体より
+ * ずっと大きく動く——ので、位置を滑らかにしながら姿勢だけ各更新へ飛びつかせれば、最も目に付く部分に、位置
+ * から取り除いたばかりのカクつきを戻すことになる。
  */
 public final class AircraftInterpolation {
 
-    /** Ticks a correction is taken up over, if the aircraft's file names none. */
+    /** 機体ファイルが値を書かない場合に、補正を取り込む tick 数。 */
     public static final int DEFAULT_CORRECTION_TICKS = 5;
 
-    /** Blocks of error beyond which the aircraft is simply put where it belongs. */
+    /** これを超える誤差なら、滑らせずに機体を本来の位置へ置く距離（ブロック）。 */
     public static final double DEFAULT_SNAP_DISTANCE = 8.0;
 
     /**
-     * Ticks of dead reckoning trusted after the last correction before this stops driving.
+     * 最後の補正から、推測航法を信じてこれを駆動し続ける tick 数。
      *
-     * <p>Without a bound, an aircraft whose server stops talking about it — the pilot disconnects,
-     * the entity stops being tracked, the server hitches — would coast on its last known velocity
-     * for ever while the real one sits still, and nothing could pull it back. Comfortably longer
-     * than the one-tick interval these are broadcast at, so it never trips in normal flight.
+     * <p>上限が無いと、サーバーが話題にしなくなった機体——パイロットが切断した、追跡対象から外れた、サーバー
+     * が詰まった——は最後に知っている速度で永遠に流れ続け、本体は静止したままで、引き戻す物が何も無くなる。
+     * これらが送られる1tick間隔より十分長いので、通常の飛行で発動することは無い。
      */
     public static final int DEFAULT_MAX_PREDICTION_TICKS = 10;
 
     /**
-     * Ticks at the end of that budget over which the prediction eases off rather than stopping dead.
+     * その予算の末尾で、予測を急停止させずに減衰させる tick 数。
      *
-     * <p>Running the reported velocity at full strength right up to the last tick of the budget and
-     * then cutting it puts a step in the drawn speed that is the whole of the aircraft's speed, which
-     * is the largest step this class can produce and exactly the thing the rest of it exists to
-     * prevent. What that looks like is an aeroplane flying normally and then simply stopping in
-     * mid-air, which is what a client sees of someone else's aircraft whenever half a second of
-     * updates goes missing — a hitch, a burst of packet loss, a server that skipped a beat.
+     * <p>報告された速度を予算の最後の tick まで全力で回してから切ると、描画速度に「機体の速度そのもの」と
+     * いう段差が入る。それはこのクラスが作り得る最大の段差であり、残りの全部がそれを防ぐために存在する当の
+     * 物だ。見た目は「普通に飛んでいた機体が空中でぴたりと止まる」で、更新が0.5秒欠けるたびにクライアントが
+     * 他人の機体について見る光景——一瞬の詰まり、パケットロスの塊、1拍飛ばしたサーバー。
      *
-     * <p>Eased off instead, the aircraft coasts to a halt over the tail of the budget, and the
-     * correction that eventually arrives is flown out from there by the spring like any other.
-     * Nothing about ordinary flight goes anywhere near this: an update every tick or two leaves the
-     * counter at one or two, and the prediction runs at full strength throughout.
+     * <p>減衰させれば、機体は予算の末尾にかけて惰性で止まり、やがて届く補正はそこからバネが他と同じように
+     * 飛ばして消す。通常の飛行がここに近づくことは無い。1〜2tickごとの更新ならカウンタは1か2のままで、予測
+     * は終始全力で走る。
      */
     private static final int COAST_OUT_TICKS = 4;
 
     /**
-     * Most a reported velocity is believed, in blocks per tick. Nothing in the mod flies anywhere
-     * near this; it is here so that a corrupt or hostile figure cannot fling an aircraft across the
-     * world between two corrections.
+     * 報告された速度を信じる上限（1tickあたりブロック）。MOD 内にこれに近い速度で飛ぶ物は無い。壊れた値や
+     * 悪意ある値が、2回の補正の間に機体を世界の反対側へ放り投げないようにするための物。
      */
     private static final double MAX_SPEED = 40.0;
 
-    /** Most a reported turn rate is believed, in radians a tick. A quarter turn a tick is already absurd. */
+    /** 報告された旋回率を信じる上限（1tickあたりラジアン）。1tickで1/4回転でも既に馬鹿げている。 */
     private static final float MAX_BODY_RATE = (float) (Math.PI / 2.0);
 
-    /** Attitude error past which there is nothing worth smoothing, in radians. */
+    /** これを超えたら滑らかにする価値の無い姿勢誤差（ラジアン）。 */
     private static final float SNAP_ANGLE = (float) Math.toRadians(90.0);
 
-    // Where the aircraft is really believed to be, dead-reckoned forward between corrections.
+    // 機体が実際にいると信じている位置。補正と補正の間は推測航法で進める。
     private double simX;
     private double simY;
     private double simZ;
@@ -127,7 +110,7 @@ public final class AircraftInterpolation {
     private double velY;
     private double velZ;
 
-    /** How far what is drawn sits from that prediction, per axis, and how fast that is closing. */
+    /** 描画位置がその予測からどれだけ離れているか（軸ごと）と、それが詰まる速度。 */
     private final Offset offsetX = new Offset();
     private final Offset offsetY = new Offset();
     private final Offset offsetZ = new Offset();
@@ -143,7 +126,7 @@ public final class AircraftInterpolation {
     private boolean seeded;
     private boolean hasLastTarget;
     private boolean snapRequested;
-    /** Whether the velocity is being told to this side rather than guessed from the position stream. */
+    /** 速度が、位置の流れから推測されたのではなくこちら側へ伝えられた物か。 */
     private boolean velocityReported;
     private int sinceCorrection;
 
@@ -151,15 +134,14 @@ public final class AircraftInterpolation {
     private double snapDistance = DEFAULT_SNAP_DISTANCE;
     private int maxPredictionTicks = DEFAULT_MAX_PREDICTION_TICKS;
 
-    /** The attitude being extrapolated, the last one that arrived, and the turn being carried on. */
+    /** 外挿中の姿勢、最後に届いた姿勢、そして継続中の旋回。 */
     private final Quaternionf simAttitude = new Quaternionf();
     private final Quaternionf lastAttitude = new Quaternionf();
-    /** Turn rate, radians a tick about the aircraft's own axes. See {@link Attitude#rotationVector}. */
+    /** 旋回率。機体自身の軸回りの1tickあたりラジアン。{@link Attitude#rotationVector} 参照。 */
     private final Vector3f spin = new Vector3f();
     /**
-     * The drawn attitude's offset from the prediction, on the same spring the position uses: the
-     * turn still to be made about each of the aircraft's own axes, in radians, in the order a
-     * rotation vector writes them — x through the wings, y through the canopy, z along the nose.
+     * 描画姿勢の予測からのずれ。位置と同じバネに乗る。機体自身の各軸回りにまだ残っている回転量（ラジアン）
+     * を、回転ベクトルの並び順で——x が翼を貫く軸、y がキャノピーを抜ける軸、z が機首方向。
      */
     private final Offset offsetAboutX = new Offset();
     private final Offset offsetAboutY = new Offset();
@@ -168,11 +150,11 @@ public final class AircraftInterpolation {
     private boolean rateReported;
     private int sinceAttitude;
 
-    /** Scratch, so drawing an attitude every tick does not allocate. */
+    /** 作業用。毎tickの姿勢描画でメモリ確保が起きないように。 */
     private final Quaternionf scratch = new Quaternionf();
     private final Vector3f scratchVector = new Vector3f();
 
-    /** Fed from the aircraft's file every tick; a craft learns its own tuning after it exists. */
+    /** 毎tick機体ファイルから与えられる。機体は存在した後で自分の調整値を知る。 */
     public void tune(int correctionTicks, double snapDistance, int maxPredictionTicks) {
         this.correctionTicks = Math.max(1, correctionTicks);
         this.snapDistance = Math.max(0.5, snapDistance);
@@ -195,7 +177,7 @@ public final class AircraftInterpolation {
         return renderZ;
     }
 
-    /** Where the aircraft is really believed to be, for anything that wants the target not the draw. */
+    /** 機体が実際にいると信じている位置。描画位置ではなく目標位置が欲しい側のため。 */
     public double targetX() {
         return seeded ? simX : renderX;
     }
@@ -208,7 +190,7 @@ public final class AircraftInterpolation {
         return seeded ? simZ : renderZ;
     }
 
-    /** Stops driving. The next update seeds again from scratch rather than from a stale pose. */
+    /** 駆動を止める。次の更新は古い姿勢からではなく最初から種を撒き直す。 */
     public void release() {
         releasePosition();
         hasAttitude = false;
@@ -221,12 +203,11 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * Gives up on the position alone and leaves the attitude running.
+     * 位置だけを諦め、姿勢は動かし続ける。
      *
-     * <p>The two arrive by different routes and go quiet for different reasons. An aircraft standing
-     * still is not sent position updates at all — there is nothing to say — while a helicopter
-     * turning on its wheels is sent attitudes every tick, and taking the silence on one as a reason
-     * to reset the other would put a hitch into the pedal turn for no reason whatsoever.
+     * <p>2つは別々の経路で届き、別々の理由で沈黙する。静止している機体には位置更新がそもそも送られない
+     * ——言うことが無いので——一方、車輪の上で旋回しているヘリコプターには毎tick姿勢が送られる。片方の沈黙を
+     * もう片方をリセットする理由にすれば、ペダルターンに何の理由も無く引っ掛かりが入る。
      */
     private void releasePosition() {
         seeded = false;
@@ -242,16 +223,14 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * Takes the velocity from the side that is actually flying the aircraft, in blocks a tick.
+     * 実際に機体を飛ばしている側から速度を受け取る（1tickあたりブロック）。
      *
-     * <p>This is the difference between a prediction that works and one that stutters, and it is
-     * worth being plain about why it cannot simply be measured here instead. Corrections do not
-     * arrive one a tick; they arrive one a tick <em>on average</em>, because the pilot's clock, the
-     * server's and this one all run at twenty hertz and none of them agree on when a tick starts.
-     * Differencing consecutive positions reads that drift as speed — double one tick, nothing the
-     * next — and the prediction would then carry the jitter into the drawn motion rather than
-     * absorbing it. The figure below has none of that in it: it is what the flight model actually
-     * produced, on the machine that ran it.
+     * <p>これが「機能する予測」と「カクつく予測」の分かれ目であり、なぜここで測ってはいけないのかをはっきり
+     * 書いておく価値がある。補正は1tickに1回届くのではない。1tickに1回<em>平均で</em>届く。パイロットの
+     * 時計、サーバーの時計、こちらの時計がどれも20Hz で、tick の始まりについて誰も一致していないからだ。
+     * 連続する位置の差分はそのずれを速度として読む——ある tick は倍、次の tick はゼロ——ので、予測は揺らぎを
+     * 吸収するどころか描画へ持ち込む。下の値にはそれが一切入っていない。飛行モデルが、それを走らせた機械の
+     * 上で実際に出した値だ。
      */
     public void receiveVelocity(double x, double y, double z) {
         double speed = Math.sqrt(x * x + y * y + z * z);
@@ -270,8 +249,8 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * Takes the turn rate from the side flying the aircraft, in radians a tick about its own axes,
-     * for the same reasons and against the same drift as {@link #receiveVelocity}.
+     * 機体を飛ばしている側から旋回率を受け取る。機体自身の軸回りの1tickあたりラジアンで、理由も、対抗して
+     * いるずれも {@link #receiveVelocity} と同じ。
      */
     public void receiveBodyRate(float aboutX, float aboutY, float aboutZ) {
         scratchVector.set(aboutX, aboutY, aboutZ);
@@ -287,16 +266,14 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * Takes a fresh authoritative position.
+     * 権威ある新しい位置を受け取る。
      *
-     * <p>Note what this does not do: it does not move the drawn pose. A correction re-aims the
-     * prediction and hands the whole of the difference to the spring, which is precisely what stops
-     * a correction from ever producing a visible step of its own. The one exception is an error too
-     * large to be flying error at all — a teleport, a respawn, an aircraft that was out of range and
-     * is back — where there is nothing to smooth and pretending otherwise would send it sliding
-     * across the world.
+     * <p>やらないことに注目。描画姿勢は動かさない。補正は予測を狙い直し、差の全部をバネへ渡す。それこそが、
+     * 補正自体が目に見える段差を作らない理由だ。例外は1つ、飛行誤差では有り得ないほど大きい誤差——テレポート、
+     * リスポーン、圏外から戻ってきた機体——の場合。そこには滑らかにすべき物が無く、そのふりをすれば機体を
+     * 世界の向こうまで滑らせることになる。
      *
-     * @param currentX where the aircraft is drawn right now, so a first correction can seed from it
+     * @param currentX 現在機体が描かれている位置。最初の補正がそこから種を撒けるように
      */
     public void receivePosition(double x, double y, double z,
             double currentX, double currentY, double currentZ) {
@@ -304,8 +281,8 @@ public final class AircraftInterpolation {
             simX = x;
             simY = y;
             simZ = z;
-            // Start from where the aircraft already is and let the spring fly the difference out,
-            // rather than putting it somewhere else the moment it is first heard about.
+            // 最初に存在を知った瞬間に別の場所へ置くのではなく、機体が既にいる場所から始めて、差はバネに
+            // 飛ばして消させる。
             offsetX.set(currentX - x);
             offsetY.set(currentY - y);
             offsetZ.set(currentZ - z);
@@ -322,15 +299,14 @@ public final class AircraftInterpolation {
             return;
         }
 
-        // Only ever a fallback. If the aircraft is reporting its velocity — everything in the mod
-        // does — this is not reached, and the note on receiveVelocity says why guessing is worse.
-        // Measured in ticks rather than wall-clock: a burst of packets landing together after a
-        // hitch would read as an enormous speed on a clock, and as the interval it really was here.
+        // 常に予備手段。機体が速度を報告していれば——MOD 内の全部がそうする——ここには来ない。推測が劣る
+        // 理由は receiveVelocity の説明にある。実時間ではなく tick で測るのは、詰まりの後にまとめて届いた
+        // パケット群が、実時間では途方もない速度に読めるのに対し、ここでは本当の間隔として読めるから。
         if (!velocityReported && hasLastTarget) {
             int gap = Math.max(1, sinceCorrection);
 
             receiveVelocity((x - lastTargetX) / gap, (y - lastTargetY) / gap, (z - lastTargetZ) / gap);
-            // Guessed, not told. Say so, or one guess would silence the next.
+            // 教えられたのではなく推測した値。そう記録しないと、1回の推測が次の推測を黙らせてしまう。
             velocityReported = false;
         }
 
@@ -340,8 +316,8 @@ public final class AircraftInterpolation {
         hasLastTarget = true;
         sinceCorrection = 0;
 
-        // The drawn pose stays exactly where it is: the prediction moves under it, and the offset
-        // takes up the difference. render = sim + offset before and after, to the last digit.
+        // 描画姿勢はその場に留まる。予測がその下で動き、ずれが差を受け取る。前後で render = sim + offset
+        // が最下位の桁まで保たれる。
         offsetX.shift(simX - x);
         offsetY.shift(simY - y);
         offsetZ.shift(simZ - z);
@@ -366,11 +342,10 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * Advances one tick of dead reckoning and flies out whatever error the drawn pose still carries.
+     * 推測航法を1tick進め、描画姿勢がまだ抱えている誤差を飛ばして消す。
      *
-     * @return whether the drawn pose should be applied to the aircraft this tick; false once the
-     *         prediction budget has run out with no correction, which hands the aircraft back rather
-     *         than letting it coast on a stale velocity for ever
+     * @return この tick の描画姿勢を機体へ適用すべきか。補正が来ないまま予測予算を使い切ったら false で、
+     *         古い速度で永遠に流れ続けさせるのではなく機体を返す
      */
     public boolean advance() {
         if (!seeded) {
@@ -400,7 +375,7 @@ public final class AircraftInterpolation {
         return true;
     }
 
-    /** True once, after a seed or a snap, to tell the caller to place the aircraft outright. */
+    /** 種撒きまたはスナップの後に1度だけ true。呼び出し側へ「機体をそのまま置け」と伝える。 */
     public boolean consumeSnap() {
         boolean snap = snapRequested;
         snapRequested = false;
@@ -408,13 +383,11 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * Takes a fresh authoritative attitude.
+     * 権威ある新しい姿勢を受け取る。
      *
-     * <p>Like a position, it re-aims the prediction and leaves what is drawn alone: the difference
-     * between the two goes to the spring in {@link #advanceAttitude} and is turned out over the next
-     * few ticks. Held as a rotation rather than as three angles throughout, because the aircraft this
-     * belongs to is built on a quaternion precisely so that it can fly through the vertical and roll
-     * inverted without an angle folding back on itself.
+     * <p>位置と同じく、予測を狙い直して描画中の物には触れない。両者の差は {@link #advanceAttitude} のバネ
+     * へ渡り、続く数tickで回して消される。全体を通じて3つの角度ではなく回転として保持するのは、この機体が
+     * まさに「天頂を突き抜け、背面へロールしても角度が折り返さない」ためにクォータニオンで組まれているから。
      */
     public void receiveAttitude(Quaternionfc authoritative) {
         if (!hasAttitude) {
@@ -429,11 +402,10 @@ public final class AircraftInterpolation {
             return;
         }
 
-        // What is on screen this instant, kept so the correction cannot move it.
+        // 今この瞬間に画面に出ている物。補正がそれを動かせないよう保持しておく。
         drawnAttitude(scratch);
 
-        // Fallback only, for an aircraft that is not reporting its turn rate: the whole rotation
-        // since the last authoritative attitude, divided down to one tick's worth.
+        // 旋回率を報告していない機体のための予備手段。前回の権威ある姿勢からの回転全体を1tick分へ割る。
         if (!rateReported) {
             int gap = Math.max(1, sinceAttitude);
 
@@ -446,9 +418,8 @@ public final class AircraftInterpolation {
         simAttitude.set(authoritative);
         sinceAttitude = 0;
 
-        // The drawn attitude, written as a turn away from the new prediction in the aircraft's own
-        // frame. The rates the spring is carrying are left alone: over the fraction of a degree a
-        // correction usually moves the prediction, the old frame and the new one are the same frame.
+        // 描画姿勢を、新しい予測からのずれとして機体自身の座標系で書く。バネが抱えている速度には触れない。
+        // 補正が予測を動かす量はたいてい1度の何分の一かで、その範囲では古い座標系と新しい座標系は同じ物。
         Vector3f error = Attitude.rotationVector(
                 scratch.premul(new Quaternionf(simAttitude).conjugate()).normalize());
 
@@ -465,16 +436,14 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * Keeps the attitude turning at the reported rate and flies out whatever is left over.
+     * 報告された速度で姿勢を回し続け、残った分を飛ばして消す。
      *
-     * <p>Without the first half the attitude would sit still between corrections and then have to
-     * cover the whole accumulated turn the instant the next one lands; without the second it would
-     * snap to each correction as it arrived. Both draw the same stutter, and an aeroplane shows it
-     * far more readily in roll than in position, a wingtip having so much further to travel.
+     * <p>前半が無ければ姿勢は補正の間ずっと静止し、次の補正が届いた瞬間に溜まった回転を全部こなす羽目に
+     * なる。後半が無ければ届いた補正ごとに飛びつく。どちらも同じカクつきを描き、機体はそれを位置よりロール
+     * ではるかに顕著に見せる。翼端の移動距離がずっと長いので。
      *
-     * <p>The turn is carried no longer than the position is dead-reckoned for. Past that the last
-     * rate heard is no longer evidence of anything, and an aircraft that has stopped being talked
-     * about should come to rest rather than wind on for ever about its own nose.
+     * <p>回転を継続する期間は位置の推測航法と同じ長さまで。それを超えれば最後に聞いた回転率はもう何の証拠
+     * でもないし、話題にされなくなった機体は自分の機首回りに永遠に回り続けるのではなく静止すべきだ。
      */
     public void advanceAttitude(Quaternionf out) {
         if (!hasAttitude) {
@@ -486,8 +455,8 @@ public final class AircraftInterpolation {
         float coast = (float) this.coasting(sinceAttitude);
 
         if (coast > 0.0F) {
-            // Eased off over the tail of the budget for the reason the position is, and rather more
-            // urgently: a roll that stopped dead is the most visible thing an aeroplane can do.
+            // 位置と同じ理由で予算の末尾にかけて減衰させる。しかもより切実に。急停止したロールは機体が
+            // できる最も目立つ動きだから。
             simAttitude.mul(Attitude.rotationOf(scratchVector.set(spin).mul(coast))).normalize();
         }
 
@@ -499,10 +468,10 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * How much of the reported velocity or turn rate the prediction still carries: all of it while
-     * there is budget in hand, easing to nothing as the last {@link #COAST_OUT_TICKS} of it run out.
+     * 報告された速度や旋回率のうち、予測がまだ運んでいる割合。予算が残っている間は全部、末尾の
+     * {@link #COAST_OUT_TICKS} を使い切るにつれてゼロへ減っていく。
      *
-     * @param since ticks since the last correction of the kind being advanced
+     * @param since 進めている種類の直近の補正からの tick 数
      */
     private double coasting(int since) {
         int left = maxPredictionTicks - since + 1;
@@ -516,7 +485,7 @@ public final class AircraftInterpolation {
         return left >= taper ? 1.0 : (double) left / taper;
     }
 
-    /** The prediction, turned by however much error the spring has still to take up. */
+    /** 予測を、バネがまだ取り込んでいない誤差の分だけ回した物。 */
     private void drawnAttitude(Quaternionf out) {
         scratchVector.set((float) offsetAboutX.value(), (float) offsetAboutY.value(), (float) offsetAboutZ.value());
         out.set(simAttitude).mul(Attitude.rotationOf(scratchVector)).normalize();
@@ -526,7 +495,7 @@ public final class AircraftInterpolation {
         return hasAttitude;
     }
 
-    /** Whether this attitude is news, or the same one the aircraft was already extrapolating from. */
+    /** その姿勢が新情報か、それとも機体が既に外挿元にしている物と同じか。 */
     public boolean isNewAttitude(Quaternionfc candidate) {
         return !hasAttitude
                 || candidate.x() != lastAttitude.x
@@ -536,18 +505,15 @@ public final class AircraftInterpolation {
     }
 
     /**
-     * One axis of the difference between where the aircraft is drawn and where it is predicted to
-     * be, closing under a critically damped spring.
+     * 機体の描画位置と予測位置の差の1軸分。臨界減衰のバネで詰まっていく。
      *
-     * <p>Critically damped is the point: the offset carries a rate, so it leaves and reaches zero
-     * gradually instead of lurching, and it does so without ever crossing to the other side and
-     * having to come back. What that buys is a drawn velocity that is continuous — the aircraft's own
-     * speed plus a rate that can only change a little each tick — so no correction, however it
-     * arrives, can put a step in how fast the aeroplane appears to be going.
+     * <p>臨界減衰であることが要点だ。ずれは速度を持つので、跳ねるのではなく徐々に離れ徐々にゼロへ達し、
+     * しかも反対側へ行き過ぎて戻ってくることが無い。それが買うのは連続な描画速度——機体自身の速度に、毎tick
+     * 少しずつしか変われない速度を足した物——であり、補正がどう届こうと「機体の見かけの速さ」に段差を入れ
+     * られなくなる。
      *
-     * <p>The step is the closed form of a critically damped spring over one tick rather than an
-     * Euler step of one, which matters because a tick is a long time next to the settling times
-     * wanted here: integrated naively, a two-tick spring is unstable and rings.
+     * <p>1tick分の更新はオイラー法ではなく臨界減衰バネの閉形式で行う。ここで欲しい整定時間に対して1tickは
+     * 長い時間であり、素朴に積分すると2tickのバネは不安定になって振動するから。
      */
     private static final class Offset {
         private double value;
@@ -557,7 +523,7 @@ public final class AircraftInterpolation {
             return value;
         }
 
-        /** Moves the offset without disturbing the rate: the prediction moved, not the drawing. */
+        /** 速度を乱さずにずれだけを動かす。動いたのは予測であって描画ではないので。 */
         void shift(double by) {
             value += by;
         }
@@ -571,10 +537,10 @@ public final class AircraftInterpolation {
             rate = 0.0;
         }
 
-        /** @param smoothTicks roughly how long the offset takes to be flown out */
+        /** @param smoothTicks ずれを飛ばして消すのにかかるおおよその tick 数 */
         void step(double smoothTicks) {
             double omega = 2.0 / smoothTicks;
-            // One tick, so the time step is one and drops out of everything below.
+            // 1tick分なので時間刻みは1になり、以下の式から消える。
             double decay = 1.0 / (1.0 + omega + 0.48 * omega * omega + 0.235 * omega * omega * omega);
             double travel = rate + omega * value;
 

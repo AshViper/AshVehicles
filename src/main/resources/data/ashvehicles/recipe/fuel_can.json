@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "c": {
+      "item": "minecraft:coal"
+    }
+  },
+  "pattern": ["###", "#c#", "###"],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:fuel_can"
+  }
+}

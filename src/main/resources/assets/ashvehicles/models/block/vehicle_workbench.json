@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top": "ashvehicles:block/vehicle_workbench_top",
+    "side": "ashvehicles:block/vehicle_workbench_side",
+    "bottom": "ashvehicles:block/vehicle_workbench_bottom"
+  }
+}

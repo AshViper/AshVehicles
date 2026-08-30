@@ -11,17 +11,16 @@ import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 
 /**
- * What every particle the mod draws is told when it is made: what colour it is and how big.
+ * この MOD が描くパーティクルが生成時に受け取る情報。色と大きさ。
  *
- * <p>One option class serves all of them, and the type it belongs to is carried in the option rather
- * than fixed by the class, so smoke and fire and grit are the same two numbers pointed at different
- * textures. That is what lets any of it be decided by a weapon's file — the smoke of one motor and
- * the smoke of another are the same particle in different colours — and what lets a chip knocked off
- * a block be the colour of the block it came off.
+ * <p>1つのオプションクラスで全種類をまかない、所属する型はクラスで固定せずオプションが持つ。だから煙も
+ * 炎も砂粒も「別のテクスチャを指した同じ2つの数値」になる。これが、色や大きさを兵装ファイルで決められる
+ * 理由（あるモーターの煙と別のモーターの煙は色違いの同じパーティクル）であり、ブロックから削れた欠片を
+ * 元のブロックの色にできる理由でもある。
  *
- * @param type which of the mod's particles this is
- * @param colour {@code RRGGBB}, multiplied into the texture, which is drawn white for the purpose
- * @param scale how big, as a multiplier on whatever that particle's ordinary size is
+ * @param type この MOD のどのパーティクルか
+ * @param colour {@code RRGGBB}。テクスチャに乗算する。そのためテクスチャは白で描かれている
+ * @param scale 大きさ。そのパーティクル本来の寸法に対する倍率
  */
 public record TintedParticleOption(ParticleType<TintedParticleOption> type, int colour, float scale)
         implements ParticleOptions {
@@ -44,8 +43,8 @@ public record TintedParticleOption(ParticleType<TintedParticleOption> type, int 
     }
 
     /**
-     * The type is not written out with the rest: whichever type's codec is doing the reading is the
-     * type the option belongs to, which is how one option class can serve several of them.
+     * 型は一緒に書き出さない。読んでいるコーデックの持ち主がそのままオプションの型になる。これが1つの
+     * オプションクラスで複数の型をまかなえる仕組み。
      */
     static MapCodec<TintedParticleOption> codec(ParticleType<TintedParticleOption> type) {
         return RecordCodecBuilder.mapCodec(instance -> instance.group(

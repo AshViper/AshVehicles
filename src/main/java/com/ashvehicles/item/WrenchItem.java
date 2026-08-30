@@ -9,20 +9,17 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 
 /**
- * The ground crew's tool: what an aeroplane is taken apart with.
+ * 整備員の工具。機体をばらすための道具。
  *
- * <p>Everything that undoes work on an aircraft asks for one of these. Click a loaded pylon with it
- * and the store comes off; click the aeroplane itself, once its pylons are bare, and the whole thing
- * folds back into the item it was put down from.
+ * <p>機体に対する作業を戻す操作はすべてこれを要求する。搭載済みパイロンをこれでクリックすれば兵装が
+ * 外れ、パイロンが空の状態で機体本体をクリックすれば、設置元のアイテムに畳まれて戻る。
  *
- * <p>It exists because that used to be a sneak-click, and a sneak-click is not something anybody
- * asks for on purpose. Crouching is how a player walks along a wing without falling off it, and
- * doing that near the fuselage packed the aeroplane away underneath them. Putting it behind a tool
- * means the aircraft can only be taken to pieces by somebody holding the thing that takes aircraft
- * to pieces.
+ * <p>これが存在するのは、以前それがスニーク＋クリックだったから。スニーク＋クリックは誰も意図して行う
+ * 操作ではない。しゃがみは翼の上を落ちずに歩くための姿勢で、胴体の近くでそれをやると足元の機体が畳まれ
+ * てしまった。工具の後ろに置けば、機体をばらせるのは「機体をばらす道具」を持っている者だけになる。
  *
- * <p>The item does nothing on its own; all of it is in
- * {@link com.ashvehicles.entity.AircraftEntity#interact}.
+ * <p>アイテム自体は何もしない。中身は全部
+ * {@link com.ashvehicles.entity.AircraftEntity#interact} にある。
  */
 public class WrenchItem extends Item {
     public WrenchItem(Properties properties) {

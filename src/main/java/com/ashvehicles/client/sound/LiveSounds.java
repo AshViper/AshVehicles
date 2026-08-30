@@ -12,25 +12,22 @@ import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.world.entity.Entity;
 
 /**
- * One live sound per entity, for the sounds that belong to a thing rather than to a moment.
+ * エンティティ1つにつき1本の継続音。瞬間ではなく物に属する音のための仕組み。
  *
- * <p>An engine, a motor and an undercarriage are all the same problem: something that goes on for as
- * long as the thing making it is doing what it does, and which nobody sends a packet about. The
- * answer each time is to keep a list of the entities this client can see and make sure every one of
- * them that ought to be making a noise has a sound running.
+ * <p>エンジン、モーター、降着装置はいずれも同じ問題だ。発生源がその動作を続ける限り鳴り続け、しかも誰もパケット
+ * を送らない音。答えは毎回同じで、このクライアントから見えるエンティティのリストを保持し、鳴っているべき物すべて
+ * に音が走っていることを保証する。
  *
- * <p>Written as a list of entities rather than a sound tied to each entity for life because a sound
- * is a channel, and channels are few. Anything out of earshot or not doing the thing gives its
- * channel back, {@link #tick} notices the gap and starts another when that changes, and a sound lost
- * to a resource reload or a volume slider comes back on its own.
+ * <p>各エンティティへ音を生涯結び付けるのではなくエンティティのリストとして書いてあるのは、音がチャンネルであり
+ * チャンネルは少ないからだ。可聴範囲外の物や動作していない物はチャンネルを返し、状況が変われば {@link #tick}
+ * が空きに気付いて別の音を開始する。リソースリロードや音量スライダーで失われた音も自ずと戻ってくる。
  *
- * <p>Starting is not attempted every tick. A sound that could not start — because the volume is
- * down, or there was no channel free — would otherwise be tried twenty times a second for as long as
- * the entity lived. The interval is measured against each entity's own age, so a sky full of them
- * spreads the attempts out rather than making them all together.
+ * <p>開始は毎tick試みない。開始できなかった音——音量が0、空きチャンネルが無い——は、そうしないとエンティティの
+ * 生存中ずっと毎秒20回試されることになる。間隔は各エンティティ自身の齢に対して測るので、空一杯のエンティティが
+ * あっても試行は一斉ではなく分散する。
  */
 public final class LiveSounds<T extends Entity> {
-    /** What to play for this entity right now, or null if it should not be making a noise yet. */
+    /** このエンティティに今鳴らすべき音。まだ鳴らすべきでなければ null。 */
     @FunctionalInterface
     public interface Starter<T> {
         @Nullable
@@ -40,7 +37,7 @@ public final class LiveSounds<T extends Entity> {
     private final Class<T> kind;
     private final int retryTicks;
     private final Starter<T> starter;
-    /** Entities in the current level, and the sound each one has, if it has one right now. */
+    /** 現在のレベルにいるエンティティと、それぞれが今持っている音（あれば）。 */
     private final Map<T, AbstractTickableSoundInstance> sounds = new HashMap<>();
 
     public LiveSounds(Class<T> kind, int retryTicks, Starter<T> starter) {
@@ -49,14 +46,14 @@ public final class LiveSounds<T extends Entity> {
         this.starter = starter;
     }
 
-    /** Takes note of an entity that has just come into the level, if it is one of ours. */
+    /** レベルへ入ってきたエンティティを、MOD の物なら記録する。 */
     public void offer(Entity entity) {
         if (this.kind.isInstance(entity)) {
             this.sounds.putIfAbsent(this.kind.cast(entity), null);
         }
     }
 
-    /** Leaving the world takes the whole list with it; the next one is somebody else's sky. */
+    /** ワールドを離れるときリストごと捨てる。次のワールドは別の空だ。 */
     public void forget() {
         this.sounds.clear();
     }

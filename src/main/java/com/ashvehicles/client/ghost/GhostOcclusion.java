@@ -19,57 +19,46 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
 /**
- * Whether the world stands between the camera and a ghost.
+ * カメラとゴーストの間に世界が立ち塞がっているか。
  *
- * <p>A ghost is drawn without fog and lit by nothing, so that it reads against the sky — and it
- * would read just as well straight through a mountain, which is worse than not drawing it. The
- * game's depth buffer catches part of this for free: ghosts depth-test against whatever the game
- * has drawn, so anything behind rendered terrain is already hidden. What escapes it is Distant
- * Horizons' terrain, which leaves no depth in the game's buffer at all; and, as a belt to those
- * braces, the game's own blocks are traced too.
+ * <p>ゴーストは霧無し・照明無しで描かれ、空を背に読める。だが山を突き抜けても同じように読めてしまい、それは描か
+ * ないより悪い。ゲームの深度バッファがその一部は無料で拾ってくれる。ゴーストはゲームが描いた物に対して深度テスト
+ * するので、描画済み地形の背後にある物は既に隠れる。逃れるのは Distant Horizons の地形だ。あれはゲームのバッファ
+ * に深度をまったく残さない。加えて念のため、ゲーム自身のブロックもトレースする。
  *
- * <p>So the line is traced twice: through the game's own blocks as far as the loaded world
- * reaches, on the game thread, which is cheap; and past that through Distant Horizons' LOD
- * columns, <em>on a worker thread</em>. That last part is not optional: the Distant Horizons data
- * repo loads what it is asked for on its own threads and blocks the caller until it arrives, and
- * those threads can in turn be waiting on the game thread — asked from the game thread it has
- * deadlocked the client outright. The worker waits instead; the ghost keeps its last answer until
- * the new one lands.
+ * <p>そこで線は2度トレースする。ロード範囲まではゲーム自身のブロックを、ゲームスレッドで——これは安い。その先は
+ * Distant Horizons の LOD 列を、<em>ワーカースレッドで</em>。最後の点は選択の余地が無い。Distant Horizons のデータ
+ * リポジトリは要求された物を自前のスレッドでロードし、届くまで呼び出し元をブロックする。そしてそれらのスレッドが
+ * 今度はゲームスレッドを待っていることがある——ゲームスレッドから問い合わせてクライアントを完全にデッドロックさせ
+ * た実績がある。代わりにワーカーが待ち、ゴーストは新しい答えが着くまで前回の答えを保つ。
  *
- * <p><b>Two points are aimed at, not one, in both halves.</b> A line to the middle of something
- * standing on the ground, from an eye at about the same height, skims the surface for its whole
- * length, and any rise of a single block along the way reports the thing as hidden when it is in
- * plain sight. So the middle is tried and the top of it as well, and it counts as hidden only when
- * both are blocked — which is also the honest answer to the question being asked, since a shape
- * with its fin showing over a ridge is visible. The line is stopped short of the point it is aimed
- * at, so that the ground a thing rests on is never counted as standing in front of it.
+ * <p><b>どちらの半分でも、狙う点は1つではなく2つだ。</b>地上に立つ物の中心へ、ほぼ同じ高さの視点から引いた線は
+ * 全長にわたって地表を掠めるので、途中に1ブロックの起伏があるだけで、丸見えの物を「隠れている」と報告する。だから
+ * 中心と上端の両方を試し、両方が塞がれたときだけ隠れていると数える——それが問いへの正直な答えでもある。尾翼が
+ * 尾根の上に見えている形は見えているのだから。線は狙う点の手前で止めるので、物が乗っている地面がその物の前に立つ
+ * 物として数えられることはない。
  *
- * <p>The second point matters more for Distant Horizons than for the game's own blocks, not less:
- * its terrain is an average of the real thing and gets coarser the further out it is drawn, so a
- * line that passes a few blocks over a distant ridge in the world can go straight through the
- * ridge as Distant Horizons has it. Asking about one point only — which is what this did until
- * 2026-08-21 — hides aeroplanes that are plainly in the air over the hill. The rays are still at
- * most two: the top is asked about only when the middle came back blocked.
+ * <p>2つ目の点は、ゲーム自身のブロックより Distant Horizons にとってこそ重要だ。あちらの地形は実物の平均であり、
+ * 遠くに描かれるほど粗くなるので、世界では遠い尾根の数ブロック上を通る線が、Distant Horizons の尾根では真っ直ぐ
+ * 貫通しうる。点を1つしか問わないと——2026-08-21 まではそうだった——丘の上空に明らかにいる機体が隠れてしまう。
+ * レイは今も最大2本だ。上端を問うのは中心が塞がれて戻ってきたときだけ。
  *
- * <p><b>None of it applies to a ghost standing inside the world the client has built.</b> The game
- * has drawn the terrain around it, the ghost is drawn at its real position with that terrain's own
- * light and fog, and the depth buffer therefore hides it exactly — per pixel, by the ground that is
- * actually in the way. Tracing a line as well can only overrule that, and it overrules it in one
- * direction: two points is a coarse way to describe a machine, and a sightline to something
- * <em>standing on the ground</em> grazes that ground for its whole length, so a single rise
- * anywhere along it hides a tank that is in plain view. Ground vehicles were being lost at the
- * hand-over distance for exactly that reason. Inside the built world the answer is always "not
- * hidden", and the depth buffer settles it.
+ * <p><b>クライアントが構築済みの世界の内側に立つゴーストには、この一切が適用されない。</b>ゲームはその周りの地形を
+ * 描いており、ゴーストは実位置にその地形自身の光と霧で描かれるので、深度バッファが正確に——ピクセル単位で、実際に
+ * 遮っている地面によって——隠してくれる。加えて線をトレースしてもそれを覆すだけであり、覆す向きは一方向だ。2点は
+ * 機体を表すには粗すぎるし、<em>地上に立つ</em>物への視線は全長にわたってその地面を擦るので、線上のどこか1つの
+ * 起伏が丸見えの戦車を隠す。地上車両が引き継ぎ距離で見失われていた理由はまさにそれだ。構築済み世界の内側では答え
+ * は常に「隠れていない」であり、深度バッファが決着させる。
  *
- * <p>Each remaining ghost is asked about every few ticks, not every frame, and the manager spreads
- * the asking out so that no one tick pays for all of them. The worker's queue is bounded; a check
- * that does not fit is dropped and the ghost asked again next time round.
+ * <p>残る各ゴーストへの問い合わせは毎フレームではなく数tickごとで、マネージャが問い合わせを分散させるので、1つの
+ * tickが全員分を払うことは無い。ワーカーのキューには上限がある。入り切らなかった判定は捨て、そのゴーストは次の巡回
+ * で改めて問う。
  */
 final class GhostOcclusion {
-    /** How many checks may wait for the worker at once. */
+    /** ワーカー待ちにできる判定の同時上限数。 */
     private static final int QUEUE_LIMIT = 64;
 
-    /** Blocks left off the end of a ray, so the ground a thing rests on is not "in front of" it. */
+    /** レイの終端で差し引くブロック数。物が乗っている地面をその物の「手前」と数えないため。 */
     private static final double TARGET_MARGIN = 1.5;
 
     private static ThreadPoolExecutor worker;
@@ -78,32 +67,32 @@ final class GhostOcclusion {
     }
 
     /**
-     * Begins a check: answers at once if the game's own blocks decide it, or hands the rest to the
-     * worker. Game thread.
+     * 判定を開始する。ゲーム自身のブロックで決着するなら即答し、そうでなければ残りをワーカーへ渡す。ゲーム
+     * スレッド。
      *
-     * @param eye where the camera is
-     * @param now the game tick, recorded as when the check began
-     * @return whether the check actually cost a ray. One the depth buffer already answers for costs
-     *         none, and the caller's ray budget should go to a ghost that needs it
+     * @param eye カメラ位置
+     * @param now ゲームtick。判定開始時刻として記録する
+     * @return 実際にレイを消費したか。深度バッファが既に答えている物はレイを消費しないので、呼び出し元のレイ予算
+     *         は必要とするゴーストへ回すべきだ
      */
     static boolean check(ClientLevel level, Vec3 eye, EntityGhost ghost, long now) {
         ghost.beginOcclusion(now);
 
         GhostSnapshot snapshot = ghost.current();
 
-        // Standing in the built world: not this method's business. See the note on the class.
+        // 構築済み世界の内側に立っている。このメソッドの管轄外だ。クラスの注記参照。
         if (GhostRenderDispatcher.isBuilt(BlockPos.containing(snapshot.position()))) {
             ghost.finishOcclusion(false);
 
             return false;
         }
-        // Only ground this client actually has can be asked about; beyond it every block reads as
-        // air, and following the line out there costs a great deal and finds nothing.
+        // 問い合わせられるのはこのクライアントが実際に持つ地面だけ。その外では全ブロックが空気と読まれるので、
+        // 線を追ってもコストばかりかかって何も見つからない。
         double loaded = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16.0;
         List<Vec3> candidates = new ArrayList<>(2);
 
-        // Whatever the game's own blocks do not already hide is what Distant Horizons is asked
-        // about; if neither point survives them there is nothing left to ask.
+        // ゲーム自身のブロックが隠していない分だけを Distant Horizons へ問う。どちらの点も生き残らなければ、
+        // 問うべき物は残っていない。
         for (Vec3 candidate : new Vec3[] { snapshot.centre(), snapshot.top() }) {
             if (!blockedByWorld(level, eye, candidate, loaded)) {
                 candidates.add(candidate);
@@ -116,8 +105,8 @@ final class GhostOcclusion {
             return true;
         }
 
-        // A point inside the loaded world that the blocks did not hide is a point in plain sight,
-        // and there is no Distant Horizons terrain between here and there to hide it either.
+        // ロード範囲内にあってブロックに隠されなかった点は丸見えの点だ。ここからそこまでの間に、それを隠す
+        // Distant Horizons の地形も存在しない。
         for (Vec3 candidate : candidates) {
             if (candidate.distanceTo(eye) <= loaded) {
                 ghost.finishOcclusion(false);
@@ -152,14 +141,14 @@ final class GhostOcclusion {
                 ghost.finishOcclusion(hidden);
             });
         } catch (RejectedExecutionException e) {
-            // The queue is full; keep the last answer and ask again next time.
+            // キューが一杯。前回の答えを保ち、次回また問う。
             ghost.finishOcclusion(ghost.isOccluded());
         }
 
         return true;
     }
 
-    /** Whether the game's own blocks, as far as the client has them, stand in the way of a point. */
+    /** クライアントが持つ範囲のゲーム自身のブロックが、ある点への行く手を塞いでいるか。 */
     private static boolean blockedByWorld(ClientLevel level, Vec3 eye, Vec3 target, double loaded) {
         Vec3 gap = target.subtract(eye);
         double away = gap.length();
@@ -175,14 +164,14 @@ final class GhostOcclusion {
         }
 
         Vec3 end = eye.add(gap.scale(reach / away));
-        // What the eye can see, so glass and foliage are not walls.
+        // 目に見えるかを基準にする。ガラスや葉は壁ではない。
         HitResult hit = level.clip(new ClipContext(eye, end,
                 ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, CollisionContext.empty()));
 
         return hit.getType() != HitResult.Type.MISS;
     }
 
-    /** Drops whatever is queued. Level change. */
+    /** キューの中身を捨てる。レベル変更時。 */
     static synchronized void reset() {
         if (worker != null) {
             worker.shutdownNow();

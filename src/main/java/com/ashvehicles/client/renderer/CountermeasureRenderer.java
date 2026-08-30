@@ -10,14 +10,14 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.resources.ResourceLocation;
 
 /**
- * Draws nothing, on purpose.
+ * 意図的に何も描かない。
  *
- * <p>A flare is fire and a cloud of chaff is foil dust; neither is an object with a shape, and both
- * are already drawn — by the entity itself, which throws its own particles every tick from wherever
- * it has fallen to. See {@link CountermeasureEntity}.
+ * <p>フレアは炎、チャフの雲は箔の粉塵であり、どちらも形を持つオブジェクトではないし、どちらも既に描かれている
+ * ——エンティティ自身が、落下した位置から毎tick自前のパーティクルを撒いている。{@link CountermeasureEntity}
+ * 参照。
  *
- * <p>This exists because the game insists on a renderer for every entity type it is asked to draw,
- * and will crash rather than assume one is not wanted.
+ * <p>これが存在するのは、ゲームが描画対象の全エンティティタイプにレンダラーを要求し、不要と見なす代わりに
+ * クラッシュするからだ。
  */
 public class CountermeasureRenderer extends EntityRenderer<CountermeasureEntity> {
     public CountermeasureRenderer(EntityRendererProvider.Context context) {

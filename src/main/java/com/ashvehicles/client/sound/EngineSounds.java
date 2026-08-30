@@ -16,32 +16,29 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
 
 /**
- * Gives every machine this client can see an engine note, and picks which recording it gets.
+ * このクライアントから見える全機体にエンジン音を与え、どの録音を使うかを選ぶ。
  *
- * <p><b>Which recording.</b> Sounds are ordinary resource-pack sounds: an entry in
- * {@code sounds.json} pointing at an {@code .ogg}. An vehicle is given, in order of preference,
- * the event its file names under {@code sound.engine}; the event named after it,
- * {@code <namespace>:engine.<name>}; or the mod's default {@code ashvehicles:engine.default}. An
- * event only counts if the resource pack actually has it and its file exists, so a missing or
- * misspelt recording falls through to the default rather than to silence.
+ * <p><b>どの録音を使うか。</b>音は普通のリソースパックの音だ。{@code sounds.json} のエントリが {@code .ogg} を
+ * 指す。車両には優先順に、ファイルが {@code sound.engine} で指定するイベント、車両名のイベント
+ * {@code <namespace>:engine.<name>}、MOD の既定 {@code ashvehicles:engine.default} が与えられる。イベントが有効
+ * なのはリソースパックが実際に持ちファイルも存在する場合だけなので、欠落や綴り間違いは無音ではなく既定へ落ちる。
  *
- * <p><b>When it plays.</b> Rather than tying one sound to each machine for life, {@link LiveSounds}
- * keeps the list and asks here for a sound whenever a machine has none; a sound stops itself once
- * it has nothing to say. That way parked machines cost nothing, and a machine whose sound was lost
- * to a resource reload or a muted volume slider gets it back on its own.
+ * <p><b>いつ鳴るか。</b>各機体へ音を生涯結び付けるのではなく、{@link LiveSounds} がリストを保持し、音を持たない
+ * 機体があるたびここへ音を求める。音は言うことが無くなれば自ら止まる。おかげで駐機中の機体はコスト0で済み、
+ * リソースリロードや音量ミュートで音を失った機体も自ずと取り戻す。
  */
 public final class EngineSounds {
-    /** How often a machine without a live sound is looked at again. */
+    /** 音が鳴っていない機体を再確認する間隔。 */
     private static final int RETRY_TICKS = 10;
 
-    /** Every machine this client can see, and the engine note each one has. */
+    /** このクライアントから見える全機体と、それぞれのエンジン音。 */
     public static final LiveSounds<VehicleEntityBase> SOUNDS =
             new LiveSounds<>(VehicleEntityBase.class, RETRY_TICKS, EngineSounds::start);
 
-    /** Requested sounds already complained about, so a missing file is one line in the log, not one a second. */
+    /** 既に警告した要求済みの音。欠落ファイルのログを毎秒1行ではなく計1行に留めるため。 */
     private static final Set<ResourceLocation> WARNED = new HashSet<>();
 
-    /** A note for a machine that is running and near enough to be heard, else nothing. */
+    /** 稼働中かつ可聴距離にある機体の音。該当しなければ null。 */
     @Nullable
     private static EngineSoundInstance start(VehicleEntityBase vehicle) {
         if (!EngineSoundInstance.isEngineRunning(vehicle)
@@ -53,9 +50,8 @@ public final class EngineSounds {
     }
 
     /**
-     * The engine recording for a machine: the one its file asks for, else the one named after it,
-     * else the default. Resolved afresh each time a sound is started, so a resource pack change is
-     * picked up without a restart.
+     * 機体のエンジン録音。ファイルが要求する物、無ければ機体名の物、無ければ既定。音を鳴らすたびに解決し直す
+     * ので、リソースパックの変更は再起動なしで反映される。
      */
     public static SoundEvent engineSound(SoundManager sounds, VehicleEntityBase vehicle) {
         VehicleChassis.Sound setup = vehicle.soundSetup();

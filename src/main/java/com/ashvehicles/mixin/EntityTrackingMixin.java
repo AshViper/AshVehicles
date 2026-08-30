@@ -4,6 +4,7 @@ import java.util.Set;
 
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.aircraft.AircraftDefinition;
+import com.ashvehicles.entity.DesignationEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
 
@@ -19,34 +20,34 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Keeps sending an aircraft, and anything it fires, to players long after the world around it has
- * stopped being sent.
+ * 機体と、その機体が撃った物を、周囲の世界の送信が止まったずっと後までプレイヤーへ送り続ける。
  *
- * <p>Minecraft decides who hears about an entity twice over: the entity's own tracking range, capped
- * at whatever the player's view distance is, and then whether that player has the entity's chunk
- * loaded at all. Both are the right answer for a cow. Neither is the right answer for an aeroplane
- * at altitude, which is visible from very much further away than the ground under it, and which
- * would otherwise wink out of the sky the moment it crossed the edge of the loaded world — most
- * obviously to anyone running a low vanilla render distance behind Distant Horizons, which is
- * exactly who wants to watch aircraft in the distance.
+ * <p>Minecraft はエンティティを誰に知らせるかを二重に決める。エンティティ型の追跡距離（プレイヤーの描画
+ * 距離で頭打ち）と、そのプレイヤーがエンティティの chunk をロードしているかどうか。牛にはどちらも正解
+ * で、高高度の機体にはどちらも不正解だ。機体は真下の地面よりずっと遠くから見えるのに、このままではロード
+ * 済み範囲の縁を越えた瞬間に空から消える。バニラの描画距離を低くして Distant Horizons を使っている人ほど
+ * 顕著で、そういう人こそ遠くの機体を眺めたい人でもある。
  *
- * <p>So for an aircraft both limits are set aside and its own {@code ghost_range} is used instead.
- * What arrives at that distance is a real entity, positioned and turned like any other, and
- * {@link com.ashvehicles.client.renderer.AircraftRenderer} draws it as a ghost once it is beyond the
- * world the player can actually see.
+ * <p>そこで機体については両方の制限を外し、代わりに自分の {@code ghost_range} を使う。その距離で届くの
+ * は位置も向きも普通に付いた本物のエンティティで、プレイヤーが実際に見えている世界の外に出たら
+ * {@link com.ashvehicles.client.renderer.AircraftRenderer} がゴーストとして描く。
  *
- * <p>A round or a missile gets the same treatment for the same reason, but keeps the range its
- * entity type was registered with. The view-distance cap is the part that matters there: a missile
- * is aimed at something three hundred blocks away and is worth watching all the way in, and a client
- * running eight chunks would otherwise lose sight of it at a hundred and twenty — while the aircraft
- * that fired it is still perfectly visible.
+ * <p>弾やミサイルも同じ理由で同じ扱いにするが、距離はエンティティ型に登録された値のまま。あちらで効いて
+ * いるのは描画距離による頭打ちの方だ。ミサイルは300ブロック先の相手を狙い着弾まで見る価値があるのに、
+ * 描画距離8チャンクのクライアントでは120ブロックで見失う——撃った機体はまだはっきり見えているのに。
  *
- * <p>Everything else is left exactly as it was: the entity still has to want to be broadcast to that
- * player, and every other entity in the game goes through the vanilla path untouched.
+ * <p>そして照準ポッドが保持している光点。これが最も極端な例で、マークが置かれるのは望遠鏡越しに見ている
+ * 地面、つまり誰もロードしておらず、しばしば1km以上先の地面だ。バニラのままではパイロットは指示した直後
+ * に「何も保持していない」と告げられる。計器も、ポッドカメラも、マークを手放すキーも、まず機体に何を
+ * 保持しているか訊き、次に世界へその位置を訊くが、こちら側の世界はそれを知らされないまま。描画物は無い
+ * ので、コストは目標を持っている間の毎秒1個の位置パケットだけ。
+ *
+ * <p>それ以外は一切そのまま。エンティティ側がそのプレイヤーへの送信を望んでいる必要はあるし、ゲーム中の
+ * 他のエンティティは全部バニラの経路を通る。
  */
 @Mixin(targets = "net.minecraft.server.level.ChunkMap$TrackedEntity")
 public abstract class EntityTrackingMixin {
-    // Declared with the same access the real fields have, which is what mixin checks against.
+    // 実フィールドと同じアクセス修飾子で宣言する。mixin はそこを照合する。
     @Shadow
     @Final
     ServerEntity serverEntity;
@@ -66,16 +67,16 @@ public abstract class EntityTrackingMixin {
         if (this.entity instanceof VehicleEntityBase machine) {
             callback.cancel();
             this.ashvehicles$report(player, withinGhostRange(machine, player));
-        } else if (this.entity instanceof VehicleProjectile) {
+        } else if (this.entity instanceof VehicleProjectile || this.entity instanceof DesignationEntity) {
             callback.cancel();
-            // The range its entity type was registered with, in blocks, and nothing else: it is
-            // the capping against the player's view distance that has to go, not the range itself.
+            // エンティティ型に登録された距離をブロック単位にしただけ。外すべきはプレイヤーの描画距離
+            // による頭打ちであって、距離そのものではない。
             this.ashvehicles$report(player,
                     this.ashvehicles$within(player, this.entity.getType().clientTrackingRange() * 16.0));
         }
     }
 
-    /** Vanilla's own bookkeeping, once this has decided for itself whether the player can see it. */
+    /** 見えるかどうかを自前で決めた後の、バニラ本来の登録処理。 */
     private void ashvehicles$report(ServerPlayer player, boolean inRange) {
         if (inRange && this.entity.broadcastToPlayer(player)) {
             if (this.seenBy.add(player.connection)) {
@@ -87,17 +88,15 @@ public abstract class EntityTrackingMixin {
     }
 
     /**
-     * Whether this player is near enough to go on hearing about the machine.
+     * このプレイヤーが、その機体の情報を受け取り続けるだけ近くにいるか。
      *
-     * <p>One whose file sets no limit is always near enough: it is reported wherever it is, for as
-     * long as both are in the same world. That is a decision about a handful of entity types rather
-     * than about the world, and there are never many machines, so the cost is a position packet a
-     * tick each rather than anything that scales with how big the world is.
+     * <p>ファイルに上限を書いていない機体は常に「十分近い」。同じワールドにいる限りどこにいても送られる。
+     * これはワールドについての判断ではなく数種類のエンティティ型についての判断で、機体の数は元々多く
+     * ないので、コストはワールドの広さに比例する何かではなく1機あたり毎tick 1個の位置パケット。
      *
-     * <p>Tanks are here for the same reason aircraft are, if not quite so obviously. A tank does not
-     * fly, but the ground it sits on is visible from as far away as any of it, and a column crossing
-     * a valley two kilometres off is exactly the thing somebody with Distant Horizons running is
-     * looking out at. Left to vanilla it would vanish at the edge of the loaded chunks.
+     * <p>戦車がここにいる理由は機体と同じ。ただし少し分かりにくい。戦車は飛ばないが、戦車が乗っている
+     * 地面は戦車と同じ距離から見えるし、2km 先の谷を渡る車列こそ Distant Horizons を入れた人が眺めている
+     * 物だ。バニラに任せればロード済み chunk の縁で消える。
      */
     private boolean withinGhostRange(VehicleEntityBase machine, ServerPlayer player) {
         VehicleChassis.Hitbox hitbox = machine.hitbox();
@@ -105,7 +104,7 @@ public abstract class EntityTrackingMixin {
         return !hitbox.hasGhostLimit() || this.ashvehicles$within(player, hitbox.ghostRange());
     }
 
-    /** Flat distance, as vanilla measures tracking: how high something is has nothing to do with it. */
+    /** バニラの追跡判定と同じ水平距離。高さは関係しない。 */
     private boolean ashvehicles$within(ServerPlayer player, double range) {
         double dx = player.getX() - this.entity.getX();
         double dz = player.getZ() - this.entity.getZ();

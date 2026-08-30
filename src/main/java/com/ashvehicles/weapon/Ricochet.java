@@ -11,124 +11,113 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * A round thrown off armour instead of going into it.
+ * 装甲に入らず弾かれた弾。
  *
- * <p>What decides it is one angle: how far off square the round struck the plate, measured from the
- * plate's own normal. A shot arriving head-on has all of its speed pointed into the metal and goes
- * in; the same shot arriving nearly along the surface has almost none of it pointed into anything,
- * skids, and leaves. Between the two there is a band a few degrees wide where it may do either,
- * because a real one does — the same gun at the same angle bites one round and throws the next.
+ * <p>決めるのは1つの角度だけ。装甲板の法線から測って、弾がどれだけ直角から外れて当たったか。正面から
+ * 来た弾は速度の全部が金属へ向いているので入る。同じ弾が表面に沿うように来れば、何かへ向いた成分はほぼ
+ * 無く、滑って去る。その2つの間には数度幅の帯があり、そこではどちらも起こり得る。実物がそうだから——
+ * 同じ砲が同じ角度で、ある弾は食い込み次の弾は弾かれる。
  *
- * <p><b>The slope is not a figure anywhere.</b> It does not have to be. A machine's boxes lie at
- * whatever angle the machine is lying at — see {@link Hitbox} — so the plate a shot meets is the
- * plate that is really there: a hull turned to meet the fire, a tank sitting nose-up on a bank, a
- * turret traversed away from the shot. All of that arrives here as the angle, already worked out by
- * the geometry, and a crew angling their hull are doing the one thing that actually helps rather
- * than triggering a rule about it. What the files carry is only the two halves nothing can derive:
- * how well the round bites ({@code ricochet} on the round) and how good the plate is
- * ({@code armour} on the vehicle).
+ * <p><b>傾斜角はどこにも数値として無い。</b> 必要ないからだ。機体の箱は機体が寝ている角度のまま寝ている
+ * （{@link Hitbox} 参照）ので、弾が出会う装甲板は本当にそこにある板になる。射線に向けて振った車体、
+ * 土手で機首を上げた戦車、射線から旋回して外れた砲塔。それら全部が幾何計算済みの角度としてここへ届き、
+ * 車体を傾ける乗員は「傾斜についての規則を発動させる」のではなく「実際に効く唯一のこと」をしている。
+ * ファイルが持つのは導出できない2つの半分だけ——弾の食い込みやすさ（弾側の {@code ricochet}）と装甲板の
+ * 良さ（車両側の {@code armour}）。
  *
- * <p>A round thrown off is still a round. It goes on flying, on a new line, having lost most of its
- * speed and with it most of what it was worth — see {@link #energy} — and it can hit whatever is
- * behind or beside the thing that threw it off. That includes the thing itself: a shot that skids
- * off a glacis into the turret ring is exactly the shot everybody who has ever aimed at a tank is
- * hoping for.
+ * <p>弾かれた弾も弾のままだ。速度の大半とともに価値の大半を失いつつ（{@link #energy} 参照）新しい線上を
+ * 飛び続け、弾いた物の後ろや横にある物に当たり得る。弾いた物自身も含めて——前面装甲を滑って砲塔リングへ
+ * 入る一撃こそ、戦車を狙った者全員が願っている当たり方。
  */
 public final class Ricochet {
-    /** The tail of the sound event's name: {@code weapon.<weapon>.ricochet}. */
+    /** 音イベント名の末尾。{@code weapon.<weapon>.ricochet} の形。 */
     public static final String SOUND_ROLE = "ricochet";
 
-    /** What any weapon with no clang of its own falls back on. Named by the server. */
+    /** 専用の跳弾音を持たない兵装のフォールバック。サーバーが指定する。 */
     public static final ResourceLocation SOUND = ResourceLocation.fromNamespaceAndPath(
             AshVehicles.MODID, WeaponMounts.SOUND_PREFIX + SOUND_ROLE);
 
     /**
-     * How loud a ricochet is, on the same scale a weapon's report uses: the figure is a reach rather
-     * than a loudness. Under a gun's own, and deliberately — a round skidding off a turret is a hard
-     * noise but it is not the gun going off, and the person who most needs to hear it is the one who
-     * fired, a long way away.
+     * 跳弾音の大きさ。兵装の発砲音と同じ尺度で、この数値は音量ではなく到達距離。発砲音より小さいのは意図
+     * 的で、砲塔を滑る弾は硬い音ではあっても発砲そのものではないし、最も聞く必要があるのは遠く離れた発射
+     * 側だから。
      */
     public static final float VOLUME = 0.9F;
-    /** Pitched up, because it is a strike on plate rather than anything going off inside it. */
+    /** 高めのピッチ。中で何かが炸裂したのではなく装甲板を叩いた音なので。 */
     public static final float PITCH = 1.35F;
 
     /**
-     * The two together, as the one object both ends of the sound read them from.
+     * 上の2つを、音の送受信両側が読む1つのオブジェクトにまとめた物。
      *
-     * <p>The server asks it how far the clang should carry and the client asks it how loud that
-     * comes to where the listener is standing; they have to be the same figures or the sound arrives
-     * at the wrong loudness or not at all. See {@link WeaponDefinition.SoundSetup#packetVolume()}.
+     * <p>サーバーは「どこまで届くか」を、クライアントは「聴き手の位置でどれだけの音量か」を訊く。同じ
+     * 数値でなければ、音は間違った音量で届くか、まったく届かない。
+     * {@link WeaponDefinition.SoundSetup#packetVolume()} 参照。
      */
     public static final WeaponDefinition.SoundSetup SOUND_SETUP =
             new WeaponDefinition.SoundSetup(Optional.empty(), VOLUME, PITCH);
 
     /**
-     * How many times one round may be thrown off before it is spent.
+     * 1発の弾が弾かれてよい回数。
      *
-     * <p>A cap rather than a rule about energy, and it is here to end the one case the arithmetic
-     * cannot: a round skidding between two plates that face each other has somewhere to go for as
-     * long as it has speed, and each bounce leaves it enough to make the next. Two is past what
-     * anybody will notice and well short of a round living in the running gear.
+     * <p>エネルギーの規則ではなく上限であり、計算では終わらせられない唯一の場合を終わらせるためにある——
+     * 向かい合った2枚の板の間を滑る弾は速度がある限り行き先があり、各跳ね返りが次を生む分の速度を残す。
+     * 2回は誰も気付かない範囲を超えており、走行装置に住み着く弾には遠く及ばない。
      */
     public static final int MOST = 2;
 
-    /** How much of its speed a round keeps as it is thrown off. */
+    /** 弾かれる際に弾が保持する速度の割合。 */
     public static final double SPEED_KEPT = 0.55;
 
     /**
-     * How far past the margin a hit is allowed the round is put before it flies on, in blocks.
+     * 弾かれた弾を飛ばし直す前に、命中判定の余裕からさらにどれだけ外へ出すか（ブロック）。
      *
-     * <p>Added to that margin rather than used alone, and it has to be. Every test that looks for a
-     * hit grows the box first — vanilla by a third of a block, and the mod matches it — so a round
-     * left on the surface, or anywhere inside that margin, is still inside the box as far as the next
-     * tick is concerned. A line that starts inside a box comes back with where it started, so the
-     * round would be thrown off the same plate again, from the same place, until it ran out of
-     * bounces. Past the margin there is nothing to be thrown off and it simply leaves.
+     * <p>その余裕に「足す」値であり、そうでなければならない。命中を探す判定はどれもまず箱を膨らませる
+     * （バニラは1/3ブロック、この MOD もそれに合わせている）ので、表面に置いた弾やその余裕の内側に置いた
+     * 弾は、次の tick から見てまだ箱の中にいる。箱の内側から始まる線分は開始点を返すので、弾は同じ板から
+     * 同じ場所で、跳ね返り回数を使い切るまで弾かれ続ける。余裕の外へ出せば弾かれる相手が無く、そのまま
+     * 去る。
      */
     public static final double CLEARANCE = 0.05;
 
     /**
-     * How wide the band between never and always is, in degrees.
+     * 「絶対に弾かれない」と「必ず弾かれる」の間の帯の幅（度）。
      *
-     * <p>At the round's own angle it is thrown off one time in none, and this far past it one time
-     * in one, with the odds running evenly between. The band matters more than either end: without
-     * it the angle is a wall, and a gunner who has found one degree past it is not fighting a tank
-     * any more, they are fighting a number.
+     * <p>弾自身の角度ちょうどでは確率0、そこからこの幅だけ超えれば確率1、間は線形。両端より帯そのものが
+     * 重要だ。帯が無ければ角度は壁になり、そこから1度超えた場所を見つけた砲手はもう戦車ではなく数値と
+     * 戦っている。
      */
     private static final double BAND = 12.0;
 
-    /** How much a ricochet wanders off the line the geometry gives it, as a share of its speed. */
+    /** 跳弾が幾何的な線からどれだけ外れるか。速度に対する割合で。 */
     private static final double SCATTER = 0.06;
 
     /**
-     * How much of the round's push into the plate comes back out of it.
+     * 板へ押し込んだ分のうち、跳ね返って出てくる割合。
      *
-     * <p>Well under half, so that a ricochet hugs the plate rather than mirroring off it. A shot
-     * thrown off armour is not a ball off a wall — it is a hardened lump skidding along a slope,
-     * shedding the part of its speed that was pointed into the metal and keeping the part that was
-     * pointed along it — and what leaves is travelling nearly the way the plate runs. Which is also
-     * why a ricochet off the glacis so often goes into the turret.
+     * <p>半分をかなり下回る値にして、跳弾が鏡面反射ではなく板に沿うようにする。装甲に弾かれた弾は壁に
+     * 当たったボールではない。硬い塊が斜面を滑り、金属へ向いていた速度成分を捨て、板に沿った成分を保つ
+     * ——出ていく物はほぼ板の走る方向へ進む。前面装甲からの跳弾がしばしば砲塔へ入る理由でもある。
      */
     private static final double REBOUND = 0.25;
 
-    /** Below this a direction is no direction at all, and the normal stands in for it. */
+    /** これ未満は方向として扱わず、法線で代用する。 */
     private static final double NOTHING = 1.0E-9;
 
     private Ricochet() {
     }
 
-    /** The sound event for one weapon's ricochet, which a pack may record on its own. */
+    /** 1兵装分の跳弾音イベント。パック側が独自に用意してもよい。 */
     public static ResourceLocation soundFor(ResourceLocation weapon) {
         return weapon.withPath(WeaponMounts.SOUND_PREFIX + weapon.getPath() + "." + SOUND_ROLE);
     }
 
     /**
-     * How far off square a round struck a plate, in degrees from the plate's own normal.
+     * 弾が板に対してどれだけ直角から外れて当たったか。板自身の法線からの角度（度）。
      *
-     * @param velocity where the round was going. Need not be a unit vector
-     * @param normal the plate's outward unit normal, from {@link Hitbox#normalAt}
-     * @return nought for a square hit and ninety for one along the surface, or ninety for a round
-     *         that was somehow already leaving, which is the angle that bites least
+     * @param velocity 弾の進行方向。単位ベクトルでなくてよい
+     * @param normal 板の外向き単位法線。{@link Hitbox#normalAt} から得る
+     * @return 直角命中で0、表面に沿う命中で90。何らかの理由で既に離れつつある弾も90（最も食い込まない
+     *         角度）
      */
     public static double angle(Vec3 velocity, Vec3 normal) {
         double speed = velocity.length();
@@ -137,24 +126,22 @@ public final class Ricochet {
             return 90.0;
         }
 
-        // Into the plate is against its normal, so the square hit is the one whose dot is -1.
+        // 板へ入る向きは法線と逆なので、内積 -1 が直角命中になる。
         double square = -velocity.dot(normal) / speed;
 
         return Math.toDegrees(Math.acos(Mth.clamp(square, 0.0, 1.0)));
     }
 
     /**
-     * Whether the plate throws this round off rather than letting it in.
+     * 板がこの弾を、通すのではなく弾くか。
      *
-     * <p>Both halves are asked for whole rather than as one number worked out beforehand, because
-     * the two mean different things and only one of them can say never. A round whose file gives it
-     * no angle at all is never thrown off by anything, however good the plate — that is a shaped
-     * charge, or a bomb, and what it does on contact is go off. Armour, on the other hand, only ever
-     * moves the angle, and armour good enough to take the angle down to nothing still does not throw
-     * off a shot that arrived dead square: there is no angle left in that hit to skid along.
+     * <p>2つの値をあらかじめ1つの数にせず別々に受け取るのは、両者の意味が違い、「絶対に無い」と言える方
+     * が片方だけだから。ファイルが角度をまったく与えていない弾は、板がどれだけ良くても決して弾かれない
+     * ——それは成形炸薬か爆弾で、接触時にすることは炸裂だ。一方の装甲は角度を動かすだけで、角度を0まで
+     * 削るほど良い装甲でも、真正面から来た弾は弾けない。その当たりには滑るべき角度が残っていないから。
      *
-     * @param round the round that struck, for the angle it needs before it can be thrown off at all
-     * @param armour what the plate is worth, in degrees off that angle
+     * @param round 当たった弾。弾かれるために必要な角度を持っている
+     * @param armour 板の価値。その角度から引く度数
      */
     public static boolean thrownOff(Vec3 velocity, Vec3 normal, WeaponDefinition.Projectile round,
             float armour, RandomSource random) {
@@ -168,12 +155,11 @@ public final class Ricochet {
     }
 
     /**
-     * Where the round goes once the plate has thrown it off.
+     * 弾かれた弾がどこへ行くか。
      *
-     * <p>The part of its speed that was pointed along the plate is kept; the part that was pointed
-     * into it mostly is not, and what comes back out is {@link #REBOUND} of it. The whole is then
-     * cut to {@link #SPEED_KEPT}, because a round that has just skidded the length of a glacis is
-     * not the round that arrived.
+     * <p>板に沿っていた速度成分は保ち、板へ向いていた成分は大半が失われ、戻ってくるのはその
+     * {@link #REBOUND} 倍。その全体をさらに {@link #SPEED_KEPT} 倍に削る。前面装甲を端から端まで滑った
+     * 弾は、到着した時の弾とは別物だから。
      */
     public static Vec3 away(Vec3 velocity, Vec3 normal, RandomSource random) {
         double speed = velocity.length();
@@ -182,9 +168,8 @@ public final class Ricochet {
         Vec3 wandered = thrown.add(random.nextGaussian() * scatter,
                 random.nextGaussian() * scatter, random.nextGaussian() * scatter);
 
-        // Never back into the plate. The scatter is small and the rebound points out of it, so this
-        // only ever catches a round thrown off almost exactly along the surface -- and along the
-        // surface is where that one should go.
+        // 板の中へ戻すことは決してしない。散らばりは小さく跳ね返りは板の外を向くので、ここに引っ掛かる
+        // のは表面にほぼ完全に沿って弾かれた弾だけ——そしてその弾が行くべき先は表面に沿った方向。
         if (wandered.dot(normal) < 0.0) {
             wandered = wandered.subtract(normal.scale(wandered.dot(normal)));
         }
@@ -197,12 +182,10 @@ public final class Ricochet {
     }
 
     /**
-     * What a round is still worth after being thrown off however many times, as a share of what it
-     * was worth when it left the barrel.
+     * 何度か弾かれた後の弾の価値。砲口を出た時の価値に対する割合。
      *
-     * <p>The speed it kept, and nothing else. A round carries its damage in how fast it is going, so
-     * one that has skidded off a turret roof and gone on into a truck should not arrive at the truck
-     * as though it had come straight from the gun.
+     * <p>保持した速度だけで決まる。弾は威力を速度として持ち運ぶので、砲塔上面を滑ってからトラックへ入った
+     * 弾が、砲から直接来たのと同じ威力でトラックに届いてはいけない。
      */
     public static float energy(int deflections) {
         return (float) Math.pow(SPEED_KEPT, Math.max(deflections, 0));

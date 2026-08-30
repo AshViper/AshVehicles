@@ -1,47 +1,156 @@
 package com.ashvehicles.client;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.EjectionSeat;
 import com.ashvehicles.entity.VehicleEntityBase;
+import com.ashvehicles.network.EjectPayload;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.MovementInputUpdateEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * One key gets a crew member out of anything in the mod, and it is alt.
+ * MOD 内のあらゆる乗り物から降りるキーは1つで、alt だ。
  *
- * <p>Shift cannot be it. In a cockpit shift is the throttle, and a pilot climbing away from the
- * ground with the throttle open would step out of the aeroplane doing it. That was moved to alt for
- * the pilot alone to begin with, which left everybody else — the passengers sitting behind the
- * pilot, and the whole crew of a tank — getting out on a key the cockpit had quietly taken away.
- * One key for every seat of every machine is the whole point of this.
+ * <p>shift ではありえない。コックピットで shift はスロットルであり、スロットルを開けて上昇中のパイロットは
+ * その操作で機外へ出てしまう。最初はパイロットだけ alt へ移したが、それは他の全員——パイロット後席の搭乗者や
+ * 戦車の全乗員——を、コックピットが黙って奪ったキーで降りる羽目にした。全機体の全座席で1キーにするのがこの
+ * クラスの目的の全てだ。
  *
- * <p>Getting out is decided on the server, from the shift state the client reports in its input
- * packet. This fires the moment the input has been read and before that packet goes out, so
- * rewriting the flag here is all it takes: hold alt and the server hears what it expects to hear,
- * hold shift and it hears nothing.
+ * <p>降車の判断はサーバーが、クライアントが入力パケットで報告する shift 状態から行う。これは入力が読まれた
+ * 直後、そのパケットが出る前に発火するので、ここでフラグを書き換えるだけで足りる。alt を押せばサーバーは期待
+ * 通りの内容を受け取り、shift を押しても何も受け取らない。
  *
- * <p>The line vanilla writes across the screen on climbing in names the key <em>it</em> thinks does
- * this, which is shift and is now wrong. {@code MountHintMixin} asks here for the one that works.
+ * <p><b>射出座席のある機体では同じキーが2つの意味を持つ。</b>叩けば降りる、押し続ければ飛び出す。だから
+ * そこでは報告を遅らせる——押している間は shift を伏せ、離した時にまだ1秒に満たなければ、その1tickだけ
+ * 立てて降車させる。伏せずに素通しすると、長押しの1tick目でサーバーが降車させてしまい、長押しはこの世に
+ * 存在できない。
+ *
+ * <p>乗り込み時にバニラが画面へ出す行は、<em>バニラが</em>この役目だと思っているキーを名指しする。それは shift
+ * であり、今や誤りだ。{@code MountHintMixin} が実際に効くキーをここへ問い合わせる。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class VehicleDismountHandler {
+    /**
+     * ハンドルを引き切るまでの長さ（tick）。
+     *
+     * <p>1秒。叩いて降りる操作と取り違える余地が無く、かつ機体が地面に届く前に間に合う長さ。短くすれば
+     * 降りるつもりの人が飛び出し、長くすれば飛び出すつもりの人が墜落に間に合わない。
+     */
+    private static final int HOLD_TICKS = 20;
+
+    /** 今このキーを押し続けている tick 数。押していなければ 0。 */
+    private static int held;
+
+    /** この押し込みで既に射出したか。離すまで次は無い。 */
+    private static boolean fired;
+
+    /** 離した瞬間に立て、1tick だけサーバーへ報告する降車要求。 */
+    private static boolean leaving;
+
     @SubscribeEvent
     public static void onMovementInputUpdate(MovementInputUpdateEvent event) {
-        if (isAboard(event.getEntity())) {
-            event.getInput().shiftKeyDown = ModKeyMappings.DISMOUNT.isDown();
+        Entity rider = event.getEntity();
+
+        if (!isAboard(rider)) {
+            reset();
+
+            return;
+        }
+
+        boolean down = ModKeyMappings.DISMOUNT.isDown();
+
+        if (!canEject(rider)) {
+            // 射出座席の無い物——戦車、艦、ヘリ——では従来通り、押した瞬間に降りる
+            reset();
+            event.getInput().shiftKeyDown = down;
+
+            return;
+        }
+
+        if (down) {
+            hold();
+        } else {
+            release();
+        }
+
+        // 押している間は伏せる。立つのは離した直後の1tickだけ
+        event.getInput().shiftKeyDown = take();
+    }
+
+    /** 押し続けている間。引き切れば射出し、以後は離すまで何も起きない。 */
+    private static void hold() {
+        if (fired) {
+            return;
+        }
+
+        held++;
+
+        if (held >= HOLD_TICKS) {
+            fired = true;
+            held = HOLD_TICKS;
+
+            PacketDistributor.sendToServer(EjectPayload.INSTANCE);
         }
     }
 
-    /** Whether this rider is sitting in one of ours, in any seat, flying or driving or neither. */
+    /** 離した。引き切る前なら、それは「降りる」という意味だった。 */
+    private static void release() {
+        if (held > 0 && !fired) {
+            leaving = true;
+        }
+
+        held = 0;
+        fired = false;
+    }
+
+    /** 溜めていた降車要求を1度だけ渡す。 */
+    private static boolean take() {
+        boolean now = leaving;
+
+        leaving = false;
+
+        return now;
+    }
+
+    private static void reset() {
+        held = 0;
+        fired = false;
+        leaving = false;
+    }
+
+    /** この搭乗者が MOD の乗り物のいずれかの座席にいるか。操縦中・運転中・それ以外を問わない。 */
     public static boolean isAboard(Entity rider) {
         return rider != null && rider.getVehicle() instanceof VehicleEntityBase;
     }
 
-    /** The key vanilla's "press this to get out" line ought to be naming. */
+    /** 今乗っている物に射出座席があるか。 */
+    private static boolean canEject(Entity rider) {
+        return rider.getVehicle() instanceof AircraftEntity aircraft && EjectionSeat.has(aircraft);
+    }
+
+    /**
+     * ハンドルの引き具合（0〜1）。射出座席のある機体で自分がキーを押している間だけ 0 より大きい。
+     * 画面がこれを目盛りにする。{@link AircraftHud} 参照。
+     */
+    public static float ejectCharge() {
+        Minecraft minecraft = Minecraft.getInstance();
+
+        if (minecraft.player == null || !canEject(minecraft.player)) {
+            return 0.0F;
+        }
+
+        return Mth.clamp((float) held / HOLD_TICKS, 0.0F, 1.0F);
+    }
+
+    /** バニラの「降りるにはこれを押す」行が名指しすべきキー。 */
     public static Component dismountKeyName() {
         return ModKeyMappings.DISMOUNT.getTranslatedKeyMessage();
     }

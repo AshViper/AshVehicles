@@ -1,25 +1,32 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 4
     },
-    "N": {
-      "tag": "c:ingots/netherite"
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 2
     },
-    "Q": {
-      "tag": "c:storage_blocks/diamond"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 3
     },
-    "R": {
-      "item": "minecraft:redstone_block"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "H": {
-      "item": "minecraft:chain"
+    {
+      "item": "ashvehicles:engine",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:avionics",
+      "count": 3
     }
-  },
-  "pattern": ["#R#", "NQN", "H#H"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:pantsir_s1"

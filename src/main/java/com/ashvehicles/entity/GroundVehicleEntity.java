@@ -8,6 +8,7 @@ import javax.annotation.Nullable;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.vehicle.Attitude;
+import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 import com.ashvehicles.vehicle.Ride;
@@ -54,112 +55,96 @@ import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 /**
- * Shared behaviour for every ground vehicle in the mod: a simple drivetrain, a hull that lies on
- * whatever it is standing on, a turret aimed independently of both, and the damage handling that
- * turns a tank into a burning one.
+ * MOD 内の全地上車両に共通する挙動。単純な駆動系、乗っている地面に沿って寝る車体、その両方と独立に照準
+ * される砲塔、そして戦車を炎上させるダメージ処理。
  *
- * <p><b>Where the movement runs.</b> As with an aircraft and with vanilla's boats, a vehicle is
- * simulated by whoever "controls" it: the driving client while a player is in the seat, otherwise
- * the server. That is what {@link #isControlledByLocalInstance()} decides. Position, yaw and pitch
- * reach the server through vanilla's ServerboundMoveVehiclePacket; the hull's roll, its speed and
- * where the turret is pointing have no vanilla equivalent, so the client sends them in
- * {@link com.ashvehicles.network.GroundVehicleInputPayload} and the server mirrors them into
- * synched data for everyone else.
+ * <p><b>移動処理が走る場所。</b>航空機やバニラのボートと同じく、車両は「操作している側」がシミュレートする。
+ * プレイヤーが座っている間は運転クライアント、それ以外はサーバー。判定は {@link #isControlledByLocalInstance()}。
+ * 位置・ヨー・ピッチはバニラの ServerboundMoveVehiclePacket でサーバーへ届く。車体のロール、速度、砲塔の指向
+ * にはバニラの対応物が無いのでクライアントが
+ * {@link com.ashvehicles.network.GroundVehicleInputPayload} で送り、サーバーが同期データへ複製して他全員へ渡す。
  *
- * <p><b>What makes this not an aeroplane.</b> An aircraft chooses its attitude and the world has no
- * say in it. A tank is the other way round: the driver chooses a heading and nothing else, and the
- * hull's pitch and roll are read off the ground under its tracks every tick. So the attitude here is
- * built rather than integrated — a heading the driver steers, plus two angles the terrain dictates —
- * which is why there is no accumulated rotation to drift and nothing to normalise.
+ * <p><b>航空機との違い。</b>航空機は自分で姿勢を決め、世界に口出しの余地は無い。戦車は逆で、運転手が決めるのは
+ * 進行方向だけ、車体のピッチとロールは毎tick履帯の下の地面から読み取る。つまりここでの姿勢は積分ではなく
+ * 組み立てだ——運転手が操る方位＋地形が決める2角——だから累積回転のドリフトも正規化も存在しない。
  *
- * <p>The turret is the one thing aimed in spite of all that. It is held in the hull's frame and
- * wound back by however far the hull has just turned, so a turret laid on a target stays laid on it
- * while the hull crosses a ditch underneath. That is what a stabiliser does, and it is the
- * difference between a tank and a self-propelled gun.
+ * <p>砲塔だけはその全てに逆らって照準される。車体座標系で保持し、車体が回った分だけ巻き戻すので、目標に
+ * 据えた砲塔は車体が下で溝を越えても据わったまま。それがスタビライザーの仕事であり、戦車と自走砲の違いだ。
  */
 public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity {
     /**
-     * Which way the hull is lying, as a rotation. Minecraft gives an entity a heading and an
-     * elevation and no roll at all, which cannot describe a tank across a slope, so the real
-     * attitude is carried here and the vanilla angles are kept in step behind it.
+     * 車体がどう寝ているかを回転として保持。Minecraft はエンティティに方位と仰角しか与えずロールが無く、
+     * 斜面を横切る戦車を表現できない。よって本当の姿勢はここが持ち、バニラの角度は後ろで追随させる。
      */
     private static final EntityDataAccessor<Quaternionf> DATA_ATTITUDE =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.QUATERNION);
     /**
-     * How fast it is going along its own nose, in blocks a tick, from whichever side is driving.
+     * 自機の前方向への速度（ブロック/tick）。運転している側から送られる。
      *
-     * <p>Only one machine runs the movement, and every other copy has to draw the vehicle from a
-     * stream of positions. Working the speed back out of that stream reads the drift between three
-     * unsynchronised clocks as speed; sending the figure costs one float a tick and is what the road
-     * wheels turn at and the engine note is pitched from.
+     * <p>移動を回すのは1台だけで、他のコピーは位置の流れから車両を描くしかない。その流れから速度を逆算すると
+     * 同期していない3つの時計のずれを速度として読んでしまう。送るコストは1tickあたりfloat 1個で、これが
+     * 転輪の回転速度でありエンジン音のピッチ元。
      */
     private static final EntityDataAccessor<Float> DATA_SPEED =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.FLOAT);
-    /** Where the turret is pointing, in degrees from dead ahead of the hull, positive to the right. */
+    /** 砲塔の指向。車体正面からの角度（度）、右が正。 */
     private static final EntityDataAccessor<Float> DATA_TURRET_YAW =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.FLOAT);
-    /** How far the gun is elevated above the turret roof line, in degrees; negative is depressed. */
+    /** 砲塔上面線からの砲の仰角（度）。負が俯角。 */
     private static final EntityDataAccessor<Float> DATA_GUN_PITCH =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.FLOAT);
-    /** Rounds left for the main armament. */
+    /** 主兵装の残弾。 */
     private static final EntityDataAccessor<Integer> DATA_ROUNDS =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     /**
-     * Ticks until the gun is loaded again, counting down.
+     * 装填完了までのtick数。カウントダウン。
      *
-     * <p>Sent because every side needs it and none of them could work it out. It is the gauge the
-     * crew fire on, it is what the barrel's recoil is drawn from — and a counter that has just
-     * jumped up from nothing <em>is</em> the news that the gun has fired, so it does the work of an
-     * event as well without being one. See {@link com.ashvehicles.weapon.BuiltInGun}.
+     * <p>全員が必要とし、誰も自力では算出できないので送る。乗員が発砲判断に使う計器であり、砲身の後座を描く
+     * 元でもある——そして0から跳ね上がったカウンタは「発砲した」という報せそのものなので、イベントでないまま
+     * イベントの仕事もこなす。{@link com.ashvehicles.weapon.BuiltInGun} 参照。
      */
     private static final EntityDataAccessor<Integer> DATA_RELOAD =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     /**
-     * The coaxial's belt and its own wait between rounds.
+     * 同軸機銃のベルト残量と、その独自の発射間隔。
      *
-     * <p>A second pair rather than a share of the first. The two barrels are loaded separately, are
-     * fired separately and run out separately, and a machine gun that went quiet because the loader
-     * was busy with a shell would be a machine gun nobody could rely on.
+     * <p>1つ目を分け合うのではなく2つ目の組を持つ。2つの銃身は別々に装填され、別々に撃たれ、別々に尽きる。
+     * 装填手が砲弾に掛かりきりで黙る機関銃など誰も当てにできない。
      */
     private static final EntityDataAccessor<Integer> DATA_COAX_ROUNDS =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_COAX_RELOAD =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
-    /** Missiles left in the tubes, and the wait before the next one may go. */
+    /** 発射筒に残るミサイル数と、次弾までの待ち時間。 */
     private static final EntityDataAccessor<Integer> DATA_MISSILES =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_MISSILE_RELOAD =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     /**
-     * Which of the two armaments the trigger fires.
+     * トリガーがどちらの兵装を撃つか。
      *
-     * <p>Synched because the instruments are drawn from it and because the server is what decides
-     * it: the key press arrives in a packet, and every other client has to draw the same sight the
-     * crew are looking at.
+     * <p>計器がこれを元に描かれ、決めるのがサーバーなので同期する。キー入力はパケットで届き、他の全クライアント
+     * は乗員が見ているのと同じ照準を描かねばならない。
      */
     private static final EntityDataAccessor<Boolean> DATA_MISSILE_MODE =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.BOOLEAN);
     /**
-     * What the seeker is holding, as the entity number, and how far along the lock has got.
+     * シーカーが捉えている対象のエンティティ番号と、ロックの進行度。
      *
-     * <p>Sent rather than worked out, for the reason everything about a seeker is sent: deciding
-     * what a weapon is pointed at is not something a client may do. Two figures are the whole of
-     * what the instruments need -- which thing to draw the box round, and how nearly closed it is --
-     * and the progress is already scaled against the missile own lock_ticks, so a client needs to
-     * know nothing about the round in the tubes to draw it.
+     * <p>シーカー関連が全部そうであるように、算出ではなく送信する。兵器が何を向いているかの決定はクライアント
+     * の仕事ではない。計器に必要なのはこの2つの数値だけ——どれに枠を描くか、どこまで閉じたか——で、進行度は
+     * 既にミサイル自身の lock_ticks で正規化済み。だからクライアントは筒の中の弾について何も知らずに描ける。
      */
     private static final EntityDataAccessor<Integer> DATA_LOCK_TARGET =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Float> DATA_LOCK_PROGRESS =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.FLOAT);
     /**
-     * How hard the wheel is over, from -1 to 1.
+     * ハンドルの切れ量。-1〜1。
      *
-     * <p>Sent for the same reason the speed is: only one machine runs the driving, and every other
-     * copy has to draw the vehicle from a stream of positions. It cannot be worked back out of that
-     * stream either -- a wheeled vehicle cannot turn at all standing still, so a driver holding full
-     * lock at a stop changes nothing anybody could measure, and yet the front wheels are plainly
-     * over. What the wheels follow is the driver, not the hull.
+     * <p>速度と同じ理由で送る。運転を回すのは1台だけで、他は位置の流れから描くしかない。しかもこれは流れから
+     * 逆算もできない——装輪車は停止中に旋回できないので、停止中に全舵を当てても誰にも測れる変化は起きないのに、
+     * 前輪は明らかに切れている。車輪が追うのは車体ではなく運転手だ。
      */
     private static final EntityDataAccessor<Float> DATA_STEER =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.FLOAT);
@@ -167,201 +152,180 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
 
-    /** Blocks a tick squared. Vanilla's figure, applied by us because we move the vehicle ourselves. */
+    /** ブロック/tick^2。バニラの値だが、車両を自前で動かすので自前で適用する。 */
     private static final double GRAVITY = 0.08;
-    /** Terminal velocity, so a vehicle that drives off a cliff does not fall through the world. */
+    /** 終端速度。崖から落ちた車両が世界を突き抜けないように。 */
     private static final double MAX_FALL = 3.0;
 
     /**
-     * How far above and below the hull the ground is looked for, in blocks.
+     * 車体の上下どこまで地面を探すか（ブロック）。
      *
-     * <p>{@code PROBE_ABOVE} is a compromise between two things that pull opposite ways. It has to
-     * reach the corner of the vehicle on the steepest slope it can hold, or the reading is capped
-     * and the hull lies flatter than the hill it is on — half a five-block track on a thirty-five
-     * degree slope puts a corner a block and three quarters above the middle. But it must also stay
-     * <em>under</em> the roof of anything the vehicle could sensibly drive into, because a probe
-     * that starts inside a tunnel ceiling reports the ceiling as the ground and the vehicle refuses
-     * to enter. Two blocks sees a step of two and fits under a tunnel of three.
+     * <p>{@code PROBE_ABOVE} は逆方向へ引っ張る2つの要求の妥協点。登坂可能な最急斜面での車両の角に届かないと
+     * 読み値が頭打ちになり、車体が坂より寝てしまう——5ブロック履帯の半分が35度斜面なら角は中心より1.75ブロック
+     * 上になる。一方で、車両が普通に入りうる物の天井より<em>下</em>に収める必要もある。トンネル天井の内側から
+     * 始まったプローブは天井を地面として報告し、車両は進入を拒む。2ブロックなら段差2を見て、高さ3のトンネルに
+     * 収まる。
      *
-     * <p>Capping errs the safe way in any case: a reading held down by this makes a rise look
-     * smaller than it is, which lets a vehicle through rather than stopping it against nothing.
+     * <p>頭打ちは安全側に外れる。これで抑えられた読み値は登りを実際より小さく見せるので、何も無い所で止まるより
+     * 車両を通す方に転ぶ。
      */
     private static final double PROBE_ABOVE = 2.0;
     private static final double PROBE_BELOW = 3.0;
 
     /**
-     * How near the top of the probe a reading has to be to count as the probe's own ceiling rather
-     * than a surface, in blocks.
+     * 読み値を「地表」ではなく「プローブ自身の上限」と見なすための、上端からの許容幅（ブロック）。
      *
-     * <p>A trace that begins inside a block comes back a thousandth of its own length below where it
-     * began — see {@code VoxelShape.clip}, which nudges the start before asking whether it is inside
-     * — so the reading sits a hair under {@link #PROBE_ABOVE} rather than exactly on it. A
-     * centimetre of allowance covers that and is far below anything terrain is measured in.
+     * <p>ブロック内部から始めたトレースは開始点より自身の長さの1/1000だけ下を返す——{@code VoxelShape.clip} が
+     * 内部判定の前に開始点をずらすため——ので読み値は {@link #PROBE_ABOVE} ちょうどではなく僅かに下に来る。
+     * 1cm の余裕でそれを吸収でき、地形の測定単位よりはるかに小さい。
      */
     private static final double PROBE_CEILING_SLACK = 0.05;
 
-    /** Speeds below this are nothing: the vehicle is standing still and should be left standing. */
+    /** これ未満の速度は0扱い。車両は停止しており、停止させたままにすべき。 */
     private static final float STANDSTILL = 1.0E-4F;
 
     /**
-     * How much of full lock the steered wheels swing in one tick.
+     * 操舵輪が1tickで振れる量を、全舵角に対する割合で。
      *
-     * <p>A fraction of the lock rather than a rate in degrees, so that a vehicle with a lot of lock
-     * and one with a little both take the same few ticks to reach it -- which is what a driver
-     * winding a wheel over actually looks like, and is a thing nobody is going to want to tune
-     * separately for every vehicle. A fifth of the way a tick is a little over a quarter of a second
-     * from straight ahead to hard over.
+     * <p>度/tick ではなく割合にしてあるので、舵角の大きい車両も小さい車両も全舵まで同じtick数で届く——実際に
+     * 運転手がハンドルを回す様子はそれだし、車両ごとに個別調整したい類の値でもない。1tickあたり1/5なら、直進
+     * から全舵まで0.25秒強。
      */
     private static final float STEER_SWING = 0.22F;
 
     /**
-     * How tall a gap has to be before it is worth tracing at all, in blocks.
+     * トレースする価値が生じる隙間の高さ（ブロック）。
      *
-     * <p>A vehicle whose whole height is inside its own step height has nothing overhead that could
-     * stop it, and a trace of no length is a trace worth not making.
+     * <p>全高が自身の段差高に収まる車両には、止めうる頭上物が存在しない。長さ0のトレースは行わない方がよい。
      */
     private static final double HEADROOM_MARGIN = 0.1;
 
     /**
-     * A crumb of slack on the climb test, in blocks.
+     * 登坂判定に持たせる僅かな遊び（ブロック）。
      *
-     * <p>A ground reading is where a ray met a block face, worked out along that ray, so two probes
-     * standing on faces exactly a block apart can disagree about that block by the last bit of a
-     * double. Taken strictly, whether a tank drives over a one-block kerb — which {@code
-     * climb_height: 1.0} plainly says it does, and which is every riser of a forty-five degree
-     * slope — would come down to which way that bit happened to fall.
+     * <p>地面の読み値はレイがブロック面に当たった位置をレイ上で算出した物なので、ちょうど1ブロック差の面に立つ
+     * 2つのプローブが double の最下位ビット分だけ食い違いうる。厳密に取ると、戦車が1ブロックの縁石を越えられる
+     * か——{@code climb_height: 1.0} が明らかに越えると言っており、45度斜面の全ての段差でもある——が、その1
+     * ビットの転び方次第になってしまう。
      */
     private static final double CLIMB_SLACK = 1.0E-3;
 
     /**
-     * How much further above the hull than a step the crushing starts, in blocks.
+     * 破砕の開始高さを、段差より更にどれだけ車体上方へ上げるか（ブロック）。
      *
-     * <p>The floor of the volume a vehicle breaks its way through is a step above the plane its own
-     * suspension is lying along — the same line the climb test draws, so that what stops the vehicle
-     * and what it clears are the one set of blocks. That plane is <em>eased</em> towards the ground
-     * rather than taken from it, though, and a hull that has just met a slope is a tick or two
-     * behind the slope: for those ticks the plane is under the hillside, and taken strictly the
-     * vehicle would break the riser it is about to drive over instead of driving over it. Half a
-     * block covers the lag and costs nothing that matters — a wall it can break is broken from its
-     * second course up rather than its first, and the first is driven over the way a kerb is.
+     * <p>車両が押し破る領域の床は、自身のサスペンションが沿っている平面より段差1つ分上にある——登坂判定が引く
+     * のと同じ線なので、車両を止める物と乗り越える物が同一のブロック集合になる。ただしその平面は地面から直接
+     * 取るのではなく地面へ<em>なめらかに追従</em>するので、斜面に当たったばかりの車体は1〜2tick斜面に遅れる。
+     * その間平面は斜面の下に潜り、厳密に取ると車両はこれから乗り越える段差を壊してしまう。半ブロックあれば遅れ
+     * を吸収でき、実害は無い——壊せる壁は1段目ではなく2段目から壊れ、1段目は縁石同様に乗り越えられる。
      */
     private static final double CRUSH_CLEARANCE = 0.5;
 
     /**
-     * The steepest the hull's plane is taken to be when the crushing volume is laid along it, in
-     * degrees. Past the vertical the slope of a plane is not a number, and a hull that has been
-     * thrown onto its side by a shell should not be reaching a mile into the ground.
+     * 破砕領域を車体平面に沿わせる際、その平面の傾きとして許す最大値（度）。垂直を越えると平面の傾きは数値で
+     * なくなるし、被弾で横倒しになった車体が地中1マイルまで届いてもらっては困る。
      */
     private static final float CRUSH_SLOPE_CAP = 60.0F;
 
-    /** How far clear of the vehicle somebody getting out is put down, in blocks. */
+    /** 降車者を車両からどれだけ離して降ろすか（ブロック）。 */
     private static final double DISMOUNT_MARGIN = 0.2;
 
     /**
-     * How far above a ship's own waterline the ground has to rise before it counts as a shore that
-     * stops the vessel, in blocks. Below this it is the sea floor under deep water, which a ship
-     * sails clean over; above it, it is land breaking the surface, which a ship runs aground on.
+     * 地面が船の喫水線よりどれだけせり上がったら「船を止める岸」と見なすか（ブロック）。これ未満なら深い水の
+     * 下の海底で、船はその上を素通りする。超えれば水面を破る陸で、船は座礁する。
      */
     private static final double SHORE_CLEARANCE = 0.5;
 
-    /** Ticks a correction from the server is spread over on a client that is not driving. */
+    /** 運転していないクライアントで、サーバーからの補正を何tickかけて馴らすか。 */
     private static final int LERP_TICKS = 3;
 
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
 
-    /** The gun in the turret, if this vehicle has one. Fired on the server and nowhere else. */
+    /** 砲塔の主砲（あれば）。発砲はサーバーのみ。 */
     private final BuiltInGun gun = new BuiltInGun(this, BuiltInGun.Mount.MAIN);
     /**
-     * The machine gun clamped to it, if it carries one. The same class as the gun above and on the
-     * same terms — loaded out of the same hold, fired on the server — but on a trigger of its own,
-     * because a coaxial is never <em>selected</em>: it is there whatever the crew have the main
-     * armament doing.
+     * それに固定された機関銃（あれば）。上の主砲と同じクラス・同じ条件——同じ弾庫から装填し、サーバーで発砲
+     * ——だが独自のトリガーを持つ。同軸機銃は<em>選択</em>される物ではなく、主兵装が何をしていようとそこに
+     * あるからだ。
      */
     private final BuiltInGun coax = new BuiltInGun(this, BuiltInGun.Mount.COAXIAL);
-    /** The missiles in the tubes, if it carries any. Also the seeker, which looks all the time. */
+    /** 発射筒のミサイル（あれば）。常時捜索するシーカーもここ。 */
     private final TurretLauncher launcher = new TurretLauncher(this);
     /**
-     * What the reload counter read last tick, on whichever side is driving. The tick it goes up is
-     * the tick the gun fired, which is how the shove of firing reaches the side that owns the speed
-     * — the server cannot apply it to a vehicle a client is driving, because the client's next
-     * report overwrites the speed a moment later.
+     * 運転側での前tickの装填カウンタ値。これが増えたtickが発砲したtickであり、発砲の反動が速度を所有する側へ
+     * 届く手段になる——クライアントが運転中の車両にサーバーが反動を加えても、直後のクライアント報告が速度を
+     * 上書きしてしまうため。
      */
     private int reloadWas;
 
-    /** The heading the driver steers, in Minecraft's terms: degrees, zero along +Z. */
+    /** 運転手が操る方位。Minecraft 流の度数で、0 が +Z 方向。 */
     private float heading;
-    /** How far the nose is above the tail, in degrees, as the ground under the tracks dictates. */
+    /** 車首が車尾よりどれだけ上か（度）。履帯下の地面が決める。 */
     private float hullPitch;
-    /** How far the right-hand side is below the left, in degrees, from the same reading. */
+    /** 右側が左側よりどれだけ下か（度）。同じ読み値から。 */
     private float hullBank;
 
-    /** Speed along the hull's nose, in blocks a tick. Negative is astern. */
+    /** 車首方向の速度（ブロック/tick）。負は後進。 */
     private float speed;
 
     /**
-     * How fast the vehicle is falling, in blocks a tick, and never anything else: a ground vehicle
-     * is either standing on something or on its way down to something, and its height is settled by
-     * {@link #rest} rather than by anything colliding.
+     * 落下速度（ブロック/tick）。それ以外の意味は持たない。地上車両は何かの上に立っているか、何かへ落ちている
+     * かのどちらかで、高さは衝突ではなく {@link #rest} が決める。
      */
     private double fallSpeed;
 
     /**
-     * Whether a ship is floating on water right now, as {@link #settleOnWater} last found it.
+     * 船が今水に浮いているか。{@link #settleOnWater} が最後に判定した値。
      *
-     * <p>A ship makes way only through the water: its screws have nothing to bite on out of it, so
-     * one run aground on a beach or dropped on dry land sits where it is and cannot drive itself
-     * off. This is what {@link #steer} and {@link #accelerate} read to decide whether the drivetrain
-     * does anything. It means nothing to a vehicle that is not a ship, which never floats and never
-     * asks. Read a tick after it is set, which is imperceptible and saves ordering the settle before
-     * the drivetrain that has to happen after it.
+     * <p>船は水中でしか進めない。スクリューは水の外で噛む物が無いので、浜に乗り上げたり陸に置かれたりした船は
+     * その場から自力で動けない。{@link #steer} と {@link #accelerate} が駆動系を動かすか決めるのに読む。船で
+     * ない車両には無意味で、浮かないし参照もしない。設定の1tick後に読まれるが、体感できない差であり、駆動系の
+     * 前に接地処理を並べ直す手間を省ける。
      */
     private boolean afloat;
 
-    /** Where the turret is pointing, in the hull's frame, and what it was a tick ago. */
+    /** 車体座標系での砲塔の指向と、その前tick値。 */
     private float turretYaw;
     private float turretYawO;
     private float gunPitch;
     private float gunPitchO;
 
     /**
-     * Degrees the crew's view is tipped below their own line of sight, which the gun is laid down by
-     * to match. See {@link #setSightTilt}.
+     * 乗員の視線を自分の目線からどれだけ下へ倒したか（度）。砲もそれに合わせて下げられる。
+     * {@link #setSightTilt} 参照。
      */
     private float sightTilt;
 
     /**
-     * How far the vehicle has driven altogether, in blocks, which is what the road wheels are turned
-     * from. Wrapped inside a single revolution so that it cannot lose precision over a long journey.
+     * 車両の総走行距離（ブロック）。転輪の回転はこれから求める。長距離走行で精度を失わないよう1回転内に
+     * 丸め込んである。
      */
     private float trackDistance;
     private float trackDistanceO;
 
-    /** How far the steered wheels are turned, in degrees, and what it was a tick ago. */
+    /** 操舵輪の切れ角（度）と、その前tick値。 */
     private float steerAngle;
     private float steerAngleO;
 
     /**
-     * The body on its springs: how far it has been thrown about by the going, and by what the
-     * drivetrain and the driver have been doing with it.
+     * バネの上の車体。路面と、駆動系と運転手の操作によってどれだけ揺すられたか。
      *
-     * <p>Run on every side rather than sent, because everything that drives it — the speed, the
-     * heading, the height, the way the hull is lying — every side already has. See {@link Ride},
-     * which is also where the case for keeping it out of the collision boxes and the gun's aim is
-     * made.
+     * <p>送信せず各側で回す。これを駆動する物——速度、方位、高さ、車体の寝方——は全側が既に持っているから。
+     * {@link Ride} 参照。当たり判定や砲の照準からこれを除外する理由もそこに書いてある。
      */
     private final Ride.Springs springs = new Ride.Springs();
 
 
     private GroundVehicleInput input = GroundVehicleInput.NONE;
 
-    // Interpolation state for instances that are not simulating this vehicle themselves.
+    // 自分でこの車両をシミュレートしていない側のための補間状態。
     private int lerpSteps;
     private double lerpX;
     private double lerpY;
     private double lerpZ;
     private double lerpYRot;
 
-    /** The figures under that name, and which set of files they came out of. */
+    /** その名前の定義値と、どのファイル群から来たか。 */
     @Nullable
     private GroundVehicleDefinition stats;
     private int statsVersion = -1;
@@ -369,17 +333,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     public GroundVehicleEntity(EntityType<? extends GroundVehicleEntity> type, Level level) {
         super(type, level);
         this.blocksBuilding = true;
-        // Built here rather than on the first tick: the level records an entity's parts when it is
-        // added, and an entity that has none yet is remembered as having none.
+        // 最初のtickではなくここで構築する。レベルはエンティティ追加時にそのパーツを記録するので、まだ
+        // パーツを持たないエンティティは「無し」として覚えられてしまう。
         this.buildParts();
-        // A new vehicle is a whole one, and an empty one: the gun and the tubes are both loaded out
-        // of the hold by the vehicle's own crew and out of nothing else, so one put down with
-        // nothing aboard it has nothing to fire until somebody loads it. See BuiltInGun and
-        // TurretLauncher. One read back out of the world overwrites this from its tag, and a client
-        // is told the real figures with the rest of the synched data.
+        // 新造車両は無傷であり、かつ空である。砲も発射筒も車両自身の乗員が弾庫から装填するしかないので、
+        // 何も積まずに置かれた車両は誰かが装填するまで撃つ弾を持たない。BuiltInGun と TurretLauncher 参照。
+        // ワールドから読み戻した個体はタグでこれを上書きし、クライアントには他の同期データと共に実値が届く。
         this.setHealth(this.getMaxHealth());
-        // We apply our own gravity in driveTick(), which is also what keeps the hull pressed against
-        // a downslope. Telling the server that stops it counting the vehicle as a floating one.
+        // 弾は空でもタンクは満タン。置いた場所から動かせない車両を配りたい者はいない。
+        this.setFuel(this.fuelSetup().capacity());
+        // 重力は driveTick() で自前で適用しており、それが下り坂へ車体を押し付ける力にもなっている。
+        // サーバーへそう伝えることで、浮遊エンティティ扱いされずに済む。
         this.setNoGravity(true);
     }
 
@@ -396,7 +360,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     // ------------------------------------------------------------------
-    // State
+    // 状態
     // ------------------------------------------------------------------
 
     @Override
@@ -418,7 +382,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         builder.define(DATA_STEER, 0.0F);
     }
 
-    /** Rounds left for the main armament. */
+    /** 主兵装の残弾。 */
     public int getRounds() {
         return this.entityData.get(DATA_ROUNDS);
     }
@@ -427,7 +391,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.entityData.set(DATA_ROUNDS, Math.max(rounds, 0));
     }
 
-    /** Ticks until the gun is loaded again; zero is ready to fire. */
+    /** 装填完了までのtick数。0なら発砲可能。 */
     public int getReload() {
         return this.entityData.get(DATA_RELOAD);
     }
@@ -436,27 +400,27 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.entityData.set(DATA_RELOAD, Math.max(ticks, 0));
     }
 
-    /** Whether there is a round up the spout and the crew may fire it. */
+    /** 薬室に弾があり乗員が撃てる状態か。 */
     public boolean isLoaded() {
         return this.getReload() <= 0 && this.getRounds() > 0;
     }
 
-    /** How long the loader takes altogether, in ticks: what {@link #getReload} counts down from. */
+    /** 装填に要する全体時間（tick）。{@link #getReload} はここから数え下がる。 */
     public int getReloadTicks() {
         return this.gun.reloadTicks();
     }
 
-    /** How many rounds a full magazine holds. */
+    /** 満載時の主砲弾数。 */
     public int getRoundCapacity() {
         return this.gun.capacity();
     }
 
-    /** Whether this vehicle carries a machine gun at all. */
+    /** この車両が機関銃を積んでいるか。 */
     public boolean hasCoaxial() {
         return this.coax.exists();
     }
 
-    /** Rounds left on the coaxial's belt. */
+    /** 同軸機銃のベルト残弾。 */
     public int getCoaxRounds() {
         return this.entityData.get(DATA_COAX_ROUNDS);
     }
@@ -465,7 +429,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.entityData.set(DATA_COAX_ROUNDS, Math.max(rounds, 0));
     }
 
-    /** Ticks until the coaxial may fire again; zero is ready. */
+    /** 同軸機銃が次に撃てるまでのtick数。0なら準備完了。 */
     public int getCoaxReload() {
         return this.entityData.get(DATA_COAX_RELOAD);
     }
@@ -474,17 +438,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.entityData.set(DATA_COAX_RELOAD, Math.max(ticks, 0));
     }
 
-    /** Whether the machine gun has a round on the belt and may be fired. */
+    /** 機関銃にベルト残弾があり発砲可能か。 */
     public boolean isCoaxLoaded() {
         return this.getCoaxReload() <= 0 && this.getCoaxRounds() > 0;
     }
 
-    /** How many rounds a full belt holds. */
+    /** ベルト満載時の弾数。 */
     public int getCoaxCapacity() {
         return this.coax.capacity();
     }
 
-    /** Missiles left in the tubes. */
+    /** 発射筒の残ミサイル数。 */
     public int getMissiles() {
         return this.entityData.get(DATA_MISSILES);
     }
@@ -493,7 +457,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.entityData.set(DATA_MISSILES, Math.max(missiles, 0));
     }
 
-    /** Ticks before the next missile may leave; zero is ready. */
+    /** 次のミサイルが出るまでのtick数。0なら準備完了。 */
     public int getMissileReload() {
         return this.entityData.get(DATA_MISSILE_RELOAD);
     }
@@ -502,7 +466,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.entityData.set(DATA_MISSILE_RELOAD, Math.max(ticks, 0));
     }
 
-    /** How many tubes a full load fills, and how long the crew take between launches. */
+    /** 満載時の発射筒数と、発射間隔にかかる時間。 */
     public int getMissileCapacity() {
         return this.launcher.capacity();
     }
@@ -511,18 +475,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return this.launcher.reloadTicks();
     }
 
-    /** Whether this vehicle carries missiles at all. */
+    /** この車両がミサイルを積んでいるか。 */
     public boolean hasMissiles() {
         return this.getStats().launcher().exists();
     }
 
     /**
-     * Which armament the trigger fires.
+     * トリガーがどちらの兵装を撃つか。
      *
-     * <p>Worked out rather than simply read, so that a vehicle carrying only one of the two never
-     * has to be told which it is on: with no tubes the answer is the gun whatever the flag says, and
-     * with no gun it is the missiles. Only a vehicle with both -- which is what an anti-aircraft
-     * mounting is -- has anything to cycle, and only there does the flag mean anything.
+     * <p>単に読むのではなく算出するので、片方しか積まない車両にどちらを選択中か教える必要が無い。発射筒が
+     * 無ければフラグが何を言おうと答えは砲、砲が無ければミサイル。両方積む車両——対空車両がそれだ——だけが
+     * 切り替える物を持ち、そこでだけフラグに意味がある。
      */
     public boolean isMissileMode() {
         if (!this.hasMissiles()) {
@@ -536,14 +499,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return this.entityData.get(DATA_MISSILE_MODE);
     }
 
-    /** Steps to the other armament, for a vehicle with two. Nothing at all for one with a single. */
+    /** 2種積む車両で兵装を切り替える。1種しか無い車両では何もしない。 */
     public void cycleWeapon() {
         if (this.hasMissiles() && this.getStats().armament().exists()) {
             this.entityData.set(DATA_MISSILE_MODE, !this.entityData.get(DATA_MISSILE_MODE));
         }
     }
 
-    /** What the seeker is holding, as every side sees it, or null for nothing. */
+    /** シーカーが捉えている対象。全側から見た値で、無ければ null。 */
     @Nullable
     public Entity getSeekerTarget() {
         int id = this.entityData.get(DATA_LOCK_TARGET);
@@ -551,19 +514,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return id < 0 ? null : this.level().getEntity(id);
     }
 
-    /** How far along the lock is, from nothing to one. One is a lock; less is still trying. */
+    /** ロックの進行度。0〜1で、1がロック成立、それ未満は捕捉中。 */
     public float getSeekerProgress() {
         return this.entityData.get(DATA_LOCK_PROGRESS);
     }
 
-    /** Whether the seeker has taken its target, so a guided round would have somewhere to go. */
+    /** シーカーが目標を捕捉済みか（誘導弾に行き先があるか）。 */
     public boolean isSeekerLocked() {
         return this.getSeekerProgress() >= 1.0F && this.entityData.get(DATA_LOCK_TARGET) >= 0;
     }
 
     /**
-     * The seeker itself, which lives with the tubes because what it is looking for is what they
-     * hold. Only ever meaningful on the server; every other side reads the three figures above.
+     * シーカー本体。探す対象は発射筒の中身が決めるので発射筒と同居する。意味を持つのはサーバーのみで、
+     * 他の側は上の3つの値を読む。
      */
     @Override
     public TargetLock lock() {
@@ -571,13 +534,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * How far the barrel has run back, from nothing to one, at a moment between two ticks.
+     * tick間の任意時点における砲身の後座量（0〜1）。
      *
-     * <p>Worked out from the reload counter rather than sent, because the counter already says
-     * everything: it is at its maximum the tick the gun fires and comes down from there, so how long
-     * ago the gun fired is the one figure both are made of. Runs back the instant the round leaves
-     * and eases out again over the recoil time, which is what a recoil looks like — the run-out is
-     * the slow half.
+     * <p>送信ではなく装填カウンタから算出する。カウンタが全てを語っているからだ——発砲tickに最大値を取り
+     * そこから下がるので、「いつ撃ったか」という1つの値から両方が作れる。弾が出た瞬間に後座し、後座時間を
+     * かけて復座する。それが後座の見え方であり、復座が遅い側の半分だ。
      */
     public float getRecoil(float partialTick) {
         GroundVehicleDefinition.Armament armament = this.getStats().armament();
@@ -600,50 +561,57 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.input = input;
     }
 
-    /** Speed along the hull's nose, in blocks a tick, on whichever side is asking. */
+    /** 車首方向の速度（ブロック/tick）。どの側から問われても答える。 */
     public float getSpeed() {
         return this.isControlledByLocalInstance() ? this.speed : this.entityData.get(DATA_SPEED);
     }
 
     /**
-     * How hard the wheel is over, from -1 to 1, on whichever side is asking.
+     * ハンドルの切れ量（-1〜1）。どの側から問われても答える。
      *
-     * <p>The driving side knows its own input a tick before anybody else does; every other side is
-     * told, which is the same figure a tick late rather than a guess. The same arrangement the speed
-     * has, and for the same reason.
+     * <p>運転側は自分の入力を他より1tick早く知る。他の側へは送られるので、推測ではなく1tick遅れの同じ値だ。
+     * 速度と同じ仕組みで、同じ理由。
      */
     public float getSteerInput() {
         return this.isControlledByLocalInstance() ? this.input.steer() : this.entityData.get(DATA_STEER);
     }
 
     /**
-     * How far the steered wheels are turned at a moment between two ticks, in degrees, positive to
-     * the right. Always nothing on a vehicle whose file names no steered wheels, which is every
-     * tracked one.
+     * tick間の任意時点における操舵輪の切れ角（度）。右が正。ファイルで操舵輪を指定していない車両——つまり
+     * 全ての装軌車両——では常に0。
      */
     public float getSteerAngle(float partialTick) {
         return Mth.lerp(partialTick, this.steerAngleO, this.steerAngle);
     }
 
     /**
-     * How far the body has moved on its springs at a moment between two ticks.
+     * tick間の任意時点における、バネ上の車体の変位。
      *
-     * <p>Read by whatever draws the vehicle and by the crew's own eyes, and by nothing else: see
-     * {@link Ride} for why the boxes, the aim and where the vehicle is standing are all worked out
-     * from the rigid hull and cannot see this.
+     * <p>読むのは車両を描く側と乗員の視点だけ。当たり判定・照準・接地位置がいずれも剛体車体から求められ
+     * これを見ない理由は {@link Ride} 参照。
      */
     public Ride getRide(float partialTick) {
         return this.springs.at(partialTick);
     }
 
-    /** How hard the engine is working, in [0, 1]: what the engine note is pitched from. */
+    /** エンジンの負荷（0〜1）。エンジン音のピッチはここから。 */
     public float getEngineNote() {
+        // 乾いたタンクは音を止める。燃料の消費もこの値から出るので、空の車両が消し続けることも無くなる。
+        if (this.isOutOfFuel()) {
+            return 0.0F;
+        }
+
         float max = Math.max(this.getStats().powertrain().maxSpeed(), STANDSTILL);
 
         return Mth.clamp(Math.abs(this.getSpeed()) / max, 0.0F, 1.0F);
     }
 
-    /** Points the vehicle somewhere with no interpolation: for one being placed or read back in. */
+    @Override
+    public VehicleChassis.Fuel fuelSetup() {
+        return this.getStats().powertrain().fuel();
+    }
+
+    /** 補間せず車両を向ける。設置時や読み戻し時用。 */
     public void snapAttitude(float heading, float pitch, float bank) {
         this.heading = heading;
         this.hullPitch = pitch;
@@ -657,7 +625,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.xRotO = -pitch;
     }
 
-    /** Applied on the server from what the driving client reports. */
+    /** 運転クライアントの報告を元にサーバーで適用する。 */
     public void reportState(Quaternionf hull, float travelSpeed, float turret, float gun) {
         if (this.level().isClientSide) {
             return;
@@ -673,7 +641,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.setTurret(turret, gun);
     }
 
-    /** The same, and the turret and gun with it, which is most of what there is to see on a tank. */
+    /** 同上に砲塔と砲を加えた版。戦車で見える物の大半はこれ。 */
     @Override
     public void poseForDrawing(Quaternionf hull, float turret, float gun) {
         super.poseForDrawing(hull, turret, gun);
@@ -693,13 +661,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Which way the bore is pointing, in the world.
+     * ワールド座標での砲身の指向。
      *
-     * <p>Three rotations, in the order they are bolted together: the hull lies where the ground puts
-     * it, the turret is traversed on the hull, and the gun is elevated in the turret. Applied on the
-     * right of each other, so each acts in the frame the one before it left — which is what makes a
-     * gun laid twenty degrees left of the bow stay twenty degrees left of it as the hull crosses a
-     * slope, rather than swinging about in the world.
+     * <p>組み付け順に3つの回転を重ねる。車体は地面が決める姿勢で寝て、砲塔は車体上で旋回し、砲は砲塔内で
+     * 俯仰する。互いに右から掛けるので、各回転は1つ前が残した座標系で作用する——だから車首から左20度に据えた
+     * 砲は、車体が斜面を横切っても左20度のままで、ワールド内で振り回されない。
      */
     @Override
     public Vec3 getAimDirection(float partialTick) {
@@ -713,34 +679,29 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Where the muzzle is, in the world. The first barrel, for anything that only wants one point —
-     * the gunner's sight, most of all, which is laid down one bore and cannot be laid down two.
+     * ワールド座標での銃口位置。点が1つで足りる用途のために第1砲身を返す——とりわけ砲手照準は1本の砲腔に
+     * 沿って据えるもので、2本には据えられない。
      */
     public Vec3 getMuzzle(float partialTick) {
         return this.getMuzzle(0, partialTick);
     }
 
     /**
-     * Where one of the mount's muzzles is, in the world.
+     * ワールド座標での、この砲架の銃口の1つ。
      *
-     * <p>Built from the trunnion and a length rather than from a fixed point, because the barrel
-     * swings: the trunnion is a place on the turret and rides round with it, and the muzzle is a
-     * barrel's length from there along whichever way the gun is currently laid. A single point would
-     * be right at one elevation and wrong at every other.
+     * <p>固定点ではなく耳軸＋長さから組む。砲身は振れるからだ。耳軸は砲塔上の一点で砲塔と共に回り、銃口は
+     * そこから現在の砲の指向へ砲身長だけ進んだ位置になる。固定点1つでは、ある俯仰角で正しく他の全てで狂う。
      *
-     * <p>Every barrel of a mount is laid the same way — that is what makes them one mount — so they
-     * differ only in where they start from and how far along that line they end. See
-     * {@link GroundVehicleDefinition.Barrel}, and note the two arrangements it covers:
+     * <p>1つの砲架の全砲身は同じ方向に据えられる——それが「1つの砲架」の意味だ——ので、違うのは起点と、その
+     * 線上でどこまで伸びるかだけ。{@link GroundVehicleDefinition.Barrel} 参照。以下2つの構成に対応する。
      *
-     * <p>A pair of barrels in one mounting sit either side of the trunnion the mounting elevates
-     * about, and are carried up and down by it — so they are rocked about it here, exactly as the
-     * coaxial is, and a barrel sitting above the bore stays above it at every elevation rather than
-     * sliding off the gun as the mounting comes up.
+     * <p>1つの砲架に2本の砲身がある場合、それらは俯仰の耳軸を挟んで両側に位置し、耳軸と共に上下する——だから
+     * ここで同軸機銃と全く同様に耳軸周りに揺らす。砲腔の上にある砲身は、砲架が上がってもずり落ちず、どの
+     * 俯仰角でも上にあり続ける。
      *
-     * <p>A second mounting on the same fire control — a warship's after turret — elevates about a
-     * trunnion of its own, which is the one it is described by. There is nothing to rock it about,
-     * and rocking it about the forward turret's trunnion would swing it the length of the ship. So a
-     * barrel that names a ring of its own is left where it is and merely comes round about that.
+     * <p>同じ射撃指揮下の第2砲架——軍艦の後部砲塔——は自前の耳軸で俯仰し、記述もその耳軸で行う。揺らす相手が
+     * 無く、前部砲塔の耳軸周りに揺らせば船の全長分振り回してしまう。よって自前の旋回輪を指定した砲身はその場に
+     * 置かれ、その旋回輪の周りを回るだけになる。
      */
     public Vec3 getMuzzle(int barrel, float partialTick) {
         GroundVehicleDefinition.Armament armament = this.getStats().armament();
@@ -753,29 +714,26 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return trunnion.add(this.getAimDirection(partialTick).scale(one.lengthOr(armament.barrelLength())));
     }
 
-    /** How many barrels the main armament fires out of, one at a time and in turn. */
+    /** 主兵装が持つ砲身数。1本ずつ順に撃つ。 */
     public int getBarrelCount() {
         return this.getStats().armament().barrelCount();
     }
 
     /**
-     * A point on the turret, in the vehicle's own axes, swung about the ring by however far the
-     * turret is traversed.
+     * 砲塔上の一点を車両自身の座標系で表し、砲塔の旋回量だけ旋回輪周りに回した位置。
      *
-     * <p>Measured in the vehicle's axes, where x runs to the right and z over the bow, so bringing
-     * the turret right carries a point that was ahead of the ring round towards the right-hand side.
+     * <p>車両座標系（x が右、z が車首方向）で測るので、砲塔を右へ回すと旋回輪の前方にあった点は右側へ運ばれる。
      */
     private Vec3 onTurret(Vec3 offset, float partialTick) {
         return this.onRing(offset, this.getStats().turret().ring(), partialTick);
     }
 
     /**
-     * The same, about a ring the caller names rather than the vehicle's own.
+     * 同じ処理を、車両自身ではなく呼び出し側が指定した旋回輪の周りで行う版。
      *
-     * <p>Which every mount but one uses the vehicle's own for. What wants a different one is a
-     * second mounting laid by the same fire control — a warship's after turret comes round to the
-     * bearing the forward one is laid at, but about its own barbette, and a point on it swung about
-     * the forward turret's ring would describe a barrel bolted to the wrong end of the ship.
+     * <p>1つを除く全ての砲架は車両自身の旋回輪を使う。別物が要るのは同じ射撃指揮で据えられる第2砲架だ——
+     * 軍艦の後部砲塔は前部と同じ方位へ回るが、回るのは自分のバーベット周り。前部砲塔の旋回輪周りに回すと、
+     * 船の反対端に取り付けた砲身を描いてしまう。
      */
     private Vec3 onRing(Vec3 offset, Vec3 ring, float partialTick) {
         Vec3 local = offset.subtract(ring);
@@ -790,13 +748,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * A point on the gun, in the vehicle's own axes, rocked about the trunnion by however far the
-     * gun is elevated — the same idea as {@link #onTurret}, but about the trunnion and in the
-     * vertical plane rather than about the ring and in the horizontal one.
+     * 砲上の一点を車両座標系で表し、砲の俯仰量だけ耳軸周りに揺らした位置——{@link #onTurret} と同じ考え方だが、
+     * 旋回輪・水平面ではなく耳軸・垂直面で行う。
      *
-     * <p>Given in the turret's own, untraversed frame: whatever this returns still wants swinging
-     * about the ring by {@link #onTurret} afterwards, the same as any other point carried by the
-     * turret, since the gun rides round with it.
+     * <p>戻り値は砲塔の旋回前の座標系。砲は砲塔と共に回るので、砲塔が運ぶ他の点と同様、この後 {@link #onTurret}
+     * で旋回輪周りに回す必要がある。
      */
     private Vec3 onGun(Vec3 offset, float partialTick) {
         Vec3 trunnion = this.getStats().armament().trunnion();
@@ -812,11 +768,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * A point on the turret, in the world: swung about the ring by the traverse, then out through
-     * the hull's attitude. For anything that rides the turret round rather than sitting on the
-     * hull — the commander's eye, most of all, which looks out of a hatch in the turret roof and
-     * goes wherever the turret goes. A vehicle with no turret has nothing to swing it about, and
-     * the point is simply on the hull.
+     * 砲塔上の一点をワールド座標へ。旋回量だけ旋回輪周りに回し、次に車体姿勢を通す。車体に固定ではなく砲塔と
+     * 共に回る物のため——とりわけ車長視点は砲塔上面のハッチから覗き、砲塔の行く所へ行く。砲塔の無い車両は
+     * 回す物が無いので、点は単に車体上に乗る。
      */
     public Vec3 turretToWorld(Vec3 offset, float partialTick) {
         return this.toWorld(this.getStats().turret().exists() ? this.onTurret(offset, partialTick) : offset,
@@ -824,22 +778,20 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * A point on the gun, in the world: rocked about the trunnion by the elevation, then swung about
-     * the ring by the traverse, then out through the hull's attitude. What {@link #turretToWorld}
-     * is for anything bolted to the turret, this is for anything bolted to the barrel — the coaxial
-     * machine gun's muzzle, which is the whole of why it is coaxial.
+     * 砲上の一点をワールド座標へ。俯仰量だけ耳軸周りに揺らし、旋回量だけ旋回輪周りに回し、車体姿勢を通す。
+     * 砲塔固定物に対する {@link #turretToWorld} と同じ役割を、砲身固定物に対して果たす——同軸機銃の銃口が
+     * まさにそれで、「同軸」である理由そのものだ。
      */
     public Vec3 gunToWorld(Vec3 offset, float partialTick) {
         return this.turretToWorld(this.onGun(offset, partialTick), partialTick);
     }
 
     /**
-     * How far the road wheels have gone round, in degrees, at a moment between two ticks.
+     * tick間の任意時点における転輪の回転角（度）。
      *
-     * <p>Worked out from distance rather than sent, because every side already knows how fast the
-     * vehicle is going and a packet a tick to say where a wheel had got to would be a poor use of
-     * one. Interpolated by winding the distance on rather than by blending two angles: a wheel on a
-     * tank at speed turns most of a revolution a tick, and the angle is wrapped.
+     * <p>送信ではなく走行距離から算出する。全側が既に車速を知っており、車輪の位置を伝えるためだけに1tickに
+     * 1パケット使うのは無駄だからだ。補間は2つの角度のブレンドではなく距離を進めて行う。全速の戦車の転輪は
+     * 1tickでほぼ1回転するうえ、角度は折り返されるためだ。
      */
     public float getWheelAngle(float partialTick) {
         float radius = Math.max(this.getStats().suspension().wheelRadius(), 0.05F);
@@ -849,11 +801,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Copies what the seeker found into the synched data, so that every side can draw it.
+     * シーカーの捕捉結果を同期データへ複製し、全側が描けるようにする。
      *
-     * <p>Once a tick and unconditionally: the entity data only sends what has actually changed, so a
-     * seeker sitting on the same target costs nothing, and one that has just lost it says so on the
-     * tick it does rather than on the next sweep.
+     * <p>毎tick無条件に行う。エンティティデータは実際に変化した物しか送らないので、同じ目標を捉え続ける
+     * シーカーはコスト0であり、目標を失った側は次の走査を待たずそのtickで通知できる。
      */
     private void reportSeeker() {
         Entity target = this.launcher.lock().target();
@@ -870,7 +821,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     // ------------------------------------------------------------------
-    // What the base class needs from a ground vehicle
+    // 基底クラスが地上車両に要求する物
     // ------------------------------------------------------------------
 
     @Override
@@ -884,12 +835,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * What the vehicle can see with, which for almost all of them is nothing.
+     * 車両の索敵手段。ほぼ全ての車両では無し。
      *
-     * <p>A tank has no use for a radar: what it is fighting is on the ground, in among the trees,
-     * and the way to find it is to look. What the field is here for is the machine that cannot fight
-     * without one — a launcher, whose targets are several kilometres up and moving faster than
-     * anybody can search for by eye.
+     * <p>戦車にレーダーは要らない。相手は地上の木立の中にいて、見つける手段は目視だ。このフィールドが存在する
+     * のは、それ無しでは戦えない車両——数km上空を目視で追えない速度で飛ぶ目標を相手にする発射機——のため。
      */
     @Override
     public VehicleChassis.Radar radar() {
@@ -897,9 +846,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * How fast it is really going, as a vector. Along the hull's nose and nothing else: a tracked
-     * vehicle goes where it is pointing, and what little it does sideways is a skid that is gone
-     * within a tick or two.
+     * 実際の速度ベクトル。車首方向のみ。装軌車両は向いている方へ進み、横滑りは1〜2tickで消える程度しかない。
      */
     @Override
     public Vec3 getVelocity() {
@@ -912,10 +859,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * A tank is armour, and every box of one is: the hull, the turret, the skirts and the running
-     * gear alike. All of them are plate of some thickness, and a round arriving along any of them
-     * is a round that may be thrown off — which is why a tank is fought by turning it to meet the
-     * fire rather than by pointing it at whatever is shooting.
+     * 戦車は装甲であり、その全ての箱もそうだ。車体、砲塔、スカート、走行装置いずれも厚みのある板であり、
+     * どこに飛来した弾も弾かれうる——だから戦車は、撃ってくる相手へ正対させるのではなく、被弾方向へ向けて
+     * 戦うのだ。
      */
     @Override
     public boolean isArmoured() {
@@ -948,10 +894,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * A tank's eye is on the turret unless the seat says otherwise: it looks out of the turret roof
-     * and comes round with the gun, so a crew laid off to one side see the ground out to that side.
-     * A ship's is the other way — the bridge is bolted to the hull and the guns train away from
-     * under it — so its view stays put as the turret swings.
+     * 座席が別途指定しない限り、戦車の視点は砲塔上にある。砲塔上面から覗き砲と共に回るので、片側へ砲を据えた
+     * 乗員はその側の地面を見る。船は逆で——艦橋は船体に固定され、砲はその下から旋回していく——砲塔が回っても
+     * 視界は動かない。
      */
     @Override
     protected VehicleShape.Mount defaultEyeMount() {
@@ -959,16 +904,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Where a crew member sees the world from — and the one place the body's springs are allowed out
-     * of the drawing.
+     * 乗員が世界を見る視点。そして、バネ上の車体変位が描画の外へ出ることを許される唯一の場所。
      *
-     * <p>A head is bolted to the body and not to the running gear, so it goes wherever the body
-     * goes: down as the nose dips under the brakes, sideways as the hull leans out of a corner, and
-     * up and down over every bump. That is by a distance rather than by a rotation, which means the
-     * view is shaken about without the crew's <em>aim</em> being shaken with it. Deliberately: the
-     * gun is laid by where they are looking, and a sight thrown off its target by the ground would
-     * have them fighting the suspension instead of the enemy. What they see moves; what they are
-     * pointing at does not.
+     * <p>頭は走行装置ではなく車体に固定されているので、車体の行く所へ行く。制動で車首が沈めば下がり、コーナー
+     * で車体が傾けば横へ振れ、段差ごとに上下する。ただし回転ではなく平行移動として——つまり視界は揺れるが乗員の
+     * <em>照準</em>は揺れない。意図的だ。砲は乗員の視線で据えられるので、地形で照準が振られたら敵ではなく
+     * サスペンションと戦うことになる。見える物は動き、狙っている物は動かない。
      */
     @Override
     protected Vec3 eyeToWorld(VehicleShape.Mount mount, Vec3 eye, float partialTick) {
@@ -980,8 +921,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Where the middle of a box is: where the file put it, swung about the turret ring if the box is
-     * on the turret, and then out into the world through the hull's own attitude.
+     * 箱の中心位置。ファイルが置いた場所を、砲塔上の箱なら旋回輪周りに回し、車体姿勢を通してワールドへ出す。
      */
     @Override
     protected Vec3 boxCentre(VehicleShape.Box box) {
@@ -989,9 +929,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * The rotation a box is standing at: the hull's attitude, then the turret's traverse if the box
-     * is on it, then the gun's elevation on top of that if the box rides the gun as well, then the
-     * box's own angle within whatever carries it.
+     * 箱が寝ている姿勢。車体姿勢、砲塔上なら旋回、さらに砲上にも乗るなら俯仰、最後に担い手の中での箱自身の
+     * 角度、の順に重ねる。
      */
     @Override
     protected Quaternionf boxRotation(VehicleShape.Box box) {
@@ -1008,17 +947,15 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return rotation.mul(box.orientation());
     }
 
-    /** The footprint is worked out from the boxes, so it is only ever as current as they are. */
+    /** 設置面積は箱から算出するので、鮮度は箱と同じ。 */
     @Override
     protected void onShapeChanged() {
         this.footprint = null;
     }
 
     /**
-     * Where a box sits in the vehicle's own axes right now. One on the hull is where the file says
-     * it is; one on the turret is swung about the ring by however far the turret is traversed; one
-     * on the gun is rocked about the trunnion by however far the gun is elevated first, and then
-     * carried round with the turret the same as any other turret box.
+     * 現時点での車両座標系における箱の位置。車体上の箱はファイル通りの位置、砲塔上の箱は旋回量だけ旋回輪
+     * 周りに回した位置、砲上の箱はまず俯仰量だけ耳軸周りに揺らし、その後は他の砲塔箱と同様に砲塔と共に回す。
      */
     private Vec3 mountOffset(VehicleShape.Box box) {
         return switch (box.mount()) {
@@ -1029,10 +966,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Puts every box where the hull, and the turret it may be on, have carried it to, lying the way
-     * the hull and the turret have left it. What the vehicle is stopped by, stood on and hit by is
-     * that box and nothing else — see {@code Hitbox}, which is the mod's own shape and none of
-     * Minecraft's.
+     * 全ての箱を、車体と（乗っていれば）砲塔が運んだ位置へ、両者が残した姿勢のまま配置する。車両が何に
+     * 止められ、何の上に立ち、何に当たるかは全てこの箱で決まる——{@code Hitbox} 参照。これは MOD 自前の形状で
+     * あって Minecraft の物ではない。
      */
     private void tickParts() {
         List<VehicleShape.Box> shape = this.getShape().boxes();
@@ -1041,8 +977,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             VehiclePart part = this.parts[i];
 
             if (i >= shape.size()) {
-                // A box the file no longer describes, after a reload that shortened it. Folded
-                // away inside the hull rather than left standing in the air where it was.
+                // リロードで定義が短くなり、ファイルがもう記述しなくなった箱。元の位置に空中で残さず、
+                // 車体内部へ畳み込む。
                 part.fold(this.position());
 
                 continue;
@@ -1059,7 +995,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     // ------------------------------------------------------------------
-    // The tick
+    // tick 処理
     // ------------------------------------------------------------------
 
     @Override
@@ -1076,10 +1012,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.trackDistanceO = this.trackDistance;
 
         if (this.isControlledByLocalInstance()) {
-            // Nobody in the seat: the brake goes on and the vehicle rolls to a halt on it, carrying
-            // whatever it was doing when the driver climbed out rather than stopping dead underneath
-            // them. A wreck is the same case for good — there is no seat left to be in — and it comes
-            // to rest on its own tracks rather than where it was hit.
+            // 座席が空: ブレーキが掛かり惰性で停止する。運転手が降りた時点の動きを引き継ぎ、足元で急停止
+            // したりはしない。残骸も同じ扱いが恒久化した物で——座る席がもう無い——被弾地点ではなく自分の
+            // 履帯の上で止まる。
             if (this.isWrecked() || !(this.getControllingPassenger() instanceof Player)) {
                 this.input = GroundVehicleInput.PARKED;
             }
@@ -1099,70 +1034,58 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             this.speed = this.entityData.get(DATA_SPEED);
             this.turretYaw = this.entityData.get(DATA_TURRET_YAW);
             this.gunPitch = this.entityData.get(DATA_GUN_PITCH);
-            // Wound on from the speed this side was told, which is the same figure the driving side
-            // is turning its own wheels from.
+            // この側へ通知された速度から進める。運転側が自分の車輪を回しているのと同じ値だ。
             this.windTrack(this.speed);
         }
 
-        // The gun is the server's business alone, the same way an aircraft's rounds are: a client
-        // that could fire could conjure rounds out of nothing and claim hits with them. What the
-        // client sends is the trigger; what comes back is the reload counter.
+        // 砲はサーバー専任。航空機の弾と同じ理由で、発砲できるクライアントは弾を無から作り命中を主張できて
+        // しまう。クライアントが送るのはトリガー、返ってくるのは装填カウンタ。
         if (!this.level().isClientSide) {
-            // An empty vehicle holds no trigger down. The input is whatever the last driver reported
-            // and it stops arriving the moment they climb out, so somebody who left mid-press would
-            // otherwise leave the gun firing itself for as long as the tank sat there.
+            // 無人車両はトリガーを引き続けない。入力は最後の運転手の報告値のまま届かなくなるので、押しっ放し
+            // で降りた者がいると、そのままでは戦車が置かれている限り自動で撃ち続けてしまう。
             if (this.getControllingPassenger() == null || this.isWrecked()) {
                 this.input = GroundVehicleInput.PARKED;
             }
 
-            // A burnt-out hull has no gun to reload, no seeker to look with, and nothing to lay
-            // either of them at.
+            // 焼け落ちた車体には装填する砲も、捜索するシーカーも、それらを向ける対象も無い。
             if (!this.isWrecked()) {
-                // The trigger goes to whichever armament the crew have selected and to that one
-                // alone. The other still ticks: a gun goes on reloading whether or not it is the
-                // thing being fired, and the seeker goes on looking whether or not the tubes are
-                // selected -- which is what warns the aeroplane that it is being tracked. See
-                // TurretLauncher.
+                // トリガーは乗員が選択中の兵装だけに届く。もう一方も tick は回り続ける。砲は選択の有無に
+                // かかわらず装填を進めるし、シーカーは発射筒が選択されていなくても捜索を続ける——それが
+                // 航空機へ「追尾されている」と警告する仕組みだ。TurretLauncher 参照。
                 boolean missiles = this.isMissileMode();
 
                 this.gun.tick(this.input.fire() && !missiles);
                 this.launcher.tick(this.input.fire() && missiles);
-                // The coaxial is not one of the two and never was. It has its own trigger and is
-                // laid by the same mounting, so a gunner already on a target can put a burst into
-                // it without putting the main armament away first — which is the whole of what one
-                // is for.
+                // 同軸機銃は2択のどちらでもない。独自のトリガーを持ち同じ砲架で据えられるので、既に目標へ
+                // 照準している砲手は主兵装を仕舞わずに掃射できる——同軸機銃の存在理由そのものだ。
                 this.coax.tick(this.input.coax());
                 this.reportSeeker();
                 this.getSensors().tick();
             }
         }
 
-        // Everywhere, and from the driver rather than from the hull: see DATA_STEER. The server
-        // publishes what it was told before anybody reads it, so that every side is working from the
-        // one figure.
+        // 全側で、車体ではなく運転手の入力から。DATA_STEER 参照。サーバーは誰かが読む前に受け取った値を
+        // 公開するので、全側が同一の値で動く。
         if (!this.level().isClientSide) {
             this.entityData.set(DATA_STEER, this.input.steer());
         }
 
         this.windSteering();
-        // After everything that could have moved the hull, and on every side: what the springs are
-        // doing is worked out from how the hull has just changed, and a side reading last tick's
-        // hull would draw the body answering a bump it has not met yet.
+        // 車体を動かしうる全処理の後、全側で実行する。バネの挙動は車体が今どう変化したかから求めるので、
+        // 前tickの車体を読む側はまだ来ていない段差への反応を描いてしまう。
         this.springs.tick(this.getStats(), this.speed, this.heading, this.getY(), this.onGround());
 
-        // After everything that could have moved the hull, so that what is broken is what the hull
-        // is standing in now rather than what it was standing in a tick ago.
+        // 車体を動かしうる全処理の後に置くことで、壊すのは1tick前ではなく今めり込んでいる物になる。
         this.crushBlocks();
         this.tickParts();
         this.checkInsideBlocks();
     }
 
     /**
-     * One tick of driving: steer, then drive, then lie down on whatever is underneath.
+     * 走行1tick分。操舵→駆動→下にある物への接地、の順。
      *
-     * <p>The order matters. Steering decides the heading, the drivetrain decides the speed along it,
-     * and only then is the hull read off the ground — because where the corners of the hull are
-     * depends on which way it is now pointing and where it has just got to.
+     * <p>順序が重要。操舵が方位を決め、駆動系がその方向の速度を決め、その後で初めて地面から車体姿勢を読む——
+     * 車体の四隅の位置は、今どちらを向いていてどこまで進んだかで決まるからだ。
      */
     private void driveTick() {
         GroundVehicleDefinition definition = this.getStats();
@@ -1172,10 +1095,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.absorbRecoil(definition.armament());
         this.travel();
 
-        // How the hull is held up is the one thing a ship does differently from a tank, and it is
-        // the whole of the difference: a tank lies along the ground under its tracks, and a ship
-        // rides at the waterline the sea under it settles it to. Everything above — steering, the
-        // drivetrain, the recoil, the turret — is the same machinery working the same way.
+        // 船が戦車と異なるのは車体の支えられ方だけで、違いはそれが全てだ。戦車は履帯下の地面に沿って寝、
+        // 船は下の海が決める喫水線で浮く。それより上——操舵、駆動系、後座、砲塔——は全て同じ仕組みが同じように
+        // 動く。
         if (definition.isShip()) {
             this.settleOnWater(definition.buoyancy());
         } else {
@@ -1192,28 +1114,22 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Brings the hull round.
+     * 車体を旋回させる。
      *
-     * <p>A tracked vehicle turns by driving one track harder than the other, so it turns fastest
-     * standing still and least at speed — the opposite of a steered wheel, and the reason the rate
-     * is read between two figures rather than being one. A vehicle that cannot pivot has nothing at
-     * the standing-still end and so cannot turn until it is rolling, which is exactly right for one.
+     * <p>装軌車両は片側の履帯を強く駆動して曲がるので、停止時に最も速く曲がり高速時に最も鈍い——操舵輪とは
+     * 逆であり、旋回率が1つの値ではなく2値の補間である理由だ。信地旋回できない車両は停止側の値が0なので、
+     * 転がり出すまで曲がれない。装輪車両として正しい挙動だ。
      *
-     * <p><b>Which way it comes round depends on which way it is going</b>, and not only on which way
-     * the driver is steering. Reversing with the wheel over to the right swings the tail to the
-     * right and therefore the nose to the <em>left</em> — the opposite of what the same wheel does
-     * going forwards, and what anybody who has reversed a car into a space is expecting. It is as
-     * true of tracks as of tyres: asking for right is asking for the right-hand side to travel less
-     * far than the left, and which end of the vehicle that carries round changes the moment the
-     * tracks change direction.
+     * <p><b>どちらへ回るかは進行方向にもよる</b>。運転手の操舵方向だけでは決まらない。舵を右に当てて後進すると
+     * 車尾が右へ振れ、したがって車首は<em>左</em>を向く——前進時と逆で、車庫入れの経験がある者なら想像通りだ。
+     * これは履帯でもタイヤでも同じ。右を要求することは右側を左側より短く進ませることであり、それがどちら端を
+     * 振り回すかは履帯の進行方向が変わった瞬間に入れ替わる。
      *
-     * <p>Standing still is neither, and is left following the driver. A vehicle pivoting on the spot
-     * has no direction of travel to take a sign from, and a lever pulled right should pivot it
-     * right; the speed is only consulted once there is one.
+     * <p>停止中はどちらでもなく、運転手の入力に素直に従う。その場で信地旋回する車両には符号を取る進行方向が
+     * 無いし、右へ倒したレバーは右へ回すべきだ。速度を参照するのは進行方向が存在してからでよい。
      */
     private void steer(GroundVehicleDefinition.Powertrain powertrain) {
-        // A ship out of the water cannot turn any more than it can drive: there is nothing under the
-        // hull for the rudder or the screws to work against.
+        // 水から出た船は走れないのと同様に曲がれない。船体の下に舵もスクリューも噛む物が無い。
         if (this.getStats().isShip() && !this.afloat) {
             return;
         }
@@ -1225,34 +1141,30 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         float top = Math.max(powertrain.maxSpeed(), STANDSTILL);
         float fraction = Mth.clamp(Math.abs(this.speed) / top, 0.0F, 1.0F);
         float rate = Mth.lerp(fraction, powertrain.pivotRate(), powertrain.steerRate());
-        // The magnitude is the speed's and the sign is the travel's. Taking the magnitude alone --
-        // which is what the abs above leaves -- turns a reversing vehicle the way it would go
-        // forwards, so backing round a corner steers the wrong way about.
+        // 大きさは速度から、符号は進行方向から取る。大きさだけを取ると——上の abs が残すのがそれだ——後進中の
+        // 車両が前進時と同じ向きに曲がってしまい、後退でコーナーを回ると舵が逆になる。
         float astern = this.speed < -STANDSTILL ? -1.0F : 1.0F;
         float turn = this.input.steer() * rate * astern;
 
         this.heading = Mth.wrapDegrees(this.heading + turn);
         this.setYRot(this.heading);
-        // The turret is aimed at the world, not at the hull, so it is wound back by whatever the
-        // hull has just done -- whichever way that was. This is the whole of the stabiliser: without
-        // it every turn of the hull drags the gun off the target and the gunner spends the fight
-        // re-laying it.
+        // 砲塔が照準するのは車体ではなくワールドなので、車体が今行った回転を——どちら向きであれ——巻き戻す。
+        // これがスタビライザーの全てだ。無ければ車体が曲がるたび砲が目標から外れ、砲手は戦闘中ずっと据え直す
+        // ことになる。
         this.turretYaw = Mth.wrapDegrees(this.turretYaw - turn);
     }
 
     /**
-     * Works the drivetrain, the brakes and gravity along the slope into one speed.
+     * 駆動系・制動・斜面に沿った重力を1つの速度にまとめる。
      *
-     * <p>{@code drive} is a pedal rather than a throttle lever: it names the speed being asked for,
-     * and letting go asks for nothing and lets the vehicle roll to a stop. Accelerating is the
-     * engine's business and slowing is the brakes', so which of the two figures is being spent
-     * depends on whether the vehicle is being asked to go faster or slower than it is going.
+     * <p>{@code drive} はスロットルレバーではなくペダル。要求速度を示し、離せば要求0となって惰行停止する。
+     * 加速はエンジンの、減速はブレーキの仕事なので、どちらの値を消費するかは現在より速く走れと言われているか
+     * 遅く走れと言われているかで決まる。
      */
     private void accelerate(GroundVehicleDefinition.Powertrain powertrain,
             GroundVehicleDefinition.Suspension suspension) {
-        // A ship out of the water is going nowhere under its own power. The screws have nothing to
-        // bite on, so the drivetrain gives it nothing and whatever way it still had comes off as the
-        // hull grinds to a stop on the ground it has run onto.
+        // 水から出た船は自力では動けない。スクリューが噛む物が無いので駆動系は何も与えず、残っていた惰性は
+        // 乗り上げた地面で船体が擦れて止まる形で失われる。
         if (this.getStats().isShip() && !this.afloat) {
             this.speed = approach(this.speed, 0.0F, powertrain.braking());
 
@@ -1266,7 +1178,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         float target;
         float step;
 
-        if (this.input.brake()) {
+        if (this.isOutOfFuel()) {
+            // タンクが空。駆動系に渡す物が無いので、車両は転がり抵抗だけで惰行して止まる。操舵は残る
+            // ——舵を効かせているのは車輪であってエンジンではない——ので、坂を下りながら向きは選べる。
+            target = 0.0F;
+            step = powertrain.rollingResistance();
+        } else if (this.input.brake()) {
             target = 0.0F;
             step = powertrain.braking();
         } else if (this.input.drive() > 0.0F) {
@@ -1280,8 +1197,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             step = powertrain.rollingResistance();
         }
 
-        // Too steep to climb. The drivetrain has nothing left for the hill, so it stops pulling and
-        // gravity below decides what happens next — which on a slope like that is sliding back down.
+        // 登坂限界超え。駆動系に坂へ回す余力が無いので牽引をやめ、下の重力処理が次を決める——この傾斜なら
+        // ずり落ちる。
         float limit = holdableSlope(suspension);
 
         if (target > 0.0F && this.hullPitch > limit) {
@@ -1294,10 +1211,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         this.speed = approach(this.speed, target, step);
 
-        // Gravity along the slope, which is what makes a hill cost something to climb and gives one
-        // back on the way down. Only what the vehicle is standing on counts: in the air there is no
-        // slope to run down, and the fall is handled with the rest of the vertical. A ship is level
-        // on flat water and has no slope to run down at all, so it is left out of this.
+        // 斜面に沿った重力。坂を登るのにコストを払わせ、下りでは返す。効くのは車両が立っている物だけ。空中に
+        // 転がり落ちる斜面は無く、落下は鉛直処理側で扱う。船は平らな水面で水平なので、そもそも転がり落ちる
+        // 斜面が無く対象外。
         if (this.onGround() && !this.getStats().isShip()) {
             double along = -Attitude.nose(this.attitude).y;
             this.speed += (float) (along * GRAVITY * powertrain.gradeResistance());
@@ -1309,17 +1225,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * The steepest the hull may read and still be driven, in degrees: the vehicle's slope limit,
-     * plus the coarsest a reading of a slope can be wrong by.
+     * 走行を許す車体傾斜の上限（度）。車両の登坂限界に、傾斜読み取り誤差の最大値を足した値。
      *
-     * <p>A slope in this world is a staircase, and the four probes land wherever the risers put
-     * them. Across a five-block contact patch, a forty-five degree staircase reads anything from
-     * {@code atan(4/5)} to {@code atan(6/5)} — thirty-nine degrees to fifty — as the vehicle
-     * crosses them, and easing the hull down on to it only narrows that ripple rather than removing
-     * it. Compared to the degree, the limit therefore cuts the power on a good half of the ticks of
-     * the very slope the vehicle's own figures say it can hold, and the vehicle stalls half way up.
-     * One block over the contact patch is the whole of that error; allowing for it is what makes
-     * {@code slope_limit} mean the slope it says.
+     * <p>この世界の斜面は階段であり、4本のプローブは段差の置く場所に着地する。5ブロックの接地長では、45度の
+     * 階段は車両が渡る間 {@code atan(4/5)} から {@code atan(6/5)}——39度から50度——まで振れる。車体をなめらか
+     * に降ろしてもこの波は狭まるだけで消えない。度単位で厳密に比較すると、車両自身の数値が登れると言っている
+     * まさにその斜面で半分近くのtickで出力が切られ、途中で立ち往生する。誤差は接地長あたり1ブロック分が全て
+     * なので、それを見込むことで {@code slope_limit} が書いてある通りの傾斜を意味するようになる。
      */
     private static float holdableSlope(GroundVehicleDefinition.Suspension suspension) {
         double span = Math.max(suspension.contactLength(), 1.0);
@@ -1329,15 +1241,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * The shove of firing, taken by whichever side is driving.
+     * 発砲の反動。運転している側が処理する。
      *
-     * <p>Only what runs along the hull counts. A gun laid over the bow pushes the tank straight
-     * backwards; one laid abeam pushes it sideways, which a sixty-tonne hull on tracks simply does
-     * not do — it rocks, and rocking is not something this hull models, so abeam it does nothing.
+     * <p>効くのは車体軸方向成分だけ。車首方向へ据えた砲は戦車を真後ろへ押すが、真横へ据えた砲が60トンの装軌
+     * 車体を横滑りさせることはない——揺れるだけで、この車体は揺れをモデル化していないので真横では何も起きない。
      *
-     * <p>Read off the reload counter rather than told, because the tick that counter jumps up is the
-     * tick the round left. The server cannot apply this itself to a vehicle a client is driving: the
-     * client's next report carries its own speed and would overwrite it within the tick.
+     * <p>通知ではなく装填カウンタから読む。カウンタが跳ね上がったtickが発砲したtickだからだ。クライアントが
+     * 運転中の車両にサーバーが直接適用することはできない。クライアントの次の報告が自身の速度を運んできて、
+     * そのtick内で上書きしてしまう。
      */
     private void absorbRecoil(GroundVehicleDefinition.Armament armament) {
         int reload = this.getReload();
@@ -1353,19 +1264,15 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Moves the vehicle over the map: along its own nose at the speed the drivetrain settled on, and
-     * sideways at whatever it has not yet stopped sliding.
+     * 車両を地図上で動かす。車首方向へは駆動系が決めた速度で、横方向へはまだ止まりきっていない滑り分だけ。
      *
-     * <p>Horizontally, and only horizontally. How high a ground vehicle is standing is not the
-     * outcome of falling and colliding at all — it is standing <em>on</em> something, and where that
-     * something is is what {@link #settleOnGround} measures with its own probes. So the two are
-     * separated: this decides where over the ground the vehicle is, and that decides how high and at
-     * what angle. Nothing here consults the plain box, and nothing here needs to.
+     * <p>水平方向のみ。地上車両の高さは落下と衝突の結果ではまったくない——何かの<em>上に</em>立っており、その
+     * 何かがどこにあるかは {@link #settleOnGround} が自前のプローブで測る。だから両者は分離されている。ここは
+     * 地面のどこにいるかを決め、あちらが高さと角度を決める。ここでは素の直方体を一切参照しないし、その必要も
+     * ない。
      *
-     * <p>The sideways part is the only momentum carried between ticks. Everything along the nose is
-     * the drivetrain's and is decided afresh, but a hull that has just been swung round is still
-     * travelling the way it was a moment ago, and how quickly that goes away is what tracks biting
-     * into the ground means.
+     * <p>tick をまたぐ運動量は横方向成分だけ。車首方向は全て駆動系の管轄で毎回決め直すが、旋回したばかりの
+     * 車体はまだ少し前の方向へ進んでおり、それがどれだけ速く消えるかが「履帯が地面を噛む」ということだ。
      */
     private void travel() {
         Vec3 forward = this.headingVector();
@@ -1381,10 +1288,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.setDeltaMovement(allowed.x, this.fallSpeed, allowed.z);
         this.setPos(this.getX() + allowed.x, this.getY(), this.getZ() + allowed.z);
 
-        // What the world actually let it have. A hillside can take a good deal of a tick's travel
-        // away between the drivetrain asking and the world agreeing, and a vehicle whose speed still
-        // says thirty while it sits against a wall spins its wheels for ever and pins the engine
-        // note at full.
+        // 世界が実際に許した移動量。駆動系の要求と世界の承認の間で、斜面は1tick分の移動をかなり削りうる。
+        // 壁に押し付けられているのに速度が30のままの車両は永久に空転し、エンジン音が全開に張り付く。
         double covered = new Vec3(allowed.x, 0.0, allowed.z).dot(forward);
 
         if (Math.abs(covered) < Math.abs(this.speed)) {
@@ -1393,27 +1298,22 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * How far the vehicle may move before it runs into something.
+     * 何かにぶつかるまでに車両がどれだけ動けるか。
      *
-     * <p>The plain box is not consulted, and neither, in the end, is the sweep an aircraft uses.
-     * Both answer the wrong question for a ground vehicle. Minecraft can only describe an entity as
-     * an upright box with a square footprint, which for a seven-metre tank is a shed; and sweeping
-     * the collision boxes instead fails for a subtler reason — a box is carried around in the
-     * <em>upright</em> box drawn around it, and the upright box around an eight-block hull tilted
-     * onto a hillside dips two blocks below the tracks and fills the wedge of hillside in front of
-     * them. Swept against that, a tank cannot climb any slope at all: it is permanently colliding
-     * with the hill it is standing on.
+     * <p>素の直方体は参照しないし、結局のところ航空機が使うスイープも使わない。どちらも地上車両にとっては誤った
+     * 問いに答えている。Minecraft はエンティティを正方形底面の直立直方体でしか記述できず、7m の戦車にとって
+     * それは小屋だ。代わりに当たり判定の箱をスイープする案は、もっと微妙な理由で失敗する——箱はそれを囲む
+     * <em>直立</em>直方体で運ばれるので、斜面へ傾いた8ブロックの車体を囲む直立直方体は履帯より2ブロック下へ
+     * 潜り、前方の斜面の楔を丸ごと含んでしまう。それでスイープすると戦車はどんな斜面も登れない。立っている坂
+     * と永久に衝突し続けるからだ。
      *
-     * <p>So what is asked instead is the question a driver would ask, at the corners of the shape
-     * the vehicle really has: <em>does the ground under this corner rise faster than the vehicle can
-     * climb?</em> A hillside raises it a little each tick and is driven up. A kerb raises it by a
-     * step and is driven over, which is what {@code climb_height} means. A wall raises it by more
-     * than the vehicle can manage and stops it, and so does the lip of a cliff coming the other way.
-     * Nothing about it depends on how the hull happens to be lying, which is exactly the property
-     * the swept box lacked.
+     * <p>そこで代わりに、運転手が問うであろう問いを、車両が実際に持つ形状の四隅で問う。<em>この隅の下の地面は
+     * 車両の登坂能力より速くせり上がっているか？</em> 斜面は毎tick少しずつ持ち上げるので登れる。縁石は段差
+     * 1つ分持ち上げるので乗り越えられる——それが {@code climb_height} の意味だ。壁は車両の限界を超えて持ち上げる
+     * ので止められる。逆向きの崖の縁も同様。車体がどう寝ているかには一切依存しない。スイープ方式に欠けていた
+     * のはまさにその性質だ。
      *
-     * <p>The two axes are asked separately, so a vehicle driven at a wall at an angle keeps the
-     * share of its movement that runs along the wall rather than stopping dead against it.
+     * <p>2軸は別々に問うので、壁へ斜めに突っ込んだ車両は、壁に沿う分の移動量を失わずに残せる。
      */
     private Vec3 limitToShape(Vec3 movement) {
         if (movement.lengthSqr() == 0.0
@@ -1444,14 +1344,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Whether the vehicle can take one step: no corner of it meets ground rising faster than it can
-     * climb, and no corner of it meets something hanging over that ground.
+     * 車両が1歩進めるか。どの隅でも地面が登坂能力を超えて上がっておらず、どの隅でもその地面の上に覆い被さる物
+     * が無いこと。
      *
-     * <p>The second test is what the first cannot do. A wall shows up as ground that has risen,
-     * because a probe dropped down the outside of one lands on top of it; a bridge deck at head
-     * height does not show up at all, since the ground under it is the same ground the vehicle is
-     * already on. So the headroom is looked at separately, from a step above the local ground up to
-     * the top of the vehicle, and anything in that gap is something the hull would have hit.
+     * <p>2つ目の判定は1つ目にできないことをやる。壁は「上がった地面」として現れる——外側で落としたプローブが
+     * 天面に着地するからだ。だが頭上の橋桁はまったく現れない。その下の地面は車両が今立っているのと同じ地面
+     * だからだ。よって頭上空間は別途、局所地面の段差1つ上から車両上端までを見て、その隙間にある物は車体が
+     * ぶつかる物として扱う。
      */
     private boolean canStep(Vec3 step, Vec3[] corners, double[] before, Footprint footprint, double climb) {
         if (step.lengthSqr() == 0.0) {
@@ -1463,8 +1362,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             double ground = this.groundUnder(to);
 
             if (Double.isNaN(ground)) {
-                // Nothing under that corner at all: a ditch or the lip of a cliff, which a vehicle
-                // is free to drive over and, if it commits to it, to fall off.
+                // その隅の下に何も無い。溝か崖の縁で、車両は自由に乗り出せるし、踏み切れば落ちる。
                 continue;
             }
 
@@ -1472,15 +1370,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 return this.crushesThrough(step);
             }
 
-            // The headroom is only worth asking about where the probe actually found a surface. A
-            // reading capped by PROBE_ABOVE is not one: it says "the ground here is at least this
-            // high", and measuring a gap up from a floor that is really several blocks further up
-            // looks into the hillside itself and reports it as something hanging over the vehicle.
-            // That is what used to stop a tank dead in front of a bank of one-block steps — and stop
-            // it on flat ground, several blocks short of the first of them, since it is the corner
-            // out at the vehicle's nose that reads the hill. Nothing is lost by leaving it: ground
-            // that high is ground the climb test above has already refused, on the tick the corner
-            // first met it.
+            // 頭上空間を問う価値があるのは、プローブが実際に地表を見つけた場所だけ。PROBE_ABOVE で頭打ちに
+            // なった読み値はそうではない。それは「ここの地面は少なくともこの高さ」としか言っておらず、本当は
+            // 数ブロック上にある床から上へ隙間を測ると、斜面そのものを覗き込んで「車両に覆い被さる物」と報告
+            // してしまう。1ブロック段差の連なりの前で戦車が急停止していたのはこれが原因だ——しかも平地で、
+            // 最初の段差の数ブロック手前で止まる。坂を読むのは車首側に張り出した隅だからだ。除外しても失う物は
+            // 無い。その高さの地面は、隅が最初に触れたtickで上の登坂判定が既に拒否している。
             if (!this.isProbeCeiling(ground) && !this.hasHeadroom(to, ground, footprint.top(), climb)) {
                 return this.crushesThrough(step);
             }
@@ -1490,19 +1385,15 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Whether everything standing in the vehicle's way one step from here is soft enough to be
-     * driven through rather than stopped against.
+     * ここから1歩先で行く手を塞ぐ物が全て、押し通れるほど柔らかいか。
      *
-     * <p>Asked only of a step something has already refused, and it is the last word on that
-     * refusal: a wall of earth or a stand of trees stops nothing on tracks, and the vehicle is let
-     * on into it. Nothing is broken here. What breaks it is {@link #crushBlocks}, on the server,
-     * from where the vehicle actually gets to — the same volume asked the same question, so a step
-     * allowed on the strength of this is a step whose obstruction is gone within the tick. See
-     * {@link BlockCrusher}, which is where both halves of that live.
+     * <p>何かに既に拒否された1歩に対してのみ問い、その拒否に対する最終判断となる。土の壁や木立は装軌車両を
+     * 止められないので、車両はそこへ進入を許される。ここでは何も壊さない。壊すのはサーバー側の
+     * {@link #crushBlocks} で、車両が実際に到達した位置から行う——同じ領域に同じ問いを投げるので、これを根拠に
+     * 許された1歩の障害物はそのtick内に消える。両者の実装は {@link BlockCrusher} にある。
      *
-     * <p>The volume is the whole hull rather than the corner that objected. Which is the safe way
-     * round: a vehicle let into a space holding one thing it can never clear would be a vehicle
-     * parked inside a wall for good.
+     * <p>判定領域は異議を唱えた隅ではなく車体全体。安全側だ。永久に片付けられない物が1つある空間へ車両を通せば、
+     * その車両は壁の中に永久駐車される。
      */
     private boolean crushesThrough(Vec3 step) {
         return BlockCrusher.opens(this.level(), this.body(this.position().add(step)),
@@ -1510,20 +1401,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * The volume the hull takes up at a position, for the two questions {@link BlockCrusher} asks of
-     * it.
+     * ある位置で車体が占める領域。{@link BlockCrusher} が投げる2つの問いのために使う。
      *
-     * <p>Laid along the plane the hull is lying along rather than levelled, which is the whole of
-     * what keeps this from being a machine that digs. The pitch and roll here are the ones the
-     * suspension read off the ground under the tracks, so on a hillside the floor of this volume is
-     * the hillside and there is nothing inside it to break; on the flat it is the flat, and a bank
-     * of earth taller than a step is inside it and goes.
+     * <p>水平化せず車体が沿っている平面に沿わせる。これがこの機構を掘削機にしない全てだ。ここでのピッチとロール
+     * はサスペンションが履帯下の地面から読んだ値なので、斜面ではこの領域の床が斜面そのものになり、中に壊す物は
+     * 無い。平地では床も平らで、段差を超える高さの土手は領域内に入り、消える。
      */
     private BlockCrusher.Body body(Vec3 at) {
         Footprint footprint = this.footprint();
         double climb = this.getStats().suspension().climbHeight();
         double rise = Math.tan(Math.toRadians(Mth.clamp(this.hullPitch, -CRUSH_SLOPE_CAP, CRUSH_SLOPE_CAP)));
-        // Bank is written positive with the left side high, and the sideways axis runs to the right.
+        // ロールは左側が高いときを正として記述し、横軸は右向き。
         double tilt = -Math.tan(Math.toRadians(Mth.clamp(this.hullBank, -CRUSH_SLOPE_CAP, CRUSH_SLOPE_CAP)));
 
         return new BlockCrusher.Body(at, this.headingVector(), footprint.halfWidth(), footprint.front(),
@@ -1531,23 +1419,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Breaks whatever the hull has driven into, on the server and nowhere else.
+     * 車体が突っ込んだ物を破壊する。サーバー限定。
      *
-     * <p>Every tick the vehicle is moving, and from where it now is rather than from where it is
-     * going. That is what makes this work for a vehicle with a driver in it, which is the case that
-     * matters: such a vehicle is simulated on the driver's own client and the server never runs its
-     * movement at all, so there is no step here to ask about — only a position that has arrived, and
-     * a hull standing in whatever the client decided it could drive into. Sweeping that hull breaks
-     * exactly those blocks, without the client having been trusted with the question.
+     * <p>車両が動いている間は毎tick、行き先ではなく現在位置から実行する。これが運転手が乗った車両で機能する
+     * 理由であり、そこが肝心な場合だ。そうした車両は運転手自身のクライアントでシミュレートされ、サーバーは移動
+     * をまったく走らせないので、ここで問うべき1歩は存在しない——あるのは届いた位置と、クライアントが「進入
+     * できる」と判断した物の中に立つ車体だけだ。その車体でスイープすればまさにそのブロックが壊れる。クライアント
+     * に判断を委ねることなく。
      *
-     * <p>A vehicle standing still on the ground with nothing pressed is left alone. Not for the cost
-     * of it, though it is not free, but because a machine parked against something should sit there
-     * rather than slowly eat it. A driver leaning on the throttle is a different matter and is not
-     * left alone, however little the vehicle is managing to move: something the movement stopped
-     * against and the crushing would have cleared is only ever a tick from clearing itself, and
-     * reading the speed alone would have the vehicle grind to a halt against it and stay there,
-     * since a vehicle that got nowhere this tick is a vehicle whose speed the ground has just taken
-     * away.
+     * <p>何も押さずに地上で停止している車両は対象外。コストのためではなく（無料ではないが）、何かに寄せて駐車
+     * した車両はそこに留まるべきで、じわじわ食い荒らすべきではないからだ。スロットルを踏み込んでいる運転手は別
+     * 問題で、車両がどれだけ動けていなくても対象外にはしない。移動が止められ、破壊が片付けたはずの物は常に
+     * 1tick後に自ら片付くのであり、速度だけを見ていると車両はそこで擦って止まったまま動かなくなる。今tick何も
+     * 進めなかった車両とは、地面が速度を奪ったばかりの車両だからだ。
      */
     private void crushBlocks() {
         if (this.level().isClientSide) {
@@ -1570,19 +1454,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Whether a ground reading is the top of the probe rather than a surface it found.
+     * 地面の読み値が、実際に見つけた地表ではなくプローブの上限かどうか。
      *
-     * <p>{@link #groundUnder} starts its trace {@link #PROBE_ABOVE} over the vehicle, and a trace
-     * that starts inside a block comes straight back at the point it started — so ground higher than
-     * that reads as exactly that height however far above it really is. Which is the safe way round
-     * for the climb test and is worth nothing at all to anything that wants to know where the
-     * surface is.
+     * <p>{@link #groundUnder} は車両の {@link #PROBE_ABOVE} 上からトレースを始め、ブロック内部から始めた
+     * トレースは開始点をそのまま返す——だからそれより高い地面は、実際にどれだけ上にあってもちょうどその高さと
+     * 読まれる。登坂判定にとっては安全側だが、地表の位置を知りたい用途にはまったく無価値だ。
      */
     private boolean isProbeCeiling(double ground) {
         return ground >= this.getY() + PROBE_ABOVE - PROBE_CEILING_SLACK;
     }
 
-    /** Whether the gap above the ground at a point is tall enough for the vehicle to pass through. */
+    /** ある地点の地面上の隙間が、車両が通れる高さあるか。 */
     private boolean hasHeadroom(Vec3 where, double ground, double top, double climb) {
         Vec3 from = new Vec3(where.x, ground + climb, where.z);
         Vec3 to = new Vec3(where.x, ground + top, where.z);
@@ -1596,24 +1478,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * The reach of the vehicle's shape, in its own axes: how wide it is, how far it stands out
-     * ahead and behind, and how tall it is.
+     * 車両座標系での形状の張り出し量。車幅、前後の張り出し、車高。
      *
-     * <p>Taken from the collision boxes rather than from the plain box, so the corners the movement
-     * is measured at are the corners of the thing itself. Only the boxes on the <em>hull</em> shape
-     * it, though every box counts towards the height: a gun laid abeam is not something a driver
-     * expects to be stopped by, and a barrel that could catch on scenery would leave a tank wedged
-     * every time the crew traversed near a wall.
+     * <p>素の直方体ではなく当たり判定の箱から取るので、移動を測る隅は実体の隅になる。ただし形を決めるのは
+     * <em>車体</em>上の箱だけで、高さには全ての箱が寄与する。真横へ据えた砲で止められるのは運転手の想定外だし、
+     * 地形に引っ掛かる砲身があると、壁際で旋回するたび戦車が嵌まってしまう。
      *
-     * <p>That means the barrel as much as the turret, and it used not to. The barrel is a box of its
-     * own mounted on the gun rather than on the turret, so leaving out the turret's boxes left it
-     * in, and the corners the whole of the movement was measured at were the corners of a shape nine
-     * blocks long in front of a hull that is four and a half — a Leopard stopping four blocks short
-     * of everything, and reading the ground for its climb test out in the middle of the next hill.
+     * <p>これは砲塔だけでなく砲身にも当てはまり、以前はそうなっていなかった。砲身は砲塔ではなく砲に取り付いた
+     * 独立の箱なので、砲塔の箱を除外しても砲身は残り、移動判定の隅が、全長4.5ブロックの車体の前方9ブロックまで
+     * 伸びた形状の隅になっていた——レオパルトが何にでも4ブロック手前で止まり、登坂判定の地面を次の丘の中腹で
+     * 読んでいたわけだ。
      *
-     * @param front how far the shape reaches over the bow, which for a tank is the glacis rather
-     *              than the muzzle
-     * @param back the same behind, as a negative number
+     * @param front 車首方向への張り出し。戦車では砲口ではなく車体前面
+     * @param back 同じく後方への張り出し。負値
      */
     private record Footprint(double halfWidth, double front, double back, double top) {
         static Footprint of(VehicleShape shape) {
@@ -1642,7 +1519,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return this.halfWidth <= 0.0 || this.top <= 0.0;
         }
 
-        /** The four corners of the footprint, in the world, at a position and a heading. */
+        /** ある位置・方位における設置面積の四隅（ワールド座標）。 */
         Vec3[] corners(Vec3 at, Vec3 forward) {
             Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
             Vec3 nose = forward.scale(this.front);
@@ -1656,9 +1533,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * The footprint under the shape as last read, and which set of files it came out of. Rebuilt
-     * with the shape, because it is a handful of comparisons over every box and the movement asks
-     * for it twice a tick.
+     * 最後に読んだ形状の設置面積と、その出所のファイル群。形状と共に再構築する。全箱に対する比較を数回行う
+     * 処理であり、移動処理が1tickに2回要求するからだ。
      */
     @Nullable
     private Footprint footprint;
@@ -1676,21 +1552,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Nothing moves this vehicle by its plain box, vanilla included. Anything that pushes a tank
-     * about is resolved against the boxes it is really made of, exactly as its own drivetrain is.
+     * バニラを含め、何もこの車両を素の直方体で動かさない。戦車を押す物は全て、駆動系と同様に実際の構成箱に
+     * 対して解決される。
      *
-     * <p>With one exception, and it matters. A {@link MoverType#PLAYER} move is the driving client
-     * reporting where it has <em>already got to</em>, arriving through vanilla's vehicle packet, and
-     * the server is in no position to argue with it: it is a tick behind, its ground probes read the
-     * terrain at the old position, and anything it refuses vanilla reads as the client having "moved
-     * wrongly" — at which point vanilla puts the vehicle back where it was and sends the client a
-     * correction. That is a tank that drives at a hillside and is quietly dragged backwards. The
-     * driving side has already run this test against the ground it could actually see; running it
-     * again here, worse informed, can only take movement away.
+     * <p>例外が1つあり、それが重要。{@link MoverType#PLAYER} の移動は運転クライアントが<em>既に到達した</em>
+     * 位置の報告で、バニラの vehicle パケットで届く。サーバーはこれに異を唱える立場にない。1tick遅れており、
+     * 地面プローブは旧位置の地形を読み、拒否した分はバニラに「クライアントが不正に動いた」と解釈される——
+     * その時点でバニラは車両を元に戻しクライアントへ補正を送る。斜面へ突っ込んだ戦車が静かに後ろへ引き戻される
+     * わけだ。運転側は実際に見えている地面に対してこの判定を既に済ませている。情報の少ないここで再実行しても
+     * 移動を削る効果しかない。
      *
-     * <p>This is only half of what vanilla does with that report. The other half asks whether the
-     * plain box is standing in clear air, which for a shape this one is not made of is the same
-     * mistake asked a different way — see {@code VehicleMoveCheckMixin}, which stands it down.
+     * <p>これはバニラがその報告に対して行うことの半分にすぎない。もう半分は素の直方体が空中に立っているかを
+     * 問うが、この形状で構成されていない車両にとってそれは同じ誤りを別の形で問うだけだ——
+     * {@code VehicleMoveCheckMixin} がそれを無効化している。
      */
     @Override
     public void move(MoverType type, Vec3 movement) {
@@ -1703,16 +1577,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Reads the ground under the four corners of the tracks and lies the hull down on it.
+     * 履帯の四隅の下の地面を読み、その上に車体を寝かせる。
      *
-     * <p>Four probes rather than one, because one says nothing about which way the ground is
-     * sloping. The front pair against the back pair is the pitch; the left pair against the right is
-     * the roll. A corner hanging over a hole reads as nothing at all and is left out of both, so a
-     * tank with its nose over a ditch tips forward rather than snapping level.
+     * <p>1本ではなく4本のプローブを使う。1本では地面がどちらへ傾いているか分からないからだ。前2本と後2本の差が
+     * ピッチ、左2本と右2本の差がロール。穴の上に張り出した隅は「無し」と読まれ両方から除外されるので、溝に車首
+     * を出した戦車は水平のまま固まらず前のめりになる。
      *
-     * <p>The result is eased into rather than taken: the ground under a vehicle changes by a whole
-     * block the moment a corner crosses a step, and a hull that took every reading as it came would
-     * shake itself to pieces crossing a ploughed field.
+     * <p>結果は直接採用せず、なめらかに追従させる。隅が段差を越えた瞬間に車両下の地面は丸1ブロック変化するので、
+     * 毎回の読み値をそのまま採る車体は耕地を渡るだけでバラバラに揺れる。
      */
     private void settleOnGround(GroundVehicleDefinition.Suspension suspension) {
         Vec3 forward = this.headingVector();
@@ -1726,8 +1598,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         double rearLeft = this.groundUnder(centre.subtract(forward.scale(halfLength)).subtract(right.scale(halfWidth)));
         double rearRight = this.groundUnder(centre.subtract(forward.scale(halfLength)).add(right.scale(halfWidth)));
 
-        // Nothing underneath at all reads as level, which is what a vehicle in the air should ease
-        // towards: it has no reason to hold the angle of the hillside it has just left.
+        // 下に何も無ければ水平と読む。空中の車両が向かうべき姿勢はそれだ。今離れた斜面の角度を保つ理由は
+        // 無い。
         float targetPitch = slopeAngle(mean(frontLeft, frontRight), mean(rearLeft, rearRight), halfLength * 2.0);
         float targetBank = slopeAngle(mean(frontLeft, rearLeft), mean(frontRight, rearRight), halfWidth * 2.0);
 
@@ -1736,27 +1608,21 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.hullBank = Mth.lerp(rate, this.hullBank, targetBank);
         this.setXRot(-this.hullPitch);
 
-        // The middle of the contact patch, which with the hull lying along the same plane is where
-        // the vehicle's own origin belongs.
+        // 接地面の中心。車体が同じ平面に沿って寝ている以上、車両の原点はここに属する。
         this.rest(mean(mean(frontLeft, frontRight), mean(rearLeft, rearRight)), suspension);
     }
 
     /**
-     * Sets how high the vehicle is standing, from the ground its tracks have just been measured
-     * against.
+     * 履帯下で測ったばかりの地面から、車両の立つ高さを決める。
      *
-     * <p>This is where a ground vehicle differs most from everything else in the mod. An aeroplane
-     * falls, and what it hits stops it; a tank is <em>standing on</em> something, and how high it is
-     * standing is a question with an answer rather than the leftovers of a collision. So the height
-     * is taken from the ground under the contact patch and nothing collides with anything — which is
-     * also what makes it possible to leave the plain box out of the movement altogether, since the
-     * plain box was only ever holding the vehicle up.
+     * <p>地上車両がこの MOD の他の全てと最も異なる点。航空機は落ち、ぶつかった物に止められる。戦車は何かの
+     * <em>上に立って</em>おり、その高さは衝突の残りかすではなく答えのある問いだ。だから高さは接地面下の地面から
+     * 取り、何も衝突しない——素の直方体を移動処理から完全に外せるのもこのためだ。素の直方体は車両を持ち上げる
+     * 以外の仕事をしていなかった。
      *
-     * <p>Three cases, and the step height tells them apart. Ground level with or above the vehicle
-     * is a kerb, and it drives up it. Ground a little below is a slope, and it follows it down —
-     * gravity would have it hover a moment and then slam, since a tank at speed descends a great
-     * deal faster than anything falls in the first few ticks. Ground a long way below, or none at
-     * all, is a drop, and there it falls like anything else.
+     * <p>段差高で3つの場合に分かれる。車両と同じか上の地面は縁石で、乗り上げる。少し下の地面は坂で、追従して
+     * 下る——重力任せだと一瞬浮いてから叩きつけられる。全速の戦車は、最初の数tickの落下よりはるかに速く降りる
+     * からだ。ずっと下、あるいは何も無ければ落差で、そこでは他と同様に落ちる。
      */
     private void rest(double support, GroundVehicleDefinition.Suspension suspension) {
         double climb = suspension.climbHeight();
@@ -1768,15 +1634,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return;
         }
 
-        // Onto the step, or down the slope. Anything taller than the vehicle can climb was stopped
-        // horizontally before it got here; the cap is what keeps a misread from throwing it up a
-        // cliff face rather than stopping it against one.
+        // 段差へ乗り上げるか、坂を下る。登坂能力を超える高さは、ここへ来る前に水平方向で止められている。
+        // 上限は、読み違えが車両を崖に沿って打ち上げるのを防ぐためのもの——本来は崖で止まるべきなのだ。
         this.setPos(this.getX(), this.getY() + Math.min(rise, climb), this.getZ());
         this.fallSpeed = 0.0;
         this.setOnGround(true);
     }
 
-    /** One tick of falling, held to a terminal speed so a vehicle off a cliff outruns nothing. */
+    /** 落下1tick分。終端速度で頭打ちにし、崖から落ちた車両が何も追い越さないようにする。 */
     private void fall() {
         this.fallSpeed = Math.max(this.fallSpeed - GRAVITY, -MAX_FALL);
         this.setPos(this.getX(), this.getY() + this.fallSpeed, this.getZ());
@@ -1784,16 +1649,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * The height of the ground under a point, or {@link Double#NaN} if there is none within reach.
+     * ある地点の下の地面の高さ。届く範囲に無ければ {@link Double#NaN}。
      *
-     * <p>Traced rather than read off the heightmap, because a heightmap knows nothing about the
-     * inside of a cave, a bridge or a road cut into a hillside, and a tank drives through all three.
-     * The trace is short — a couple of blocks either side of the hull — and stays inside the
-     * vehicle's own footprint, which is loaded by definition because the vehicle is standing in it.
+     * <p>ハイトマップではなくトレースで求める。ハイトマップは洞窟の中も橋も切通しも知らないが、戦車はその全て
+     * を走るからだ。トレースは短く——車体の上下数ブロック——車両自身の設置面積内に収まる。車両がそこに立って
+     * いる以上、その範囲は定義上ロード済みだ。
      *
-     * <p>It reaches further downwards the faster the vehicle is falling. Otherwise a vehicle off a
-     * cliff at terminal speed crosses more ground in a tick than the probe can see, and passes
-     * clean through the floor it was going to land on without the probe ever meeting it.
+     * <p>落下が速いほど下方向へ長く伸ばす。さもないと終端速度で崖から落ちた車両は1tickでプローブの視程より
+     * 長く進み、着地するはずだった床をプローブが一度も触れないまま突き抜ける。
      */
     private double groundUnder(Vec3 where) {
         double below = PROBE_BELOW + Math.abs(this.fallSpeed);
@@ -1806,28 +1669,22 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     // ------------------------------------------------------------------
-    // Being a ship instead
+    // 船である場合
     // ------------------------------------------------------------------
 
     /**
-     * Floats the hull at the waterline instead of lying it on the ground, which is the one place a
-     * ship parts company with a tank.
+     * 車体を地面に寝かせる代わりに喫水線で浮かせる。船が戦車と袂を分かつ唯一の箇所。
      *
-     * <p>What holds a vessel up is the water it displaces, and the whole of that is one balance: the
-     * further the hull is pushed from the depth it floats at, the harder the water pushes it back,
-     * and the bobbing that would leave is taken out by the damping so it settles rather than rings.
-     * So the height here is not read off anything the way a tank's is — it is integrated, like an
-     * aircraft's, but towards a resting line rather than under gravity. On flat water the hull sits
-     * flat, so unlike a tank there is no slope to lie along and the attitude is only ever eased back
-     * to level.
+     * <p>船体を支えるのは排除した水であり、その全体は1つの釣り合いだ。浮く深さから押しのけられるほど水は強く
+     * 押し返し、そこで残る上下動は減衰が取り除くので、振動せず落ち着く。だからここでの高さは戦車のように何かから
+     * 読むのではなく、航空機のように積分する——ただし重力ではなく静止喫水線へ向けて。平らな水面では船体も水平
+     * なので、戦車と違って沿うべき斜面が無く、姿勢は水平へ戻されるだけだ。
      *
-     * <p>Off the water there is nothing to float on. A ship dropped in mid-air, or driven up onto a
-     * beach, falls and rests on the ground exactly as a tank does — which is what grounds it on the
-     * shore rather than letting it sail up the sand.
+     * <p>水の外では浮く物が無い。空中に落とされた船、浜へ乗り上げた船は、戦車とまったく同じように落ちて地面で
+     * 止まる——それが砂浜を走らせず岸で座礁させる仕組みだ。
      */
     private void settleOnWater(GroundVehicleDefinition.Buoyancy buoyancy) {
-        // Flat water holds no slope, so a ship always eases back to level rather than holding the
-        // angle of whatever tipped it.
+        // 平らな水面に傾斜は無いので、船は傾けた物の角度を保たず常に水平へ戻る。
         float trim = Mth.clamp(buoyancy.trimRate(), 0.0F, 1.0F);
         this.hullPitch = Mth.lerp(trim, this.hullPitch, 0.0F);
         this.hullBank = Mth.lerp(trim, this.hullBank, 0.0F);
@@ -1836,9 +1693,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         double surface = this.waterSurfaceUnder(this.position());
 
         if (Double.isNaN(surface)) {
-            // Not over water at all: beached, or dropped in the air. It falls like any hull, and the
-            // ground stops it wherever it comes down — a shore, most likely, which is where a ship
-            // driven at the land ends up. Out of the water it makes no way; see the field.
+            // 水上ですらない。座礁したか空中に落とされたか。他の車体同様に落ち、降りた場所で地面に止められる
+            // ——大抵は岸で、陸へ突っ込んだ船の行き着く先だ。水の外では進めない。フィールドの説明参照。
             this.afloat = false;
             this.rest(this.groundUnder(this.position()), this.getStats().suspension());
 
@@ -1847,7 +1703,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         this.afloat = true;
 
-        // The spring towards the resting draught, damped so the hull settles in a second or two.
+        // 静止喫水へ向かうバネ。減衰を効かせて1〜2秒で落ち着かせる。
         double restY = surface - buoyancy.draught();
         double error = restY - this.getY();
         this.fallSpeed += error * buoyancy.buoyancy();
@@ -1855,19 +1711,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.fallSpeed = Mth.clamp(this.fallSpeed, -MAX_FALL, MAX_FALL);
 
         this.setPos(this.getX(), this.getY() + this.fallSpeed, this.getZ());
-        // Held up by the water, so to everything else it counts as being on the ground: it is not
-        // falling, so it neither banks the fall that would write it off nor reads as airborne.
+        // 水に支えられているので、他の全処理からは接地扱いになる。落下していないので、全損させる落下距離を
+        // 溜めることも、空中扱いされることもない。
         this.setOnGround(true);
     }
 
     /**
-     * The height of the surface of the water under a point, or {@link Double#NaN} if there is none
-     * within reach.
+     * ある地点の下の水面高さ。届く範囲に無ければ {@link Double#NaN}。
      *
-     * <p>Traced from just above the hull down through however far it might be falling, and the first
-     * water met from above is the surface — its own block's fill height, so a ship rides on the top
-     * of the water rather than on the block boundary under it. Nothing but water counts: a ship
-     * floats on the sea and on nothing else.
+     * <p>船体のすぐ上から落下しうる距離まで下方へトレースし、上から最初に出会った水を水面とする——そのブロック
+     * 自身の充填高さを使うので、船は下のブロック境界ではなく水の上面に浮く。水以外は数えない。船は海にだけ浮く。
      */
     private double waterSurfaceUnder(Vec3 where) {
         int x = Mth.floor(where.x);
@@ -1889,15 +1742,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * How far a ship may move before it runs aground, on the same terms a tank's movement is limited
-     * on but asking the question a ship's way.
+     * 座礁するまでに船がどれだけ動けるか。戦車の移動制限と同じ枠組みだが、問いを船の流儀で立てる。
      *
-     * <p>A tank is stopped by ground rising faster than it can climb; a ship is stopped only by land
-     * that breaks the surface it is floating on, and sails clean over a sea floor however close it
-     * comes. So the test is not how fast the ground rises but how high it stands: anything reaching
-     * above the vessel's own waterline ahead of it is a shore, and anything below is the deep it is
-     * meant to be over. The two axes are asked apart, so a ship driven at a coast at an angle keeps
-     * the share of its way that runs along the shore.
+     * <p>戦車は登坂能力を超えて上がる地面に止められる。船を止めるのは浮いている水面を破る陸だけで、海底が
+     * どれだけ近くても素通りする。よって判定は地面の上がる速さではなく高さだ。前方で自艦の喫水線を超える物は
+     * 岸、それ以下は本来その上を通る深みである。2軸は別々に問うので、海岸へ斜めに突っ込んだ船は岸に沿う分の
+     * 進路を残せる。
      */
     private Vec3 limitAfloat(Vec3 movement) {
         if (movement.lengthSqr() == 0.0
@@ -1918,7 +1768,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return new Vec3(x, movement.y, z);
     }
 
-    /** Whether no corner of the ship, stepped by {@code step}, would meet land above its waterline. */
+    /** {@code step} だけ進めた船のどの隅も、喫水線より上の陸に当たらないか。 */
     private boolean clearAfloat(Vec3 step, Vec3[] corners) {
         if (step.lengthSqr() == 0.0) {
             return true;
@@ -1938,34 +1788,29 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * How far the crew's view is tipped below their own line of sight, in degrees.
+     * 乗員の視界が自分の目線からどれだけ下へ倒されているか（度）。
      *
-     * <p>Set by the driving client every tick, and zero everywhere else. The chase view is rotated
-     * down by the machine's {@code camera.tilt} so that there is ground on the screen rather than
-     * sky — see {@code GroundVehicleCameraHandler} — and the gun is laid down by the same amount so
-     * that the middle of the screen goes on being the line of the gun. Without it the two are the
-     * whole of the tilt apart, which on these vehicles is five to twelve degrees: the crew lay the
-     * crosshair on a target, the gun is pointing well over the top of it, and the round goes there.
+     * <p>運転クライアントが毎tick設定し、他では0。三人称視点は車両の {@code camera.tilt} だけ下へ回され、
+     * 空ではなく地面が画面に入る——{@code GroundVehicleCameraHandler} 参照——ので、砲も同じ量だけ下げて画面中央
+     * が砲の線であり続けるようにする。これが無いと両者は傾き分そのままずれ、この種の車両では5〜12度になる。
+     * 乗員が目標に十字線を合わせても砲はその遥か上を向いており、弾はそちらへ飛ぶ。
      *
-     * <p>Told rather than worked out here, because which view the crew are using and how it has been
-     * tipped are questions only their own client can answer. Nothing is given away by trusting it:
-     * the turret is laid on this client already — see {@link #tickTurret} — and what the server is
-     * told is the angle, not the reasoning behind it.
+     * <p>ここで算出せず通知を受ける。乗員がどの視点を使い、それがどう傾いているかは本人のクライアントにしか
+     * 答えられないからだ。信頼しても失う物は無い。砲塔は既にこのクライアント上で据えられており
+     * （{@link #tickTurret} 参照）、サーバーへ伝わるのは角度であって、その根拠ではない。
      */
     public void setSightTilt(float degrees) {
         this.sightTilt = degrees;
     }
 
     /**
-     * Brings the turret round to where the crew are looking, as fast as it is able.
+     * 乗員が見ている方向へ、可能な最大速度で砲塔を回す。
      *
-     * <p>Both angles are held in the hull's frame and aimed in the world's, so what is worked out
-     * here is the difference: where the gunner is looking, less where the hull is pointing. The
-     * mechanical limits are the hull's — a gun can only depress so far into its own roof — so they
-     * are applied after the hull's own pitch has been taken out and not before.
+     * <p>2つの角度は車体座標系で保持されワールド座標系で照準されるので、ここで求めるのはその差——砲手の視線
+     * から車体の指向を引いた値だ。機械的な限界は車体基準なので（砲は自分の車体上面へそこまでしか俯角を取れない）、
+     * 車体自身のピッチを除いた後に適用する。前ではない。
      *
-     * <p>Laid on the middle of the crew's screen rather than on their line of sight, which in the
-     * chase view are not the same direction: see {@link #setSightTilt}.
+     * <p>据える先は乗員の視線ではなく画面中央。三人称視点ではこの2つは別方向だ。{@link #setSightTilt} 参照。
      */
     private void tickTurret(GroundVehicleDefinition.Turret turret) {
         if (!turret.exists()) {
@@ -1987,13 +1832,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Swings the steered wheels towards where the driver is asking for, a little each tick.
+     * 操舵輪を運転手の要求方向へ毎tick少しずつ振る。
      *
-     * <p>Towards rather than to: a wheel that snapped from lock to lock in one tick would read as a
-     * glitch rather than as steering, and the swing is most of what says the vehicle is being driven
-     * rather than sliding. It follows the <em>driver</em> and not the hull, so a vehicle stopped with
-     * the wheel held over shows it -- which a wheeled one has to, since it cannot turn at a stop and
-     * so the hull says nothing about what the driver is doing.
+     * <p>「合わせる」ではなく「向かわせる」。1tickで全舵から全舵へ跳ねる車輪は操舵ではなくグリッチに見えるし、
+     * この振れこそが「滑っているのではなく運転されている」ことを示す大半だ。追うのは車体ではなく<em>運転手</em>
+     * なので、停止中に舵を当てたままの車両はそれを表示する——装輪車両ではそうせざるを得ない。停止中は曲がれない
+     * ので、車体は運転手が何をしているか何も語らないからだ。
      */
     private void windSteering() {
         VehicleChassis.Model model = this.getStats().model();
@@ -2011,31 +1855,31 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.steerAngle = approach(this.steerAngle, this.getSteerInput() * lock, lock * STEER_SWING);
     }
 
-    /** Winds the road wheels on by a tick's travel, kept inside one revolution. */
+    /** 1tick分の走行距離だけ転輪を回す。1回転内に収める。 */
     private void windTrack(float travelled) {
         float circumference = (float) (2.0 * Math.PI * Math.max(this.getStats().suspension().wheelRadius(), 0.05F));
 
         this.trackDistance = (this.trackDistance + travelled) % circumference;
-        // Wrapped on both sides of the join, so that reversing past zero does not leave the previous
-        // distance a whole revolution away and the wheels spinning backwards for one frame.
+        // 継ぎ目の両側で折り返す。0をまたいで後進したとき、前回距離が丸1回転ぶん離れてしまい、1フレームだけ
+        // 車輪が逆回転するのを防ぐ。
         if (Math.abs(this.trackDistance - this.trackDistanceO) > circumference * 0.5F) {
             this.trackDistanceO = this.trackDistance;
         }
     }
 
-    /** The hull's rotation, built from the heading the driver steers and the two angles the ground gives. */
+    /** 車体の回転。運転手が操る方位＋地面が与える2角から組む。 */
     private Quaternionf buildAttitude() {
         return Attitude.of(this.heading, -this.hullPitch).rotateZ(this.hullBank * DEG_TO_RAD);
     }
 
-    /** Which way the hull is pointing, flat on the ground, as a unit vector. */
+    /** 車体の指向を水平面上の単位ベクトルで。 */
     private Vec3 headingVector() {
         float radians = this.heading * DEG_TO_RAD;
 
         return new Vec3(-Mth.sin(radians), 0.0, Mth.cos(radians));
     }
 
-    /** The angle of a slope, in degrees, from the height difference across a span. */
+    /** ある区間の高低差から傾斜角（度）を求める。 */
     private static float slopeAngle(double high, double low, double span) {
         if (Double.isNaN(high) || Double.isNaN(low) || span <= 0.0) {
             return 0.0F;
@@ -2044,7 +1888,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return (float) (Math.atan2(high - low, span) * (180.0 / Math.PI));
     }
 
-    /** The average of two readings, or whichever of them is a reading at all. */
+    /** 2つの読み値の平均。片方しか有効でなければその値。 */
     private static double mean(double a, double b) {
         if (Double.isNaN(a)) {
             return b;
@@ -2067,7 +1911,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 : Math.max(current - step, target);
     }
 
-    /** The same, the short way round a circle. */
+    /** 同じ処理を、円周上の近い側を通って行う版。 */
     private static float approachAngle(float current, float target, float step) {
         float difference = Mth.wrapDegrees(target - current);
 
@@ -2079,27 +1923,23 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     // ------------------------------------------------------------------
-    // Being driven by somebody else
+    // 他者が運転している場合
     // ------------------------------------------------------------------
 
     /**
-     * Holds the handover ready, for the tick the driver climbs out and this side stops driving.
+     * 運転手が降りてこの側が運転をやめるtickに備え、引き継ぎ状態を維持する。
      *
-     * <p>Two things are left standing by a vehicle being driven here, and both of them are aimed at
-     * where it was when the driver climbed <em>in</em>. The first is the lerp below, which is simply
-     * not run while this side is driving and so keeps whatever it was last told. The second is
-     * subtler and much the worse: a tracked entity's position arrives as a <em>delta</em> from the
-     * one before it, both ends keeping their own copy of what that was, and vanilla throws away
-     * every such packet for a vehicle the local player is driving — before decoding it, so the
-     * client's copy is never wound on. It is only ever set outright by a whole position, and the
-     * server sends one of those once every four hundred ticks.
+     * <p>この側で運転される車両は2つの物を置き去りにし、どちらも運転手が<em>乗り込んだ</em>時点の位置を指した
+     * まま止まる。1つ目は下の lerp で、運転中は単に走らないので最後に通知された値を保つ。2つ目はもっと厄介だ。
+     * 追跡エンティティの位置は前回位置からの<em>差分</em>として届き、両端がその基準を各自保持するのだが、バニラ
+     * はローカルプレイヤーが運転中の車両についてはそうしたパケットを全て捨てる——デコード前に捨てるので、
+     * クライアント側の基準は決して更新されない。更新されるのは絶対位置が来たときだけで、サーバーがそれを送るのは
+     * 400tickに1回。
      *
-     * <p>None of that shows while the driving lasts, because this side is drawing the vehicle from
-     * its own physics and the packets are being ignored. It shows the moment the driver gets out:
-     * the next delta is decoded at last, against a mark that can be twenty seconds of driving stale,
-     * and the vehicle is put back at the far end of that — which the crew see as the tank they have
-     * just stepped out of vanishing off down the road they came up. Winding the mark on here every
-     * tick costs one vector and leaves the handover working from a position one tick old at worst.
+     * <p>運転中は何も表面化しない。この側は自前の物理で車両を描いており、パケットは無視されているからだ。表面化
+     * するのは運転手が降りた瞬間だ。ようやく次の差分がデコードされ、その基準は運転20秒分古いことすらありうる。
+     * そして車両はその差分の先へ戻される——乗員には、今降りたばかりの戦車が来た道を走り去っていくように見える。
+     * ここで毎tick基準を進めるコストはベクトル1つで、引き継ぎは最悪でも1tick前の位置から始まる。
      */
     private void holdPosition() {
         this.lerpSteps = 0;
@@ -2107,11 +1947,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Eases towards the last position the server sent, rather than snapping to it.
+     * サーバーが最後に送った位置へ、瞬間移動ではなくなめらかに寄せる。
      *
-     * <p>A vehicle nobody here is driving arrives as a position a tick, and each of those is a step
-     * if it is simply taken. Spread over a few ticks it is a vehicle driving, which is what it
-     * actually is.
+     * <p>この側で誰も運転していない車両は1tickに1つの位置として届き、そのまま採用すればいずれも階段状の跳躍に
+     * なる。数tickかけて広げれば走行している車両になる。実際そうなのだから。
      */
     private void tickLerp() {
         if (this.lerpSteps <= 0) {
@@ -2158,13 +1997,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Sits the crew's bodies facing the way the hull is facing, and leaves their heads alone.
+     * 乗員の体を車体の向きに合わせ、頭はそのままにする。
      *
-     * <p>Deliberately not what an aircraft does. An aircraft turns its passengers' view with the
-     * airframe, because it is flown from the keys and the view may as well face where it is going. A
-     * tank is aimed with the view: turning it with the hull would drag the gun off the target every
-     * time the driver touched the sticks, which is precisely what the stabiliser in {@link #steer}
-     * exists to prevent.
+     * <p>航空機とは意図的に異なる。航空機は搭乗者の視界を機体と共に回す。キー操作で飛ばす以上、視界も進行方向を
+     * 向いていた方がよいからだ。戦車は視界で照準する。車体と共に視界を回せば、運転手が操縦桿に触れるたび砲が
+     * 目標から引き剥がされる——{@link #steer} のスタビライザーがまさに防いでいる事態だ。
      */
     @Override
     protected void positionRider(Entity passenger, Entity.MoveFunction moveFunction) {
@@ -2178,20 +2015,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Puts somebody getting out down beside the vehicle, on the ground, clear of it.
+     * 降車者を車両の脇の地面、車体から離れた場所へ降ろす。
      *
-     * <p>What Minecraft does instead is drop them at the middle of the plain box's roof, and for
-     * this vehicle that is the worst place there is: nothing collides with the plain box, so the
-     * roof it names is a foot inside the turret. Left there the crew are standing inside a solid
-     * part box — and a box cannot be clicked from within, because the pick asks where a line
-     * <em>enters</em> a box and a line starting inside one never enters it. So the tank cannot be
-     * climbed back into, which is a poor reward for getting out of it.
+     * <p>Minecraft の既定は素の直方体の天面中央へ落とすことで、この車両にとってそれは最悪の場所だ。素の直方体
+     * には何も衝突しないので、その天面は砲塔の30cmほど内側にある。そこへ置かれた乗員は固体のパーツ箱の中に立つ
+     * ことになる——そして箱は内側からクリックできない。ピックは線が箱へ<em>入る</em>位置を問うが、内側から
+     * 始まる線は入らないからだ。つまり戦車へ乗り直せない。降りたことへの報いとしてはひどい。
      *
-     * <p>Four places are tried, in the order somebody would actually step: down the left side, down
-     * the right, off the back, off the front. Each has to be clear of the world <em>and</em> of the
-     * vehicle's own boxes, which is what {@code noCollision} checks for us since the parts are
-     * ordinary solid entities to anyone who is no longer riding. Failing all four they go on the
-     * roof — on top of the tallest box rather than inside it, which is at least somewhere to stand.
+     * <p>実際に人が降りる順で4か所を試す。左側面、右側面、後方、前方。各所は世界に対しても<em>車両自身の箱</em>
+     * に対しても空いている必要があり、それは {@code noCollision} が検査してくれる。降車済みの者にとってパーツは
+     * 通常の固体エンティティだからだ。4か所とも駄目なら天面へ——最も高い箱の内部ではなく上に置く。少なくとも
+     * 立てる場所ではある。
      */
     @Override
     public Vec3 getDismountLocationForPassenger(LivingEntity passenger) {
@@ -2230,27 +2064,34 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     // ------------------------------------------------------------------
-    // Being handled
+    // 操作を受ける
     // ------------------------------------------------------------------
 
     @Override
     public InteractionResult interact(Player player, InteractionHand hand) {
-        // The client is in no position to judge any of this and must not try; see the same note on
-        // AircraftEntity.interact. It says yes to everything and the server decides what happened.
+        // クライアントにこれを判断する立場は無く、試みてもならない。AircraftEntity.interact の同じ注記参照。
+        // 全てに yes を返し、何が起きたかはサーバーが決める。
         if (this.level().isClientSide) {
             return InteractionResult.SUCCESS;
         }
 
-        // Crouching means the hold, whatever is in the player's hand — the same click that opens
-        // an aircraft's, since a crew member should not have to remember which sort of machine they
-        // are standing at. Taking one to pieces is the wrench's job without the crouch.
+        // スニーク中は手に何を持っていても弾庫を開く——航空機の弾庫を開くのと同じ操作。乗員が目の前の機種を
+        // いちいち思い出す必要は無いからだ。解体はスニーク無しのレンチの仕事。
         if (player.isSecondaryUseActive()) {
             this.openHold(player);
 
             return InteractionResult.CONSUME;
         }
 
-        if (player.getItemInHand(hand).getItem() instanceof WrenchItem) {
+        ItemStack held = player.getItemInHand(hand);
+
+        // 燃料缶は搭乗より先に見る。缶を持って戦車へ歩み寄る者は給油したいのであって、乗り込みたいのでは
+        // ない。満タンなら缶は減らず、クリックは素通りして通常どおり乗車になる。
+        if (held.getItem() instanceof FuelItem && FuelItem.refuel(this, player, held)) {
+            return InteractionResult.CONSUME;
+        }
+
+        if (held.getItem() instanceof WrenchItem) {
             return this.dismantle(player);
         }
 
@@ -2258,19 +2099,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return InteractionResult.PASS;
         }
 
-        // Forced, which here means only that the three seconds vanilla makes somebody wait after
-        // getting out of a boat do not apply. That delay is for a vehicle you fall into by walking
-        // over it, and it is nothing but an annoyance for one that has to be deliberately clicked:
-        // the crew who just climbed out to look at something want to climb straight back in. The two
-        // things force skips are checked above — nobody boards while crouching, and nobody boards a
-        // full vehicle.
+        // force 指定。ここでの意味は、ボートを降りた後にバニラが課す3秒待ちを適用しないというだけ。あの遅延は
+        // 歩いて乗り込んでしまう乗り物のための物で、意図的にクリックが要る乗り物では邪魔でしかない。何か確認
+        // しようと降りた乗員はすぐ乗り直したいのだ。force が飛ばす2つの検査は上で行っている——スニーク中は
+        // 乗らない、満員の車両にも乗らない。
         return player.startRiding(this, true) ? InteractionResult.CONSUME : InteractionResult.PASS;
     }
 
-    /** Folds the vehicle back into its item. Ground work, and not while anybody is aboard. */
+    /** 車両をアイテムへ畳み戻す。地上作業であり、誰か乗っている間は不可。 */
     private InteractionResult dismantle(Player player) {
-        // A wreck answers first and answers differently: there is no vehicle left to fold up, only a
-        // hulk to clear away and the metal in it.
+        // 残骸は先に、別の答えを返す。畳む車両はもう無く、片付けるべき残骸とその中の金属があるだけだ。
         if (this.isWrecked()) {
             return this.salvage();
         }
@@ -2279,8 +2117,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return InteractionResult.PASS;
         }
 
-        // Whatever is in the hold stays the player's, and a vehicle folded up with a load inside it
-        // would take the load with it.
+        // 弾庫の中身はプレイヤーの物であり、積んだまま畳めば積荷ごと持って行かれてしまう。
         this.spillHold();
         this.destroy(this.getDropItem());
 
@@ -2288,23 +2125,20 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * A vehicle that has boxes of its own is not solid in its own right: the boxes are.
+     * 自前の箱を持つ車両自身は固体ではない。固体なのは箱の方だ。
      *
-     * <p>Minecraft gives an entity one upright box with a square footprint, and for a seven-metre
-     * tank that is a shed — square whatever the hull is doing, and nowhere near the tracks once it
-     * is across a slope. The boxes in the vehicle's own file are the real shape, so once there are any,
-     * they do the work and the plain box stops pretending to.
+     * <p>Minecraft はエンティティに正方形底面の直立直方体を1つ与えるが、7m の戦車にとってそれは小屋だ——車体が
+     * 何をしていようと正方形で、斜面を横切れば履帯からかけ離れる。車両自身のファイルにある箱こそ本当の形状なので、
+     * 箱が1つでもあればそちらが仕事をし、素の直方体はふりをやめる。
      *
-     * <p>Nothing is lost by standing down: {@link VehiclePart} passes hits, clicks and pick results
-     * straight to the vehicle, so being shot, being climbed into and being stood on all still reach
-     * here. A vehicle with no boxes of its own keeps its plain box, because otherwise it would have no
-     * way of being touched at all.
+     * <p>降板しても失う物は無い。{@link VehiclePart} が被弾・クリック・ピック結果を車両へそのまま渡すので、
+     * 撃たれることも乗り込まれることも上に立たれることも従来通りここへ届く。自前の箱を持たない車両は素の直方体を
+     * 保つ。さもないと一切触れられなくなるからだ。
      *
-     * <p>With {@link #limitToShape} and {@link #rest} the plain box has nothing left to do: it is no
-     * longer an obstacle, no longer a target, no longer what the vehicle runs into, and no longer
-     * what holds it up. What remains of it is bookkeeping — which chunk section the vehicle is filed
-     * in, and being gathered up by a region query — and {@link #getBoundingBoxForCulling} sees to it
-     * that the drawing is not decided by it either.
+     * <p>{@link #limitToShape} と {@link #rest} により、素の直方体にはもう仕事が無い。障害物でもなく、標的でも
+     * なく、車両がぶつかる相手でもなく、車両を支える物でもない。残るのは帳簿上の役割——どのチャンクセクションに
+     * 登録されるか、範囲クエリで拾われるか——だけであり、描画判定に使われないことは
+     * {@link #getBoundingBoxForCulling} が保証している。
      */
     @Override
     public boolean isPickable() {
@@ -2317,7 +2151,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     // ------------------------------------------------------------------
-    // Persistence and GeckoLib
+    // 永続化と GeckoLib
     // ------------------------------------------------------------------
 
     @Override
@@ -2353,11 +2187,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * Nothing is played from an animation file. Everything a ground vehicle does with itself — the
-     * turret, the gun, the road wheels — follows a figure the vehicle already knows from moment to
-     * moment, and is posed in code by
-     * {@link com.ashvehicles.client.model.GroundVehicleModel#setCustomAnimations}. Hatches and
-     * anything else that is a sequence rather than an angle will want a controller here.
+     * アニメーションファイルからは何も再生しない。地上車両が自身に対して行うこと——砲塔、砲、転輪——は全て
+     * 車両が既に把握している値に毎瞬追従する物で、
+     * {@link com.ashvehicles.client.model.GroundVehicleModel#setCustomAnimations} がコードでポーズを付ける。
+     * ハッチのように角度ではなく手順である物を足すなら、ここにコントローラが要る。
      */
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {

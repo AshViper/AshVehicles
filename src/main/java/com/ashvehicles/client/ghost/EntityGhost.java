@@ -9,16 +9,15 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * One entity as the ghost system knows it: the last two snapshots taken of it, and the bookkeeping
- * that decides whether, and how, it is drawn this frame.
+ * ゴーストシステムから見た1エンティティ。直近2つのスナップショットと、このフレームで描くか・どう描くかを決める
+ * 帳簿。
  *
- * <p>This is a client-side drawing record and nothing more. It has no AI, no physics and no
- * animation controllers; it does not tick. The only thing that changes it is the manager replacing
- * its snapshots on the game thread, and the only thing that reads it is the render pass.
+ * <p>これはクライアント側の描画記録であり、それ以上の物ではない。AI も物理もアニメーションコントローラも持たず、
+ * tick もしない。これを変更するのはゲームスレッド上でスナップショットを差し替えるマネージャだけで、読むのは
+ * 描画パスだけだ。
  *
- * <p>The snapshot references are volatile so the render thread always sees a whole snapshot, never
- * half of one — cheap insurance in a game where render and tick share a thread today and may not
- * tomorrow.
+ * <p>スナップショット参照は volatile にしてある。レンダースレッドが常に半端ではない完全なスナップショットを見る
+ * ためだ——描画とtickが今日は同じスレッドを共有していても明日はそうでないかもしれないゲームでの、安い保険。
  */
 public final class EntityGhost {
     private final UUID uuid;
@@ -27,23 +26,23 @@ public final class EntityGhost {
     private volatile GhostSnapshot current;
     private volatile GhostSnapshot previous;
 
-    /** The live entity, while the client still has one. Cleared the moment it leaves the level. */
+    /** クライアントがまだ保持している実体。レベルを離れた瞬間にクリアする。 */
     @Nullable
     private Entity entity;
 
-    /** Game tick this ghost was last refreshed from a live entity. */
+    /** このゴーストを実体から最後に更新したゲームtick。 */
     private long lastSeenTick;
-    /** Game tick the live entity went away, or -1 while it is still here. */
+    /** 実体が消えたゲームtick。まだ在るなら -1。 */
     private long orphanedAt = -1L;
 
-    // Occlusion: begun on the game thread every few ticks, sometimes finished on a worker thread
-    // (see GhostOcclusion), read by the render pass. Volatile for that reason.
+    // 遮蔽判定。数tickごとにゲームスレッドで開始し、ワーカースレッドで完了することもあり（GhostOcclusion
+    // 参照）、描画パスが読む。volatile なのはそのため。
     private volatile boolean occluded;
     private volatile boolean occlusionPending;
-    /** Far enough back that the first check is due at once, without {@code now - this} overflowing. */
+    /** 最初の判定が即座に期限を迎え、かつ {@code now - this} が溢れない程度に古い値。 */
     private long occlusionCheckedAt = Long.MIN_VALUE / 2;
 
-    // What the last frame decided, kept for the debug overlay.
+    // 前フレームの判定結果。デバッグオーバーレイ用に保持する。
     private GhostLOD lod = GhostLOD.HIDDEN;
     private double distanceSq = Double.MAX_VALUE;
     private GhostVerdict verdict = GhostVerdict.HIDDEN;
@@ -60,7 +59,7 @@ public final class EntityGhost {
     }
 
     // ------------------------------------------------------------------
-    // Identity
+    // 同一性
     // ------------------------------------------------------------------
 
     public UUID uuid() {
@@ -72,7 +71,7 @@ public final class EntityGhost {
     }
 
     // ------------------------------------------------------------------
-    // Snapshots
+    // スナップショット
     // ------------------------------------------------------------------
 
     public GhostSnapshot current() {
@@ -83,14 +82,14 @@ public final class EntityGhost {
         return this.previous;
     }
 
-    /** Replaces the snapshots: what was current becomes previous. Game thread only. */
+    /** スナップショットを差し替える。現在が前回になる。ゲームスレッド限定。 */
     void update(GhostSnapshot next) {
         this.previous = this.current;
         this.current = next;
         this.lastSeenTick = next.gameTime();
     }
 
-    /** Where the ghost is drawn this frame, between the last two ticks. */
+    /** このフレームでゴーストを描く位置。直近2tickの間を補間する。 */
     public Vec3 position(float partialTick) {
         GhostSnapshot now = this.current;
         GhostSnapshot then = this.previous;
@@ -106,10 +105,10 @@ public final class EntityGhost {
     }
 
     // ------------------------------------------------------------------
-    // The live entity
+    // 実体
     // ------------------------------------------------------------------
 
-    /** The entity this ghost stands for, or {@code null} once the client no longer has it. */
+    /** このゴーストが代役を務めるエンティティ。クライアントが失った後は {@code null}。 */
     @Nullable
     public Entity entity() {
         return this.entity;
@@ -138,25 +137,25 @@ public final class EntityGhost {
     }
 
     // ------------------------------------------------------------------
-    // Occlusion
+    // 遮蔽
     // ------------------------------------------------------------------
 
     public boolean isOccluded() {
         return this.occluded;
     }
 
-    /** Whether a check has been begun and not yet answered. */
+    /** 判定を開始してまだ答えが出ていないか。 */
     boolean isOcclusionPending() {
         return this.occlusionPending;
     }
 
-    /** Marks a check begun this tick. Game thread. */
+    /** このtickで判定を開始したと記録する。ゲームスレッド。 */
     void beginOcclusion(long now) {
         this.occlusionCheckedAt = now;
         this.occlusionPending = true;
     }
 
-    /** Records the answer. Game thread or worker thread. */
+    /** 答えを記録する。ゲームスレッドまたはワーカースレッド。 */
     void finishOcclusion(boolean occluded) {
         this.occluded = occluded;
         this.occlusionPending = false;
@@ -167,7 +166,7 @@ public final class EntityGhost {
     }
 
     // ------------------------------------------------------------------
-    // Last frame's verdict
+    // 前フレームの判定
     // ------------------------------------------------------------------
 
     public GhostLOD lod() {
@@ -182,7 +181,7 @@ public final class EntityGhost {
         return this.verdict == GhostVerdict.DRAWN;
     }
 
-    /** Why it was, or was not, drawn last frame. */
+    /** 前フレームで描かれた／描かれなかった理由。 */
     public GhostVerdict verdict() {
         return this.verdict;
     }
@@ -193,14 +192,14 @@ public final class EntityGhost {
         this.verdict = verdict;
 
         if (verdict != GhostVerdict.DRAWN) {
-            // Nothing was drawn, so the light of the last draw is somebody else's frame. Reported
-            // as it stands it reads as fact, which is worse than reporting nothing.
+            // 何も描かれなかったので、最後の描画の光量は別フレームの物だ。そのまま報告すると事実のように
+            // 読まれてしまい、何も報告しないより悪い。
             this.lastLight = 0;
             this.lastInWorld = false;
         }
     }
 
-    /** The packed light the last draw used, and whether it came from the world or from nowhere. */
+    /** 最後の描画が使ったパック済み光量と、それが世界由来か無由来か。 */
     public int lastLight() {
         return this.lastLight;
     }

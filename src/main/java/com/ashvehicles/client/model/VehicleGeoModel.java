@@ -8,6 +8,7 @@ import org.joml.Vector3f;
 import com.ashvehicles.AshVehicles;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animation.state.BoneSnapshot;
@@ -15,17 +16,16 @@ import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.model.GeoModel;
 
 /**
- * Finds the three files any of the mod's machines is drawn from, and remembers where they are.
+ * MOD の機体を描く元になる3つのファイルを見つけ、その場所を記憶する。
  *
- * <p>Nothing here names a machine. An aircraft or a vehicle called {@code su_25} is drawn from
- * {@code geo/entity/su_25.geo.json} and {@code textures/entity/su_25.png} without being told where
- * they are, because a machine's id is the name everything about it is found under.
+ * <p>ここで機体名を名指しする物は無い。{@code su_25} という名の機体や車両は、場所を教えられずとも
+ * {@code geo/entity/su_25.geo.json} と {@code textures/entity/su_25.png} から描かれる。機体のIDは、それに関する
+ * 全てが見つかる名前だからだ。
  *
- * <p><b>Why the answers are kept.</b> They are derived names — a directory, the machine's own path, a
- * suffix — and building one means a string joined and then validated a character at a time. That is
- * nothing to do once and a good deal to do on every frame of every machine on the screen, which is
- * what GeckoLib asks for, and again on every tick of every ghost. Nothing about the answer can ever
- * change: an id is settled when the entity is built.
+ * <p><b>答えを保持する理由。</b>これらは導出された名前——ディレクトリ、機体自身のパス、接尾辞——であり、1つ組む
+ * ごとに文字列連結と1文字ずつの検証が要る。1度なら何でもないが、画面上の全機体の全フレームで——GeckoLib が要求
+ * するのはそれだ——さらに全ゴーストの全tickでとなると相当な量になる。しかも答えは決して変わらない。IDは
+ * エンティティ生成時に確定する。
  */
 public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoModel<T> {
     protected static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
@@ -35,7 +35,7 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
 
     private static final Map<ResourceLocation, Files> FILES = new ConcurrentHashMap<>();
 
-    /** The id everything about this machine is found under. */
+    /** この機体に関する全てが見つかるID。 */
     protected abstract ResourceLocation idOf(T animatable);
 
     @Override
@@ -54,10 +54,9 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
     }
 
     /**
-     * A bone an animation names and the geometry does not is skipped, as one the pose code cannot
-     * find is. Losing a bay door or a hatch because somebody renamed it is not worth taking the
-     * client down for, and the alternative — every file having to be exactly in step with its
-     * geometry or nobody can play — is not a trade anyone would make.
+     * アニメーションが名指ししジオメトリに無いボーンは、ポーズ用コードが見つけられないボーンと同様に飛ばす。誰かが
+     * 改名したせいでベイ扉やハッチが失われることは、クライアントを落とすに値しない。代替案——全ファイルがジオメトリ
+     * と完全に同期していなければ誰もプレイできない——は誰も選ばない取引だ。
      */
     @Override
     public boolean crashIfBoneMissing() {
@@ -88,14 +87,12 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
     }
 
     /**
-     * Turns a bone <em>from</em> where the geometry file put it, rather than to a flat angle.
+     * ボーンを、絶対角へ設定するのではなく、ジオメトリファイルが置いた位置<em>から</em>回す。
      *
-     * <p>This is the whole difference between a wheel that spins and a wheel that jumps out of its
-     * hub the moment anything touches it. A road wheel is usually built lying on its side and stood
-     * up by a rotation in the file; setting the rotation outright throws that away and lays the wheel
-     * flat again. GeckoLib's own animations add to the same figure — see {@code AnimationProcessor},
-     * which lerps a keyframe and adds the initial snapshot to it — so this is what a bone posed from
-     * code has to do as well.
+     * <p>これが「回る車輪」と「何かが触れた瞬間にハブから飛び出す車輪」の違いの全てだ。転輪は大抵横倒しで作られ、
+     * ファイル内の回転で起こされる。回転を直接設定するとそれを捨てて車輪をまた寝かせてしまう。GeckoLib 自身の
+     * アニメーションも同じ値へ加算する——{@code AnimationProcessor} 参照。キーフレームを補間し初期スナップショットを
+     * 加える——ので、コードでポーズを付けるボーンもそうすべきだ。
      */
     protected static void rotateX(GeoModel<?> model, String bone, float degrees) {
         pose(model, bone, found -> found.setRotX(found.getInitialSnapshot().getRotX() + degrees * DEG_TO_RAD));
@@ -109,50 +106,88 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
         pose(model, bone, found -> found.setRotZ(found.getInitialSnapshot().getRotZ() + degrees * DEG_TO_RAD));
     }
 
-    /** Slides a bone along its own Z, from wherever the geometry file put it. */
+    /**
+     * ボーンを、自分のジオメトリの<em>中心</em>の周りに Z 軸回りで回す。支点がそこに無くても。
+     *
+     * <p>プロペラのためにある。プロペラは1枚作って複製するのが普通で、複製されたボーンは支点まで一緒に持って
+     * くる——AC-130 の4枚は全部が右外側エンジンの支点を共有している。そのまま {@link #rotateZ} で回せば、
+     * 正しく回るのは1枚だけで、残り3枚は16ブロック離れた1点を公転する。
+     *
+     * <p>支点 Q 周りの回転を中心 P 周りの回転にするのは、ボーン自身の平行移動 {@code (I − R)(P − Q)} だ。
+     * GeckoLib はボーンを「オフセット → 支点へ → 回転 → 支点から戻す」の順で置く（{@code RenderUtil}）ので、
+     * その差をオフセットへ入れれば回転の中心だけが移る。中心と支点は {@link BakedGeometry} から取る——どちらも
+     * このフレームのポーズではなくジオメトリファイルが落ち着く姿勢から求まるので、毎フレーム同じ答えになり、
+     * 自分が付けたポーズを読み返して積み上がることもない。
+     *
+     * <p>差はモデル軸で取るので、この補正が正しいのは<b>回転を持たない親にぶら下がったボーン</b>——プロペラは
+     * 例外なくそれだ。親が回っていれば、差は親の軸で測り直す必要がある。
+     */
+    protected static void spinZ(GeoModel<?> model, String bone, float degrees) {
+        pose(model, bone, found -> {
+            BoneSnapshot rest = BakedGeometry.rest(found);
+            float radians = degrees * DEG_TO_RAD;
+
+            found.setRotZ(rest.getRotZ() + radians);
+
+            Vector3f centre = BakedGeometry.centreOf(found);
+            Vector3f pivot = BakedGeometry.pivotOf(found);
+            float dx = centre.x() - pivot.x();
+            float dy = centre.y() - pivot.y();
+
+            if (dx * dx + dy * dy < 1.0E-8F) {
+                // 支点が既に中心にある。まっとうに作られたプロペラはここで終わる。
+                return;
+            }
+
+            float cos = Mth.cos(radians);
+            float sin = Mth.sin(radians);
+            float offsetX = dx - (dx * cos - dy * sin);
+            float offsetY = dy - (dx * sin + dy * cos);
+
+            // ブロックからモデル単位へ。x はボーンのオフセットが負方向へ効く（RenderUtil 参照）ので反転する。
+            found.setPosX(rest.getOffsetX() - offsetX * BakedGeometry.UNITS);
+            found.setPosY(rest.getOffsetY() + offsetY * BakedGeometry.UNITS);
+        });
+    }
+
+    /** ボーンを、ジオメトリファイルが置いた位置から自身の Z 方向へ動かす。 */
     protected static void slideZ(GeoModel<?> model, String bone, float units) {
         pose(model, bone, found -> found.setPosZ(found.getInitialSnapshot().getOffsetZ() + units));
     }
 
     // ------------------------------------------------------------------
-    // Posing a bone in the machine's axes rather than its own
+    // ボーン自身の軸ではなく機体の軸でポーズを付ける
     // ------------------------------------------------------------------
 
     /**
-     * The same three turns and the slide, but about the <em>machine's</em> axes rather than the
-     * bone's own — so that a part goes the way it is asked to go whatever frame its geometry was
-     * built in.
+     * 同じ3つの回転と移動を、ボーン自身ではなく<em>機体</em>の軸周りに行う——ジオメトリがどの座標系で作られていても、
+     * 部品が要求された方向へ動くようにするためだ。
      *
-     * <p><b>What the problem is.</b> A bone is turned inside its parent, and its parent inside its
-     * parent, up to the root; a rotation anywhere up that chain carries the bone's axes round with
-     * it. Half the models here are built facing backwards and turned round by a half turn on the
-     * root bone, and a wheel or a barrel under a root like that has its own +X pointing at the
-     * machine's left. Ask both kinds of model for the same turn about X and one of them elevates its
-     * gun and rolls its wheels forwards while the other depresses and rolls back. That is the whole
-     * of what a track running the wrong way, or a gun that dips when it should rise, ever is.
+     * <p><b>何が問題か。</b>ボーンは親の内側で回り、その親もさらに親の内側で回り、ルートまで続く。その連鎖のどこか
+     * にある回転は、ボーンの軸を一緒に運んでしまう。ここのモデルの半分は後ろ向きに作られてルートボーンの半回転で
+     * 向き直されており、そうしたルートの下の車輪や砲身は自身の +X が機体の左を指す。両方の種類のモデルへ X 軸周りの
+     * 同じ回転を要求すると、一方は砲を上げ車輪を前へ回し、他方は砲を下げ車輪を後ろへ回す。履帯が逆走することも、
+     * 上がるべき砲が下がることも、原因は常にこれだ。
      *
-     * <p>It is not only the root: a wheel bone frequently carries a half turn of its own so that it
-     * could be built once and reused down the side, and one of these models turns eight of its
-     * twenty-one that way and not the other thirteen. There is no per-vehicle flag that can express
-     * that, which is why the answer is worked out per bone.
+     * <p>ルートだけではない。車輪ボーンはしばしば自前の半回転を持つ。一度作って側面に並べて再利用できるようにする
+     * ためだ。あるモデルは21個のうち8個をそうし、残り13個はそうしていない。車両単位のフラグでは表現できない。だから
+     * 答えはボーン単位で求める。
      *
-     * <p><b>What is done about it.</b> Before the turn is applied, the axis it will actually happen
-     * about is carried up the chain of parents into the machine's own frame, and if it comes out
-     * pointing backwards the angle is negated. So the caller asks for a lay to the right, or a wheel
-     * winding on, and gets it; nobody has to know which way round the artist left the file.
+     * <p><b>どう対処するか。</b>回転を適用する前に、実際にその回転が起きる軸を親の連鎖を辿って機体自身の座標系へ
+     * 運び、それが逆向きを指していたら角度を反転する。だから呼び出し元は「右へ据える」「車輪を進める」と要求すれば
+     * そうなる。作者がファイルをどちら向きに残したかを誰も知る必要は無い。
      *
-     * <p>The rest pose is what is carried up, not this frame's — a turret that has been slewed is
-     * still a turret the right way up, and the gun under it elevates the same way at every bearing.
+     * <p>運ぶのは静止ポーズであってこのフレームのポーズではない——旋回した砲塔も上下が正しい砲塔のままだし、その下
+     * の砲はどの方位でも同じ向きに俯仰する。
      *
-     * <p>An axis that comes out square to the one asked for — a bone quarter-turned, so that a turn
-     * about X tips the part sideways instead of rolling it — cannot be fixed by a sign and is left
-     * alone. That is a model to fix in Blockbench, not here.
+     * <p>要求した軸と直交して出てきた軸——ボーンが90度回っていて、X 軸周りの回転が部品を転がす代わりに横へ倒す
+     * ような場合——は符号では直せないので放置する。それは Blockbench で直すモデルであって、ここで直す物ではない。
      */
     protected static void turnAboutX(GeoModel<?> model, String bone, float degrees) {
         pose(model, bone, found -> turnAboutX(found, degrees));
     }
 
-    /** The same, given the bone rather than its name. @see #slideAlongY */
+    /** 同じ処理を、名前ではなくボーンを渡して行う版。@see #slideAlongY */
     protected static void turnAboutX(GeoBone bone, float degrees) {
         bone.setRotX(rest(bone).getRotX() + machineSignX(bone) * degrees * DEG_TO_RAD);
     }
@@ -168,18 +203,16 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
         pose(model, bone, found -> slideAlongZ(found, units));
     }
 
-    /** The same, given the bone rather than its name. @see #slideAlongY */
+    /** 同じ処理を、名前ではなくボーンを渡して行う版。@see #slideAlongY */
     protected static void slideAlongZ(GeoBone bone, float units) {
         bone.setPosZ(rest(bone).getOffsetZ() + machineSignZ(bone) * units);
     }
 
     /**
-     * As {@link #slideAlongZ}, along the machine's vertical, and given the bone rather than its name.
+     * {@link #slideAlongZ} と同様の処理を機体の鉛直方向に対して行い、名前ではなくボーンを渡す版。
      *
-     * <p>The bone rather than the name because the callers for this one — a road wheel being put
-     * back down on the ground as the body moves above it — have to know where the bone is before
-     * they can know how far to move it, and looking the same bone up twice a frame for every wheel
-     * on the vehicle is not free.
+     * <p>名前ではなくボーンを渡すのは、この呼び出し元——車体が上で動く間に地面へ戻される転輪——が、動かす量を知る前
+     * にボーンの位置を知る必要があるからだ。車両の車輪ごとに毎フレーム同じボーンを2回引くのは無料ではない。
      */
     protected static void slideAlongY(GeoBone bone, float units) {
         bone.setPosY(rest(bone).getOffsetY() + machineSignYSlide(bone) * units);
@@ -187,8 +220,8 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
 
 
     /**
-     * As {@link #machineSignZ}, for a slide along Y. None of the bone's own turns come into it, for
-     * the same reason: an offset happens in the parent's axes and not in the bone's.
+     * {@link #machineSignZ} と同様、Y 方向の移動用。ボーン自身の回転はどれも関与しない。理由も同じで、オフセット
+     * はボーンの軸ではなく親の軸で起きるからだ。
      */
     private static float machineSignYSlide(GeoBone bone) {
         return sign(intoMachine(bone, new Vector3f(0.0F, 1.0F, 0.0F)).y());
@@ -196,12 +229,11 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
 
 
     /**
-     * Whether a turn about this bone's X comes out as a turn the same way about the machine's.
+     * このボーンの X 軸周りの回転が、機体の X 軸周りの同じ向きの回転として現れるか。
      *
-     * <p>The bone's own Z and Y turns come into it and its own X does not. GeckoLib builds a bone's
-     * matrix as Z, then Y, then X — see {@code RenderUtil.rotateMatrixAroundBone} — so the X is the
-     * innermost of the three and the axis it happens about is the bone's own X carried through the
-     * other two.
+     * <p>ボーン自身の Z と Y の回転は関与し、自身の X は関与しない。GeckoLib はボーンの行列を Z→Y→X の順に組む
+     * ——{@code RenderUtil.rotateMatrixAroundBone} 参照——ので、X は3つのうち最も内側であり、その回転が起きる軸は
+     * ボーン自身の X を他の2つに通した物になる。
      */
     private static float machineSignX(GeoBone bone) {
         BoneSnapshot rest = rest(bone);
@@ -210,7 +242,7 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
         return sign(intoMachine(bone, axis).x());
     }
 
-    /** As {@link #machineSignX}, for a turn about Y, which only the bone's own Z turn is outside of. */
+    /** {@link #machineSignX} と同様、Y 軸周りの回転用。外側にあるのはボーン自身の Z 回転だけ。 */
     private static float machineSignY(GeoBone bone) {
         Vector3f axis = new Vector3f(0.0F, 1.0F, 0.0F).rotateZ(rest(bone).getRotZ());
 
@@ -218,17 +250,16 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
     }
 
     /**
-     * As {@link #machineSignX}, for a slide along Z.
+     * {@link #machineSignX} と同様、Z 方向の移動用。
      *
-     * <p>None of the bone's own turns come into this one. A bone's position offset is applied before
-     * it is taken out to its pivot and turned — {@code RenderUtil.prepMatrixForBone} again — so a
-     * slide happens in the parent's axes and not in the bone's.
+     * <p>ボーン自身の回転はどれも関与しない。ボーンの位置オフセットは、支点へ出して回す前に適用される——ここでも
+     * {@code RenderUtil.prepMatrixForBone}——ので、移動はボーンの軸ではなく親の軸で起きる。
      */
     private static float machineSignZ(GeoBone bone) {
         return sign(intoMachine(bone, new Vector3f(0.0F, 0.0F, 1.0F)).z());
     }
 
-    /** Carries a direction in a bone's parent's axes up the chain of parents into the machine's. */
+    /** ボーンの親の軸で表された方向を、親の連鎖を辿って機体の軸へ運ぶ。 */
     private static Vector3f intoMachine(GeoBone bone, Vector3f axis) {
         for (GeoBone up = bone.getParent(); up != null; up = up.getParent()) {
             BoneSnapshot rest = rest(up);
@@ -244,8 +275,8 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
     }
 
     /**
-     * Where the geometry file left a bone. A bone GeckoLib has not taken its snapshot of yet is
-     * asked to take it, which for a bone nothing has moved is the same answer.
+     * ジオメトリファイルがボーンを残した位置。GeckoLib がまだスナップショットを撮っていないボーンには撮らせる。
+     * 何も動かしていないボーンなら同じ答えになる。
      */
     protected static BoneSnapshot rest(GeoBone bone) {
         BoneSnapshot rest = bone.getInitialSnapshot();

@@ -1,0 +1,6 @@
+{
+  "type": "targeting_pod",
+  "seeker_range": 1.6,
+  "lock_rate": 1.4,
+  "camera": [0.0, -0.2, 0.95]
+}

@@ -19,34 +19,28 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Makes anything aimed through the world hit the mod's machines where they really are.
+ * 世界を貫いて狙う物すべてが、この MOD の機体を「本当にある場所」で捉えるようにする。
  *
- * <p>Everything the game aims comes through here: an arrow, a fireball, a player's crosshair, and
- * the mod's own rounds. What it does is walk the entities along the line and clip each one's upright
- * box — which for a machine's boxes is the box drawn round the tilted one, so a shot threaded past a
- * barrel laid over at forty-five degrees would hit it, and a click aimed at the gap between a wing
- * and a tailplane would climb aboard.
+ * <p>ゲームの照準は全部ここを通る。矢、ファイアボール、プレイヤーの十字線、そしてこの MOD の弾。中身は
+ * 線分に沿ってエンティティを歩き、それぞれの直立した箱で切ること。機体の箱に対してそれは「傾いた箱を
+ * 囲む箱」になるので、45度に寝た砲身の脇を通した射撃が命中したり、主翼と水平尾翼の隙間を狙ったクリック
+ * で搭乗できたりする。
  *
- * <p>So the machines are taken out of that walk altogether and the same line is put to them
- * separately, against the shapes they really are. Whichever of the two answers is nearer to the eye
- * is the one that stands, and a hit on anything that is not one of the mod's machines is left
- * exactly as the game found it.
+ * <p>そこで機体はその走査から完全に外し、同じ線分を別途、本物の形に対して当てる。2つの答えのうち視点に
+ * 近い方を採り、この MOD の機体でない物への命中はゲームが出した通りに残す。
  *
- * <p>The caller's own view of what is worth hitting is carried through untouched — its filter is
- * asked about every box before the box is tested — so a round that may not hit the aeroplane that
- * fired it still may not, and a pylon with nothing to hang on it still stands aside.
+ * <p>呼び出し側の「何に当ててよいか」の判断はそのまま通す。箱を試す前に必ず呼び出し側のフィルタに訊く
+ * ので、発射した機体に当たってはいけない弾は今も当たらないし、何も吊っていないパイロンは今も除外される。
  */
 @Mixin(ProjectileUtil.class)
 public abstract class HitScanMixin {
     /**
-     * Keeps the mod's boxes out of the game's own walk down the line entirely.
+     * この MOD の箱を、ゲーム側の線分走査から完全に外す。
      *
-     * <p>Not merely so that it cannot land a hit on one against the wrong shape, but so that it
-     * cannot land one and thereby hide what was really behind: the game returns the nearest thing it
-     * found and nothing else, so a wing whose upright box the line crossed but whose plate it missed
-     * would swallow the shot meant for whatever was standing beyond it. Left out of the search, a
-     * machine's boxes can neither be hit wrongly nor stand in front of anything, and the scan below
-     * puts them back where they really are.
+     * <p>間違った形で命中させないためだけではなく、命中させることで「本当は後ろにあった物」を隠さない
+     * ため。ゲームは見つけた最も近い1つしか返さないので、線分が直立した箱を横切っただけで実際の翼面には
+     * 当たっていない主翼が、その奥の相手に向けた射撃を飲み込んでしまう。探索から外しておけば、機体の箱は
+     * 誤って当たることも、何かの前に立ちはだかることもできず、下の走査が本来の位置へ戻す。
      */
     @Redirect(method = {
             "getEntityHitResult(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/Vec3;"
@@ -65,8 +59,8 @@ public abstract class HitScanMixin {
     }
 
     /**
-     * The overload the crosshair and anything with a reach limit uses. The limit is a squared
-     * distance, and it applies to the mod's boxes exactly as it applies to everything else.
+     * 十字線や、届く距離に上限がある物が使うオーバーロード。上限は距離の二乗で、この MOD の箱にも他と
+     * まったく同じように適用される。
      */
     @Inject(method = "getEntityHitResult(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/Vec3;"
             + "Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/AABB;Ljava/util/function/Predicate;D)"
@@ -81,9 +75,8 @@ public abstract class HitScanMixin {
     }
 
     /**
-     * The overload projectiles use, which allows every entity a margin round it rather than a reach
-     * limit. The same margin is allowed round the mod's boxes, or a graze the game would have
-     * counted anywhere else would be refused here.
+     * 発射物が使うオーバーロード。距離上限ではなく、各エンティティの周囲に余裕を持たせる方式。この MOD
+     * の箱にも同じ余裕を与える。そうしないと、他所でなら掠りと数えられる当たりがここでだけ弾かれる。
      */
     @Inject(method = "getEntityHitResult(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/Entity;"
             + "Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/AABB;"
@@ -99,12 +92,10 @@ public abstract class HitScanMixin {
     }
 
     /**
-     * Whichever of the two hits is nearer to the eye, with anything the game found against a
-     * machine's own boxes thrown away first.
+     * 2つの命中のうち視点に近い方。ただしゲームが機体の箱に対して出した答えは先に捨てる。
      *
-     * <p>Thrown away rather than compared, because it is not a worse answer to the same question but
-     * an answer to a different one: it is where the line crossed the upright box a part is carried
-     * in, and that box is not the part.
+     * <p>比較せず捨てるのは、それが同じ問いへの劣った答えではなく別の問いへの答えだから。パーツを収める
+     * 直立した箱と線分の交点であって、その箱はパーツではない。
      */
     private static EntityHitResult nearer(Vec3 from, EntityHitResult found, EntityHitResult ours,
             double furthest, float margin) {
@@ -126,11 +117,11 @@ public abstract class HitScanMixin {
     }
 
     /**
-     * How far away the game's own hit was.
+     * ゲーム側の命中までの距離。
      *
-     * <p>Worked out again rather than read off the result, because one of the two overloads reports
-     * a hit without saying where on the entity it landed — the middle of it stands in, and the
-     * middle of a long entity is a long way from where a line grazing its nose went in.
+     * <p>結果から読まず計算し直すのは、2つのオーバーロードの片方が「エンティティのどこに当たったか」を
+     * 言わずに命中を返すため。代わりに中心が入るが、細長いエンティティの中心は、機首を掠めた線分の進入点
+     * から遠く離れている。
      */
     private static double reach(Vec3 from, EntityHitResult found, float margin) {
         return found.getEntity().getBoundingBox().inflate(margin).clip(from, found.getLocation())

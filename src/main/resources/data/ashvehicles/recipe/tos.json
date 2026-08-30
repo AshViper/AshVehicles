@@ -1,25 +1,28 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_vehicle",
-  "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 2
     },
-    "N": {
-      "tag": "c:ingots/netherite"
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 4
     },
-    "Q": {
-      "tag": "c:storage_blocks/diamond"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 10
     },
-    "T": {
-      "item": "minecraft:tnt"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "H": {
-      "item": "minecraft:chain"
+    {
+      "item": "ashvehicles:engine",
+      "count": 1
     }
-  },
-  "pattern": ["TTT", "#Q#", "HNH"],
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:tos"

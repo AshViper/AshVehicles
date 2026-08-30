@@ -12,13 +12,12 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * The key that moves the crew member to the next seat of the machine they are aboard.
+ * 搭乗中の機体の次の座席へ移動するキー。
  *
- * <p>All it does is say the key went down while the player is riding one of ours. Which seat is next
- * — and whether there is a free one to move to at all — is the server's, settled in
- * {@link SwitchSeatPayload}: the client cannot see who is sitting where until it is told, and must
- * not guess. The press is drained rather than read, so one is never left queued to fire a tick
- * later, and only one move is asked for however many presses piled up.
+ * <p>このクラスがするのは「この MOD の乗り物に乗っている間にキーが押された」と伝えることだけ。次がどの座席か
+ * ——そもそも移れる空席があるか——はサーバーの管轄で、{@link SwitchSeatPayload} で決まる。クライアントは通知
+ * されるまで誰がどこに座っているか分からないし、推測してはならない。押下は読むのではなく吸い出すので、1tick後
+ * に発火する押下がキューに残ることはなく、何回押されても要求する移動は1回だけだ。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class SeatSwitchHandler {

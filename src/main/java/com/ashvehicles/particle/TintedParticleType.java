@@ -8,15 +8,12 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 
 /**
- * One of the mod's particle types. There is nothing to it but its codecs and a shorthand for making
- * an option out of it.
+ * この MOD のパーティクル型。中身はコーデックと、オプションを作る簡易メソッドだけ。
  *
- * <p>Every one of them overrides the limiter, which is not the small decision it looks like. A
- * particle that does not is thrown away twice over: the server will not send it to anyone more than
- * thirty-two blocks off, and a client will not draw one further away than that even if it makes it
- * itself. Thirty-two blocks is a reasonable distance for a candle flame and a useless one for a
- * missile, which is worth watching from as far away as it can be seen and which is most interesting
- * exactly when it is a long way off.
+ * <p>全型が limiter を上書きしているが、これは見た目ほど小さな判断ではない。上書きしないパーティクル
+ * は二重に捨てられる。サーバーは32ブロック以上離れた相手に送らず、クライアントは自分で生成した物さえ
+ * それ以上遠ければ描かない。32ブロックはロウソクの炎には妥当でミサイルには無意味な距離で、ミサイルは
+ * 見える限り遠くから見る価値があり、しかも遠い時こそ一番面白い。
  */
 public class TintedParticleType extends ParticleType<TintedParticleOption> {
     private final MapCodec<TintedParticleOption> codec = TintedParticleOption.codec(this);
@@ -26,7 +23,7 @@ public class TintedParticleType extends ParticleType<TintedParticleOption> {
         super(true);
     }
 
-    /** One of these particles, in a colour and a size. */
+    /** このパーティクルを色と大きさ指定で1つ。 */
     public TintedParticleOption of(int colour, float scale) {
         return new TintedParticleOption(this, colour, scale);
     }

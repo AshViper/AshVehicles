@@ -3,17 +3,21 @@
   "category": "equipment",
   "group": "ashvehicles_pod",
   "key": {
-    "#": {
-      "tag": "c:ingots/iron"
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "M": {
+      "item": "ashvehicles:machine_parts"
     },
     "G": {
       "item": "minecraft:gunpowder"
-    },
-    "B": {
-      "item": "minecraft:blaze_powder"
     }
   },
-  "pattern": ["###", "GBG", "###"],
+  "pattern": [
+    "SSS",
+    "MGM",
+    "SSS"
+  ],
   "result": {
     "count": 1,
     "id": "ashvehicles:s8_pod"

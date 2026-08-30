@@ -11,17 +11,15 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
- * A blast, and where and how big it was.
+ * 爆発が起きたこと、その位置と規模。
  *
- * <p>Sent instead of playing the sound the ordinary way, because the ordinary way cannot carry it.
- * A sound asked for on the server reaches nobody beyond {@code volume * 16} blocks, and the sound
- * engine's own falloff has run to nothing by the same distance, so an explosion is inaudible past
- * sixty-four blocks however loud it is said to be. That is a reasonable answer for a chest opening
- * and a useless one for half a tonne of high explosive, which in life is heard for miles.
+ * <p>通常の方法で音を鳴らす代わりに送る。通常の方法では届かないからだ。サーバーで要求した音は
+ * {@code volume * 16} ブロックより先の誰にも届かず、音響エンジン側の減衰も同じ距離でゼロになる。つまり
+ * どれだけ大音量と書いても爆発は64ブロック先で無音になる。チェストの開閉音には妥当で、現実なら数km先まで
+ * 聞こえる500kg の炸薬には無意味な答え。
  *
- * <p>So the server says only that a blast happened, and the client works out the rest: how long the
- * sound takes to get there, how much of it is left when it arrives, and how dull it has become on
- * the way. See {@link BlastSounds}.
+ * <p>そこでサーバーは「爆発が起きた」とだけ告げ、残りはクライアントが計算する。音が届くまでの時間、着い
+ * た時に残っている音量、道中でどれだけ籠もったか。{@link BlastSounds} 参照。
  */
 public record BlastSoundPayload(double x, double y, double z, float power) implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<BlastSoundPayload> TYPE =
@@ -36,16 +34,15 @@ public record BlastSoundPayload(double x, double y, double z, float power) imple
             },
             buf -> new BlastSoundPayload(buf.readDouble(), buf.readDouble(), buf.readDouble(), buf.readFloat()));
 
-    /** How far the blast is worth sending, in blocks. Nobody further off is told about it at all. */
+    /** 爆発を送る価値のある距離（ブロック）。これより遠い者には一切知らせない。 */
     private static final double CARRY = 220.0;
     private static final double CARRY_PER_POWER = 80.0;
 
     /**
-     * How far a blast of this size is heard, in blocks.
+     * この規模の爆発が聞こえる距離（ブロック）。
      *
-     * <p>Both ends use it: the server to decide who is sent one at all, the client to decide how
-     * much of it is left by the time it arrives. They have to agree, or a player at the edge is sent
-     * a sound and then told it is silent.
+     * <p>両端が使う。サーバーは誰に送るかの判断に、クライアントは着いた時点で音量がどれだけ残っているか
+     * の判断に。両者が一致していないと、境界にいるプレイヤーは音を送られた上で「無音」と告げられる。
      */
     public static double carry(float power) {
         return CARRY + power * CARRY_PER_POWER;
@@ -61,8 +58,8 @@ public record BlastSoundPayload(double x, double y, double z, float power) imple
     }
 
     /**
-     * Registered as client-bound only, so this runs on a client and nowhere else; a dedicated server
-     * never resolves {@link BlastSounds}.
+     * クライアント向けとしてのみ登録されているので、これはクライアントでしか走らない。専用サーバーが
+     * {@link BlastSounds} を解決することはない。
      */
     public static void handle(BlastSoundPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> BlastSounds.hear(payload.at(), payload.power()));

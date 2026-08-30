@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_pod",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "V": {
+      "item": "ashvehicles:avionics"
+    },
+    "E": {
+      "item": "minecraft:ender_eye"
+    }
+  },
+  "pattern": [
+    " E ",
+    "SVS",
+    "SSS"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:targeting_pod"
+  }
+}

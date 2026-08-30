@@ -32,24 +32,22 @@ import software.bernie.geckolib.renderer.GeoObjectRenderer;
 import software.bernie.geckolib.util.RenderUtil;
 
 /**
- * Draws one of the mod's machines from nothing but its name, as it was built.
+ * MOD の機体を、名前だけを頼りに作られたままの姿で描く。
  *
- * <p>This is what stands behind the picture an item is drawn as: no entity, no attitude, no
- * animation and no clock — the geometry and the texture the machine's id names, in the pose the
- * geometry file left them in. It is used exactly twice per machine, once to measure it and once to
- * take its picture, and never again while the client is running. See {@link VehicleIcons}.
+ * <p>アイテムの絵の背後にあるのがこれだ。エンティティも姿勢もアニメーションも時計も無い——機体IDが指すジオメトリ
+ * とテクスチャを、ジオメトリファイルが残したポーズのまま描く。使うのは機体1つにつきちょうど2回、寸法を測るのに
+ * 1回と写真を撮るのに1回で、クライアント稼働中それ以降は二度と使わない。{@link VehicleIcons} 参照。
  *
- * <p>The one thing it does beyond drawing the bones as they come is lay a run of track, because a
- * tank whose model carries a single link bone is a tank with no tracks until somebody walks it round
- * the wheels — and a picture of one like that would be a picture of a hull on bare road wheels. It
- * is the same call the vehicle's own renderer makes, with the wheels stopped.
+ * <p>ボーンをそのまま描く以外に唯一やるのが履帯を1周敷くことだ。リンク1つ分のボーンしか持たないモデルの戦車は、
+ * 誰かが車輪の周りを歩かせるまで履帯の無い戦車であり、その写真は転輪剥き出しの車体の写真になってしまう。車両自身
+ * のレンダラーが行うのと同じ呼び出しを、車輪を止めた状態で行う。
  */
 public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machine> {
     private static final VehicleIconGeo INSTANCE = new VehicleIconGeo();
 
     /**
-     * The model being drawn, kept from the start of the draw because the run of track needs to look
-     * the road wheels up in it and the bone loop is not handed it. As {@code GroundVehicleRenderer}.
+     * 描画中のモデル。描画開始時から保持する。履帯敷設が転輪をここから引く必要がある一方、ボーンループには渡されて
+     * いないからだ。{@code GroundVehicleRenderer} と同様。
      */
     @Nullable
     private BakedGeoModel drawing;
@@ -59,11 +57,10 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
     }
 
     /**
-     * Draws the machine into the given buffers, at the origin of the pose stack and in whatever
-     * frame the caller has turned it to.
+     * 機体を指定バッファへ、pose stack の原点と、呼び出し元が向けた座標系で描く。
      *
-     * <p>Full-bright, because a picture is not standing anywhere and there is no light where it is:
-     * what shades it is the diffuse lighting the caller has set, not a lightmap.
+     * <p>最大輝度。絵はどこにも立っておらず、そこに光は無いからだ。陰影を付けるのは呼び出し元が設定した拡散光で
+     * あって、ライトマップではない。
      */
     public static void draw(PoseStack poseStack, ResourceLocation vehicle, MultiBufferSource buffers) {
         Machine machine = Machine.of(vehicle);
@@ -74,16 +71,14 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
     }
 
     /**
-     * How much room the machine takes up once it has been turned the way it will be drawn.
+     * 描画時の向きに回した後、機体が占める空間の大きさ。
      *
-     * <p>Every vertex, rather than the eight corners of an upright box turned afterwards: a machine
-     * is a long thin thing seen from the corner, and the box round a turned box is half air. This is
-     * what lets one framing suit a tank and an aeroplane four times its length without a figure per
-     * machine anywhere.
+     * <p>直立の箱の8隅を後から回すのではなく全頂点を測る。機体は角から見た細長い物であり、回した箱を囲む箱は半分が
+     * 空気だからだ。これのおかげで、戦車とその4倍の長さの機体に同じ構図が使え、機体ごとの数値をどこにも置かずに
+     * 済む。
      *
-     * <p>The same walk GeckoLib makes when it draws — the same bone transforms in the same order,
-     * out of {@link RenderUtil}, so that what is measured is what is drawn. Bones the model hides
-     * are skipped for the same reason.
+     * <p>GeckoLib が描画時に行うのと同じ走査——{@link RenderUtil} から同じボーン変換を同じ順序で——なので、測った物
+     * が描かれる物になる。モデルが隠しているボーンを飛ばすのも同じ理由だ。
      */
     public static Bounds measure(ResourceLocation vehicle, Quaternionf view) {
         BakedGeoModel geometry = geometry(vehicle);
@@ -98,7 +93,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
         return bounds;
     }
 
-    /** The machine's baked geometry. Throws if the model has not been loaded, which is the caller's. */
+    /** 機体のベイク済みジオメトリ。モデル未ロードなら例外。それは呼び出し元の責任。 */
     public static BakedGeoModel geometry(ResourceLocation vehicle) {
         return INSTANCE.getGeoModel().getBakedModel(VehicleGeoModel.geometryFile(vehicle));
     }
@@ -129,7 +124,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
 
     private static void measure(Matrix4f pose, GeoCube cube, Bounds bounds) {
         for (GeoQuad quad : cube.quads()) {
-            // A face a cube has no depth for is left out of the baked model as a null.
+            // 立方体が奥行きを持たない面は、ベイク済みモデルに null として残る。
             if (quad == null) {
                 continue;
             }
@@ -146,9 +141,8 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
     }
 
     /**
-     * The half block GeckoLib's object renderer shifts what it draws by, taken back out. It draws
-     * things that sit in a block, whose origin is a corner; a machine stands at a point, and the
-     * framing is worked out about that point.
+     * GeckoLib のオブジェクトレンダラーが描画対象をずらす半ブロック分の打ち消し。あちらは原点を角に持つブロック内
+     * に収まる物を描く。機体は点に立つし、構図もその点を中心に決める。
      */
     @Override
     public void preRender(PoseStack poseStack, Machine animatable, BakedGeoModel model,
@@ -161,7 +155,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
         poseStack.translate(-0.5F, -0.51F, -0.5F);
     }
 
-    /** Lays the whole run of track wherever the model has the one link it is built out of. */
+    /** モデルが構成元のリンク1つを持つ場所に、履帯を1周分すべて敷く。 */
     @Override
     public void renderRecursively(PoseStack poseStack, Machine animatable, GeoBone bone, RenderType renderType,
             MultiBufferSource bufferSource, VertexConsumer buffer, boolean isReRender, float partialTick,
@@ -179,7 +173,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
                 partialTick, packedLight, packedOverlay, colour);
     }
 
-    /** How much room something takes up, built a vertex at a time. Empty until something is added. */
+    /** 物が占める空間を頂点1つずつ積み上げて求める。何か追加するまでは空。 */
     public static final class Bounds {
         private float minX = Float.MAX_VALUE;
         private float minY = Float.MAX_VALUE;
@@ -197,7 +191,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
             this.maxZ = Math.max(this.maxZ, point.z());
         }
 
-        /** Whether anything was measured at all. A model of nothing cannot be framed. */
+        /** そもそも何か測れたか。何も無いモデルには構図を決められない。 */
         public boolean isEmpty() {
             return this.maxX < this.minX;
         }
@@ -210,7 +204,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
             return (this.minY + this.maxY) * 0.5F;
         }
 
-        /** The longer of the two sides across the picture, which is what the framing is cut to. */
+        /** 絵の縦横のうち長い方。構図はこれに合わせて切る。 */
         public float across() {
             return Math.max(this.maxX - this.minX, this.maxY - this.minY);
         }
@@ -225,11 +219,10 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
     }
 
     /**
-     * A machine, as something GeckoLib can draw.
+     * GeckoLib が描ける物としての機体。
      *
-     * <p>One holder pointed at each machine in turn immediately before its draw, as the ghost pass
-     * does: nothing here has any state of its own, drawing is single-threaded, and a machine is
-     * drawn once and then never again.
+     * <p>ホルダー1つを、各機体の描画直前に順番にその機体へ向ける。ゴーストパスと同じやり方だ。ここには自前の状態
+     * が何も無く、描画はシングルスレッドで、機体は1度描かれたら二度と描かれない。
      */
     public static final class Machine implements GeoAnimatable {
         private static final Machine INSTANCE = new Machine();
@@ -250,8 +243,8 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
         }
 
         /**
-         * What the machine's file says about its model, whichever kind of machine it is. Only the
-         * track is read out of it here; the scale is not, because the framing settles that.
+         * 機体の種類を問わず、機体ファイルがモデルについて述べている内容。ここから読むのは履帯だけ。スケールは
+         * 読まない。構図がそれを決めるからだ。
          */
         private static VehicleChassis.Model chassisOf(ResourceLocation id) {
             if (Definitions.VEHICLES.has(id)) {
@@ -273,7 +266,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
             return this.chassis;
         }
 
-        /** None. A picture is one moment, and the moment is the one the model was built in. */
+        /** 無し。絵は1つの瞬間であり、その瞬間はモデルが作られた瞬間だ。 */
         @Override
         public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
         }
@@ -289,7 +282,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
         }
     }
 
-    /** Geometry, texture and animations found under the machine's own name, as everywhere else. */
+    /** 他所と同様、機体自身の名前で見つかるジオメトリ・テクスチャ・アニメーション。 */
     private static final class Model extends GeoModel<Machine> {
         @Override
         public ResourceLocation getModelResource(Machine animatable) {
@@ -306,7 +299,7 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
             return VehicleGeoModel.animationFile(animatable.id());
         }
 
-        /** Nothing here poses a bone by name, but a machine with no animation file must not crash. */
+        /** ここでは名前指定のボーンポーズは行わないが、アニメーションファイルの無い機体で落ちてはならない。 */
         @Override
         public boolean crashIfBoneMissing() {
             return false;

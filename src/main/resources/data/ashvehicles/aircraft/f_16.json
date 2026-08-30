@@ -1,0 +1,361 @@
+{
+  "hitbox": {
+    "width": 6,
+    "height": 3,
+    "tracking_range": 12,
+    "ghost_range": 0,
+    "boxes": [
+      {
+        "name": "all",
+        "offset": [0.0, 2.443, 2.198],
+        "size": [1.204, 1.466, 3.397]
+      },
+      {
+        "name": "all_2",
+        "offset": [0.0, 1.705, -0.39],
+        "size": [1.524, 0.338, 10.157]
+      },
+      {
+        "name": "all_3",
+        "offset": [0.0, 1.91, -6.557],
+        "size": [2.282, 1.456, 1.545]
+      },
+      {
+        "name": "all_4",
+        "offset": [0.0, 1.968, 5.078],
+        "size": [1.558, 0.815, 3.723]
+      },
+      {
+        "name": "all_5",
+        "offset": [0.0, 1.185, -4.786],
+        "size": [1.627, 1.249, 2.177],
+        "rotation": [-5.0, 0.0, 0.0]
+      },
+      {
+        "name": "all_6",
+        "offset": [0.418, 2.169, -2.23],
+        "size": [0.575, 1.119, 5.466],
+        "rotation": [2.5, 0.0, 0.0]
+      },
+      {
+        "name": "all_7",
+        "offset": [-0.268, 1.24, -1.123],
+        "size": [1.2, 0.439, 5.924],
+        "rotation": [0.0, 0.0, 22.5]
+      },
+      {
+        "name": "all_8",
+        "offset": [-0.141, 1.799, 4.977],
+        "size": [1.193, 0.908, 2.596],
+        "rotation": [-14.963, -4.141, -21.429]
+      },
+      {
+        "name": "all_9",
+        "offset": [0.0, 1.842, -1.744],
+        "size": [3.027, 0.227, 3.841]
+      },
+      {
+        "name": "all_10",
+        "offset": [-0.393, 2.263, -2.267],
+        "size": [0.527, 0.929, 5.357],
+        "rotation": [2.5, 0.0, 0.0]
+      },
+      {
+        "name": "all_11",
+        "offset": [-0.451, 2.147, -0.717],
+        "size": [1.171, 0.665, 3.113],
+        "rotation": [7.5, 0.0, -45.0]
+      },
+      {
+        "name": "all_12",
+        "offset": [0.0, 1.919, -4.656],
+        "size": [2.282, 0.382, 2.343]
+      },
+      {
+        "name": "all_13",
+        "offset": [0.278, 2.533, 0.144],
+        "size": [1.314, 0.527, 2.72],
+        "rotation": [7.5, 0.0, 45.0]
+      },
+      {
+        "name": "all_14",
+        "offset": [0.0, 3.574, -6.642],
+        "size": [0.229, 1.943, 3.965],
+        "rotation": [-42.5, 0.0, 0.0]
+      },
+      {
+        "name": "all_15",
+        "offset": [0.512, 1.341, -1.123],
+        "size": [0.672, 0.439, 5.924],
+        "rotation": [0.0, 0.0, -22.5]
+      },
+      {
+        "name": "rightwing",
+        "offset": [2.771, 1.818, -1.915],
+        "size": [3.604, 0.129, 3.476]
+      },
+      {
+        "name": "leftwing",
+        "offset": [-2.771, 1.818, -1.915],
+        "size": [3.604, 0.129, 3.476]
+      },
+      {
+        "name": "all_16",
+        "offset": [0.0, 2.613, -2.475],
+        "size": [0.544, 0.367, 6.736],
+        "rotation": [1.0, 0.0, 0.0]
+      },
+      {
+        "name": "all_17",
+        "offset": [-0.634, 2.326, -4.49],
+        "size": [1.101, 0.394, 2.701],
+        "rotation": [0.0, 0.0, -22.5]
+      },
+      {
+        "name": "all_18",
+        "offset": [0.634, 2.326, -4.49],
+        "size": [1.101, 0.394, 2.701],
+        "rotation": [0.0, 0.0, 22.5]
+      },
+      {
+        "name": "all_19",
+        "offset": [0.76, 2.037, 1.992],
+        "size": [0.618, 0.617, 2.985]
+      },
+      {
+        "name": "all_20",
+        "offset": [-0.76, 2.037, 1.992],
+        "size": [0.618, 0.617, 2.985]
+      },
+      {
+        "name": "all_21",
+        "offset": [-1.094, 2.023, -1.75],
+        "size": [1.303, 0.197, 3.853],
+        "rotation": [0.0, 0.0, -22.5]
+      },
+      {
+        "name": "all_22",
+        "offset": [1.094, 2.023, -1.75],
+        "size": [1.303, 0.197, 3.853],
+        "rotation": [0.0, 0.0, 22.5]
+      },
+      {
+        "name": "all_23",
+        "offset": [0.762, 1.885, 0.61],
+        "size": [1.098, 0.535, 1.376],
+        "rotation": [0.0, -22.5, 22.5]
+      },
+      {
+        "name": "all_24",
+        "offset": [-0.762, 1.885, 0.61],
+        "size": [1.098, 0.535, 1.376],
+        "rotation": [0.0, 22.5, -22.5]
+      },
+      {
+        "name": "rightwing_2",
+        "offset": [4.788, 1.816, -2.292],
+        "size": [0.444, 0.389, 3.0]
+      },
+      {
+        "name": "leftwing_2",
+        "offset": [-4.788, 1.816, -2.292],
+        "size": [0.444, 0.389, 3.0]
+      },
+      {
+        "name": "all_25",
+        "offset": [0.0, 1.111, -1.112],
+        "size": [1.613, 0.303, 0.812]
+      },
+      {
+        "name": "righttailplane",
+        "offset": [1.918, 1.867, -5.949],
+        "size": [1.595, 0.1, 2.107],
+        "rotation": [0.0, 0.0, 10.0]
+      },
+      {
+        "name": "lefttailplane",
+        "offset": [-1.918, 1.867, -5.949],
+        "size": [1.595, 0.1, 2.107],
+        "rotation": [0.0, 0.0, -10.0]
+      },
+      {
+        "name": "all_26",
+        "offset": [0.0, 2.712, -3.763],
+        "size": [0.229, 0.52, 2.251],
+        "rotation": [-12.5, 0.0, 0.0]
+      },
+      {
+        "name": "cockpithatch",
+        "offset": [-0.01, 2.813, 1.614],
+        "size": [1.034, 0.688, 0.177],
+        "rotation": [25.0, 0.0, -3.0]
+      },
+      {
+        "name": "all_27",
+        "offset": [0.016, 1.359, 0.914],
+        "size": [1.458, 0.463, 0.15]
+      }
+    ]
+  },
+  "model": {
+    "scale": 0.8,
+    "bones": {
+      "elevator_left": "LeftTailPlane",
+      "elevator_right": "RightTailPlane",
+      "aileron_left": "LeftFlap",
+      "aileron_right": "RightFlap",
+      "rudder": "verticalTail",
+      "nose_gear": "Tyre",
+      "left_gear": "LeftTyre",
+      "right_gear": "RightTyre",
+      "nose_gear_door": "ForwardTyreHatch",
+      "left_gear_door": "LeftTyreHatch",
+      "right_gear_door": "RightTyreHatch"
+    }
+  },
+  "engine": {
+    "max_thrust": 0.0225,
+    "throttle_rate": 0.012,
+    "spool_rate": 0.1,
+    "sea_level_density": 1,
+    "afterburner": {
+      "thrust": 1.55,
+      "light_rate": 0.28,
+      "heat": 4.5,
+      "nozzles": [
+        [0.0, 2.0, -7.4]
+      ]
+    }
+  },
+  "wing": {
+    "max_speed": 37,
+    "stall_speed": 1.55,
+    "lift": 0.006,
+    "lift_slope": 5.5,
+    "stall_angle": 16,
+    "drag": 0.000029,
+    "induced_drag": 0.00042,
+    "lateral_drag": 0.15,
+    "ground_effect": 0.28,
+    "span": 10
+  },
+  "handling": {
+    "pitch_rate": 1.2,
+    "roll_rate": 4.32,
+    "yaw_rate": 1.2,
+    "control_lag": 0.16,
+    "weathervane": 3,
+    "alpha_limit": 0.9,
+    "aero_damping": 0.05
+  },
+  "airframe": {
+    "health": 260,
+    "crash_speed": 2.6,
+    "explosion_power": 3,
+    "seats": [
+      [0.0, 1.2, 2.25]
+    ],
+    "max_g": 9,
+    "ejection": {
+      "speed": 1.5,
+      "canopy": 22
+    }
+  },
+  "landing_gear": {
+    "cycle_ticks": 40,
+    "drag_penalty": 0.6,
+    "rolling_friction": 0.999,
+    "brake_friction": 0.986,
+    "lateral_friction": 0.5,
+    "steer_rate": 1.1,
+    "steer_fade": 1.3
+  },
+  "flaps": {
+    "cycle_ticks": 20,
+    "drag_penalty": 0.5,
+    "lift_bonus": 0.4
+  },
+  "camera": {
+    "pos": [0.0, 3.2, -11.0],
+    "cockpit": [0.0, 2.8, 2.25]
+  },
+  "sound": {
+    "volume": 1,
+    "idle_volume": 0.35,
+    "pitch_min": 0.7,
+    "pitch_max": 1.25,
+    "range": 512
+  },
+  "radar": {
+    "range": 3500,
+    "arc": 60,
+    "sweep_ticks": 8,
+    "warning_range": 5000
+  },
+  "signature": {
+    "radar": 1.1,
+    "store": 0.25
+  },
+  "hardpoints": [
+    {
+      "name": "wingtip_left",
+      "pos": [-4.85, 1.75, -2.3],
+      "kind": "weapon"
+    },
+    {
+      "name": "wingtip_right",
+      "pos": [4.85, 1.75, -2.3],
+      "kind": "weapon"
+    },
+    {
+      "name": "pylon1_left",
+      "pos": [-3.6, 1.68, -1.95],
+      "kind": "weapon"
+    },
+    {
+      "name": "pylon1_right",
+      "pos": [3.6, 1.68, -1.95],
+      "kind": "weapon"
+    },
+    {
+      "name": "pylon2_left",
+      "pos": [-2.75, 1.68, -1.9],
+      "kind": "weapon"
+    },
+    {
+      "name": "pylon2_right",
+      "pos": [2.75, 1.68, -1.9],
+      "kind": "weapon"
+    },
+    {
+      "name": "pylon3_left",
+      "pos": [-1.85, 1.68, -1.8],
+      "kind": "weapon"
+    },
+    {
+      "name": "pylon3_right",
+      "pos": [1.85, 1.68, -1.8],
+      "kind": "weapon"
+    },
+    {
+      "name": "centreline",
+      "pos": [0.0, 1.15, -1.6],
+      "kind": "weapon"
+    },
+    {
+      "name": "sensor_left",
+      "pos": [-0.75, 1.3, 1.1],
+      "kind": "special"
+    },
+    {
+      "name": "sensor_right",
+      "pos": [0.75, 1.3, 1.1],
+      "kind": "special"
+    },
+    {
+      "name": "gun",
+      "pos": [-1.0, 2.6, 1.2],
+      "fixed": "ashvehicles:m61"
+    }
+  ]
+}

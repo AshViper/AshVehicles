@@ -9,20 +9,17 @@ import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.util.Mth;
 
 /**
- * The fireball of a detonation.
+ * 起爆の火球。
  *
- * <p>What makes a blast read as a blast is that it is over almost before it has happened. It opens
- * white-hot and at nearly its full size within two or three ticks, cools through the weapon's own
- * colour, and is gone in under a second, leaving the smoke to do the rest. Anything slower looks
- * like a bonfire.
+ * <p>爆発が爆発に見えるのは、起きたと思う間もなく終わるからだ。2〜3tickで白熱しほぼ最大まで開き、兵器固有の色
+ * を通って冷え、1秒足らずで消えて、あとは煙に任せる。これより遅い物は焚き火に見える。
  *
- * <p>It lights itself, everywhere, always: fire is not lit by the world, and out beyond the loaded
- * world there would be nothing to light it anyway.
+ * <p>常にどこでも自ら発光する。炎は世界に照らされる物ではないし、ロード範囲の外ではどのみち照らす物が無い。
  */
 public class BlastParticle extends WeaponParticle {
     private static final int LIFE = 9;
     private static final int LIFE_JITTER = 6;
-    /** How far open it already is when it appears, as a fraction of full size. */
+    /** 出現時点で既にどれだけ開いているか。最大サイズに対する割合。 */
     private static final float OPENS_AT = 0.35F;
 
     private final float tintRed;
@@ -53,8 +50,8 @@ public class BlastParticle extends WeaponParticle {
         super.tick();
         float lived = this.lived(0.0F);
 
-        // White at the instant it goes off, the weapon's own colour a moment later, and dark before
-        // it disappears, so what is left behind reads as soot rather than as the flame fading out.
+        // 起爆の瞬間は白、直後に兵器固有の色、消える前には暗くする。最後に残る物が「消えゆく炎」ではなく
+        // 「煤」に見えるように。
         float white = (1.0F - lived) * (1.0F - lived);
         float cool = 1.0F - lived * 0.65F;
         this.rCol = Mth.lerp(white, this.tintRed * cool, 1.0F);
@@ -65,12 +62,11 @@ public class BlastParticle extends WeaponParticle {
 
     @Override
     public float getQuadSize(float partialTick) {
-        // Opens fast and then holds: the square root is what puts nearly all of the growth into the
-        // first couple of ticks.
+        // 速く開いてから保つ。平方根が、成長のほぼ全てを最初の2〜3tickへ寄せている。
         return this.quadSize * (OPENS_AT + (1.0F - OPENS_AT) * Mth.sqrt(this.lived(partialTick)));
     }
 
-    /** Fire is its own light, wherever it is. */
+    /** 炎はどこにいても自前の光源。 */
     @Override
     protected int getLightColor(float partialTick) {
         return LightTexture.FULL_BRIGHT;

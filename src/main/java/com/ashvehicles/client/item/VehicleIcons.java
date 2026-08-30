@@ -28,59 +28,52 @@ import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 
 /**
- * The picture of a machine that stands in for it wherever a flat one will do: on its item, and on a
- * ghost too far off to be worth a model. Taken from the machine's own geometry rather than drawn by
- * hand, so a machine that has a model has a picture, and nobody has to remember to make one.
+ * 平面で用が足りる場所で機体の代役を務める絵。アイテム上と、モデルを描く価値の無いほど遠いゴースト上で使う。手描き
+ * ではなく機体自身のジオメトリから撮るので、モデルを持つ機体は絵も持ち、誰かが作るのを覚えておく必要が無い。
  *
- * <p><b>Why it is a picture and not the model.</b> An item is drawn every frame, in every slot it
- * appears in, in both hands, on the ground and in the tooltip under the cursor — an inventory open
- * over a full hotbar is a dozen draws of the same thing before anything else on the screen. Drawing
- * a GeckoLib machine there means walking its bones and filling its cubes a dozen times a frame, for
- * a picture sixteen pixels across that never changes. So each machine is drawn <em>once</em>, into a
- * texture of its own, and what the item then draws is one square: two triangles and no bones at all,
- * which is less than the item it replaces — a flat vanilla item is a slab with an extruded edge
- * around every hole in it, and this is not.
+ * <p><b>なぜモデルではなく絵なのか。</b>アイテムは毎フレーム、現れる全スロットで、両手で、地面で、カーソル下の
+ * ツールチップで描かれる——ホットバーが埋まった状態でインベントリを開けば、他の何より先に同じ物を十数回描くことに
+ * なる。そこで GeckoLib の機体を描くとは、16ピクセルの変わらない絵のために、毎フレーム十数回ボーンを歩き立方体を
+ * 埋めることだ。だから各機体は<em>1回だけ</em>専用テクスチャへ描き、以後アイテムが描くのは正方形1枚——三角形2つで
+ * ボーンは無し——になる。置き換え元のアイテムより軽い。バニラの平坦アイテムは、穴という穴の周りに押し出した縁を持つ
+ * 板だが、これはそうではないからだ。
  *
- * <p>The picture costs a frame to take and is then kept until the resources are reloaded. One is
- * taken per frame, at the top of the frame and never in the middle of a screen, so that opening a
- * creative tab full of machines for the first time cannot stall on ten of them at once. Until a
- * machine's picture is ready its item draws nothing, which lasts a frame or ten and is not something
- * anybody sees.
+ * <p>撮影は1フレームのコストがかかり、以後はリソースリロードまで保持する。撮るのは1フレームに1つ、フレームの先頭で
+ * あって画面描画の途中では決してやらない。機体で一杯のクリエイティブタブを初めて開いたとき、10体分で一度に詰まらない
+ * ようにするためだ。絵が用意できるまでその機体のアイテムは何も描かないが、それは1〜10フレームの話で誰の目にも留まら
+ * ない。
  */
 public final class VehicleIcons {
     /**
-     * Where the camera is: round from dead astern, and up from the deck.
+     * カメラの位置。真後ろからの回転角と、甲板からの仰角。
      *
-     * <p>135° round puts the camera off the machine's <em>right bow</em>: the nose swung towards the
-     * camera and to the left of the picture, the right flank towards the camera and to the right of
-     * it, so that the front, the side and the top are all in the one view and none of the three is
-     * foreshortened away. 225° is the other bow, 0° is dead astern, and 45° and 315° are the
-     * quarters.
+     * <p>135° はカメラを機体の<em>右前方</em>へ置く。機首はカメラ側かつ絵の左へ、右舷はカメラ側かつ絵の右へ振れる
+     * ので、正面・側面・上面が1つの視界に入り、3つとも短縮されて潰れない。225° は反対側の前方、0° は真後ろ、45° と
+     * 315° は斜め後方だ。
      *
-     * <p>30° up is exactly what Minecraft looks down on a block in the inventory at, which is not a
-     * coincidence: a shelf of these next to a shelf of blocks should read as one shelf.
+     * <p>仰角30° は Minecraft がインベントリのブロックを見下ろす角度とちょうど同じで、偶然ではない。これらの棚が
+     * ブロックの棚と並んだとき、1つの棚として読めるべきだからだ。
      */
     private static final float AZIMUTH = 135.0F;
     private static final float ELEVATION = 30.0F;
 
     /**
-     * How big the kept picture is, and how much bigger it is drawn before being shrunk to that.
+     * 保持する絵の大きさと、そこへ縮める前にどれだけ大きく描くか。
      *
-     * <p>The shrink is the whole of the smoothing. Drawing straight into 128 pixels leaves a hard
-     * staircase down every edge of a machine seen from the corner — every edge of one is a diagonal.
-     * Drawn at twice that and averaged four pixels into one, the same edges come out graded, which
-     * is what the eye reads as a straight line. Four times the pixels is four times nothing, once.
+     * <p>縮小がスムージングの全てだ。128ピクセルへ直接描くと、角から見た機体の全エッジに硬い階段が残る——機体の
+     * エッジは全て斜めだからだ。倍で描いて4ピクセルを1つへ平均すれば同じエッジが階調を持ち、目はそれを直線として
+     * 読む。4倍のピクセル数は、1回きりなら4倍の「無」でしかない。
      */
     private static final int SIZE = 128;
     private static final int OVERSAMPLE = 2;
     private static final int DRAWN_SIZE = SIZE * OVERSAMPLE;
 
-    /** How much wider than the machine the picture is cut, so that nothing is touching the edge. */
+    /** 絵を機体よりどれだけ広く切るか。何も端に接しないようにするため。 */
     private static final float MARGIN = 1.08F;
 
     /**
-     * How much room is left in front of and behind the machine for the depth test to work in, in
-     * blocks. Anything at all does: the machine is drawn flat on, with nothing else in the picture.
+     * 深度テストのために機体の前後へ残す余裕（ブロック）。値は何でもよい。機体は平行投影で描かれ、絵の中に他の物は
+     * 無いからだ。
      */
     private static final float DEPTH_MARGIN = 1.0F;
 
@@ -89,7 +82,7 @@ public final class VehicleIcons {
     private static final Set<ResourceLocation> FAILED = ConcurrentHashMap.newKeySet();
     private static final Queue<ResourceLocation> QUEUE = new ConcurrentLinkedQueue<>();
 
-    /** One target, borrowed by each machine in turn. Built on the first picture and then kept. */
+    /** ターゲット1つを各機体が順に借りる。最初の撮影時に構築し、以後保持する。 */
     @Nullable
     private static RenderTarget target;
 
@@ -97,11 +90,9 @@ public final class VehicleIcons {
     }
 
     /**
-     * The picture of a machine, or {@code null} if there is not one yet — in which case one is asked
-     * for, and there will be within a frame or two.
+     * 機体の絵。まだ無ければ {@code null} を返し、その場合は撮影を要求するので1〜2フレーム後には用意される。
      *
-     * <p>Safe to call from anywhere; taking the picture happens on the render thread and nowhere
-     * else.
+     * <p>どこから呼んでも安全。撮影はレンダースレッド以外では起きない。
      */
     @Nullable
     public static ResourceLocation of(ResourceLocation vehicle) {
@@ -119,9 +110,8 @@ public final class VehicleIcons {
     }
 
     /**
-     * Takes the next machine's picture, if any machine is waiting for one. Called at the top of a
-     * frame, where the screen has not been drawn yet and there is nothing of anybody else's to put
-     * back afterwards.
+     * 待っている機体があれば、次の1体の絵を撮る。フレームの先頭で呼ばれる。まだ画面が描かれておらず、後で戻すべき
+     * 他人の状態が無い時点だ。
      */
     public static void takeNext() {
         ResourceLocation vehicle = QUEUE.poll();
@@ -135,8 +125,8 @@ public final class VehicleIcons {
         try {
             TAKEN.put(vehicle, take(vehicle));
         } catch (Exception exception) {
-            // Once. A machine whose model or texture will not load is not going to start loading
-            // because its item was drawn again, and the log would fill at sixty lines a second.
+            // 1回だけ。モデルやテクスチャがロードできない機体は、アイテムがもう一度描かれたからといってロード
+            // できるようになりはしないし、ログは毎秒60行で埋まってしまう。
             FAILED.add(vehicle);
             AshVehicles.LOGGER.error("Cannot draw an item picture for {}; its item will be blank", vehicle,
                     exception);
@@ -144,9 +134,8 @@ public final class VehicleIcons {
     }
 
     /**
-     * Throws every picture away, to be taken again as they are asked for. The models and the
-     * textures they were taken from have just been reloaded, so every one of them is out of date —
-     * including the ones that failed, which a fixed resource pack may have just fixed.
+     * 全ての絵を捨て、要求され次第撮り直させる。撮影元のモデルとテクスチャが今リロードされたので、全て古い物に
+     * なった——失敗した分も含めて。修正されたリソースパックが今それを直したかもしれないからだ。
      */
     public static void forget() {
         Minecraft minecraft = Minecraft.getInstance();
@@ -158,7 +147,7 @@ public final class VehicleIcons {
         QUEUE.clear();
     }
 
-    /** Draws the machine into the offscreen target and keeps what came out as a texture. */
+    /** 機体をオフスクリーンターゲットへ描き、出来上がった物をテクスチャとして保持する。 */
     private static ResourceLocation take(ResourceLocation vehicle) {
         Minecraft minecraft = Minecraft.getInstance();
         Quaternionf view = view();
@@ -176,19 +165,18 @@ public final class VehicleIcons {
         into.bindWrite(true);
         RenderSystem.backupProjectionMatrix();
         RenderSystem.setProjectionMatrix(framing(bounds), VertexSorting.ORTHOGRAPHIC_Z);
-        // The whole of the view is in the pose stack below, so that what is drawn is exactly what
-        // was measured. Whatever the last frame left here is not part of it.
+        // 視点処理の全ては下の pose stack にある。測った物がそのまま描かれるようにするためだ。前フレームがここに
+        // 残した物はその一部ではない。
         modelView.pushMatrix();
         modelView.identity();
         RenderSystem.applyModelViewMatrix();
 
         try {
             RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-            // Nothing here is standing in the weather, and the fog of wherever the player happens to
-            // be would otherwise be drawn over the machine at whatever range the box put it at.
+            // ここにある物は天候の中に立っていない。放っておくと、プレイヤーがたまたま居る場所の霧が、投影の箱が
+            // 置いた距離に応じて機体の上に描かれてしまう。
             FogRenderer.setupNoFog();
-            // Lit as it is in the world at noon: tops bright, sides shaded. A machine's picture
-            // should look like the machine.
+            // 正午のワールドと同じ照明。上面は明るく側面は陰る。機体の絵は機体らしく見えるべきだ。
             Lighting.setupLevel();
 
             PoseStack poseStack = new PoseStack();
@@ -198,8 +186,7 @@ public final class VehicleIcons {
             VehicleIconGeo.draw(poseStack, vehicle, buffers);
             buffers.endBatch();
         } finally {
-            // Whatever happened in there, the frame that is about to be drawn gets its own matrices
-            // and its own card back.
+            // 中で何が起きようと、これから描かれるフレームには自分の行列とカードの状態が戻る。
             modelView.popMatrix();
             RenderSystem.applyModelViewMatrix();
             RenderSystem.restoreProjectionMatrix();
@@ -211,17 +198,15 @@ public final class VehicleIcons {
     }
 
     /**
-     * The turn from the machine's own frame into the camera's.
+     * 機体座標系からカメラ座標系への回転。
      *
-     * <p>The machine is turned about its own vertical to bring the bow round, and the whole of it is
-     * then tipped towards the camera to look down on it — in that order, which is what a quaternion
-     * built this way applies. Nothing else: the camera sits at the origin looking down its own −Z,
-     * and how far away the machine is does not come into a flat-on view.
+     * <p>機体を自身の鉛直軸周りに回して船首を振り、そのうえで全体をカメラ側へ倒して見下ろす——この順序で、それが
+     * こう組んだクォータニオンの適用順だ。他には何もしない。カメラは原点に座り自身の −Z を見ており、機体までの距離は
+     * 平行投影の視界には関与しない。
      *
-     * <p>The angles are in the frame the geometry is baked in, where the nose is down −Z and the
-     * <em>right</em> side is down −X. Both of those are the machine's own doing rather than
-     * anything Minecraft settles: geometry here is authored facing north, and GeckoLib mirrors X
-     * when it bakes. See {@code GroundVehicleModel} for the same two facts from the other end.
+     * <p>角度はジオメトリがベイクされる座標系での物で、機首が −Z、<em>右</em>舷が −X を向く。どちらも Minecraft が
+     * 決めた物ではなく機体側の事情だ。ここのジオメトリは北を向いて作られるし、GeckoLib はベイク時に X を鏡像化する。
+     * 同じ2つの事実を反対側から見た説明は {@code GroundVehicleModel} 参照。
      */
     private static Quaternionf view() {
         return new Quaternionf()
@@ -230,27 +215,24 @@ public final class VehicleIcons {
     }
 
     /**
-     * The box the picture is cut to: square, centred on the machine, and just big enough for the
-     * longer of its two sides.
+     * 絵を切り取る箱。正方形で、機体を中心に据え、縦横の長い方がちょうど収まる大きさ。
      *
-     * <p>Square because the picture is, and cut to the machine rather than to a figure per machine
-     * because a tank and a bomber both have to fill the same sixteen pixels. Flat on rather than in
-     * perspective, so that a long machine is not distorted end to end and a wing pointing at the
-     * camera does not swell.
+     * <p>正方形なのは絵がそうだから。機体ごとの数値ではなく機体そのものに合わせて切るのは、戦車も爆撃機も同じ16
+     * ピクセルを埋めねばならないからだ。透視ではなく平行投影にするのは、長い機体が端から端まで歪まないようにし、
+     * カメラを向いた主翼が膨らまないようにするためだ。
      */
     private static Matrix4f framing(VehicleIconGeo.Bounds bounds) {
-        // Never nothing: a box with no width at all is a projection full of infinities.
+        // 0にはしない。幅がまったく無い箱は無限大だらけの投影になる。
         float half = Math.max(bounds.across() * 0.5F * MARGIN, 0.001F);
         float middleX = bounds.middleX();
         float middleY = bounds.middleY();
 
-        // The near and far planes are given as distances down the camera's own line of sight, which
-        // runs the other way from the axis the machine was measured along.
+        // 近接面と遠方面はカメラ自身の視線方向の距離として与えるが、その向きは機体を測った軸とは逆だ。
         return new Matrix4f().setOrtho(middleX - half, middleX + half, middleY - half, middleY + half,
                 -bounds.nearest() - DEPTH_MARGIN, -bounds.furthest() + DEPTH_MARGIN);
     }
 
-    /** Reads what was drawn back out of the card, shrinks it, and registers it as a texture. */
+    /** 描いた結果をカードから読み戻し、縮小し、テクスチャとして登録する。 */
     private static ResourceLocation keep(ResourceLocation vehicle, RenderTarget from) {
         NativeImage drawn = new NativeImage(DRAWN_SIZE, DRAWN_SIZE, false);
 
@@ -258,14 +240,14 @@ public final class VehicleIcons {
             from.bindRead();
             drawn.downloadTexture(0, false);
             from.unbindRead();
-            // A frame buffer is read from the bottom up and an image is written from the top down.
+            // フレームバッファは下から上へ読まれ、画像は上から下へ書かれる。
             drawn.flipY();
 
             ResourceLocation name = ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID,
                     "vehicle_icon/" + vehicle.getPath());
             DynamicTexture texture = new DynamicTexture(shrink(drawn));
-            // Smoothed rather than blocky: this is a photograph of a machine and not pixel art, and
-            // it is drawn at a different size in a slot, in the hand and on the ground.
+            // ドット絵ではなく平滑化する。これは機体の写真でありピクセルアートではないし、スロット・手・地面で
+            // それぞれ違う大きさに描かれるからだ。
             texture.setFilter(true, false);
             Minecraft.getInstance().getTextureManager().register(name, texture);
 
@@ -276,12 +258,11 @@ public final class VehicleIcons {
     }
 
     /**
-     * Averages each square of drawn pixels down into one.
+     * 描画済みピクセルの正方形ブロックを1ピクセルへ平均する。
      *
-     * <p>Weighted by how much of each pixel there is, which matters at every edge: an edge pixel is
-     * part machine and part nothing, and nothing here is transparent <em>black</em>. Averaged
-     * straight, a white wingtip against nothing comes out grey, and every machine is drawn with a
-     * dirty outline around it.
+     * <p>各ピクセルの存在量で重み付けする。これが全エッジで効く。エッジのピクセルは一部が機体で一部が「無」であり、
+     * ここでの「無」は透明な<em>黒</em>だからだ。単純平均すると、何も無い背景に対する白い翼端が灰色になり、どの機体も
+     * 汚れた輪郭を纏って描かれてしまう。
      */
     private static NativeImage shrink(NativeImage drawn) {
         NativeImage icon = new NativeImage(SIZE, SIZE, false);
@@ -295,7 +276,7 @@ public final class VehicleIcons {
 
                 for (int downY = 0; downY < OVERSAMPLE; downY++) {
                     for (int downX = 0; downX < OVERSAMPLE; downX++) {
-                        // Packed as alpha, blue, green, red, from the top down.
+                        // 上位からアルファ・青・緑・赤の順に詰められている。
                         int pixel = drawn.getPixelRGBA(x * OVERSAMPLE + downX, y * OVERSAMPLE + downY);
                         int weight = pixel >>> 24;
 
@@ -319,7 +300,7 @@ public final class VehicleIcons {
         RenderTarget built = target;
 
         if (built == null) {
-            // With a depth buffer: the near side of a machine has to cover the far side of it.
+            // 深度バッファ付き。機体の手前側が奥側を覆う必要がある。
             built = new TextureTarget(DRAWN_SIZE, DRAWN_SIZE, true, Minecraft.ON_OSX);
             target = built;
         }
