@@ -68,7 +68,10 @@ public final class EntityGhostRenderer {
         PoseStack poseStack = context.poseStack();
         RenderType type = RenderType.entityTranslucentEmissive(texture);
         VertexConsumer buffer = context.buffers().getBuffer(type);
-        int alpha = context.ghostStyle() ? (int) (GhostGeoRenderer.GHOST_ALPHA * 255.0F) : 255;
+        // モデルと同じ式で。DH の霧の濃さの分だけ薄れる。
+        float opacity = (context.ghostStyle() ? GhostGeoRenderer.GHOST_ALPHA : 1.0F)
+                * (1.0F - context.fog());
+        int alpha = (int) (255.0F * Mth.clamp(opacity, 0.0F, 1.0F));
         // 残骸の代役アイコンもモデルと同様に暗くする。最遠階層が黙って塗り直してしまわないように。
         int level = (int) (255.0F * Mth.clamp(snapshot.shade(), 0.0F, 1.0F));
         int light = context.packedLight();

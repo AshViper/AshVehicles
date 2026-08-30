@@ -7,6 +7,7 @@ import com.ashvehicles.client.ghost.adapter.AircraftGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.BulletGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.GroundVehicleGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.RocketGhostAdapter;
+import com.ashvehicles.client.ghost.adapter.TargetDroneGhostAdapter;
 import com.ashvehicles.client.particle.BlastParticle;
 import com.ashvehicles.client.particle.FlameParticle;
 import com.ashvehicles.client.particle.SmokeParticle;
@@ -22,6 +23,7 @@ import com.ashvehicles.client.renderer.CountermeasureRenderer;
 import com.ashvehicles.client.renderer.DesignationRenderer;
 import com.ashvehicles.client.renderer.GroundVehicleRenderer;
 import com.ashvehicles.client.renderer.RocketRenderer;
+import com.ashvehicles.client.renderer.TargetDroneRenderer;
 import com.ashvehicles.client.screen.VehicleWorkbenchScreen;
 import com.ashvehicles.registry.ModEntities;
 import com.ashvehicles.registry.ModMenus;
@@ -86,6 +88,7 @@ public class AshVehiclesClient {
         ModEntities.vehicles().values().forEach(type -> EntityGhostRegistry.register(type.get(), ground));
         EntityGhostRegistry.register(ModEntities.BULLET.get(), new BulletGhostAdapter());
         EntityGhostRegistry.register(ModEntities.ROCKET.get(), new RocketGhostAdapter());
+        EntityGhostRegistry.register(ModEntities.TARGET_DRONE.get(), new TargetDroneGhostAdapter());
     }
 
     /** ゴーストの距離は毎フレームではなくここで一度だけ二乗しておく。 */
@@ -111,6 +114,7 @@ public class AshVehiclesClient {
                 .forEach(type -> event.registerEntityRenderer(type.get(), GroundVehicleRenderer::new));
         event.registerEntityRenderer(ModEntities.BULLET.get(), BulletRenderer::new);
         event.registerEntityRenderer(ModEntities.ROCKET.get(), RocketRenderer::new);
+        event.registerEntityRenderer(ModEntities.TARGET_DRONE.get(), TargetDroneRenderer::new);
         event.registerEntityRenderer(ModEntities.COUNTERMEASURE.get(), CountermeasureRenderer::new);
         // 指示点は計器が地表に重ねて描くもので、そこに立つ物体として描くものではない。
         // レンダラーがあるのは、エンティティ型には必ず要るから。

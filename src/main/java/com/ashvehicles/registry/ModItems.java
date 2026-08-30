@@ -11,10 +11,12 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.item.AircraftItem;
 import com.ashvehicles.item.AmmoItem;
+import com.ashvehicles.item.BlastWandItem;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.GroundVehicleItem;
 import com.ashvehicles.item.RackItem;
+import com.ashvehicles.item.TargetDroneItem;
 import com.ashvehicles.item.VehicleWorkbenchItem;
 import com.ashvehicles.item.WeaponItem;
 import com.ashvehicles.item.WrenchItem;
@@ -54,6 +56,22 @@ public final class ModItems {
             ITEMS.registerItem("fuel_can", FuelItem::new, new Item.Properties().stacksTo(16));
 
     /**
+     * 標的ドローンの投入器。これも機体に付く物ではなく、撃つ相手を空へ上げる道具。
+     *
+     * <p>ソロでミサイルを試すための的なので、機体・兵装のどれからも独立してここに置く。使えば1機、
+     * スニークで使えば自分の分を全機回収（{@link TargetDroneItem} 参照）。
+     */
+    public static final DeferredItem<TargetDroneItem> TARGET_DRONE =
+            ITEMS.registerItem("target_drone", TargetDroneItem::new, new Item.Properties().stacksTo(16));
+
+    /**
+     * 爆発演出のテスト用の棒。狙った地点で火球・炸裂音・衝撃波を起こすが、地形は壊さない。
+     * スニークで使えば規模を切り替える（{@link BlastWandItem} 参照）。
+     */
+    public static final DeferredItem<BlastWandItem> BLAST_WAND =
+            ITEMS.registerItem("blast_wand", BlastWandItem::new, new Item.Properties().stacksTo(1));
+
+    /**
      * 中間素材。機体も車両も、鉄と赤石を卓に積み上げれば出てくる物ではなくなった。
      *
      * <p>7種のうち板と部品と基板が土台で、そこから装甲板・エンジン・ジェットエンジン・アビオニクスが
@@ -85,7 +103,8 @@ public final class ModItems {
      * <p>データパックの兵装がこの名前を名乗ったら、争いになる前に負けてもらう。機体や弾薬と同じ扱いだが、
      * こちらは登録が先に済んでいるので、防がないと名前の二重登録でゲームが上がらなくなる。
      */
-    private static final Set<String> FIXED_NAMES = Set.of("wrench", "fuel_can", "vehicle_workbench",
+    private static final Set<String> FIXED_NAMES = Set.of("wrench", "fuel_can", "target_drone",
+            "blast_wand", "vehicle_workbench",
             "steel_plate", "machine_parts", "circuit_board", "armor_plate", "engine", "jet_engine", "avionics");
 
     private static final Map<ResourceLocation, DeferredItem<AircraftItem>> AIRCRAFT = registerAircraft();
@@ -102,7 +121,7 @@ public final class ModItems {
     private static Map<ResourceLocation, DeferredItem<AircraftItem>> registerAircraft() {
         Map<ResourceLocation, DeferredItem<AircraftItem>> items = new LinkedHashMap<>();
 
-        ModEntities.aircraft().forEach((id, type) -> items.put(id, ITEMS.registerItem(id.getPath(),
+        ModEntities.aircraft().forEach((id, type) -> items.put(id, itemsFor(id).registerItem(id.getPath(),
                 properties -> new AircraftItem(type, properties), new Item.Properties().stacksTo(1))));
 
         return Collections.unmodifiableMap(items);
@@ -112,7 +131,7 @@ public final class ModItems {
     private static Map<ResourceLocation, DeferredItem<GroundVehicleItem>> registerVehicles() {
         Map<ResourceLocation, DeferredItem<GroundVehicleItem>> items = new LinkedHashMap<>();
 
-        ModEntities.vehicles().forEach((id, type) -> items.put(id, ITEMS.registerItem(id.getPath(),
+        ModEntities.vehicles().forEach((id, type) -> items.put(id, itemsFor(id).registerItem(id.getPath(),
                 properties -> new GroundVehicleItem(type, properties), new Item.Properties().stacksTo(1))));
 
         return Collections.unmodifiableMap(items);
@@ -137,7 +156,7 @@ public final class ModItems {
                 return;
             }
 
-            items.put(id, ITEMS.registerItem(id.getPath(),
+            items.put(id, itemsFor(id).registerItem(id.getPath(),
                     properties -> new WeaponItem(id, properties), new Item.Properties().stacksTo(1)));
         });
 
@@ -166,7 +185,7 @@ public final class ModItems {
                 return;
             }
 
-            items.put(id, ITEMS.registerItem(id.getPath(),
+            items.put(id, itemsFor(id).registerItem(id.getPath(),
                     properties -> new RackItem(id, properties), new Item.Properties().stacksTo(RACK_STACK)));
         });
 
@@ -189,17 +208,31 @@ public final class ModItems {
                 return;
             }
 
-            items.put(id, ITEMS.registerItem(id.getPath(),
+            items.put(id, itemsFor(id).registerItem(id.getPath(),
                     properties -> new EquipmentItem(id, properties), new Item.Properties().stacksTo(1)));
         });
 
         return Collections.unmodifiableMap(items);
     }
 
-    /** その名前を機体か弾薬か、MOD 固有のアイテムが既に取っているか。 */
+    /**
+     * その名前を機体か弾薬か、MOD 固有のアイテムが既に取っているか。
+     *
+     * <p>弾薬名と MOD 固有名は {@code ashvehicles} の中でしか予約されない。コンテンツパックは自分の
+     * 名前空間を持っているので、{@code mypack:engine} は誰とも争わない。
+     */
     private static boolean isTaken(ResourceLocation id) {
-        return AIRCRAFT.containsKey(id) || VEHICLES.containsKey(id) || isAmmoName(id)
-                || FIXED_NAMES.contains(id.getPath());
+        return AIRCRAFT.containsKey(id) || VEHICLES.containsKey(id)
+                || (AshVehicles.MODID.equals(id.getNamespace())
+                        && (isAmmoName(id) || FIXED_NAMES.contains(id.getPath())));
+    }
+
+    /**
+     * その ID を登録すべきレジスタ。理由は {@code ModEntities.typesFor} と同じで、パックの物はパックの
+     * 名前空間から登録される。
+     */
+    private static DeferredRegister.Items itemsFor(ResourceLocation id) {
+        return AshVehicles.MODID.equals(id.getNamespace()) ? ITEMS : ModRegisters.items(id.getNamespace());
     }
 
     /**

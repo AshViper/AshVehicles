@@ -5,6 +5,7 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.entity.CountermeasureEntity;
@@ -433,6 +434,11 @@ public final class TargetLock {
         // 既に撃墜した機体に落ち着いてしまう。
         if (candidate instanceof VehicleEntityBase machine) {
             return !machine.isWrecked();
+        }
+
+        // 標的ドローンは生き物でも機体でもないが、ロックされるために存在する物。
+        if (candidate instanceof TargetDroneEntity) {
+            return true;
         }
 
         return candidate instanceof LivingEntity;

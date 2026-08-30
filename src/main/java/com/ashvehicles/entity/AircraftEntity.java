@@ -1402,7 +1402,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.attitudeO = new Quaternionf(this.attitude);
         this.tickGear();
         this.tickVtol();
-        this.tickSweep();
         this.tickRotor();
         this.tickLerp();
 
@@ -1514,6 +1513,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 this.publishVelocity();
             }
         }
+
+        // 可変翼は他の tick* と違い、移動の「後」で動かす。目標後退角を決めるのは対気速度だが、操縦側での
+        // それは travelled() ——位置と旧位置の差——であり、tick は旧位置を現在位置へ揃えた直後に始まる。
+        // 移動前に測れば実速度にかかわらず必ず0で、翼は全開前進に貼り付いたまま二度と動かない。サーバーと
+        // 非操縦クライアントは申告値を読むので順序を問わないが、測る側に全側を合わせる。recordTurnRate が
+        // 移動後に測るのと同じ理由。
+        this.tickSweep();
 
         if (this.crashing) {
             this.crash();
@@ -2792,6 +2798,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * はずの抗力を払っていない。
      *
      * <p>残骸も動かす。翼を途中で止める理由が無く、落ちていく残骸は減速するので、翼は自然に前へ戻っていく。
+     *
+     * <p>呼ぶのは移動の後。操縦側の対気速度は位置と旧位置の差であり、移動前にはまだ0だからだ。
+     * {@link #tick()} の呼び出し箇所を参照。
      */
     private void tickSweep() {
         this.sweepProgressO = this.sweepProgress;

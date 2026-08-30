@@ -5,11 +5,13 @@ import javax.annotation.Nullable;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.client.HitReadout;
 import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehiclePart;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.vehicle.Hitbox;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -109,6 +111,16 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
         } else if (struck instanceof VehicleEntityBase hulk) {
             machine = hulk;
             within = Attitude.toBody(machine.getAttitude(), at.subtract(machine.position()));
+        } else if (struck instanceof TargetDroneEntity drone) {
+            // 標的ドローンにも集計を返す。的の存在理由は「当たったかを知る」ことで、800m 先の的は
+            // まさにこの計器の距離にいる。箱も車体座標も持たないので名前とダメージ集計だけの札になり、
+            // 絵は {@code HitReadout.copyOf} が機体以外を描かないため元から出ない。
+            PacketDistributor.sendToPlayer(crew, new HitReportPayload(drone.getId(),
+                    BuiltInRegistries.ENTITY_TYPE.getKey(drone.getType()), -1, Vec3.ZERO,
+                    travel.lengthSqr() < 1.0E-6 ? new Vec3(0.0, 0.0, 1.0) : travel.normalize(),
+                    0.0F, 0.0F, damage, bounced));
+
+            return;
         } else {
             return;
         }

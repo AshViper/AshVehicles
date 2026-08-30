@@ -2,7 +2,9 @@ package com.ashvehicles.entity;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.network.HitReportPayload;
 import com.ashvehicles.weapon.WeaponDefinition;
+import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -11,6 +13,7 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -33,9 +36,9 @@ import software.bernie.geckolib.util.GeckoLibUtil;
  * を指定しないファイルは最初の tick から全推力を得る。
  *
  * <p>ミサイルにできることは意図的に制限されている。旋回は1tickあたり固定の角度なので、それより強く曲がる
- * 目標には外れる。そして前方に見えている物しか追わないので、背後へ回った目標は失探しミサイルはロケットと
- * して飛び続ける。誘導するのは動力飛行中だけで、モーターが切れれば他の全部と同じく弾道飛行になる。無条件
- * に命中する物は1つも無く、それが要点だ。ミサイルは破られるべき物である。
+ * 目標には外れる。そして前方に見えている物しか追わないので、背後へ回った目標は失探する。失探したミサイルは
+ * しばらく視野内を探し直し（{@link #searchAgain} 参照）、取り戻せなければ自爆する。無条件に命中する物は
+ * 1つも無く、それが要点だ。ミサイルは破られるべき物である。
  *
  * <p>そして何もロックせずに撃った物はレールを離れた時点でロケットだ。シーカーがそもそも動かないので、飛行
  * 中に自分で目標を探しに行くこともなければ、フレアが騙す相手も存在しない。それが最も効くのは撃った本人で、
@@ -49,17 +52,49 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      * よう同期する。
      */
     /** デコイがミサイルを誘い得る最大距離（ブロック）。 */
+    /**
+     * これ以内をかすめた弾頭は直撃扱い（ブロック）。信管の効く距離がこれより短い弾では
+     * {@link #CONTACT_SHARE} の方が効く。
+     */
+    private static final double CONTACT = 1.5;
+
+    /** 信管の効く距離のうち、直撃扱いになる割合。近接信管の短い弾で {@link #CONTACT} の代わりに使う。 */
+    private static final double CONTACT_SHARE = 0.4;
+
     private static final double DECOY_REACH = 40.0;
-    /** 範囲内のデコイ1つが毎tickミサイルを奪う確率。 */
-    private static final float DECOY_CHANCE = 0.2F;
+
+    /**
+     * 失探後の捜索でシーカーが手を伸ばす最大距離（ブロック）。ファイルの {@code lock_range} がこれより
+     * 短ければそちらに従う。
+     *
+     * <p>上限があるのは、この捜索が毎tick走る箱の問い合わせだから。箱の問い合わせのコストは中身ではなく
+     * 箱の大きさで決まり（{@link com.ashvehicles.weapon.TargetLock} の掃引参照）、空対空ミサイルの
+     * {@code lock_range} は km 単位だ。失探は終末機動の至近距離で起きる物なので、捜索がその距離まで
+     * 届く必要はそもそも無い。
+     */
+    private static final double SEARCH_REACH = 160.0;
+
+    /**
+     * 目標の熱量／反射がどれだけ小さくても、デコイの魅力をこれ以上は増やさない下限。
+     * {@link #checkDecoys} 参照。
+     */
+    private static final float FAINTEST_TARGET = 0.25F;
 
     private static final EntityDataAccessor<Integer> DATA_TARGET =
             SynchedEntityData.defineId(RocketEntity.class, EntityDataSerializers.INT);
 
     @Nullable
     private Entity target;
-    /** シーカーが追っていた相手を見失ったら true。以後は探さない。 */
+    /**
+     * シーカーが追っていた相手を見失ったら true。以後しばらくは捜索モードで、ファイルの
+     * {@code reacquire_ticks} の間に視野へ戻ってきた物を捉え直せなければ自爆する。サーバー専用。
+     * {@link #searchAgain} 参照。
+     */
     private boolean lost;
+    /** 見失った相手。捜索中、視野内の他の何かより優先して取り戻しに行く。 */
+    private int lostId = -1;
+    /** 失探してからの tick 数。{@code reacquire_ticks} と比べる。 */
+    private int searching;
 
     /**
      * 機首の向き。進行方向とは別物。
@@ -169,6 +204,12 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
             return;
         }
 
+        // 失探中のシーカーは黙って弾道飛行に落ちるのではなく、まず視野内を探し直す。目標を決めてよいのは
+        // サーバーだけなので、こちらだけで回す。捉え直せばこの tick からもう誘導が戻っている。
+        if (!this.level().isClientSide && this.lost) {
+            this.searchAgain(heading);
+        }
+
         boolean burning = this.isBurning() && round.hasMotor();
         // 「兵装が誘導できる種類か」ではなく「まだ追う相手がいるか」。何もロックせずに撃った物や、その後
         // 見失った物——{@link #lose} 参照。ここが判定するのと同じやり方で目標を消す——は、モーターが切れた
@@ -201,8 +242,36 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
                         round.topSpeed() > 0.0F ? round.topSpeed() : Double.MAX_VALUE)
                 : velocity.length();
 
+        // 空気が持っていく分。この tick に舵を何度切ったかを渡すので、真っ直ぐ飛ぶミサイルと曲がっている
+        // ミサイルでは削られ方が違う。
+        double turned = Math.acos(Mth.clamp(heading.dot(wanted), -1.0, 1.0));
+
+        speed = Math.max(0.0, speed - this.drag(round, speed, turned, burning));
+
         this.axis = wanted;
         this.setDeltaMovement(wanted.scale(speed));
+    }
+
+    /**
+     * この tick に空気が奪う速さ（1tickあたりブロック）。
+     *
+     * <p>2つの足し算。<em>素の抗力</em>は速さの2乗に比例し、燃焼が終わってから効く——燃え尽きたミサイルが
+     * 目標まで同じ速さで滑っていくのではなく、確実に遅くなっていく理由。<em>誘導抗力</em>は舵を切った分
+     * だけ余分に奪い、こちらは燃焼中も効く——急旋回したミサイルが速度を失い、失った速度が戻らないという、
+     * 回避が成立する仕組みそのもの。
+     *
+     * <p>係数はどちらも兵装ファイルの物で、既定値の狙いは
+     * {@link WeaponDefinition.Projectile#DEFAULT_DRAG} と
+     * {@link WeaponDefinition.Projectile#DEFAULT_TURN_DRAG} にある。0 を書けば従来通り、空気の無い世界を
+     * 飛ぶ。
+     *
+     * @param turned この tick に機首が回った角（ラジアン）
+     */
+    private double drag(WeaponDefinition.Projectile round, double speed, double turned, boolean burning) {
+        double air = burning ? 0.0 : round.drag() * speed * speed;
+        double induced = round.turnDrag() * speed * turned;
+
+        return air + induced;
     }
 
     /**
@@ -230,24 +299,159 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      * 奪うので、フレア1発は賭け、連続放出なら分の良い賭け、何も出さなければ確実な死になる。それがレバーを
      * 引くタイミングに価値を与えている。
      *
-     * <p>数えるのは<em>この</em>シーカーを騙す種類だけ。そして一度奪われたら返らない。フレアへ向かった
-     * ミサイルはフレアへ向かったのであり、その後することはそこへ飛び込んで空中で炸裂することだけ。
+     * <p>確率は一律ではない。シーカーは2つの光源を<em>比べて</em>いるので、賭けの分は両者の明るさで動く。
+     * デコイ側は残り寿命——放出直後のフレアが最も明るく、燃え尽きかけの物はほぼ何でもない。目標側は自分の
+     * 被探知性——熱源追尾に対してはアフターバーナーの熱、レーダー追尾に対しては反射断面積。バーナーを
+     * 焚いたまま逃げる機体はフレアを出しても分が悪く、絞ってから出せば同じフレアがずっと良く効く。それが
+     * 「レバーを引くだけ」を「レバーを引き、スロットルも絞る」にしている。
+     *
+     * <p>そして視野の外のデコイは存在しないのと同じ。シーカーに見えない物はシーカーを騙せない。真後ろへ
+     * 抜けたフレアに賭け続けるミサイルは、フレアではなく乱数に負けている。
+     *
+     * <p>数えるのは<em>この</em>シーカーを騙す種類だけ。そして一度奪われたら返らない——正確には、フレアが
+     * 燃え尽きた時に「追う物が消えた」として失探扱いになり、そこからは他の失探と同じ捜索が走る。
      */
     private void checkDecoys(WeaponDefinition.Guidance guidance) {
-        if (this.getTarget() instanceof CountermeasureEntity) {
+        Entity chasing = this.getTarget();
+
+        if (chasing instanceof CountermeasureEntity) {
             return;
         }
 
+        Vec3 heading = this.axis();
+
+        if (heading.lengthSqr() < 1.0E-8) {
+            return;
+        }
+
+        double narrowest = Math.cos(Math.toRadians(guidance.trackAngle()));
+        // 目標がどれだけ目立つか。シーカーの種類ごとに見ている物が違う——TargetLock.reachAgainst と同じ
+        // 区別。暗い目標ほどデコイが際立つが、下限は設ける。完全なステルスがフレア1発で必中で振り切る
+        // 世界にはしない。
+        float glare = Math.max(FAINTEST_TARGET, switch (guidance.seeker()) {
+            case HEAT -> AircraftEntity.heatVisibility(chasing);
+            case RADAR -> AircraftEntity.visibility(chasing);
+            case LASER -> 1.0F;
+        });
         AABB box = this.getBoundingBox().inflate(DECOY_REACH);
 
         for (CountermeasureEntity decoy : this.level().getEntitiesOfClass(CountermeasureEntity.class, box,
                 candidate -> candidate.fools(guidance.seeker()))) {
-            if (this.random.nextFloat() < DECOY_CHANCE) {
+            Vec3 gap = decoy.middle().subtract(this.position());
+            double distance = gap.length();
+
+            // シーカー視野の外にある物は比較の土俵に載らない。
+            if (distance < 1.0E-3 || gap.scale(1.0 / distance).dot(heading) < narrowest) {
+                continue;
+            }
+
+            if (this.random.nextFloat() < guidance.seduction() * decoy.remaining() / glare) {
                 this.setTarget(decoy);
 
                 return;
             }
         }
+    }
+
+    /**
+     * 失探中の1tick分の捜索。見失った相手が視野へ戻れば取り戻し、代わりに別の有効目標が視野に入れば
+     * それを取り、どちらも起きないまま {@code reacquire_ticks} が尽きれば——{@link #earlyDetonation} が
+     * 自爆させる。
+     *
+     * <p>TRACK LOST → SEARCH → REACQUIRE。失探を永久にしないのは、それが「振り切られたミサイルは無害」
+     * を意味してしまうから。旋回で視野から抜けるのは正しい対抗機動のままだが、抜けた後もミサイルの視野を
+     * 横切って戻るのは間違いになる。
+     *
+     * <p>捜索範囲は意図的に狭い。{@link #SEARCH_REACH} 参照。箱の問い合わせは箱の大きさで払うので、
+     * ファイルの {@code lock_range}——km 単位になり得る——をそのまま毎tick歩かせはしない。
+     */
+    private void searchAgain(Vec3 heading) {
+        WeaponDefinition.Guidance guidance = this.getWeapon().guidance().orElse(null);
+
+        if (guidance == null || guidance.reacquireTicks() <= 0) {
+            return;
+        }
+
+        this.searching++;
+
+        double reach = Math.min(guidance.lockRange(), SEARCH_REACH);
+        double narrowest = Math.cos(Math.toRadians(guidance.trackAngle()));
+        Vec3 from = this.position();
+        AABB box = this.getBoundingBox().inflate(reach);
+        Entity best = null;
+        double bestAlignment = narrowest;
+
+        for (Entity candidate : this.level().getEntities(this, box, this::couldReacquire)) {
+            Vec3 middle = candidate.position().add(0.0, candidate.getBbHeight() * 0.5, 0.0);
+            Vec3 gap = middle.subtract(from);
+            double distance = gap.length();
+
+            if (distance > reach || distance < 1.0E-3) {
+                continue;
+            }
+
+            double alignment = gap.scale(1.0 / distance).dot(heading);
+
+            if (alignment < narrowest) {
+                continue;
+            }
+
+            // 見失った当人が視野内にいるなら、より中央の別人がいてもそちらへ戻る。シーカーが覚えている
+            // のはその相手の信号だから。
+            if (candidate.getId() == this.lostId) {
+                best = candidate;
+
+                break;
+            }
+
+            if (alignment > bestAlignment) {
+                bestAlignment = alignment;
+                best = candidate;
+            }
+        }
+
+        if (best != null) {
+            this.lost = false;
+            this.searching = 0;
+            this.setTarget(best);
+        }
+    }
+
+    /**
+     * 失探からの捜索が拾ってよい相手。{@link com.ashvehicles.weapon.TargetLock} の couldTarget と同じ
+     * 名簿で、デコイだけを除いた物。捜索中のシーカーがフレアを「再取得」するなら、フレア1発が確実に
+     * ミサイルを空へ捨てさせることになり、確率で決めている {@link #checkDecoys} の意味が無くなる。
+     *
+     * <p>撃てる相手の種類を増やす時はここも1行増える。名簿を持つ場所は既に5つあり、これが6つ目。
+     */
+    private boolean couldReacquire(Entity candidate) {
+        Entity vehicle = this.firedFrom();
+
+        if (candidate instanceof VehicleProjectile || candidate instanceof CountermeasureEntity) {
+            return false;
+        }
+
+        if (vehicle != null && (candidate == vehicle || WeaponMounts.isPartOf(vehicle, candidate))) {
+            return false;
+        }
+
+        if (!candidate.isAlive() || candidate.isSpectator()) {
+            return false;
+        }
+
+        if (candidate.getVehicle() instanceof VehicleEntityBase) {
+            return false;
+        }
+
+        if (candidate instanceof VehicleEntityBase machine) {
+            return !machine.isWrecked();
+        }
+
+        if (candidate instanceof TargetDroneEntity) {
+            return true;
+        }
+
+        return candidate instanceof LivingEntity;
     }
 
     /**
@@ -264,12 +468,19 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         WeaponDefinition.Guidance guidance = this.getWeapon().guidance().orElse(null);
         Entity chasing = this.lost ? null : this.getTarget();
 
-        // 追う相手が無いので何も追わない。これはロケットであり、残りの飛行の間ずっとロケットのままだ。
-        // デコイ判定の後ではなく前に問うこと、それが規則の全部。何もロックせずレールを離れたミサイルは
-        // シーカーが動いていないので、自分で目標を探しに行くこともなければ騙される相手にもならない——
-        // 前方の空中へ投げ込まれた物はただの煙だ。既に見失った物も探し直さない。見失ったことこそが、それを
-        // これにしたのだから。
-        if (guidance == null || chasing == null || !chasing.isAlive()) {
+        // 追う相手が無いので何も追わない。何もロックせずレールを離れたミサイルはシーカーが動いていない
+        // ので、自分で目標を探しに行くこともなければ騙される相手にもならない——前方の空中へ投げ込まれた物
+        // はただの煙だ。失探した物の探し直しはここではなく searchAgain の仕事で、取り戻した tick には
+        // lost が false に戻っているので、この行はまた通らなくなる。
+        if (guidance == null || chasing == null) {
+            return heading;
+        }
+
+        // 追っていた物が消えた。撃墜された機体、そして燃え尽きたフレア——奪われたミサイルの信号は本当に
+        // そこで消える。どちらも「視野から外れた」のと同じ失探として扱い、捜索と自爆の時計が回り始める。
+        if (!chasing.isAlive()) {
+            this.lose();
+
             return heading;
         }
 
@@ -331,6 +542,65 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         return rotateAbout(heading, losRate.scale(1.0 / rate), commanded);
     }
 
+    /**
+     * 信管が作動した。爆風の前に、弾頭を追っていた相手へ渡す。
+     *
+     * <p><b>これが無いと兵装ファイルの {@code damage} が誘導弾では一度も使われない。</b> 近接信管を持つ
+     * ミサイルは相手に触れる前に炸裂する——それが近接信管だ——ので、{@code onHitEntity} の直撃経路には
+     * 一度も入らない。残るのはバニラの爆発だけで、あれは炸薬の大きさしか見ない。200点の弾頭を積んだ
+     * ミサイルが、爆風の10点だけを置いて消えていたのはそれが理由。
+     *
+     * <p>渡す量は外した距離で減る。破片は球状に広がるので、機体を貫く距離を通ったミサイルは弾頭全部を、
+     * 信管の効く縁をかすめたミサイルは何も渡さない——縁の側にも爆風はあり、そちらは従来通り届く。
+     */
+    @Override
+    protected void detonate(Vec3 where) {
+        Entity chasing = this.getTarget();
+        WeaponDefinition.Guidance guidance = this.getWeapon().guidance().orElse(null);
+
+        if (guidance != null && chasing != null && chasing.isAlive()) {
+            this.warhead(chasing, where, guidance.proximity());
+        }
+
+        super.detonate(where);
+    }
+
+    /** 弾頭1発分を、外した距離で目減りさせて相手へ。 */
+    private void warhead(Entity target, Vec3 where, float reach) {
+        Vec3 middle = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0);
+        float share = fragments(where.distanceTo(middle), reach);
+        float damage = this.getRound().damage() * share;
+
+        if (damage <= 0.0F) {
+            return;
+        }
+
+        target.hurt(this.damageSource(), damage);
+        // 直撃と同じく撃った者だけに伝える。近接信管で終わった弾は目標に触れていないので、これが無いと
+        // 命中は画面上のどこにも現れない。
+        HitReportPayload.report(this.getOwner(), target, where, this.getDeltaMovement(), damage, false);
+    }
+
+    /**
+     * その外し方で弾頭のどれだけが届くか。0から1まで。
+     *
+     * <p>信管の効く距離の内側でも、近ければ近いほど多く届く。ただし「ほぼ触れている」範囲では全部届く
+     * ——実際の弾頭も、機体の直近で炸裂すればその機体を貫く破片を出すだけの密度を持っている。
+     */
+    private static float fragments(double miss, float reach) {
+        if (reach <= 0.0F) {
+            return 1.0F;
+        }
+
+        double contact = Math.min(CONTACT, reach * CONTACT_SHARE);
+
+        if (miss <= contact) {
+            return 1.0F;
+        }
+
+        return (float) Mth.clamp(1.0 - (miss - contact) / (reach - contact), 0.0, 1.0);
+    }
+
     /** {@code vector} を {@code axis} 回りに {@code radians} だけ回す。軸は単位ベクトル前提。 */
     private static Vec3 rotateAbout(Vec3 vector, Vec3 axis, double radians) {
         double cos = Math.cos(radians);
@@ -355,7 +625,12 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
             return;
         }
 
+        // 誰を見失ったかを覚えてから手放す。捜索はその相手を優先して取り戻しに行く。searchAgain 参照。
+        Entity was = this.getTarget();
+
         this.lost = true;
+        this.lostId = was == null ? -1 : was.getId();
+        this.searching = 0;
         this.setTarget(null);
     }
 
@@ -385,9 +660,26 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     @Nullable
     protected Vec3 earlyDetonation() {
         WeaponDefinition.Guidance guidance = this.getWeapon().guidance().orElse(null);
+
+        if (guidance == null) {
+            return null;
+        }
+
+        // 捜索が空振りのまま尽きた。振り切られたミサイルの終わり方は「どこか遠くの地面に落ちる」ではなく
+        // 自爆で、それは律儀に近接信管の経路を通る——弾頭は目標がいないので渡らず、爆発だけが空に置かれる。
+        if (this.lost && guidance.reacquireTicks() > 0 && this.searching > guidance.reacquireTicks()) {
+            return this.position();
+        }
+
+        // 信管はまだ寝ている。発射直後のミサイルはレールの横の自機や隣を飛ぶ僚機の鼻先を必ず通るので、
+        // その数tickは目標の横を通ろうと炸裂しない。直撃は別——触れた物には触れた時に当たる。
+        if (this.age < guidance.armTicks()) {
+            return null;
+        }
+
         Entity chasing = this.getTarget();
 
-        if (guidance == null || chasing == null || !chasing.isAlive()) {
+        if (chasing == null || !chasing.isAlive()) {
             return null;
         }
 
@@ -443,6 +735,8 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         super.readAdditionalSaveData(tag);
         this.entityData.set(DATA_TARGET, tag.contains("Target") ? tag.getInt("Target") : -1);
         this.lost = tag.getBoolean("Lost");
+        this.lostId = tag.contains("LostId") ? tag.getInt("LostId") : -1;
+        this.searching = tag.getInt("Searching");
         this.axis = tag.contains("Axis")
                 ? new Vec3(tag.getDouble("AxisX"), tag.getDouble("AxisY"), tag.getDouble("AxisZ"))
                 : Vec3.ZERO;
@@ -453,6 +747,8 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         super.addAdditionalSaveData(tag);
         tag.putInt("Target", this.entityData.get(DATA_TARGET));
         tag.putBoolean("Lost", this.lost);
+        tag.putInt("LostId", this.lostId);
+        tag.putInt("Searching", this.searching);
         // 保存するのは、速度がこれの安全な代用にならないから。翼から落ちて離れている最中に保存された物
         // は、地面を向いた状態で戻ってくる。
         tag.putBoolean("Axis", true);

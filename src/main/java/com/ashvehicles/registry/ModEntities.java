@@ -14,6 +14,7 @@ import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.entity.DesignationEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.entity.RocketEntity;
+import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 
 import net.minecraft.core.registries.Registries;
@@ -126,6 +127,24 @@ public final class ModEntities {
                             .setShouldReceiveVelocityUpdates(false)
                             .build("designation"));
 
+    /**
+     * 標的ドローン。ソロでシーカーや近接信管を試すための、周回し続ける的。
+     *
+     * <p>追跡距離はミサイルと同じ理由で同じ値。的はミサイルより遠くからロックされ、飛んでいくミサイルと
+     * 同じ画面に映り続ける必要がある。描画距離による頭打ちは {@code EntityTrackingMixin} が外す。
+     *
+     * <p>更新はミサイルと同じ間隔で、速度は送らない。円は両側が同じ式で計算するので
+     * （{@code TargetDroneEntity} 参照）、たまに届く位置は補正ではなく答え合わせ。
+     */
+    public static final DeferredHolder<EntityType<?>, EntityType<TargetDroneEntity>> TARGET_DRONE =
+            ENTITY_TYPES.register("target_drone",
+                    () -> EntityType.Builder.<TargetDroneEntity>of(TargetDroneEntity::new, MobCategory.MISC)
+                            .sized(2.2F, 1.0F)
+                            .clientTrackingRange(128)
+                            .updateInterval(5)
+                            .setShouldReceiveVelocityUpdates(false)
+                            .build("target_drone"));
+
     private static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> registerAll() {
         Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> types = new LinkedHashMap<>();
 
@@ -141,7 +160,7 @@ public final class ModEntities {
         // Minecraft の当たり判定は底面が正方形の箱なので、機体のシルエットには決して合わない。
         // ファイルの値は胴体と翼根を覆い、外翼ははみ出させる寸法。大きさはここで固定でデータパックから
         // は変えられない。エンティティ型は登録された瞬間からこの値を持ち歩くため。
-        return ModEntities.ENTITY_TYPES.register(id.getPath(),
+        return typesFor(id).register(id.getPath(),
                 () -> EntityType.Builder.<AircraftEntity>of(AircraftEntity::new, MobCategory.MISC)
                         .sized(hitbox.width(), hitbox.height())
                         .clientTrackingRange(hitbox.trackingRange())
@@ -179,13 +198,25 @@ public final class ModEntities {
             ResourceLocation id, GroundVehicleDefinition definition) {
         VehicleChassis.Hitbox hitbox = definition.hitbox();
 
-        return ModEntities.ENTITY_TYPES.register(id.getPath(),
+        return typesFor(id).register(id.getPath(),
                 () -> EntityType.Builder.<GroundVehicleEntity>of(GroundVehicleEntity::new, MobCategory.MISC)
                         .sized(hitbox.width(), hitbox.height())
                         .clientTrackingRange(hitbox.trackingRange())
                         .updateInterval(1)
                         .setShouldReceiveVelocityUpdates(true)
                         .build(id.getPath()));
+    }
+
+    /**
+     * その ID を登録すべきレジスタ。MOD 本体の物はここ自身の物、コンテンツパックの物はその名前空間の物。
+     *
+     * <p>{@link DeferredRegister} は名前空間を1つしか持てないので、{@code mypack:foo} という機体は
+     * {@code mypack} のレジスタからしか登録できない。{@link ModRegisters} 参照。
+     */
+    private static DeferredRegister<EntityType<?>> typesFor(ResourceLocation id) {
+        return AshVehicles.MODID.equals(id.getNamespace())
+                ? ENTITY_TYPES
+                : ModRegisters.entities(id.getNamespace());
     }
 
     /** 登録済みの全機体（ID順）。 */

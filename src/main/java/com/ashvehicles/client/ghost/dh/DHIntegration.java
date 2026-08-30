@@ -41,6 +41,17 @@ public final class DHIntegration {
     }
 
     /**
+     * DH の遠方霧の現在の形。DH が無いか、あっても霧を描いていなければ {@code null}。
+     *
+     * <p>フレームに1度写しを取り、そのフレームの全ゴーストを同じ写しで薄める。設定読みはフレームごと
+     * 数回の getValue で安く、ゴーストごとに繰り返す理由は無い。{@link DHFog} 参照。
+     */
+    @javax.annotation.Nullable
+    public static DHFog fog() {
+        return LOADED ? DHRendererBridge.fog() : null;
+    }
+
+    /**
      * DH の地形が2点の間に立っているか。
      *
      * @param level クライアントレベル。対応する DH レベルを見つけるため

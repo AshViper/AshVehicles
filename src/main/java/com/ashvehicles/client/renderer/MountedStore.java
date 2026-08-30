@@ -1,17 +1,21 @@
 package com.ashvehicles.client.renderer;
 
+import com.ashvehicles.client.ghost.GhostRenderContext;
+import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
 import com.ashvehicles.client.model.WeaponModel;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.animatable.GeoAnimatable;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animatable.instance.SingletonAnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.renderer.GeoObjectRenderer;
+import software.bernie.geckolib.util.Color;
 
 /**
  * ステーションに吊られている物を、GeckoLib が描ける形にした物。兵装、それを吊るラック、あるいは特殊ステーションの
@@ -121,6 +125,19 @@ public final class MountedStore implements GeoAnimatable {
             super.preRender(poseStack, animatable, model, bufferSource, buffer, isReRender, partialTick,
                     packedLight, packedOverlay, colour);
             poseStack.translate(-0.5F, -0.51F, -0.5F);
+        }
+
+        /**
+         * 生きた機体の上では素の白＝そのままの色。ゴーストパスの中では機体と同じ透過度と、DH の霧の同じ
+         * 濃さ。これが無いと霧に薄れていく機体の主翼の下に、くっきりしたミサイルだけが残る。
+         */
+        @Override
+        public Color getRenderColor(MountedStore animatable, float partialTick, int packedLight) {
+            float alpha = (GhostRenderContext.isTranslucent() ? GhostGeoRenderer.GHOST_ALPHA : 1.0F)
+                    * (1.0F - GhostRenderContext.fogFactor());
+
+            return alpha >= 0.999F ? Color.WHITE
+                    : Color.ofRGBA(255, 255, 255, (int) (255.0F * Mth.clamp(alpha, 0.0F, 1.0F)));
         }
     }
 }

@@ -647,7 +647,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
             Vec3 fuse = this.earlyDetonation();
 
             if (fuse != null) {
-                this.burst(fuse, null);
+                this.detonate(fuse);
 
                 return;
             }
@@ -1007,20 +1007,41 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         }
 
         super.onHitEntity(hit);
-        DamageSource source = new DamageSource(
-                this.level().registryAccess().registryOrThrow(Registries.DAMAGE_TYPE).getHolderOrThrow(DAMAGE_TYPE),
-                this, this.getOwner());
 
         // 砲身を出た時の威力ではなく今残っている威力。ここまで真っ直ぐ来た弾——ほぼ全部——では両者は同じ。
         float damage = this.getRound().damage() * Ricochet.energy(this.deflections);
 
-        hit.getEntity().hurt(source, damage);
+        hit.getEntity().hurt(this.damageSource(), damage);
         // 撃った者だけに伝える。この兵装が使われる距離では、弾が目標のどこへ行ったかを砲手が知る唯一の
         // 手段がこれ。HitReportPayload 参照。
         HitReportPayload.report(this.getOwner(), hit.getEntity(), hit.getLocation(),
                 this.getDeltaMovement(), damage, false);
         this.struck(hit);
         this.burst(hit.getLocation(), null, hit.getEntity());
+    }
+
+    /**
+     * この弾が与える打撃の出所。撃った者と、飛んできた物そのもの。
+     *
+     * <p>1つの弾が2度傷つけることがある——弾頭が目標に、続いて爆風が周囲に——ので、両方が同じ形で作られる
+     * 必要がある。機体側は同一 tick の同一ソースを1度しか数えないので（{@code VehicleEntityBase.hurt}
+     * 参照）、ここを共有することが「どちらも数えられる」ことと「箱の数だけ数えられない」ことの両方を
+     * 保証している。
+     */
+    protected DamageSource damageSource() {
+        return new DamageSource(
+                this.level().registryAccess().registryOrThrow(Registries.DAMAGE_TYPE).getHolderOrThrow(DAMAGE_TYPE),
+                this, this.getOwner());
+    }
+
+    /**
+     * 信管が作動した位置で終わる。
+     *
+     * <p>既定では炸裂するだけ。何に対して作動したのかを知っている弾——つまり目標を追っていたミサイル——は
+     * ここで弾頭をその相手へ渡す。{@code RocketEntity.detonate} 参照。
+     */
+    protected void detonate(Vec3 where) {
+        this.burst(where, null);
     }
 
     /**

@@ -209,10 +209,11 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     /**
      * ミサイル照準。シーカーが見られる円錐と、捕捉対象を囲む枠。
      *
-     * <p>ここに照準点は無い。ミサイルは目標へ据えるのではなく手渡されるので、乗員が実際にやっているのは、ロックが閉じる
-     * まで砲架を十分静かに十分長く保つことだ——だから描く価値があるのは「どこを見られるか」と「どこまで進んだか」の2つ
-     * になる。環はシーカー自身の円錐を実寸で描いた物だ。目標をその中へ入れればロックは成立するし、外にいる限り乗員が
-     * どれだけ待っても何も起きない。
+     * <p>ここに照準点は無い。ミサイルは目標へ据えるのではなく手渡されるので、乗員が実際にやっているのは、目標を環の中へ
+     * 入れ、シーカーのキーを押したままロックが閉じるまで砲架を保つことだ——だから描く価値があるのは「どこを見られるか」
+     * と「どこまで進んだか」の2つになる。環はシーカー自身の円錐を実寸で描いた物だ。目標をその中へ入れて捕捉させれば
+     * ロックは成立するし、外にいる限り乗員がどれだけ待っても何も起きない。キーを押さなければ、環の中にいる物も掴まない
+     * ——{@link com.ashvehicles.client.ModKeyMappings#RADAR_LOCK} 参照。
      */
     private static void drawSeeker(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
             float partialTick, int centreX, int centreY) {

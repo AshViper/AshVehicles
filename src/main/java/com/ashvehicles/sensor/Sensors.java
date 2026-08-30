@@ -8,6 +8,7 @@ import javax.annotation.Nullable;
 
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.RocketEntity;
+import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.network.SensorPayload;
 import com.ashvehicles.vehicle.VehicleChassis;
@@ -191,10 +192,11 @@ public final class Sensors {
             // ステルス機はもうその形状ではない。
             if (radar.fitted() && distance <= radar.range() * AircraftEntity.visibility(other)
                     && gap.scale(1.0 / distance).dot(along) > widest) {
+                // 標的ドローンは空中の的なので、スコープでは航空機の記号で出す。
                 found.add(new Contact(other.getId(), bearing, (float) distance,
                         (float) (other.getY() - this.vehicle.getY()),
                         other == seeking,
-                        other instanceof AircraftEntity,
+                        other instanceof AircraftEntity || other instanceof TargetDroneEntity,
                         identity));
             }
         }
@@ -242,6 +244,12 @@ public final class Sensors {
             // 残骸は風景。そこにあるし金属でできてもいるが、撃墜された物を全部映し続けるスコープは
             // 戦えない目標で埋まり、戦える1つがその中に紛れてしまう。
             return !machine.isWrecked();
+        }
+
+        // 標的ドローンはスコープに載るために飛んでいる。載らなければレーダー誘導弾の遠距離試験ができない
+        // ——シーカー単独の距離の外では、レーダーが渡した物しか取れないので（TargetLock 参照）。
+        if (candidate instanceof TargetDroneEntity) {
+            return true;
         }
 
         // 機体に乗っている者は乗員であって目標ではない。スペクテイターはそもそも居ない。

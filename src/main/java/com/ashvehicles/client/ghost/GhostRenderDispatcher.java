@@ -9,6 +9,7 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.client.ghost.dh.DHFog;
 import com.ashvehicles.client.ghost.dh.DHIntegration;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -216,6 +217,9 @@ public final class GhostRenderDispatcher {
         EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
         double farPlane = minecraft.gameRenderer.getDepthFar();
         double ghostBeyond = ghostStyleRadius();
+        // DH の霧の1フレーム分の写し。ゴーストはこの分だけ透明へ寄る——DH は自分の地形にしか霧を掛けない
+        // ので、これが無いと霧に沈んだ山の上をくっきりした機影が滑る。DHFog 参照。
+        DHFog fogCurve = DHIntegration.fog();
 
         // 先に集める。霧を動かすのは、それで描く物が実際にある場合だけにするためだ。
         List<EntityGhost> ghosts = GATHERED;
@@ -264,18 +268,25 @@ public final class GhostRenderDispatcher {
             } else if (lod.isGhost()) {
                 GhostSnapshot snapshot = ghost.current();
                 double pull = pull(Math.sqrt(distanceSq), farPlane);
+                // 真の距離で測る。引き寄せ後の頂点距離で測れば、遠方面の向こうのゴーストほど霧が薄くなって
+                // しまう。距離は水平——DH の霧は円筒形だ。
+                float fog = fogCurve == null ? 0.0F
+                        : fogCurve.thickness(position.x - eye.x, position.z - eye.z);
 
                 // 構築済み世界の内側では深度バッファが遮蔽を決着させる——ピクセル単位で、実際に遮っている地面に
                 // よって——し、線は一切トレースしない（GhostOcclusion 参照）。フラグは機体が世界の外にいた頃の答えを
                 // まだ保持しうるし、再問い合わせは数tickごとだ。ここでそれを鵜呑みにすると、ロード範囲の縁を越えて
                 // 入ってくる機体がその時間だけ消えてしまう。
-                if (ghost.isOccluded() && !isBuilt(BlockPos.containing(position))) {
+                if (fog >= DHFog.OPAQUE) {
+                    // 霧に沈み切った。DH の地形がそこで見えなくなるのと同じ場所で、ゴーストも見えなくなる。
+                    verdict = GhostVerdict.HIDDEN;
+                } else if (ghost.isOccluded() && !isBuilt(BlockPos.containing(position))) {
                     verdict = GhostVerdict.OCCLUDED;
                 } else if (!inView(frustum, snapshot, position, eye, pull)) {
                     culled++;
                     verdict = GhostVerdict.CULLED;
                 } else {
-                    draws.add(Draw.ofGhost(ghost, lod, position, minecraft, distanceSq, ghostBeyond, pull));
+                    draws.add(Draw.ofGhost(ghost, lod, position, minecraft, distanceSq, ghostBeyond, pull, fog));
                     verdict = GhostVerdict.DRAWN;
                 }
             } else {
@@ -345,10 +356,10 @@ public final class GhostRenderDispatcher {
      */
     private record Draw(@Nullable EntityGhost ghost, @Nullable Entity entity, GhostLOD lod,
             @Nullable Vec3 position, double distanceSq, double pull, int light, boolean ghostStyle,
-            boolean inWorld) {
+            float fog, boolean inWorld) {
 
         static Draw ofGhost(EntityGhost ghost, GhostLOD lod, Vec3 position, Minecraft minecraft,
-                double distanceSq, double ghostBeyond, double pull) {
+                double distanceSq, double ghostBeyond, double pull, float fog) {
             boolean inWorld = isBuilt(BlockPos.containing(position));
             // 立っている場所の光で照らす。ただし立つ場所がある場合に限る。構築済み世界の外では、レベルは「分からない」
             // ではなく「光は無い」と答えるからだ。
@@ -360,7 +371,7 @@ public final class GhostRenderDispatcher {
             ghost.recordLight(light, inWorld);
 
             return new Draw(ghost, null, lod, position, distanceSq, pull, light,
-                    distanceSq >= ghostBeyond * ghostBeyond, inWorld);
+                    distanceSq >= ghostBeyond * ghostBeyond, fog, inWorld);
         }
 
         static Draw ofEntity(Entity entity, Minecraft minecraft, double distanceSq, double ghostBeyond,
@@ -371,8 +382,9 @@ public final class GhostRenderDispatcher {
                     ? dispatcher.getPackedLightCoords(entity, partialTick)
                     : LightTexture.FULL_BRIGHT;
 
+            // FULL 階層は128ブロック以内で、DH の霧がそこまで届く設定は現実には無い。0で正しい。
             return new Draw(null, entity, GhostLOD.FULL, null, distanceSq, 0.0, light,
-                    distanceSq >= ghostBeyond * ghostBeyond, inWorld);
+                    distanceSq >= ghostBeyond * ghostBeyond, 0.0F, inWorld);
         }
 
         void render(Vec3 eye, float partialTick, PoseStack poseStack, MultiBufferSource buffers,
@@ -386,12 +398,12 @@ public final class GhostRenderDispatcher {
             EntityGhost drawing = this.ghost;
             Vec3 to = this.position.subtract(eye);
             GhostRenderContext context = new GhostRenderContext(poseStack, buffers, camera, to, partialTick,
-                    this.light, this.ghostStyle, this.distanceSq);
+                    this.light, this.ghostStyle, this.fog, this.distanceSq);
 
             poseStack.pushPose();
             poseStack.scale((float) this.pull, (float) this.pull, (float) this.pull);
             poseStack.translate(to.x, to.y, to.z);
-            GhostRenderContext.enter(this.ghostStyle);
+            GhostRenderContext.enter(this.ghostStyle, this.fog);
 
             try {
                 drawing.adapter().render(drawing, this.lod, context);
@@ -428,7 +440,7 @@ public final class GhostRenderDispatcher {
 
         poseStack.pushPose();
         poseStack.scale(pull, pull, pull);
-        GhostRenderContext.enter(ghostStyle);
+        GhostRenderContext.enter(ghostStyle, 0.0F);
 
         try {
             dispatcher.render(entity, to.x, to.y, to.z, yaw, partialTick, poseStack, buffers, light);

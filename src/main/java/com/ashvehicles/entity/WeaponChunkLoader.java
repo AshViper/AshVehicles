@@ -63,9 +63,11 @@ import net.neoforged.neoforge.common.world.chunk.TicketController;
  * <li><b>弾は共有する。</b> 確保は発ごとではなくワールド全体で chunk ごとに数える。だから1本の線を進む
  * 連射は、そこに何発並んでいてもその線の代金を1回だけ払う。同じ chunk を通る2発目のコストは「数値が1増え
  * る」こと。
- * <li><b>地面はロードするが tick させない。</b> 弾はどこにいても自分で tick するので、ここで chunk を
- * tick させる必要は無い。ランダム tick も湧きも、誰も立っていない土地での延焼も要らない。弾が外で欲しかっ
- * たのはロードされていることだけ——当たる物があること。
+ * <li><b>地面はロードするが chunk 自体は tick させない。</b> ランダム tick も湧きも、誰も立っていない
+ * 土地での延焼も要らない。非tickの強制ロードでも指定 chunk は entity-ticking 水準（レベル31）になるので、
+ * <em>弾自身の</em> tick はそれで通る——というより、それでしか通らない。{@code isAlwaysTicking} は弾を
+ * 世界とtickリストに残すだけで、{@code ServerLevel} の {@code inEntityTickingRange} の門は通さない。
+ * だから確保には前方2つに加えて弾自身の chunk（own）が要る。{@code update} 参照。
  * <li><b>新規の地面は配給制。</b> 誰かが既にロードしている chunk の確保はほぼ無料。誰も持っていない chunk
  * の確保はその場で、呼び出しが返る前に、ディスクから読むか無から作る。それは1tickに決まった数しかやらない。
  * 断られた弾はその tick を盲目で飛び、次の tick で再度要求する。代償は「当てるはずだった斜面をたまに1発
@@ -229,39 +231,64 @@ public final class WeaponChunkLoader {
             return;
         }
 
+        ChunkPos own = null;
         ChunkPos near = null;
         ChunkPos far = null;
 
-        if (shouldStayLoaded(shot)) {
+        // 弾が今いる chunk。前方の2つと違い、これは地面のためではなく<em>弾自身の tick</em> のためだ。
+        // ServerLevel は乗り物に乗っていない全エンティティを inEntityTickingRange で門前払いし、
+        // isAlwaysTicking はそこを通さない。entity-ticking（レベル31）になるのはチケットを指した
+        // chunk そのものだけで、隣は32——つまり半歩先と1.5歩先しか指さない弾は、1tickに半 chunk より
+        // 速く飛ぶ限り自分の chunk を一度も指さない。シミュレーション距離の内側では誰も気付かない。
+        // プレイヤーの周りは元々31だから。その外——標的ドローンへの BVR 射撃がまさにそこで行われる——
+        // では、ミサイルは境界を跨いだ次の tick に空中で凍り付く。
+        //
+        // だから own は {@code chunk_loading} を見ない。あの旗が断っているのは「地面を開いておく代金」で
+        // あって tick ではない。投棄した増槽が空中で静止する理由は無い。
+        if (stillFlying(shot)) {
+            own = shot.chunkPosition();
+        }
+
+        if (own != null && shot.getWeapon().loadsChunks()) {
             // 確保より前に。この tick が知り得た最も早い時点で、線の先端のことを生成器へ伝えるため。
             prefetch(shot, level);
 
             near = along(shot, NEAR);
             far = along(shot, FAR);
 
-            // 1tickに1 chunk より遅い物は同じ地面を2回指定する。その場合は確保1つが欲しかった物の全部
-            // なので、遠い側の枠は二重に数えず空のままにする。
-            if (far.equals(near)) {
+            // 同じ地面を2回指定する物は枠を空ける。遅い弾は3つ全部が同じ chunk になり、確保1つが欲しかった
+            // 物の全部になる。
+            if (far.equals(near) || far.equals(own)) {
                 far = null;
+            }
+
+            if (near.equals(own)) {
+                near = null;
             }
         }
 
-        if (Objects.equals(near, hold.near) && Objects.equals(far, hold.far)) {
+        if (Objects.equals(own, hold.own) && Objects.equals(near, hold.near) && Objects.equals(far, hold.far)) {
             return;
         }
 
         Claims claims = CLAIMS.computeIfAbsent(level, ignored -> new Claims());
+        ChunkPos wasOwn = hold.own;
         ChunkPos wasNear = hold.near;
         ChunkPos wasFar = hold.far;
 
         // 先に手放す。ただし完全に要らなくなった地面だけ。前 tick に前方へ確保していた地面は、たいてい今
         // 飛んでいる場所そのものだ。それを手放してすぐ要求し直すのは、チケットを2回取って途中で chunk を
         // 解放することになる。
-        drop(claims, level, wasNear, near, far);
-        drop(claims, level, wasFar, near, far);
+        drop(claims, level, wasOwn, own, near, far);
+        drop(claims, level, wasNear, own, near, far);
+        drop(claims, level, wasFar, own, near, far);
 
-        hold.near = keep(claims, level, near, wasNear, wasFar);
-        hold.far = keep(claims, level, far, wasNear, wasFar);
+        // own だけは配給の外で取る。断られた own は「その tick を盲目で飛ぶ」ではなく「次の tick が来ない」
+        // であり、tick が止まった弾は二度と要求できず、保持していた地面ごと空中で永久に凍る。ほぼ常に
+        // 前 tick の near がここに敷いた地面なので、代償を払う場面は先読みが負けた稀な race だけ。
+        hold.own = keep(claims, level, own, true, wasOwn, wasNear, wasFar);
+        hold.near = keep(claims, level, near, false, wasOwn, wasNear, wasFar);
+        hold.far = keep(claims, level, far, false, wasOwn, wasNear, wasFar);
     }
 
     /**
@@ -272,7 +299,7 @@ public final class WeaponChunkLoader {
      * @param hold 弾が保持している物。空にされる
      */
     public static void release(VehicleProjectile shot, Hold hold) {
-        if (hold.near == null && hold.far == null) {
+        if (hold.own == null && hold.near == null && hold.far == null) {
             return;
         }
 
@@ -280,19 +307,21 @@ public final class WeaponChunkLoader {
             Claims claims = CLAIMS.get(level);
 
             if (claims != null) {
-                drop(claims, level, hold.near, null, null);
-                drop(claims, level, hold.far, null, null);
+                drop(claims, level, hold.own, null, null, null);
+                drop(claims, level, hold.near, null, null, null);
+                drop(claims, level, hold.far, null, null, null);
             }
         }
 
+        hold.own = null;
         hold.near = null;
         hold.far = null;
     }
 
-    /** 弾が以前保持していた chunk を手放す。ただし今欲しい2つのどちらかなら残す。 */
+    /** 弾が以前保持していた chunk を手放す。ただし今欲しい3つのどれかなら残す。 */
     private static void drop(Claims claims, ServerLevel level, @Nullable ChunkPos had,
-            @Nullable ChunkPos near, @Nullable ChunkPos far) {
-        if (had != null && !had.equals(near) && !had.equals(far)) {
+            @Nullable ChunkPos own, @Nullable ChunkPos near, @Nullable ChunkPos far) {
+        if (had != null && !had.equals(own) && !had.equals(near) && !had.equals(far)) {
             claims.drop(level, had);
         }
     }
@@ -300,21 +329,22 @@ public final class WeaponChunkLoader {
     /**
      * 弾が今欲しい chunk を取る。既に保持していれば何もしない。
      *
+     * @param force 配給と上限を無視して取るか。弾自身の tick を運ぶ own だけが真を渡す
      * @return その chunk。要らない場合、またはこの tick にワールドがそこまで応じない場合は null。その場合
      *         は何も保持しておらず、弾は次の tick で再要求する
      */
     @Nullable
-    private static ChunkPos keep(Claims claims, ServerLevel level, @Nullable ChunkPos wanted,
-            @Nullable ChunkPos wasNear, @Nullable ChunkPos wasFar) {
+    private static ChunkPos keep(Claims claims, ServerLevel level, @Nullable ChunkPos wanted, boolean force,
+            @Nullable ChunkPos wasOwn, @Nullable ChunkPos wasNear, @Nullable ChunkPos wasFar) {
         if (wanted == null) {
             return null;
         }
 
-        if (wanted.equals(wasNear) || wanted.equals(wasFar)) {
+        if (wanted.equals(wasOwn) || wanted.equals(wasNear) || wanted.equals(wasFar)) {
             return wanted;
         }
 
-        return claims.take(level, wanted) ? wanted : null;
+        return claims.take(level, wanted, force) ? wanted : null;
     }
 
     /** 今から指定 tick 数だけ飛んだ時点で弾がいる chunk。 */
@@ -373,8 +403,9 @@ public final class WeaponChunkLoader {
         }
     }
 
-    private static boolean shouldStayLoaded(VehicleProjectile shot) {
-        return !shot.isRemoved() && shot.age <= LONGEST_HOLD && shot.getWeapon().loadsChunks();
+    /** まだ飛んでいて、保持の年限内か。own はこれだけで取り、地面の確保はさらに {@code chunk_loading} を問う。 */
+    private static boolean stillFlying(VehicleProjectile shot) {
+        return !shot.isRemoved() && shot.age <= LONGEST_HOLD;
     }
 
     /**
@@ -385,6 +416,9 @@ public final class WeaponChunkLoader {
      * のは弾自身。要らなくなった時を知っているのは弾だけなので。
      */
     public static final class Hold {
+        /** 弾自身が立っている chunk。tick の続きを買っている方の確保。 */
+        @Nullable
+        private ChunkPos own;
         @Nullable
         private ChunkPos near;
         @Nullable
@@ -409,10 +443,14 @@ public final class WeaponChunkLoader {
         /**
          * ある chunk への1発分の関心を加える。最初の1発ならチケットも取る。
          *
+         * @param force 配給（{@link #affordable}）と {@link #MOST_CHUNKS} を無視するか。弾自身が立つ
+         *              chunk（own）だけが真で来る。断られた own は「その tick を盲目で飛ぶ」ではなく
+         *              「次の tick が来ない」であり、凍った弾は手放すことも失効することもできない。
+         *              1 chunk の同期ロードの方がずっと安い
          * @return その chunk が今保持されているか。ワールドがそこまで応じない場合は false で、その場合は
          *         何も確保されておらず、弾には手放す物も無い
          */
-        boolean take(ServerLevel level, ChunkPos pos) {
+        boolean take(ServerLevel level, ChunkPos pos, boolean force) {
             Integer wanting = this.held.get(pos);
 
             if (wanting != null) {
@@ -421,12 +459,13 @@ public final class WeaponChunkLoader {
                 return true;
             }
 
-            if (this.held.size() >= MOST_CHUNKS || !this.affordable(level, pos)) {
+            if (!force && (this.held.size() >= MOST_CHUNKS || !this.affordable(level, pos))) {
                 return false;
             }
 
-            // ロードするが tick させない。弾はどこにいても自分で tick するし、ここで欲しいのは当たる地面
-            // であって、誰もいないのにフル稼働する田園ではない。
+            // ロードするが chunk 自体は tick させない——ランダム tick も湧きも、誰もいないのにフル稼働
+            // する田園も要らない。非tickの強制ロードでも指定 chunk は entity-ticking 水準（レベル31）に
+            // なるので、その上に立つ弾自身の tick はこれで通る。update() の own の項参照。
             CONTROLLER.forceChunk(level, pos.getWorldPosition(), pos.x, pos.z, true, false);
             this.held.put(pos, 1);
 

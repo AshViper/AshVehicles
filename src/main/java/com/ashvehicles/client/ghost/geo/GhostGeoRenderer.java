@@ -57,10 +57,14 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
 
         GhostAnimatable animatable = GhostAnimatable.of(ghost, snapshot, poser);
         startClock(animatable);
-        RenderType type = renderType(snapshot.texture(), context.ghostStyle());
+        RenderType type = renderType(snapshot.texture(), context);
         MultiBufferSource buffers = context.buffers();
 
-        INSTANCE.render(context.poseStack(), animatable, buffers, type, buffers.getBuffer(type),
+        // 素通しの覆いを1枚挟む。GeckoLib の頂点書き込みを乗っ取る最適化 MOD の生バイト経路が、この
+        // パスの外相（通常のエンティティフェーズの外）で走ってテクスチャ対応を壊すのを防ぐ。
+        // PlainVertices 参照。
+        INSTANCE.render(context.poseStack(), animatable, buffers, type,
+                new PlainVertices(buffers.getBuffer(type)),
                 context.packedLight(), context.partialTick());
     }
 
@@ -93,6 +97,9 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
         return animatable.ghost().uuid().getLeastSignificantBits();
     }
 
+    /** これより濃い霧の中では、切り抜きではなく透過で描く必要がある。薄め始めの見た目の段差はこの下に隠れる。 */
+    private static final float FOGGED = 0.01F;
+
     /**
      * 背後に何も無いゴーストは半透明かつ自発光で描く。自発光なのは、あの距離に照らす光が無いから。半透明なのは、
      * 近くの物ではなく「接触点」として読ませるためだ。描画済み地形の上では実体として描くが、自発光は保つ。
@@ -103,14 +110,24 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
                 : RenderType.entityCutoutNoCull(texture);
     }
 
+    /**
+     * 同じ選択を、DH の霧も踏まえて。切り抜き描画はアルファを混ぜられないので、霧に薄まり始めた物は実体の
+     * 距離でも透過型へ移す。移した瞬間のアルファは {@code 1 − 霧} ≈ 1 なので、切り替えは目に見えない。
+     */
+    public static RenderType renderType(ResourceLocation texture, GhostRenderContext context) {
+        return renderType(texture, context.ghostStyle() || context.fog() > FOGGED);
+    }
+
     @Override
     public Color getRenderColor(GhostAnimatable animatable, float partialTick, int packedLight) {
         // 透過度は距離の管轄、暗さはエンティティの管轄。残骸はどの距離でも焦げているし、機体色で描かれる
-        // ゴーストは、ゲーム自身のレンダラーが引き継いだ瞬間に残骸を生き返らせてしまう。
-        int alpha = GhostRenderContext.isTranslucent() ? (int) (GHOST_ALPHA * 255.0F) : 255;
+        // ゴーストは、ゲーム自身のレンダラーが引き継いだ瞬間に残骸を生き返らせてしまう。DH の霧はさらに
+        // その上へ掛かる——濃さの分だけ透明へ寄せれば、既に霧の色をした背景が透けて「霧に混ざった」画になる。
+        float alpha = (GhostRenderContext.isTranslucent() ? GHOST_ALPHA : 1.0F)
+                * (1.0F - GhostRenderContext.fogFactor());
         int level = (int) (255.0F * Mth.clamp(animatable.snapshot().shade(), 0.0F, 1.0F));
 
-        return Color.ofRGBA(level, level, level, alpha);
+        return Color.ofRGBA(level, level, level, (int) (255.0F * Mth.clamp(alpha, 0.0F, 1.0F)));
     }
 
     /**
