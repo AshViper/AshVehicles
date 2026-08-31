@@ -1,0 +1,222 @@
+{
+  "hitbox": {
+    "width": 3.5,
+    "height": 3.5,
+    "tracking_range": 12,
+    "boxes": [
+      {
+        "name": "hull",
+        "offset": [0.0, 0.693, 2.436],
+        "size": [2.875, 1.388, 3.904]
+      },
+      {
+        "name": "hull_2",
+        "offset": [0.0, 1.521, 4.9],
+        "size": [3.036, 2.006, 1.901],
+        "rotation": [11.0, 0.0, 0.0]
+      },
+      {
+        "name": "missilepod_left",
+        "offset": [0.755, 1.998, -2.691],
+        "size": [1.222, 1.222, 6.828],
+        "mount": "gun"
+      },
+      {
+        "name": "missilepod_right",
+        "offset": [-0.755, 1.998, -2.691],
+        "size": [1.222, 1.222, 6.828],
+        "mount": "gun"
+      },
+      {
+        "name": "hull_3",
+        "offset": [0.0, 0.812, -3.438],
+        "size": [3.205, 1.15, 2.139]
+      },
+      {
+        "name": "hull_4",
+        "offset": [0.0, 0.902, -0.293],
+        "size": [3.205, 0.898, 1.839]
+      },
+      {
+        "name": "hull_5",
+        "offset": [0.0, 0.902, -5.241],
+        "size": [2.875, 0.97, 1.57]
+      },
+      {
+        "name": "hull_6",
+        "offset": [0.0, 1.171, -0.823],
+        "size": [0.287, 1.15, 9.991]
+      },
+      {
+        "name": "wheel4",
+        "offset": [-1.262, 0.655, -2.121],
+        "size": [0.656, 1.312, 2.487]
+      },
+      {
+        "name": "hull_left",
+        "offset": [0.359, 0.92, -0.715],
+        "size": [0.144, 0.934, 9.919]
+      },
+      {
+        "name": "hull_right",
+        "offset": [-0.359, 0.92, -0.715],
+        "size": [0.144, 0.934, 9.919]
+      },
+      {
+        "name": "wheel10_left",
+        "offset": [1.197, 0.907, -4.888],
+        "size": [0.545, 1.838, 1.294],
+        "rotation": [0.0, 0.0, 2.5]
+      },
+      {
+        "name": "wheel5_right",
+        "offset": [-1.197, 0.907, -4.888],
+        "size": [0.545, 1.838, 1.294],
+        "rotation": [0.0, 0.0, -2.5]
+      },
+      {
+        "name": "hull_left_2",
+        "offset": [1.175, 1.908, 2.484],
+        "size": [0.336, 1.068, 3.378],
+        "rotation": [0.0, 0.0, -16.0]
+      },
+      {
+        "name": "hull_right_2",
+        "offset": [-1.175, 1.908, 2.484],
+        "size": [0.336, 1.068, 3.378],
+        "rotation": [0.0, 0.0, 16.0]
+      },
+      {
+        "name": "hull_7",
+        "offset": [0.0, 2.339, 2.484],
+        "size": [1.978, 0.144, 3.378]
+      },
+      {
+        "name": "hull_8",
+        "offset": [0.459, 2.842, 1.441],
+        "size": [0.773, 0.863, 1.15]
+      },
+      {
+        "name": "wheel8",
+        "offset": [1.186, 0.521, -1.51],
+        "size": [0.503, 1.043, 1.042]
+      },
+      {
+        "name": "wheel9",
+        "offset": [1.186, 0.521, -2.732],
+        "size": [0.503, 1.043, 1.042]
+      },
+      {
+        "name": "hull_9",
+        "offset": [1.54, 0.883, -2.121],
+        "size": [0.185, 0.877, 2.487],
+        "rotation": [0.0, 0.0, -9.0]
+      },
+      {
+        "name": "hull_10",
+        "offset": [0.0, 1.827, 0.866],
+        "size": [2.3, 0.88, 0.144]
+      },
+      {
+        "name": "hull_left_3",
+        "offset": [0.863, 1.275, -2.121],
+        "size": [1.15, 0.072, 2.084]
+      },
+      {
+        "name": "hull_right_3",
+        "offset": [-0.863, 1.275, -2.121],
+        "size": [1.15, 0.072, 2.084]
+      },
+      {
+        "name": "hull_11",
+        "offset": [0.0, 0.524, -1.505],
+        "size": [1.941, 0.216, 0.216]
+      }
+    ]
+  },
+  "model": {
+    "scale": 1.15,
+    "bones": {
+      "gun": "missilepod"
+    },
+    "road_wheels": [
+      "wheel1",
+      "wheel2",
+      "wheel3",
+      "wheel4",
+      "wheel5",
+      "wheel6",
+      "wheel7",
+      "wheel8",
+      "wheel9",
+      "wheel10"
+    ],
+    "steered_wheels": [
+      "wheel1",
+      "wheel2",
+      "wheel6",
+      "wheel7"
+    ],
+    "steer_lock": 28
+  },
+  "powertrain": {
+    "max_speed": 1,
+    "reverse_speed": 0.3,
+    "acceleration": 0.005,
+    "braking": 0.03,
+    "rolling_resistance": 0.0045,
+    "steer_rate": 2,
+    "pivot_rate": 0,
+    "grade_resistance": 0.06
+  },
+  "suspension": {
+    "climb_height": 1.2,
+    "slope_limit": 45,
+    "settle_rate": 0.25,
+    "grip": 0.85,
+    "wheel_radius": 0.52,
+    "contact_length": 8.5,
+    "contact_width": 2.4,
+    "travel": 0.35,
+    "stiffness": 0.2,
+    "damping": 0.28,
+    "dive": 4,
+    "lean": 5.5
+  },
+  "turret": {
+    "traverse_rate": 1.2,
+    "elevation_rate": 1.5,
+    "depression": 0,
+    "elevation": 90,
+    "ring": [0.0, 1.24, -5.84]
+  },
+  "armament": {
+    "trunnion": [0.0, 1.24, -5.84]
+  },
+  "launcher": {
+    "missile": "ashvehicles:grim_2_missile",
+    "rail": [0.0, 2.2, -2.7]
+  },
+  "hull": {
+    "health": 220,
+    "explosion_power": 6,
+    "armour": 0.4,
+    "seats": [
+      [0.6, 1.45, 4.7],
+      [-0.6, 1.45, 4.7]
+    ]
+  },
+  "camera": {
+    "pos": [0.0, 4.0, -16.0],
+    "tilt": 6,
+    "cockpit": [0.6, 3.0, 5.2]
+  },
+  "sound": {
+    "engine": "ashvehicles:engine.tank",
+    "volume": 0.7,
+    "idle_volume": 0.3,
+    "pitch_min": 0.9,
+    "pitch_max": 1.2,
+    "range": 140
+  }
+}

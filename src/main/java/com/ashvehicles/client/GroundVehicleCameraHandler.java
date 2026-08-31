@@ -2,6 +2,9 @@ package com.ashvehicles.client;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.vehicle.Attitude;
+
+import org.joml.Quaternionf;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.CameraType;
@@ -38,6 +41,10 @@ import net.neoforged.neoforge.client.event.ViewportEvent;
  * では装甲の内側を眺めることになる。その点は<em>砲塔</em>に乗り、砲と共に旋回輪の周りを回る。戦車のハッチはそこに
  * あるからだ。砲を真横へ据えれば視界も車体側面越しに回り込む。実物のキューポラと同じだ。機体から取るのは位置だけ
  * で、方向は依然として乗員の物。そもそも砲塔を据えているのがそれだからだ。
+ *
+ * <p>ただし1つ例外がある。照準キー——右クリック——を押している間は方向も車両から取り、乗員はその同じ点から
+ * 砲腔線に沿って覗く。どちらのカメラで押しても同じ場所へ来るし、その間は倒しも掛からない。理由は
+ * {@link TurretSight} に書いてある。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class GroundVehicleCameraHandler {
@@ -67,7 +74,24 @@ public final class GroundVehicleCameraHandler {
         Camera camera = event.getCamera();
         GroundVehicleEntity vehicle = riddenVehicle(camera);
 
-        if (vehicle == null || !camera.isDetached()) {
+        if (vehicle == null) {
+            return;
+        }
+
+        // 砲手照準を覗いている間は、どちらのカメラでも視界を完全に砲が持つ。乗員の頭は動き続けており、砲塔は
+        // それを追っている。TurretSight 参照。倒す物も無い——倒すのは追跡カメラの都合であって、照準眼鏡は
+        // 砲腔線に沿ってしか覗けない。
+        if (TurretSight.vehicle() == vehicle) {
+            Quaternionf bore = TurretSight.world(vehicle, (float) event.getPartialTick());
+
+            event.setYaw(Attitude.heading(bore));
+            event.setPitch(Attitude.elevation(bore));
+            event.setRoll(Attitude.bank(bore));
+
+            return;
+        }
+
+        if (!camera.isDetached()) {
             return;
         }
 
@@ -93,7 +117,9 @@ public final class GroundVehicleCameraHandler {
             return;
         }
 
-        if (!detached) {
+        // 砲手照準の接眼部は一人称視点そのものの位置——砲塔上面のハッチ——だ。三人称で覗いた場合もそこへ来る。
+        // 覗いているのは装置であって、乗員が直前にどちらのカメラだったかは関係が無い。TurretSight 参照。
+        if (!detached || TurretSight.vehicle() == vehicle) {
             // 実際に座っている座席の視点を、その座席の視点が固定されている物に乗せて運ぶ。車長の視点は砲塔上面
             // にあり砲と共に回る。操縦手の視点は前面装甲にあり回らない。CV90 後部の歩兵にはそのどちらから外を見る
             // 筋合いも無い。どれがどれかは機体ファイルが述べる。述べていない場合、各座席は従来通りの物を受け取る。

@@ -1,19 +1,16 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_pod",
-  "key": {
-    "S": {
-      "item": "ashvehicles:steel_plate"
+  "tab": "equipment",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 6
     },
-    "c": {
-      "item": "minecraft:coal"
+    {
+      "item": "minecraft:coal",
+      "count": 3
     }
-  },
-  "pattern": [
-    "SSc",
-    "Scc",
-    "SSS"
   ],
   "result": {
     "count": 1,

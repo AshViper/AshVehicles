@@ -1,18 +1,16 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_rack",
-  "key": {
-    "S": {
-      "item": "ashvehicles:steel_plate"
+  "tab": "equipment",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 3
     },
-    "M": {
-      "item": "ashvehicles:machine_parts"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 1
     }
-  },
-  "pattern": [
-    "SSS",
-    " M "
   ],
   "result": {
     "count": 2,

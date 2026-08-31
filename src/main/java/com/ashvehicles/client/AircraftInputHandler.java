@@ -54,6 +54,13 @@ public final class AircraftInputHandler {
         boolean cycleWeapon = !(player.getVehicle() instanceof com.ashvehicles.entity.GroundVehicleEntity)
                 && ModKeyMappings.CYCLE_WEAPON.consumeClick();
 
+        // センサー映像の極性。砲座の映像を見ている間しか目に見える効果は無いが、他の切り替えと同じく座席の
+        // 内外を問わず毎tick吸い出す。地上での押下がキューに残り、砲座に着いた瞬間に発火するのを防ぐためだ。
+        // ThermalView 参照。
+        while (ModKeyMappings.SENSOR_POLARITY.consumeClick()) {
+            ThermalView.togglePolarity();
+        }
+
         while (ModKeyMappings.TOGGLE_MOUSE_AIM.consumeClick()) {
             MouseAim.setEnabled(!MouseAim.isEnabled());
             // 明示的に通知する。マウスが機体に対して何をするかが変わるのに、今どちらの状態かを伝える物が画面上

@@ -256,7 +256,8 @@ public final class GunSight {
 
             @Override
             public Vec3 direction(float partialTick) {
-                return stations.direction(station, partialTick);
+                // 画面の中心を決めているのと同じ角から。GunCamera.bore 参照。
+                return GunCamera.bore(aircraft, station, partialTick);
             }
         };
 

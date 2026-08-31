@@ -1,0 +1,34 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_vehicle",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:engine",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:avionics",
+      "count": 3
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:mh_60m"
+  }
+}

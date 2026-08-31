@@ -2,6 +2,7 @@ package com.ashvehicles.network;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.GroundVehicleEntity;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -71,9 +72,29 @@ public record DesignatePayload(boolean clear, Vec3 point, int entityId, boolean 
 
     public static void handle(DesignatePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
+            Entity riding = context.player().getVehicle();
+
+            // 地上の発射機も同じ操作をする。据えるのが照準ポッドの光点ではなく発射機の目標座標だという
+            // だけで、送られてくる物——十字線の下にあった地上の一点——は同じであり、それを保持してよいかを
+            // 決めるのがサーバーだという分担も同じだ。
+            // {@link com.ashvehicles.entity.GroundVehicleEntity#designate} 参照。
+            if (riding instanceof GroundVehicleEntity vehicle) {
+                if (vehicle.getControllingPassenger() != context.player()) {
+                    return;
+                }
+
+                if (payload.clear) {
+                    vehicle.clearDesignation();
+                } else {
+                    vehicle.designate(payload.point, payload.estimated);
+                }
+
+                return;
+            }
+
             // ポッドはパイロットの計器。同じキーを押した搭乗者は搭乗者のままで、複座機の後席に仕事を
             // 与えるのは別の課題。VehicleEntityBase.getControllingPassenger 参照。
-            if (!(context.player().getVehicle() instanceof AircraftEntity aircraft)
+            if (!(riding instanceof AircraftEntity aircraft)
                     || aircraft.getControllingPassenger() != context.player()) {
                 return;
             }

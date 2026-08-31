@@ -1,6 +1,7 @@
 package com.ashvehicles.network;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.client.BlastFlash;
 import com.ashvehicles.client.sound.BlastSounds;
 
 import net.minecraft.network.FriendlyByteBuf;
@@ -13,13 +14,18 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 /**
  * 爆発が起きたこと、その位置と規模。
  *
- * <p>通常の方法で音を鳴らす代わりに送る。通常の方法では届かないからだ。サーバーで要求した音は
+ * <p>元は音のためだけに存在した。通常の方法では届かないからだ——サーバーで要求した音は
  * {@code volume * 16} ブロックより先の誰にも届かず、音響エンジン側の減衰も同じ距離でゼロになる。つまり
  * どれだけ大音量と書いても爆発は64ブロック先で無音になる。チェストの開閉音には妥当で、現実なら数km先まで
  * 聞こえる500kg の炸薬には無意味な答え。
  *
- * <p>そこでサーバーは「爆発が起きた」とだけ告げ、残りはクライアントが計算する。音が届くまでの時間、着い
- * た時に残っている音量、道中でどれだけ籠もったか。{@link BlastSounds} 参照。
+ * <p>そこでサーバーは「爆発が起きた」とだけ告げ、残りはクライアントが計算する。そしてそれが分かった時点で、
+ * 同じ通知から出る物が3つになった。届く順に、<b>閃光</b>（{@link com.ashvehicles.client.BlastFlash}、
+ * 光は待たないので即座）、<b>轟音</b>（{@link BlastSounds}、音速で遅れ、道中で籠もる）、<b>揺れ</b>
+ * （{@link com.ashvehicles.client.BlastShake}、轟音と同じ空気の壁なので同着）。三つが別々に着くこと自体が
+ * 距離の表現になっている。
+ *
+ * <p>どれもサーバーの意見を必要としない。位置と規模さえ分かれば、見ている側が自分の位置から全部を導ける。
  */
 public record BlastSoundPayload(double x, double y, double z, float power) implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<BlastSoundPayload> TYPE =
@@ -37,6 +43,14 @@ public record BlastSoundPayload(double x, double y, double z, float power) imple
     /** 爆発を送る価値のある距離（ブロック）。これより遠い者には一切知らせない。 */
     private static final double CARRY = 220.0;
     private static final double CARRY_PER_POWER = 80.0;
+    /**
+     * どれだけ大きくても、ここより遠くへは届かない（ブロック）。
+     *
+     * <p>兵装は {@link com.ashvehicles.particle.Effects#BIGGEST} までなので、そこでは1180ブロックとなり
+     * この天井には触れない。効くのは試験棒を振り切った時だけで、そこでも3kmで止まる。比例のままだと
+     * 「ワールドの全員へ1パケット」になり、しかも全員にほぼ最大音量で聞こえる。
+     */
+    private static final double FURTHEST = 3000.0;
 
     /**
      * この規模の爆発が聞こえる距離（ブロック）。
@@ -45,7 +59,7 @@ public record BlastSoundPayload(double x, double y, double z, float power) imple
      * の判断に。両者が一致していないと、境界にいるプレイヤーは音を送られた上で「無音」と告げられる。
      */
     public static double carry(float power) {
-        return CARRY + power * CARRY_PER_POWER;
+        return Math.min(CARRY + power * CARRY_PER_POWER, FURTHEST);
     }
 
     public Vec3 at() {
@@ -62,6 +76,11 @@ public record BlastSoundPayload(double x, double y, double z, float power) imple
      * {@link BlastSounds} を解決することはない。
      */
     public static void handle(BlastSoundPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> BlastSounds.hear(payload.at(), payload.power()));
+        context.enqueueWork(() -> {
+            // 閃光が先。光に飛行時間は無いので、パケットが着いた時点がそのまま見えた時点になる。轟音と、
+            // 轟音と同じ空気の壁である揺れは、そこから音速で這ってくる。
+            BlastFlash.seen(payload.at(), payload.power());
+            BlastSounds.hear(payload.at(), payload.power());
+        });
     }
 }

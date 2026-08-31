@@ -173,6 +173,8 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         // これが手順ではなく1つの角度だからだ。機体は転換がどこまで進んだか既に知っているし、それに伴って開く扉は
         // アニメーションファイルの管轄だ。AircraftAnimations 参照。
         rotateX(model, setup, AircraftDefinition.Bone.NOZZLE, pose.nozzle() * NOZZLE_TRAVEL);
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_LEFT, pose.nozzle() * NOZZLE_TRAVEL);
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_RIGHT, pose.nozzle() * NOZZLE_TRAVEL);
 
         // ローター。同じ考え方を1回転まで押し進めた物だ。ここでポーズを付ける理由はノズルと同じで、加えてもう
         // 1つある。ローターの回転速度は機体ファイルの数値であり、その数値が動くたびアニメーションファイルを手作業

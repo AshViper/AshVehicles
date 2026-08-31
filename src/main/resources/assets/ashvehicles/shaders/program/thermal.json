@@ -1,0 +1,25 @@
+{
+    "blend": {
+        "func": "add",
+        "srcrgb": "one",
+        "dstrgb": "zero"
+    },
+    "vertex": "ashvehicles:thermal",
+    "fragment": "ashvehicles:thermal",
+    "attributes": [ "Position" ],
+    "samplers": [
+        { "name": "DiffuseSampler" }
+    ],
+    "uniforms": [
+        { "name": "ProjMat",  "type": "matrix4x4", "count": 16, "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "InSize",   "type": "float", "count": 2, "values": [ 1.0, 1.0 ] },
+        { "name": "OutSize",  "type": "float", "count": 2, "values": [ 1.0, 1.0 ] },
+        { "name": "Time",     "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "Polarity", "type": "float", "count": 1, "values": [ 1.0 ] },
+        { "name": "Gain",     "type": "float", "count": 1, "values": [ 1.45 ] },
+        { "name": "Bias",     "type": "float", "count": 1, "values": [ 0.02 ] },
+        { "name": "Bloom",    "type": "float", "count": 1, "values": [ 0.08 ] },
+        { "name": "Grain",    "type": "float", "count": 1, "values": [ 0.05 ] },
+        { "name": "Vignette", "type": "float", "count": 1, "values": [ 0.5 ] }
+    ]
+}

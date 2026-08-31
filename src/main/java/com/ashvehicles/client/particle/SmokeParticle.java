@@ -1,5 +1,6 @@
 package com.ashvehicles.client.particle;
 
+import com.ashvehicles.particle.Effects;
 import com.ashvehicles.particle.TintedParticleOption;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -16,17 +17,39 @@ import net.minecraft.util.Mth;
  * 濃い塊から細い筋へ移すので、航跡は何も指定せずともミサイル寄りが濃く後方が薄くなる。
  */
 public class SmokeParticle extends WeaponParticle {
+
     /** 排気そのもの。濃く、熱く、生まれた直後に消える。 */
-    public static final Shape MOTOR = new Shape(10, 8, 0.30F, 1.9F, 0.80F, -0.10F, 1.0F);
+    public static final Shape MOTOR = new Shape(10, 8, 0.30F, 1.9F, 0.80F, -0.10F, 1.0F, NEVER_GLOWS, 0.0F);
     /** 後方の空中に漂う物。人が実際に見る航跡はこちらだ。 */
-    public static final Shape CONTRAIL = new Shape(40, 30, 0.34F, 2.8F, 0.93F, -0.03F, 0.62F);
+    public static final Shape CONTRAIL = new Shape(40, 30, 0.34F, 2.8F, 0.93F, -0.03F, 0.62F, NEVER_GLOWS, 0.0F);
     /** 起爆が巻き上げる雲。大きく、遅く、眺められる程度に長く残る。 */
-    public static final Shape BLAST = new Shape(36, 24, 0.55F, 3.0F, 0.86F, -0.14F, 0.95F);
+    public static final Shape BLAST = new Shape(36, 24, 0.55F, 3.0F, 0.86F, -0.14F, 0.95F, NEVER_GLOWS, 0.0F);
     /**
      * 主翼から出る凝結。薄く、ほぼ即座に引き裂かれ、消える。燃えている物ではなく空気中の水なので、昇りも留まりも
      * しない。
      */
-    public static final Shape VAPOUR = new Shape(14, 10, 0.30F, 2.2F, 0.90F, 0.0F, 0.45F);
+    public static final Shape VAPOUR = new Shape(14, 10, 0.30F, 2.2F, 0.90F, 0.0F, 0.45F, NEVER_GLOWS, 0.0F);
+    /**
+     * キノコ雲を作る煙。
+     *
+     * <p>{@link #BLAST} と別なのは寿命だけが理由ではない。爆発の煙は3秒で風景に戻るべき物だが、こちらは柱が
+     * 立ち上がり傘が開ききるまでに10秒近くかかる。同じ寿命では、傘が開く頃には柱の根元が消えていて、雲が地面と
+     * 繋がらない——キノコ雲がキノコ雲に見えるのは、柱と傘が同時にそこにあるからだ。
+     *
+     * <p>ほとんど動かず（摩擦が高い）、ほとんど昇らない。柱を押し上げるのは煙自身の浮力ではなく、下から次々に
+     * 湧く新しい煙の方だからだ。位置は撒く側が決める。
+     */
+    public static final Shape CLOUD = new Shape(150, 90, 0.90F, 2.2F, 0.94F, -0.015F, 0.88F, NEVER_GLOWS, 0.0F);
+    /**
+     * 核のキノコ雲を作る煙。
+     *
+     * <p>{@link #CLOUD} と違うのは寿命だけで、そしてそれが全てだ。核の演出は柱が立ち上がるだけで10秒近く、
+     * 傘が開ききるまで含めると20秒かかる。通常のキノコ雲の煙（最長12秒）では、傘が完成する頃に柱の根元が
+     * 消えていて、雲が地面と繋がらない。ここは20〜30秒もつので、最も見応えのある瞬間——柱と傘が同時にそこに
+     * ある瞬間——に全部が揃っている。
+     */
+    public static final Shape NUCLEAR = new Shape(400, 220, 0.90F, 2.4F, 0.95F, -0.010F, 0.90F,
+            Effects.FURNACE, 0.45F);
 
     private final SpriteSet sprites;
     private final Shape shape;
@@ -49,6 +72,7 @@ public class SmokeParticle extends WeaponParticle {
         this.spin = (this.random.nextFloat() - 0.5F) * 0.08F;
         this.roll = this.random.nextFloat() * Mth.TWO_PI;
         this.oRoll = this.roll;
+        this.glowsWhileHot(shape.hot(), shape.cools());
         this.setSpriteFromAge(sprites);
     }
 
@@ -63,6 +87,13 @@ public class SmokeParticle extends WeaponParticle {
         // なるように見えてしまう。
         float lived = this.lived(0.0F);
         this.alpha = this.shape.opacity() * (1.0F - lived * lived * lived);
+
+        this.coolTowards(lived);
+    }
+
+    @Override
+    protected int getLightColor(float partialTick) {
+        return this.litWhileHot(super.getLightColor(partialTick), this.lived(partialTick));
     }
 
     @Override
@@ -83,9 +114,11 @@ public class SmokeParticle extends WeaponParticle {
      * @param friction 毎tick残る速度の割合
      * @param gravity 落下の速さ。昇る煙では負値
      * @param opacity 最も濃いときの不透明度
+     * @param hot 生まれた時点の色。{@link WeaponParticle#NEVER_GLOWS} なら光らず、最初から自分の色をしている
+     * @param cools 生まれた時の色から本来の色へ移りきる、寿命に対する割合。0なら移らない
      */
     public record Shape(int life, int lifeJitter, float size, float growth,
-            float friction, float gravity, float opacity) {
+            float friction, float gravity, float opacity, int hot, float cools) {
     }
 
     public static ParticleProvider<TintedParticleOption> provider(SpriteSet sprites, Shape shape) {

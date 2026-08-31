@@ -1,22 +1,20 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_pod",
-  "key": {
-    "S": {
-      "item": "ashvehicles:steel_plate"
+  "tab": "equipment",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 5
     },
-    "V": {
-      "item": "ashvehicles:avionics"
+    {
+      "item": "ashvehicles:avionics",
+      "count": 1
     },
-    "Q": {
-      "item": "minecraft:amethyst_shard"
+    {
+      "item": "minecraft:amethyst_shard",
+      "count": 1
     }
-  },
-  "pattern": [
-    " Q ",
-    "SVS",
-    "SSS"
   ],
   "result": {
     "count": 1,

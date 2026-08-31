@@ -1,0 +1,34 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_vehicle",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 8
+    },
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:jet_engine",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:avionics",
+      "count": 3
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:b_1"
+  }
+}

@@ -309,6 +309,72 @@ final class DHRendererBridge {
         }
     }
 
+    /**
+     * ある列で Distant Horizons が知っている一番上の地面。知らなければ {@link Double#NaN}。
+     *
+     * <p><b>ゲームスレッドから呼ばないこと。</b>{@code getColumnDataAtBlockPos} は DH がデータを読み込む間
+     * CompletableFuture を待つし、DH 側のスレッドがメインスレッドを待っていることがある——ゲームスレッドから
+     * 呼べばクライアントが固まる。{@link com.ashvehicles.client.ghost.GhostOcclusion} がレイキャストを専用の
+     * デーモンワーカーへ追い出しているのと同じ理由で、こちらの呼び出し元は
+     * {@link com.ashvehicles.client.LodTerrain} だ。
+     *
+     * <p>返すのは<em>不透明な</em>一番上の面。葉や水も地面として数える——地図に描くための高さであって、
+     * 何かが立てる面ではない。液体かどうかは別に返すので、地図は水面を別の色で塗れる。
+     *
+     * @return {@code [高さ, 液体なら1]}。DH が答えられなければ null
+     */
+    @Nullable
+    static double[] columnTop(ClientLevel level, int blockX, int blockZ) {
+        IDhApiTerrainDataRepo repo = DhApi.Delayed.terrainRepo;
+
+        if (repo == null) {
+            return null;
+        }
+
+        IDhApiLevelWrapper dhLevel = wrapperFor(level);
+
+        if (dhLevel == null) {
+            return null;
+        }
+
+        IDhApiTerrainDataCache dataCache = cache;
+
+        if (dataCache == null) {
+            dataCache = repo.createSoftCache();
+            cache = dataCache;
+        }
+
+        try {
+            DhApiResult<DhApiTerrainDataPoint[]> result =
+                    repo.getColumnDataAtBlockPos(dhLevel, blockX, blockZ, dataCache);
+
+            if (result == null || !result.success || result.payload == null) {
+                return null;
+            }
+
+            double top = Double.NaN;
+            boolean liquid = false;
+
+            // 列の並び順は約束されていないので、一番高い非空気を自分で探す。
+            for (DhApiTerrainDataPoint point : result.payload) {
+                if (point == null || point.blockStateWrapper == null
+                        || point.blockStateWrapper.isAir()) {
+                    continue;
+                }
+
+                if (Double.isNaN(top) || point.topYBlockPos > top) {
+                    top = point.topYBlockPos;
+                    liquid = point.blockStateWrapper.isLiquid();
+                }
+            }
+
+            return Double.isNaN(top) ? null : new double[]{top, liquid ? 1.0 : 0.0};
+        } catch (RuntimeException e) {
+            // レベルのロード合間にも問い合わせが来うる。失敗時の答えは「知らない」。
+            return null;
+        }
+    }
+
     // ------------------------------------------------------------------
     // デバッグ
     // ------------------------------------------------------------------

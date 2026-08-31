@@ -29,6 +29,32 @@ public final class ModParticles {
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> BLAST = register("blast");
     /** そして巻き上がってできる煙。 */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> BLAST_SMOKE = register("blast_smoke");
+    /**
+     * 起爆の進行役。これ自体は何も描かず、上の全部を順に撒く。
+     * {@link com.ashvehicles.client.particle.BlastStageParticle} 参照。
+     */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> BLAST_STAGE = register("blast_stage");
+    /** 爆発から放り出され、煙の尾を引きながら弧を描いて落ちる燃えかす。 */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> CINDER = register("cinder");
+    /** その燃えていない方。吹き飛んだ地面そのもので、土埃を引いて落ち、地面で跳ねる。 */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> RUBBLE = register("rubble");
+    /**
+     * キノコ雲を作る煙。爆発の煙と同じ物だが、柱と傘が揃うまで消えずに待てるだけ長生きする。
+     * 出るのは規模が一定を超えたときだけ。
+     */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> CLOUD = register("cloud");
+    /** その核用。同じ煙だが、20秒かけて立ち上がる雲に付き合えるだけ長生きする。 */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> NUCLEAR_CLOUD =
+            register("nuclear_cloud");
+    /**
+     * 雲を作る水平な1枚。高さと大きさを変えて重ねるとキノコ雲になる。
+     * {@link com.ashvehicles.client.particle.CloudLayerParticle} 参照。
+     */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> CLOUD_LAYER =
+            register("cloud_layer");
+    /** その核用。生まれた時点で内側が灼熱していて、十数秒かけてただの煙になる。 */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> NUCLEAR_LAYER =
+            register("nuclear_layer");
     /** 大型爆発の衝撃波面。地表を走っていく。 */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> SHOCKWAVE = register("shockwave");
     /**

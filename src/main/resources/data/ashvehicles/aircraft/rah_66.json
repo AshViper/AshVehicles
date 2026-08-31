@@ -1,0 +1,315 @@
+{
+  "hitbox": {
+    "width": 4,
+    "height": 3,
+    "tracking_range": 12,
+    "boxes": [
+      {
+        "name": "allbody",
+        "offset": [0.0, 1.573, 3.42],
+        "size": [2.21, 1.336, 3.704]
+      },
+      {
+        "name": "allbody_2",
+        "offset": [0.0, 1.189, -2.778],
+        "size": [2.215, 0.959, 4.086]
+      },
+      {
+        "name": "allbody_3",
+        "offset": [0.0, 2.656, 0.426],
+        "size": [2.093, 1.069, 2.738],
+        "rotation": [2.0, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_right",
+        "offset": [-0.69, 2.026, -1.375],
+        "size": [0.683, 1.418, 6.206],
+        "rotation": [4.0, -3.0, 7.0]
+      },
+      {
+        "name": "allbody_left",
+        "offset": [0.69, 2.026, -1.375],
+        "size": [0.683, 1.418, 6.206],
+        "rotation": [4.0, 3.0, -7.0]
+      },
+      {
+        "name": "allbody_4",
+        "offset": [0.0, 1.667, -5.459],
+        "size": [0.873, 2.096, 2.088],
+        "rotation": [-45.0, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_5",
+        "offset": [0.0, 1.502, 4.768],
+        "size": [1.194, 1.146, 2.257],
+        "rotation": [-10.5, 0.0, 0.0]
+      },
+      {
+        "name": "hull_right",
+        "offset": [-1.306, 1.297, 0.397],
+        "size": [1.435, 0.757, 2.588],
+        "rotation": [0.0, 0.0, 1.5]
+      },
+      {
+        "name": "hull_left",
+        "offset": [1.306, 1.297, 0.397],
+        "size": [1.435, 0.757, 2.588],
+        "rotation": [0.0, 0.0, -1.5]
+      },
+      {
+        "name": "allbody_6",
+        "offset": [0.0, 1.896, 2.904],
+        "size": [1.35, 1.832, 0.85],
+        "rotation": [-7.5, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_7",
+        "offset": [0.0, 1.937, 1.862],
+        "size": [2.011, 2.024, 0.437]
+      },
+      {
+        "name": "allbody_8",
+        "offset": [0.0, 4.329, 0.849],
+        "size": [1.24, 0.926, 1.24]
+      },
+      {
+        "name": "allbody_9",
+        "offset": [0.0, 2.63, 3.112],
+        "size": [0.882, 0.504, 2.984],
+        "rotation": [-17.5, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_10",
+        "offset": [0.0, 1.056, 0.967],
+        "size": [0.403, 0.323, 9.278]
+      },
+      {
+        "name": "hull",
+        "offset": [0.0, 0.753, 4.665],
+        "size": [0.799, 0.323, 3.458]
+      },
+      {
+        "name": "allbody_11",
+        "offset": [0.0, 3.106, -6.352],
+        "size": [0.27, 1.194, 2.468],
+        "rotation": [-45.0, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_12",
+        "offset": [0.0, 0.965, 0.383],
+        "size": [1.402, 0.12, 2.583]
+      },
+      {
+        "name": "allbody_13",
+        "offset": [0.0, 2.002, -3.296],
+        "size": [1.012, 0.139, 2.253],
+        "rotation": [6.5, 0.0, 0.0]
+      },
+      {
+        "name": "lefttyrehatch_right",
+        "offset": [-1.032, 1.028, 2.323],
+        "size": [0.722, 0.272, 1.386],
+        "rotation": [0.0, 7.5, -40.0]
+      },
+      {
+        "name": "righttyrehatch_left",
+        "offset": [1.032, 1.028, 2.323],
+        "size": [0.722, 0.272, 1.386],
+        "rotation": [0.0, -7.5, 40.0]
+      },
+      {
+        "name": "allbody_14",
+        "offset": [0.0, 3.594, -6.802],
+        "size": [3.904, 0.073, 0.934]
+      },
+      {
+        "name": "allbody_right_2",
+        "offset": [-1.958, 3.628, -6.83],
+        "size": [0.11, 0.804, 2.552],
+        "rotation": [-41.0, -21.0, 30.5]
+      },
+      {
+        "name": "allbody_left_2",
+        "offset": [1.958, 3.628, -6.83],
+        "size": [0.11, 0.804, 2.552],
+        "rotation": [-41.0, 21.0, -30.5]
+      },
+      {
+        "name": "allbody_15",
+        "offset": [0.0, 2.345, -1.694],
+        "size": [1.0, 0.08, 1.794],
+        "rotation": [22.5, 0.0, 0.0]
+      }
+    ]
+  },
+  "model": {
+    "scale": 0.97,
+    "bones": {
+      "rotor": "bone4",
+      "tail_rotor": "bone5",
+      "nose_gear": "BackTyre",
+      "left_gear": "LeftTyre",
+      "right_gear": "RightTyre"
+    }
+  },
+  "engine": {
+    "max_thrust": 0,
+    "throttle_rate": 0.022,
+    "spool_rate": 0.28,
+    "sea_level_density": 1,
+    "fuel": {
+      "capacity": 1100,
+      "burn_rate": 0.05,
+      "idle_fraction": 0.22,
+      "refuel_rate": 150
+    }
+  },
+  "wing": {
+    "max_speed": 2.5,
+    "stall_speed": 0.375,
+    "lift": 0,
+    "lift_slope": 5.5,
+    "stall_angle": 15,
+    "drag": 0.0021,
+    "induced_drag": 0,
+    "lateral_drag": 0.1,
+    "ground_effect": 0.25,
+    "span": 12
+  },
+  "handling": {
+    "pitch_rate": 1.3,
+    "roll_rate": 5.2,
+    "yaw_rate": 3.4,
+    "control_lag": 0.2,
+    "weathervane": 2,
+    "alpha_limit": 1,
+    "aero_damping": 0.05
+  },
+  "airframe": {
+    "health": 200,
+    "crash_speed": 0.3,
+    "explosion_power": 3,
+    "max_g": 3.5,
+    "seats": [
+      [0.0, 1.1, 2.3],
+      {
+        "pos": [0.0, 1.1, 0.6],
+        "eye": [0.0, 1.5, 4.3],
+        "mount": "gun"
+      }
+    ]
+  },
+  "landing_gear": {
+    "cycle_ticks": 50,
+    "drag_penalty": 0.35,
+    "rolling_friction": 0.98,
+    "brake_friction": 0.95,
+    "lateral_friction": 0.45,
+    "steer_rate": 1.5,
+    "steer_fade": 0.3,
+    "climb_height": 1.05
+  },
+  "flaps": {
+    "cycle_ticks": 1,
+    "drag_penalty": 0,
+    "lift_bonus": 0
+  },
+  "camera": {
+    "pos": [0.0, 3.2, -13.0],
+    "cockpit": [0.0, 2.75, 2.3]
+  },
+  "sound": {
+    "volume": 0.75,
+    "idle_volume": 0.28,
+    "pitch_min": 0.75,
+    "pitch_max": 1.3,
+    "range": 340
+  },
+  "radar": {
+    "range": 2400,
+    "arc": 120,
+    "sweep_ticks": 10,
+    "warning_range": 3600
+  },
+  "signature": {
+    "radar": 0.35,
+    "store": 0.15,
+    "heat": 0.8
+  },
+  "countermeasures": {
+    "flares": 40,
+    "chaff": 40,
+    "interval_ticks": 5,
+    "reload_ticks": 300,
+    "speed": 0.35
+  },
+  "rotor": {
+    "lift": 0.033,
+    "spool_ticks": 80,
+    "translational_lift": 0.16,
+    "translational_speed": 0.2,
+    "authority": 1.1,
+    "max_tilt": 25,
+    "trim": 0.5,
+    "stability": 0.15,
+    "hover_drag": 0.021,
+    "disc_drag": 0.024,
+    "bluff_drag": 10,
+    "torque": 0.12,
+    "rpm": 320,
+    "tail_rpm": 1420
+  },
+  "type": "helicopter",
+  "hardpoints": [
+    {
+      "name": "gun",
+      "pos": [0.0, 0.75, 4.6],
+      "fixed": "ashvehicles:m61"
+    },
+    {
+      "name": "bay_left",
+      "pos": [-1.4, 1.2, 0.4],
+      "internal": true
+    },
+    {
+      "name": "bay_left_2",
+      "pos": [-1.4, 1.2, -0.3],
+      "internal": true
+    },
+    {
+      "name": "bay_right",
+      "pos": [1.4, 1.2, 0.4],
+      "internal": true
+    },
+    {
+      "name": "bay_right_2",
+      "pos": [1.4, 1.2, -0.3],
+      "internal": true
+    },
+    {
+      "name": "sensor_left",
+      "pos": [-0.4, 0.85, 4.9],
+      "kind": "special"
+    },
+    {
+      "name": "sensor_right",
+      "pos": [0.4, 0.85, 4.9],
+      "kind": "special"
+    }
+  ],
+  "stations": [
+    {
+      "name": "20mm",
+      "pylons": [
+        "gun"
+      ],
+      "seat": 1,
+      "bearing": 0,
+      "traverse": 120,
+      "elevation": 15,
+      "depression": 45,
+      "traverse_rate": 7,
+      "elevation_rate": 7
+    }
+  ]
+}

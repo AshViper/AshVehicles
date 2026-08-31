@@ -63,6 +63,20 @@ public final class DHIntegration {
         return LOADED && DHRendererBridge.isOccluded(level, from, to, skip);
     }
 
+    /**
+     * ある列で Distant Horizons が知っている一番上の地面。知らなければ null。
+     *
+     * <p><b>ゲームスレッドから呼ばないこと。</b>DH の地形問い合わせは future を待ち、DH 側がメインスレッドを
+     * 待っていればクライアントが固まる。呼んでよいのは専用ワーカーからだけで、この MOD ではそれが
+     * {@link com.ashvehicles.client.LodTerrain} だ。
+     *
+     * @return {@code [高さ, 液体なら1]}。答えが無ければ null
+     */
+    @javax.annotation.Nullable
+    public static double[] columnTop(ClientLevel level, int blockX, int blockZ) {
+        return LOADED ? DHRendererBridge.columnTop(level, blockX, blockZ) : null;
+    }
+
     /** 旧レベルに紐付く物を全て忘れる。 */
     public static void onLevelChanged() {
         if (LOADED) {

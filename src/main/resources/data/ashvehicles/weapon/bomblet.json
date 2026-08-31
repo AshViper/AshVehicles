@@ -1,0 +1,23 @@
+{
+  "type": "bomb",
+  "item": false,
+  "ammo": 1,
+  "firing": {
+    "rounds_per_second": 1,
+    "spread": 0
+  },
+  "projectile": {
+    "damage": 30,
+    "speed": 0.1,
+    "gravity": 0.03,
+    "range": 4000,
+    "explosion": 1.8,
+    "tracer": "C8C0B0",
+    "chunk_loading": true,
+    "trail": false
+  },
+  "sound": {
+    "volume": 0.9,
+    "pitch": 1.4
+  }
+}

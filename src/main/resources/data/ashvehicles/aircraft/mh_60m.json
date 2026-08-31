@@ -1,0 +1,269 @@
+{
+  "hitbox": {
+    "width": 4.5,
+    "height": 3.5,
+    "tracking_range": 12,
+    "boxes": [
+      {
+        "name": "corpus",
+        "offset": [0.0, 2.52, 0.94],
+        "size": [2.948, 0.95, 6.309],
+        "rotation": [-1.0, 1.0, 0.0]
+      },
+      {
+        "name": "corpus_2",
+        "offset": [0.0, 1.557, -5.495],
+        "size": [1.359, 1.884, 6.613],
+        "rotation": [-1.0, 2.0, 0.0]
+      },
+      {
+        "name": "corpus_3",
+        "offset": [0.0, 1.363, 4.56],
+        "size": [2.539, 1.839, 2.82],
+        "rotation": [-3.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_4",
+        "offset": [0.0, 1.492, -2.596],
+        "size": [2.31, 2.125, 1.516],
+        "rotation": [8.0, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_5",
+        "offset": [0.0, 2.345, -2.241],
+        "size": [3.41, 1.194, 1.528],
+        "rotation": [13.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_right",
+        "offset": [-1.953, 1.6, 1.302],
+        "size": [2.546, 1.258, 1.647],
+        "rotation": [0.0, 0.0, -10.5]
+      },
+      {
+        "name": "corpus_left",
+        "offset": [1.953, 1.6, 1.302],
+        "size": [2.546, 1.258, 1.647],
+        "rotation": [0.0, 0.0, 10.5]
+      },
+      {
+        "name": "zaddoor2",
+        "offset": [1.145, 1.443, 3.351],
+        "size": [0.397, 1.668, 7.189],
+        "rotation": [2.0, 1.0, -0.5]
+      },
+      {
+        "name": "corpus_6",
+        "offset": [-1.211, 1.198, 2.889],
+        "size": [0.593, 2.294, 2.86],
+        "rotation": [6.0, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_7",
+        "offset": [0.0, 1.708, -1.316],
+        "size": [2.404, 2.284, 0.62],
+        "rotation": [1.0, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_8",
+        "offset": [0.0, 0.769, 0.835],
+        "size": [1.939, 0.404, 3.711]
+      },
+      {
+        "name": "corpus_9",
+        "offset": [-1.002, 1.491, -0.259],
+        "size": [0.313, 1.891, 4.236],
+        "rotation": [0.0, 0.0, 5.0]
+      },
+      {
+        "name": "corpus_10",
+        "offset": [1.211, 0.473, 2.979],
+        "size": [0.593, 1.023, 2.773]
+      },
+      {
+        "name": "corpus_11",
+        "offset": [0.0, 2.572, -9.129],
+        "size": [0.331, 3.636, 1.409],
+        "rotation": [37.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_12",
+        "offset": [0.0, 0.882, -4.828],
+        "size": [1.531, 0.214, 3.51],
+        "rotation": [-2.0, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_13",
+        "offset": [1.07, 1.42, -1.215],
+        "size": [0.232, 1.757, 2.324],
+        "rotation": [0.0, 0.0, 2.0]
+      },
+      {
+        "name": "corpus_14",
+        "offset": [0.0, 0.57, 0.507],
+        "size": [2.703, 0.057, 5.467]
+      },
+      {
+        "name": "corpus_15",
+        "offset": [0.0, 1.584, -8.894],
+        "size": [5.055, 0.09, 1.277],
+        "rotation": [22.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_16",
+        "offset": [0.0, 1.63, 0.775],
+        "size": [1.928, 1.442, 0.14],
+        "rotation": [-2.5, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_17",
+        "offset": [0.0, 3.142, 1.865],
+        "size": [1.064, 0.623, 0.321],
+        "rotation": [-24.0, 0.0, 0.0]
+      },
+      {
+        "name": "corpus_18",
+        "offset": [0.0, 1.633, 2.396],
+        "size": [0.267, 1.441, 0.578]
+      },
+      {
+        "name": "corpus_19",
+        "offset": [0.0, 0.474, -6.867],
+        "size": [0.214, 0.47, 1.464],
+        "rotation": [33.5, 0.0, 0.0]
+      }
+    ]
+  },
+  "model": {
+    "scale": 0.85,
+    "bones": {
+      "rotor": "VINT",
+      "tail_rotor": "VINT2"
+    }
+  },
+  "engine": {
+    "max_thrust": 0,
+    "throttle_rate": 0.02,
+    "spool_rate": 0.25,
+    "sea_level_density": 1,
+    "fuel": {
+      "capacity": 2000,
+      "burn_rate": 0.045,
+      "idle_fraction": 0.22,
+      "refuel_rate": 160
+    }
+  },
+  "wing": {
+    "max_speed": 2.2,
+    "stall_speed": 0.375,
+    "lift": 0,
+    "lift_slope": 5.5,
+    "stall_angle": 15,
+    "drag": 0.0025,
+    "induced_drag": 0,
+    "lateral_drag": 0.12,
+    "ground_effect": 0.25,
+    "span": 16
+  },
+  "handling": {
+    "pitch_rate": 1.15,
+    "roll_rate": 4.4,
+    "yaw_rate": 2.9,
+    "control_lag": 0.22,
+    "weathervane": 2,
+    "alpha_limit": 1,
+    "aero_damping": 0.05
+  },
+  "airframe": {
+    "health": 260,
+    "crash_speed": 0.3,
+    "explosion_power": 3,
+    "max_g": 3,
+    "seats": [
+      [-0.55, 1.0, 3.5],
+      [0.55, 1.0, 3.5],
+      [-0.85, 0.65, 1.7],
+      [0.85, 0.65, 1.7],
+      [-0.85, 0.65, 0.4],
+      [0.85, 0.65, 0.4],
+      [-0.85, 0.65, -0.8],
+      [0.85, 0.65, -0.8],
+      [-0.85, 0.65, -2.0],
+      [0.85, 0.65, -2.0]
+    ]
+  },
+  "landing_gear": {
+    "cycle_ticks": 1,
+    "drag_penalty": 0,
+    "rolling_friction": 0.98,
+    "brake_friction": 0.97,
+    "lateral_friction": 0.4,
+    "steer_rate": 1.5,
+    "steer_fade": 0.2,
+    "climb_height": 1.05,
+    "retractable": false
+  },
+  "flaps": {
+    "cycle_ticks": 1,
+    "drag_penalty": 0,
+    "lift_bonus": 0
+  },
+  "camera": {
+    "pos": [0.0, 3.5, -14.0],
+    "cockpit": [-0.55, 2.6, 3.5]
+  },
+  "sound": {
+    "volume": 0.8,
+    "idle_volume": 0.3,
+    "pitch_min": 0.7,
+    "pitch_max": 1.2,
+    "range": 380
+  },
+  "radar": {
+    "range": 1600,
+    "arc": 90,
+    "sweep_ticks": 12,
+    "warning_range": 3200
+  },
+  "signature": {
+    "radar": 1.2,
+    "store": 0.2,
+    "heat": 1.4
+  },
+  "countermeasures": {
+    "flares": 90,
+    "chaff": 90,
+    "interval_ticks": 4,
+    "reload_ticks": 260,
+    "speed": 0.4
+  },
+  "rotor": {
+    "lift": 0.032,
+    "spool_ticks": 90,
+    "translational_lift": 0.15,
+    "translational_speed": 0.2,
+    "authority": 0.95,
+    "max_tilt": 22,
+    "trim": 0.5,
+    "stability": 0.2,
+    "hover_drag": 0.023,
+    "disc_drag": 0.026,
+    "bluff_drag": 10,
+    "torque": 0.15,
+    "rpm": 258,
+    "tail_rpm": 1190
+  },
+  "type": "helicopter",
+  "hardpoints": [
+    {
+      "name": "sensor_left",
+      "pos": [-0.8, 1.1, 4.4],
+      "kind": "special"
+    },
+    {
+      "name": "sensor_right",
+      "pos": [0.8, 1.1, 4.4],
+      "kind": "special"
+    }
+  ]
+}

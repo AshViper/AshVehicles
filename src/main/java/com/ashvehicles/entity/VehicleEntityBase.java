@@ -966,14 +966,17 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     public Vec3 eyeOf(Entity rider, float partialTick) {
         int seat = this.getSeatIndex(rider);
 
-        return this.eyeToWorld(this.getSeatEyeMount(seat), this.getSeatEye(seat), partialTick);
+        return this.eyeToWorld(seat, this.getSeatEyeMount(seat), this.getSeatEye(seat), partialTick);
     }
 
     /**
-     * 世界座標での一人称視点の目。砲塔以外にこれを {@link #toWorld} 以上の物にする要素は無いので、砲塔を
-     * 持つ機体だけがこれを上書きする。
+     * 世界座標での一人称視点の目。振れる物に取り付いた目以外にこれを {@link #toWorld} 以上の物にする要素は
+     * 無いので、そういう物を持つ機械だけがこれを上書きする。
+     *
+     * <p>席番号を渡すのは、何が目を運ぶかが席によって変わりうるからだ。戦車の砲塔は1つなので取り付け先の
+     * 種別だけで足りるが、機体の砲座は席ごとに別の物であり、どの砲が運ぶかはその席が受け持つ砲座で決まる。
      */
-    protected Vec3 eyeToWorld(VehicleShape.Mount mount, Vec3 eye, float partialTick) {
+    protected Vec3 eyeToWorld(int seat, VehicleShape.Mount mount, Vec3 eye, float partialTick) {
         return this.toWorld(eye, partialTick);
     }
 

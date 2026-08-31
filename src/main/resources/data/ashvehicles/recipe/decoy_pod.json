@@ -1,22 +1,20 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_pod",
-  "key": {
-    "S": {
-      "item": "ashvehicles:steel_plate"
+  "tab": "equipment",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 5
     },
-    "C": {
-      "item": "ashvehicles:circuit_board"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "B": {
-      "item": "minecraft:blaze_powder"
+    {
+      "item": "minecraft:blaze_powder",
+      "count": 1
     }
-  },
-  "pattern": [
-    " B ",
-    "SCS",
-    "SSS"
   ],
   "result": {
     "count": 1,

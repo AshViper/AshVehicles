@@ -32,7 +32,8 @@ import net.minecraft.util.StringRepresentable;
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
         Firing firing, Projectile projectile, Optional<Guidance> guidance,
-        Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag) {
+        Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag,
+        Optional<Cluster> cluster) {
 
     /** {@code RRGGBB}。先頭の # は有っても無くてもよい。この種のファイルでの色表記はすべてこれ。 */
     static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
@@ -61,8 +62,37 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             // 0.00003 前後が「機体まるごと1機分の抗力」であり、ここに書く値はその一部でなければならない。
             // 増槽1本で1割、つまり 0.000003 あたりが妥当な出発点だ。桁を1つ間違えると機体は飛ばなくなる
             // ——見慣れない大きさなので、書く前に対象機体の wing.drag を必ず見ること。
-            Codec.FLOAT.optionalFieldOf("drag", 0.0F).forGetter(WeaponDefinition::drag)
+            Codec.FLOAT.optionalFieldOf("drag", 0.0F).forGetter(WeaponDefinition::drag),
+            Cluster.CODEC.optionalFieldOf("cluster").forGetter(WeaponDefinition::cluster)
     ).apply(instance, WeaponDefinition::new));
+
+    /**
+     * クラスター弾頭。1発の終わりに、もっと小さい弾を大量に撒く。
+     *
+     * <p><b>子弾は別の兵装ファイルだ。</b>威力も爆発規模も落下も、親の弾を書いたのとまったく同じ書き方で
+     * 書かれる。ここが名前で指すだけなので、同じ子弾を別の親から撒くことも、子弾だけ差し替えることもできる
+     * ——この MOD で「何かを撃つ物」が全部そうしている通りだ。
+     *
+     * <p><b>親は撒くだけで、穴は開けない。</b>面を制圧するのが弾頭であって1点を潰すのではないので、親の
+     * {@code explosion} は小さいか0であるべきで、破壊力は子弾の数×子弾の規模から出る。同じ重さの単弾頭と
+     * 比べた時の差がそれだ——1つの深い穴か、広い範囲の浅い穴か。
+     *
+     * <p><b>撒く高さを決めるのは信管だ。</b>{@code guidance.proximity} が目標からどれだけ手前で炸裂するかで、
+     * 急角度で落ちてくる弾ではそれがそのまま散布高度になる。高いほど撒布界は広く、薄くなる。
+     *
+     * @param submunition 子弾の兵装ID
+     * @param count 何発撒くか
+     * @param spread 1発ごとに横へ与える速度（1tickあたりブロック）。落下時間と掛かって撒布界の広さになる
+     * @param inherit 親の速度をどれだけ引き継ぐか。0なら真下に落ち、1なら親と同じ勢いで前へ飛ぶ
+     */
+    public record Cluster(ResourceLocation submunition, int count, float spread, float inherit) {
+        public static final Codec<Cluster> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                ResourceLocation.CODEC.fieldOf("submunition").forGetter(Cluster::submunition),
+                Codec.INT.optionalFieldOf("count", 12).forGetter(Cluster::count),
+                Codec.FLOAT.optionalFieldOf("spread", 0.3F).forGetter(Cluster::spread),
+                Codec.FLOAT.optionalFieldOf("inherit", 0.25F).forGetter(Cluster::inherit)
+        ).apply(instance, Cluster::new));
+    }
 
     /**
      * ゲームが読めるファイルが1つも無い兵装に使う値。撃ちはするのでゲームは動き続けるが、誰も本物の兵装と
@@ -70,7 +100,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      */
     public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
             new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(),
-            Optional.empty(), SoundSetup.DEFAULT, 0.0F);
+            Optional.empty(), SoundSetup.DEFAULT, 0.0F, Optional.empty());
 
     /**
      * 引き金を押し続けている間撃ち続けるか、それとも1押し1発か。
@@ -463,7 +493,19 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
              * （{@link WeaponDefinition#requires} 参照）、それが無ければ尾翼はあるが誘導の当てが無い
              * 爆弾になる。
              */
-            LASER("laser");
+            LASER("laser"),
+            /**
+             * 誰かが地面に置いた座標へ向かう。追う物は<em>点</em>であって物ではない。
+             *
+             * <p>レーザーとの違いは、当て続ける者が要らないことだ。あちらは飛翔中ずっと誰かが光を当てている
+             * 必要があり、だから照準ポッドを積んだ機体の兵装になる。こちらは発射の瞬間に座標を受け取り、以後
+             * 何も見ない——弾道ミサイルが実際にそうする通りで、発射機は撃った後その場を離れてよい。
+             *
+             * <p><b>だから捕捉という手順が無い。</b>シーカーが空を掃引することも、進行度が閉じることも、
+             * 追われている側の警戒受信機が鳴ることも無い。乗員がすることは目標を1つ選ぶことだけで、そこは
+             * 物である必要すら無い——丘でも、交差点でも、まだ誰も居ない座標でもよい。
+             */
+            POINT("point");
 
             public static final Codec<Seeker> CODEC = StringRepresentable.fromEnum(Seeker::values);
 
@@ -486,8 +528,19 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 return switch (this) {
                     case HEAT -> flare;
                     case RADAR -> !flare;
-                    case LASER -> false;
+                    case LASER, POINT -> false;
                 };
+            }
+
+            /**
+             * 追う相手を、シーカー自身が見つけるのではなく人が据えるか。
+             *
+             * <p>据える側の2つ——光点と座標——をまとめて問える1箇所。どちらも「発射の瞬間に渡された物へ行く」
+             * 弾であり、シーカーが捉えた物を渡す経路とは別の経路で目標を受け取る。両者を別々に列挙していると、
+             * 片方だけを足した箇所が静かに間違う。
+             */
+            public boolean laid() {
+                return this == LASER || this == POINT;
             }
         }
 

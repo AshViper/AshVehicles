@@ -348,9 +348,7 @@ public class TargetDroneEntity extends Entity implements GeoEntity {
         if (this.level() instanceof ServerLevel level) {
             Vec3 at = this.position().add(0.0, this.getBbHeight() * 0.5, 0.0);
 
-            Effects.fireball(level, at, BLAST, Effects.EMBER);
-            Effects.boom(level, at, BLAST);
-            Effects.wave(level, at, BLAST);
+            Effects.detonate(level, at, BLAST, Effects.EMBER);
         }
 
         this.discard();

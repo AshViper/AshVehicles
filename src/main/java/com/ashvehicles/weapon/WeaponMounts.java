@@ -1266,7 +1266,7 @@ public final class WeaponMounts {
 
         WeaponDefinition.Guidance guidance = weapon.guidance().orElse(null);
 
-        return guidance == null || guidance.seeker() == WeaponDefinition.Guidance.Seeker.LASER
+        return guidance == null || guidance.seeker().laid()
                 ? null
                 : guidance;
     }
@@ -1287,7 +1287,7 @@ public final class WeaponMounts {
             return null;
         }
 
-        if (weapon.guidance().get().seeker() == WeaponDefinition.Guidance.Seeker.LASER) {
+        if (weapon.guidance().get().seeker().laid()) {
             return this.aircraft.getDesignated();
         }
 

@@ -16,6 +16,7 @@ import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.weapon.BuiltInGun;
 import com.ashvehicles.weapon.TargetLock;
 import com.ashvehicles.weapon.TurretLauncher;
+import com.ashvehicles.weapon.WeaponDefinition;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -140,6 +141,21 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final EntityDataAccessor<Float> DATA_LOCK_PROGRESS =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.FLOAT);
     /**
+     * 発射機が据えている点に立つ {@link DesignationEntity} のエンティティ番号。据えていなければ -1。
+     *
+     * <p>シーカーの捕捉と同じ理由で同期する。何を狙っているかを決めるのはサーバーで、乗員の計器も、同じ車両を
+     * 見ている他の全クライアントも、その1つの数から描く。
+     */
+    private static final EntityDataAccessor<Integer> DATA_DESIGNATED =
+            SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
+    /**
+     * 座標を入れてから撃てるようになるまでの tick 数。
+     *
+     * <p>短いが 0 ではない。実物が座標を入力してから発射準備が整うまでの間であり、ここでは同じボタンで据えて
+     * 撃つ操作（{@code GroundVehicleInputHandler} 参照）が、クリック2回で発射にならないための間でもある。
+     */
+    private static final int LAY_SETTLE_TICKS = 20;
+    /**
      * ハンドルの切れ量。-1〜1。
      *
      * <p>速度と同じ理由で送る。運転を回すのは1台だけで、他は位置の流れから描くしかない。しかもこれは流れから
@@ -251,6 +267,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private final BuiltInGun coax = new BuiltInGun(this, BuiltInGun.Mount.COAXIAL);
     /** 発射筒のミサイル（あれば）。常時捜索するシーカーもここ。 */
     private final TurretLauncher launcher = new TurretLauncher(this);
+    /** 据えた点に立たせているマーカー。サーバー側だけが持つ。{@link #designate} 参照。 */
+    @Nullable
+    private DesignationEntity marker;
     /**
      * 運転側での前tickの装填カウンタ値。これが増えたtickが発砲したtickであり、発砲の反動が速度を所有する側へ
      * 届く手段になる——クライアントが運転中の車両にサーバーが反動を加えても、直後のクライアント報告が速度を
@@ -379,6 +398,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         builder.define(DATA_MISSILE_MODE, false);
         builder.define(DATA_LOCK_TARGET, -1);
         builder.define(DATA_LOCK_PROGRESS, 0.0F);
+        builder.define(DATA_DESIGNATED, -1);
         builder.define(DATA_STEER, 0.0F);
     }
 
@@ -524,6 +544,156 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return this.getSeekerProgress() >= 1.0F && this.entityData.get(DATA_LOCK_TARGET) >= 0;
     }
 
+    // ------------------------------------------------------------------
+    // 座標へ据える発射機
+    // ------------------------------------------------------------------
+
+    /**
+     * この車両の筒に入っているのが、シーカーではなく<em>座標</em>へ飛ぶ弾か。
+     *
+     * <p>兵装ファイルが答える（{@link WeaponDefinition.Guidance.Seeker#POINT}）。乗員の操作も計器も発射条件も
+     * この1つの問いで分かれるので、その分岐は全部ここを読む。積んでいる弾で戦い方が変わるのであって、車両の
+     * 名前で変わるのではない——同じ筒に別の弾を入れたパックの車両も、書き足す物なしにこちらの手順で動く。
+     */
+    public boolean laysPoint() {
+        WeaponDefinition missile = this.getStats().launcher().missile()
+                .map(Definitions::weapon).orElse(null);
+
+        return missile != null && missile.guidance()
+                .map(guidance -> guidance.seeker() == WeaponDefinition.Guidance.Seeker.POINT)
+                .orElse(false);
+    }
+
+    /**
+     * 発射機が据えている物。無ければ null。
+     *
+     * <p>機体の照準ポッドが保持する物とまったく同じで、実体も同じ {@link DesignationEntity} だ。この MOD で
+     * 誘導される物は全てエンティティへ向かうので、座標を狙うという操作も「そこにマーカーを1つ置く」ことに
+     * なる。だからミサイル側に足す物は何も無い——渡された物へ飛ぶ、いつもの弾のままである。
+     */
+    @Nullable
+    public Entity getDesignated() {
+        int id = this.entityData.get(DATA_DESIGNATED);
+
+        if (id < 0) {
+            return null;
+        }
+
+        Entity held = this.level().getEntity(id);
+
+        return held != null && held.isAlive() ? held : null;
+    }
+
+    /**
+     * 発射機が座標を受け付ける水平距離（ブロック）。
+     *
+     * <p>ミサイルファイルの {@code guidance.lock_range} を読む。シーカーを持つ弾ではあれが「どこまで掴めるか」
+     * だが、掴む物を持たないこの弾では「どこまで送れるか」になる——どちらにせよ、その弾が交戦できる距離を1つの
+     * 数で言っている場所だ。盤も同じ数を見て、押す前に射程外だと言う（{@code LaunchPoint.withinReach}）。
+     */
+    public double launcherReach() {
+        return this.getStats().launcher().missile()
+                .map(id -> (double) Definitions.weapon(id).guidance()
+                        .map(WeaponDefinition.Guidance::lockRange).orElse(0.0F))
+                .orElse(0.0);
+    }
+
+    /** 据えた点。無ければ null。 */
+    @Nullable
+    public Vec3 getDesignatedPoint() {
+        Entity held = this.getDesignated();
+
+        return held == null ? null : held.position().add(0.0, held.getBbHeight() * 0.5, 0.0);
+    }
+
+    /**
+     * 地上の一点へ発射機を据える。
+     *
+     * <p>座標へ飛ぶ弾を積んだ車両だけ。それ以外の発射機はシーカーで目標を取るので、据える点は持たないし、
+     * 持たせれば「ロックしていないのに撃てる筒」になる。
+     *
+     * <p><b>据え直しは待ち時間を作る。</b>点を受け取るたび短い装填待ちを置くので、クリック2回が「据えて即
+     * 撃つ」にはならない。実物が座標を入れてから撃てるようになるまでの間であり、ここでは誤射の防波堤でも
+     * ある——弾道ミサイルは引き金の震え1回で出ていってよい物ではない。
+     *
+     * @param point 地上のどこか
+     * @param estimated 点がブロック上で見えた物ではなく、クライアントの世界の外で算出された物か
+     *                  （{@link com.ashvehicles.client.Terrain} 参照）
+     */
+    public boolean designate(@Nullable Vec3 point, boolean estimated) {
+        if (point == null || this.isWrecked() || !this.laysPoint()
+                || point.subtract(this.position()).horizontalDistance() > this.launcherReach()) {
+            this.clearDesignation();
+
+            return false;
+        }
+
+        // 高さがまだ分からない座標には、真下を向いた視線を持たせる。機体の指示が使う斜めの視線ではない
+        // ——あちらはポッドが実際に地面を追った線なので、降ろすと同時に手前へ引き戻すのが正しい補正だが、
+        // こちらは乗員が盤に打ち込んだ2つの数であり、その X と Z は動かしてはならない。真下なら、マークは
+        // 自分の下に地面が現れたとき垂直にだけ降りる。DesignationEntity#settle 参照。
+        Vec3 sight = estimated ? new Vec3(0.0, -1.0, 0.0) : null;
+
+        if (this.marker == null || !this.marker.isAlive()) {
+            this.marker = DesignationEntity.at(this.level(), point, sight);
+            this.level().addFreshEntity(this.marker);
+        } else {
+            this.marker.hold(point, sight);
+        }
+
+        this.entityData.set(DATA_DESIGNATED, this.marker.getId());
+        this.setMissileReload(Math.max(this.getMissileReload(), LAY_SETTLE_TICKS));
+
+        return true;
+    }
+
+    /** 据えていた点を捨てる。 */
+    public void clearDesignation() {
+        if (this.marker != null) {
+            this.marker.discard();
+            this.marker = null;
+        }
+
+        this.entityData.set(DATA_DESIGNATED, -1);
+    }
+
+    /**
+     * 据えていた点から手を離す。ただし点そのものは消さない。
+     *
+     * <p>撃った直後の発射機がすること。弾はもう座標を持って飛んでいるので、発射機の側に据え続ける理由は無く
+     * ——架台を畳んで走り去るのが正しい——それでも弾の行き先を消してよいわけではない。だから保持を降りるだけ
+     * にして、マーク自体は飛んでいる弾に持たせる（{@code RocketEntity.holdMark}）。
+     *
+     * <p>{@link #clearDesignation} との違いはそこだけだ。あちらは乗員が「やめた」と言う経路なので、行き先ごと
+     * 消える。
+     */
+    public void releaseDesignation() {
+        this.marker = null;
+        this.entityData.set(DATA_DESIGNATED, -1);
+    }
+
+    /**
+     * 保持1tick分。マーカーへ「まだ保持者がいる」と伝え、保持できなくなった点は捨てる。
+     *
+     * <p>これが無いとマーカーは数秒で自ら諦める——tickの合間に車両が破壊された場合の後始末だ。
+     * {@link DesignationEntity} 参照。
+     */
+    private void tickDesignation() {
+        if (this.entityData.get(DATA_DESIGNATED) < 0) {
+            return;
+        }
+
+        if (this.isWrecked() || !this.laysPoint() || this.getDesignated() == null) {
+            this.clearDesignation();
+
+            return;
+        }
+
+        if (this.marker != null) {
+            this.marker.held();
+        }
+    }
+
     /**
      * シーカー本体。探す対象は発射筒の中身が決めるので発射筒と同居する。意味を持つのはサーバーのみで、
      * 他の側は上の3つの値を読む。
@@ -591,7 +761,37 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * これを見ない理由は {@link Ride} 参照。
      */
     public Ride getRide(float partialTick) {
-        return this.springs.at(partialTick);
+        Ride ride = this.springs.at(partialTick);
+        float planted = this.planted();
+
+        // 架台を立てている間、車体はバネの上で揺れない。実物が発射前に張り出すジャッキであり、それを踏まえて
+        // 見れば、ここでの「揺れる」は絵として間違っている——バネの動きは車体の中心・地面の高さを支点に模型
+        // 全体を傾けるので（{@code GroundVehicleRenderer.applyBodyMotion}）、7ブロックの筒を垂直に立てると
+        // その先端は数度の傾きで大きく横へ振れる。車体が揺れているのではなく、筒が横滑りしているように見える。
+        //
+        // 起き上がる分だけ滑らかに止める。据えた瞬間に固まるのではなく、架台が立つのに合わせて車体が落ち着く
+        // ——ジャッキが降りていく絵として読める。
+        return planted <= 0.0F ? ride : Ride.between(ride, Ride.LEVEL, planted);
+    }
+
+    /**
+     * 架台がどれだけ立っているか。0で寝ており、1で立ち切っている。起立する発射機を持たない車両では常に0。
+     *
+     * <p>{@link #getRide} が「車体を揺らさない度合い」として読む。仰角そのものから出すので、状態を持たずに
+     * 済むし、据えた・解除したの両方向で自動的に正しい向きへ動く。
+     */
+    private float planted() {
+        // 安い問いから順に。{@link #laysPoint} は兵装ファイルを引くので、そこまで来るのは実際に発射筒を
+        // 積んでいて、しかも架台が上がっている車両だけにする。ここは毎フレーム、車両ごとに数回通る。
+        float pitch = this.getGunPitch(1.0F);
+
+        if (pitch <= 0.0F || !this.getStats().launcher().exists() || !this.laysPoint()) {
+            return 0.0F;
+        }
+
+        float upright = this.getStats().turret().elevation();
+
+        return upright <= 0.0F ? 0.0F : Mth.clamp(pitch / upright, 0.0F, 1.0F);
     }
 
     /** エンジンの負荷（0〜1）。エンジン音のピッチはここから。 */
@@ -672,10 +872,42 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return Attitude.nose(this.aim(partialTick));
     }
 
+    /**
+     * 同じ物を、方向ではなく回転として。
+     *
+     * <p>{@link #getAimDirection} が答えるのと同じ向きだが、こちらは水平線の傾きも持っている。砲腔線に沿って
+     * 覗く視界——砲手照準——に要るのは3角なので、方向だけでは足りない。{@code TurretSight} 参照。
+     */
+    public Quaternionf getAimAttitude(float partialTick) {
+        return this.aim(partialTick);
+    }
+
     private Quaternionf aim(float partialTick) {
         return new Quaternionf(this.getAttitude(partialTick))
                 .rotateY(-this.getTurretYaw(partialTick) * DEG_TO_RAD)
                 .rotateX(-this.getGunPitch(partialTick) * DEG_TO_RAD);
+    }
+
+    /**
+     * 乗員の仰角を、砲が実際に取れる範囲へ収めた値。
+     *
+     * <p>砲手照準を覗いている間、乗員には自分の頭がどこを向いているか映らない。映っているのは砲だ。だから
+     * 可動端の外まで見下ろせるようにしておくと、俯角の尽きた砲の前で入力だけが溜まり、戻す時に同じ角度分の
+     * 空振りが要る——操作が遅れているようにしか感じられない不感帯だ。頭を砲の範囲に縛れば、マウスを動かした
+     * 分は必ず砲が動いた分になる。
+     *
+     * <p>{@link #tickTurret} が砲を据えるのと同じ式を逆に解いた物。両者が違う角を「範囲内」と呼べば、砲手の
+     * 画面と実際に撃つ方向が食い違う。照準を覗いている間は視界が倒されていない（{@code sightTilt} は0）ので、
+     * ここでもそれは勘定に入れない。
+     */
+    public float clampSightPitch(float xRot) {
+        GroundVehicleDefinition.Turret turret = this.getStats().turret();
+
+        if (!turret.exists()) {
+            return xRot;
+        }
+
+        return Mth.clamp(xRot, -turret.elevation() - this.hullPitch, turret.depression() - this.hullPitch);
     }
 
     /**
@@ -912,7 +1144,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * サスペンションと戦うことになる。見える物は動き、狙っている物は動かない。
      */
     @Override
-    protected Vec3 eyeToWorld(VehicleShape.Mount mount, Vec3 eye, float partialTick) {
+    protected Vec3 eyeToWorld(int seat, VehicleShape.Mount mount, Vec3 eye, float partialTick) {
         Vec3 seated = mount == VehicleShape.Mount.TURRET && this.getStats().turret().exists()
                 ? this.onTurret(eye, partialTick)
                 : eye;
@@ -1060,6 +1292,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 // 照準している砲手は主兵装を仕舞わずに掃射できる——同軸機銃の存在理由そのものだ。
                 this.coax.tick(this.input.coax());
                 this.reportSeeker();
+                this.tickDesignation();
                 this.getSensors().tick();
             }
         }
@@ -1824,6 +2057,15 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         float wantYaw = Mth.wrapDegrees(crew.getYHeadRot() - this.heading);
         float wantPitch = Mth.clamp(-(crew.getXRot() + this.sightTilt) - this.hullPitch,
                 -turret.depression(), turret.elevation());
+
+        // 座標へ飛ぶ弾の発射機は、乗員の視線をまったく見ない。狙いは盤で決まっており
+        // （{@code LaunchConsoleScreen}）、弾は出た後に自分で目標へ向き直るので、架台に残っている仕事は
+        // 「立つ」ことだけだ。だから振らない——方位を合わせる意味が無いし、実物の弾道弾発射機も真上へ向けて
+        // 撃つ。据えれば起立し、解除すれば寝る。それが車両の外から見える唯一の状態表示でもある。
+        if (this.laysPoint()) {
+            wantYaw = 0.0F;
+            wantPitch = this.getDesignatedPoint() != null ? turret.elevation() : 0.0F;
+        }
 
         float yaw = approachAngle(this.turretYaw, wantYaw, turret.traverseRate());
         float pitch = approach(this.gunPitch, wantPitch, turret.elevationRate());

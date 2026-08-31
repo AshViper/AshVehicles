@@ -35,12 +35,33 @@ public class ShockwaveParticle extends WeaponParticle {
     private static final float PALE = 0.75F;
     private static final float OPACITY = 0.55F;
 
+    /**
+     * 描かれる環が、土埃の届く距離の何倍まで広がるか。
+     *
+     * <p>環と土埃を同じ大きさにする理由は無い。過圧の前面は、それが剥がした土埃より<em>先</em>を走る——地面から
+     * 埃が持ち上がるには一瞬かかり、持ち上がった頃には前面はもう向こうにいる。だから見える環は常に土煙の壁の
+     * 外側にあり、そこが「壁が広がっている」ではなく「何かが壁を押し広げながら走っている」に見える理由になる。
+     *
+     * <p>見た目の大きさを変えたいならここを触る。土埃の量も環の寿命も
+     * {@link com.ashvehicles.client.particle.BlastStageParticle} の {@code WAVE_REACH} が決めているので、
+     * こちらは1枚のクアッドがどこまで開くかだけを動かす。
+     */
+    private static final float RING_LEADS = 1.7F;
+
     /** 前面が地面から土埃を剥がし続ける、寿命に対する割合。 */
     private static final float RAISES_DUST = 0.6F;
     /** 1tickあたりの粒数。環が回るべき距離が長いほど増える。 */
     private static final float DUST_PER_BLOCK = 0.42F;
     private static final int FEWEST_PUFFS = 3;
     private static final int MOST_PUFFS = 10;
+    /**
+     * 環1つが撒いてよい土埃の総数。
+     *
+     * <p>寿命は半径に比例して伸びるので、上の1tickあたりの数だけで抑えると、巨大な環は「上限の数 × 長い寿命」
+     * で数百個を撒くことになる。爆発規模を255まで開けた以上、そこは天井が要る。通常規模の弾頭はここに届かない
+     * ——最大級の弾頭でも300個ほどなので、効くのは試験棒を振り切った時だけだ。
+     */
+    private static final int DUST_BUDGET = 360;
     /** 後ろの土埃が前面の速度をどれだけ受け継ぐか。 */
     private static final double DUST_DRAG = 0.35;
     /** そしてどれだけ強く上へ巻き上がるか。染みではなく壁になるのはこれのおかげだ。 */
@@ -61,7 +82,7 @@ public class ShockwaveParticle extends WeaponParticle {
         this.radius = Math.max(options.scale(), 1.0F);
         this.lifetime = LIFE + (int) (this.radius * LIFE_PER_BLOCK);
         this.raisingDust = (int) (this.lifetime * RAISES_DUST);
-        this.quadSize = this.radius;
+        this.quadSize = this.radius * RING_LEADS;
         // 移動も落下もしない。前面は「どこかへ行く」のではなく「成長する」ことで描かれる。
         this.hasPhysics = false;
         this.setSprite(sprites.get(this.random));
@@ -83,7 +104,10 @@ public class ShockwaveParticle extends WeaponParticle {
     private void raiseDust(float lived) {
         double reach = this.radius * expansion(lived);
         double speed = this.frontSpeed(lived) * DUST_DRAG;
-        int puffs = Mth.clamp((int) (this.radius * DUST_PER_BLOCK), FEWEST_PUFFS, MOST_PUFFS);
+        // 総量に収まる範囲で、環の長さに見合う数。長生きする環ほど1tickあたりを薄くして、撒き切らずに
+        // 最後まで壁を引きずれるようにする。
+        int spread = (int) Math.min(this.radius * DUST_PER_BLOCK, (double) DUST_BUDGET / this.raisingDust);
+        int puffs = Mth.clamp(spread, FEWEST_PUFFS, MOST_PUFFS);
         TintedParticleOption puff = ModParticles.BLAST_SMOKE.get().of(this.dust, DUST_SIZE);
 
         for (int i = 0; i < puffs; i++) {

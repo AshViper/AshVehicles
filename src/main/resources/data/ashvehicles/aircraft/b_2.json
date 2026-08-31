@@ -1,0 +1,324 @@
+{
+  "hitbox": {
+    "width": 12,
+    "height": 4,
+    "tracking_range": 16,
+    "boxes": [
+      {
+        "name": "right",
+        "offset": [0.0, 2.778, 0.581],
+        "size": [5.573, 1.858, 20.24]
+      },
+      {
+        "name": "right_left",
+        "offset": [5.109, 2.791, 0.542],
+        "size": [4.644, 1.831, 16.719]
+      },
+      {
+        "name": "right_right",
+        "offset": [-5.109, 2.791, 0.542],
+        "size": [4.644, 1.831, 16.719]
+      },
+      {
+        "name": "left",
+        "offset": [0.0, 4.171, -3.174],
+        "size": [14.861, 0.929, 7.431]
+      },
+      {
+        "name": "right_left_2",
+        "offset": [12.075, 2.841, -1.78],
+        "size": [3.715, 1.731, 10.217]
+      },
+      {
+        "name": "right_right_2",
+        "offset": [-12.075, 2.841, -1.78],
+        "size": [3.715, 1.731, 10.217]
+      },
+      {
+        "name": "right_left_3",
+        "offset": [8.824, 2.819, -1.316],
+        "size": [2.786, 1.774, 13.004]
+      },
+      {
+        "name": "right_right_3",
+        "offset": [-8.824, 2.819, -1.316],
+        "size": [2.786, 1.774, 13.004]
+      },
+      {
+        "name": "left_2",
+        "offset": [0.0, 4.428, 5.186],
+        "size": [3.715, 1.442, 9.288]
+      },
+      {
+        "name": "left_left",
+        "offset": [5.573, 4.171, 3.328],
+        "size": [9.288, 0.929, 5.573]
+      },
+      {
+        "name": "left_right",
+        "offset": [-5.573, 4.171, 3.328],
+        "size": [9.288, 0.929, 5.573]
+      },
+      {
+        "name": "left_left_2",
+        "offset": [18.577, 2.841, -4.567],
+        "size": [3.715, 1.731, 6.502]
+      },
+      {
+        "name": "left_right_2",
+        "offset": [-18.577, 2.841, -4.567],
+        "size": [3.715, 1.731, 6.502]
+      },
+      {
+        "name": "right_left_4",
+        "offset": [15.326, 2.841, -3.174],
+        "size": [2.786, 1.731, 7.431]
+      },
+      {
+        "name": "right_right_4",
+        "offset": [-15.326, 2.841, -3.174],
+        "size": [2.786, 1.731, 7.431]
+      },
+      {
+        "name": "left_left_3",
+        "offset": [20.952, 3.071, -8.425],
+        "size": [8.743, 0.821, 4.026],
+        "rotation": [5.0, 8.5, 0.5]
+      },
+      {
+        "name": "left_right_3",
+        "offset": [-20.952, 3.071, -8.425],
+        "size": [8.743, 0.821, 4.026],
+        "rotation": [5.0, -8.5, -0.5]
+      },
+      {
+        "name": "left2_left",
+        "offset": [21.544, 2.715, -6.74],
+        "size": [5.766, 0.66, 6.516],
+        "rotation": [0.0, 0.0, -1.0]
+      },
+      {
+        "name": "left2_right",
+        "offset": [-21.544, 2.715, -6.74],
+        "size": [5.766, 0.66, 6.516],
+        "rotation": [0.0, 0.0, 1.0]
+      },
+      {
+        "name": "left_left_4",
+        "offset": [6.502, 2.841, -8.539],
+        "size": [3.715, 1.731, 1.443]
+      },
+      {
+        "name": "left_right_4",
+        "offset": [-6.502, 2.841, -8.539],
+        "size": [3.715, 1.731, 1.443]
+      },
+      {
+        "name": "right_2",
+        "offset": [0.0, 4.626, -1.179],
+        "size": [2.308, 0.566, 2.855],
+        "rotation": [10.0, 0.0, 0.0]
+      },
+      {
+        "name": "left_left_5",
+        "offset": [12.075, 3.808, -0.851],
+        "size": [3.715, 0.203, 2.786]
+      },
+      {
+        "name": "left_right_5",
+        "offset": [-12.075, 3.808, -0.851],
+        "size": [3.715, 0.203, 2.786]
+      },
+      {
+        "name": "left_left_6",
+        "offset": [21.551, 2.95, -9.714],
+        "size": [1.686, 0.789, 0.964],
+        "rotation": [0.0, 35.5, 0.0]
+      },
+      {
+        "name": "left_right_6",
+        "offset": [-21.551, 2.95, -9.714],
+        "size": [1.686, 0.789, 0.964],
+        "rotation": [0.0, -35.5, 0.0]
+      },
+      {
+        "name": "left_left_7",
+        "offset": [2.187, 3.736, 6.574],
+        "size": [1.343, 0.227, 2.118],
+        "rotation": [-4.0, -9.5, 4.5]
+      },
+      {
+        "name": "left_right_7",
+        "offset": [-2.187, 3.736, 6.574],
+        "size": [1.343, 0.227, 2.118],
+        "rotation": [-4.0, 9.5, -4.5]
+      },
+      {
+        "name": "left_left_8",
+        "offset": [21.175, 3.134, -5.436],
+        "size": [5.603, 0.135, 0.844],
+        "rotation": [-29.0, 35.0, 1.0]
+      },
+      {
+        "name": "left_right_8",
+        "offset": [-21.175, 3.134, -5.436],
+        "size": [5.603, 0.135, 0.844],
+        "rotation": [-29.0, -35.0, -1.0]
+      }
+    ]
+  },
+  "model": {
+    "scale": 1.08,
+    "bones": {
+      "nose_gear": "Front_Gear",
+      "left_gear": "Left_Gear",
+      "right_gear": "Right_Gear",
+      "nose_gear_door": "Front_Door",
+      "left_gear_door": "Left_Door",
+      "right_gear_door": "Right_Door"
+    }
+  },
+  "engine": {
+    "max_thrust": 0.0105,
+    "throttle_rate": 0.006,
+    "spool_rate": 0.04,
+    "sea_level_density": 1,
+    "fuel": {
+      "capacity": 4200,
+      "burn_rate": 0.1,
+      "idle_fraction": 0.14,
+      "refuel_rate": 250
+    }
+  },
+  "wing": {
+    "max_speed": 14,
+    "stall_speed": 1.9,
+    "lift": 0.0055,
+    "lift_slope": 5,
+    "stall_angle": 13,
+    "drag": 4.5e-05,
+    "induced_drag": 0.00022,
+    "lateral_drag": 0.15,
+    "ground_effect": 0.26,
+    "span": 50
+  },
+  "handling": {
+    "pitch_rate": 0.7,
+    "roll_rate": 1,
+    "yaw_rate": 0.3,
+    "control_lag": 0.4,
+    "weathervane": 2,
+    "alpha_limit": 0.7,
+    "aero_damping": 0.09
+  },
+  "airframe": {
+    "health": 700,
+    "crash_speed": 2.2,
+    "explosion_power": 7,
+    "max_g": 2.5,
+    "seats": [
+      [-0.6, 2.95, 7.3],
+      [0.6, 2.95, 7.3]
+    ],
+    "ejection": {
+      "speed": 1.2,
+      "canopy": 30
+    }
+  },
+  "landing_gear": {
+    "cycle_ticks": 65,
+    "drag_penalty": 0.6,
+    "rolling_friction": 0.999,
+    "brake_friction": 0.987,
+    "lateral_friction": 0.5,
+    "steer_rate": 0.6,
+    "steer_fade": 1.1,
+    "climb_height": 1.2
+  },
+  "flaps": {
+    "cycle_ticks": 30,
+    "drag_penalty": 0.5,
+    "lift_bonus": 0.4
+  },
+  "camera": {
+    "pos": [0.0, 9.0, -30.0],
+    "cockpit": [-0.6, 4.15, 7.6]
+  },
+  "sound": {
+    "volume": 1.1,
+    "idle_volume": 0.35,
+    "pitch_min": 0.5,
+    "pitch_max": 0.9,
+    "range": 560
+  },
+  "radar": {
+    "range": 2000,
+    "arc": 30,
+    "sweep_ticks": 20,
+    "warning_range": 6000
+  },
+  "signature": {
+    "radar": 0.08,
+    "store": 0.4,
+    "heat": 0.6
+  },
+  "countermeasures": {
+    "flares": 60,
+    "chaff": 90,
+    "interval_ticks": 5,
+    "reload_ticks": 400,
+    "speed": 0.35
+  },
+  "hardpoints": [
+    {
+      "name": "bay1_left",
+      "pos": [-1.2, 2.4, 3.2],
+      "internal": true
+    },
+    {
+      "name": "bay1_right",
+      "pos": [1.2, 2.4, 3.2],
+      "internal": true
+    },
+    {
+      "name": "bay2_left",
+      "pos": [-1.2, 2.4, 1.1],
+      "internal": true
+    },
+    {
+      "name": "bay2_right",
+      "pos": [1.2, 2.4, 1.1],
+      "internal": true
+    },
+    {
+      "name": "bay3_left",
+      "pos": [-1.2, 2.4, -1.0],
+      "internal": true
+    },
+    {
+      "name": "bay3_right",
+      "pos": [1.2, 2.4, -1.0],
+      "internal": true
+    },
+    {
+      "name": "bay4_left",
+      "pos": [-1.2, 2.4, -3.1],
+      "internal": true
+    },
+    {
+      "name": "bay4_right",
+      "pos": [1.2, 2.4, -3.1],
+      "internal": true
+    },
+    {
+      "name": "sensor_left",
+      "pos": [-1.6, 2.3, 6.0],
+      "kind": "special"
+    },
+    {
+      "name": "sensor_right",
+      "pos": [1.6, 2.3, 6.0],
+      "kind": "special"
+    }
+  ]
+}

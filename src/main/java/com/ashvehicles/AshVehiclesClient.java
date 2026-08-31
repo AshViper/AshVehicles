@@ -9,6 +9,9 @@ import com.ashvehicles.client.ghost.adapter.GroundVehicleGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.RocketGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.TargetDroneGhostAdapter;
 import com.ashvehicles.client.particle.BlastParticle;
+import com.ashvehicles.client.particle.BlastStageParticle;
+import com.ashvehicles.client.particle.CinderParticle;
+import com.ashvehicles.client.particle.CloudLayerParticle;
 import com.ashvehicles.client.particle.FlameParticle;
 import com.ashvehicles.client.particle.SmokeParticle;
 import com.ashvehicles.client.particle.ShockwaveParticle;
@@ -133,7 +136,20 @@ public class AshVehiclesClient {
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.CONTRAIL));
         event.registerSpriteSet(ModParticles.BLAST_SMOKE.get(),
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.BLAST));
+        event.registerSpriteSet(ModParticles.CLOUD.get(),
+                sprites -> SmokeParticle.provider(sprites, SmokeParticle.CLOUD));
+        event.registerSpriteSet(ModParticles.NUCLEAR_CLOUD.get(),
+                sprites -> SmokeParticle.provider(sprites, SmokeParticle.NUCLEAR));
+        event.registerSpriteSet(ModParticles.CLOUD_LAYER.get(),
+                sprites -> CloudLayerParticle.provider(sprites, CloudLayerParticle.DRIFT));
+        event.registerSpriteSet(ModParticles.NUCLEAR_LAYER.get(),
+                sprites -> CloudLayerParticle.provider(sprites, CloudLayerParticle.BURNING));
         event.registerSpriteSet(ModParticles.BLAST.get(), BlastParticle::provider);
+        event.registerSpriteSet(ModParticles.BLAST_STAGE.get(), BlastStageParticle::provider);
+        event.registerSpriteSet(ModParticles.CINDER.get(),
+                sprites -> CinderParticle.provider(sprites, CinderParticle.EMBER));
+        event.registerSpriteSet(ModParticles.RUBBLE.get(),
+                sprites -> CinderParticle.provider(sprites, CinderParticle.RUBBLE));
         event.registerSpriteSet(ModParticles.FIRE.get(), FlameParticle::provider);
         event.registerSpriteSet(ModParticles.SHOCKWAVE.get(), ShockwaveParticle::provider);
         event.registerSpriteSet(ModParticles.SPARK.get(), sprites -> SparkParticle.provider(sprites, true));

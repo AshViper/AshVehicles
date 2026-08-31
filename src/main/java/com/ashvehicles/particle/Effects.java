@@ -55,8 +55,47 @@ public final class Effects {
      */
     public static final int DUST = 0xFFFFFF;
 
-    /** これ以上大きくしても描画も可聴距離も変わらなくなる、爆発規模の上限。 */
+    /**
+     * 灼熱した空気の色。炎ではないので、炎ほど黄色くない。
+     *
+     * <p>核の雲の内側がこれで生まれ、十数秒かけて {@link #SOOT} へ落ちていく。
+     */
+    public static final int FURNACE = 0xFF7A30;
+
+    /**
+     * 実用上いちばん大きな弾頭の規模。
+     *
+     * <p>「これ以上は描けない上限」ではなく「兵装が使う範囲の上限」。兵装ファイルの爆発値はここで頭打ちにする
+     * し、閃光と揺れの強さもここで飽和する——最大級の弾頭より明るく光り、より強く揺れる物を用意しても、それは
+     * 差として読めないからだ。
+     *
+     * <p>描画そのものはここで止まらない。試験棒は {@link #LARGEST} まで開けてある。
+     */
     public static final float BIGGEST = 12.0F;
+
+    /**
+     * 描ける爆発規模の天井。
+     *
+     * <p>{@link #BIGGEST} の20倍以上あり、兵装がここへ来ることはない。ここまで開いているのは試験棒のためで、
+     * 一定規模を超えると演出はキノコ雲に変わる——{@link com.ashvehicles.client.particle.BlastStageParticle}
+     * 参照。粒の大きさと数はそこで頭打ちにしてあるので、天井の値でも撒く数は爆発力に比例しては増えない。
+     */
+    public static final float LARGEST = 255.0F;
+
+    /**
+     * ここから上は核として描く。
+     *
+     * <p>大きさの話ではない。{@link #LARGEST} でも雲は200ブロックまでで、実物の2%にも届かない——ワールドの
+     * 高さが384しかない以上、規模を上げて核に近づける道は無いからだ。よってここで切り替わるのは<b>形と時間</b>
+     * である。火球そのものが浮き上がり、白い凝結の殻が一瞬包み、根元から地表を這う雲が広がり、雲の内側は
+     * 十数秒のあいだ灼熱したまま光り続け、閃光が引いた後も世界がしばらくオレンジがかっている。全体で20秒。
+     *
+     * <p>{@link com.ashvehicles.client.particle.BlastStageParticle} と
+     * {@link com.ashvehicles.client.BlastFlash} がこの線を見る。だから粒側ではなくここにある。
+     * 音だけは線を持たない——{@link com.ashvehicles.client.sound.BlastSounds} は規模とともに再生速度を
+     * 落とし続けるので、そちらに境目は無い。
+     */
+    public static final float NUCLEAR = 128.0F;
 
     /**
      * この MOD の爆発は何も燃やし残さない。
@@ -69,20 +108,6 @@ public final class Effects {
     private static final boolean NO_FIRE = false;
 
     /**
-     * 爆発力1あたり衝撃波が走る距離（ブロック）。
-     *
-     * <p>大きさを決めるのはこれだけなので、弾頭が2倍なら輪も2倍に広がり、爆発する物は必ず何らかの大きさ
-     * の輪を出す。ロケットなら数ブロック、大型爆弾なら30m四方。この1つの数値を上げれば全兵装の衝撃波が
-     * 比例して大きくなる。
-     *
-     * <p>意図的に、爆発の有効半径より遠くまで走らせている。ここで描いているのは外へ吹き出す土煙であり、
-     * 現実でも実際に損害を与える範囲よりずっと遠くまで届く。
-     */
-    private static final float WAVE_REACH = 2.8F;
-    /** 走っていく地面から少し浮かせる。輪が地面とピクセルを取り合わないように。 */
-    private static final double WAVE_LIFT = 0.35;
-
-    /**
      * エンジンが再生せず、再生できないと文句も言わない唯一の音。
      *
      * <p>バニラは爆発音・煙・ノックバックを1パケットに入れて64ブロック以内の全員へ送る。ノックバックは
@@ -92,26 +117,52 @@ public final class Effects {
     private static final Holder<SoundEvent> SILENCE = Holder.direct(SoundEvent.createVariableRangeEvent(
             ResourceLocation.withDefaultNamespace("intentionally_empty")));
 
-    /** 炎、煙、破片。爆発を見た者が目にする3つを順に。 */
+    /**
+     * 起爆ひとそろい。ここから始まる物を見る者は、閃光・開く火球・走る衝撃波・追い付く煙・落ちてくる破片・
+     * 残り火を、その順で目にする。轟音と揺れは音速で遅れて来る。
+     *
+     * <p>ここで送るのはパケット1つだけだ。順序を作るのはクライアント側の
+     * {@link com.ashvehicles.client.particle.BlastStageParticle} で、そちらに全ての数値と理由がある。
+     * サーバーが述べるのは「ここでこの規模の爆発が起きた」ことだけで、それをどう見せるかは既に見えている側の
+     * 仕事——だから2秒に渡る演出がラグの影響を受けず、ロードされていないチャンクの上でも同じように動く。
+     *
+     * <p>穴を開ける方の爆発は {@link #blast} が別に持っている。これは見た目と音だけで、地面にも人にも
+     * 触らない。
+     *
+     * @param power 爆発規模。全ての大きさと、聞こえる距離の基準
+     * @param colour 火球の色。それを起こした弾自身の色
+     */
+    public static void detonate(ServerLevel level, Vec3 at, float power, int colour) {
+        detonate(level, at, power, colour, power);
+    }
+
+    /**
+     * 同じものを、見える規模と聞こえる規模を分けて。
+     *
+     * <p>要るのは残骸の着地くらいだ。あれは爆発ではなく墜落なので、土煙も炎も落ちてきた機体の大きさで立つべき
+     * だが、音は「炸薬が起爆した」ではなく「重い物が落ちた」でなければならない。
+     *
+     * @param heard 音だけの規模。聞こえる距離もこれで決まる
+     */
+    public static void detonate(ServerLevel level, Vec3 at, float power, int colour, float heard) {
+        send(level, at, ModParticles.BLAST_STAGE.get().of(colour, Mth.clamp(power, 1.0F, LARGEST)),
+                1, 0.0, 0.0);
+        boom(level, at, heard);
+    }
+
+    /**
+     * 炎、煙、破片を一度に。
+     *
+     * <p>{@link #detonate} と違い順序を持たない。爆発そのものではなく「燃えている物から火が出た」場面のための
+     * もので、そちらは展開する必要が無い——既に燃えているのだから。撃墜された機体の全長に沿って並べる火が
+     * これにあたる。
+     */
     public static void fireball(ServerLevel level, Vec3 at, float power, int colour) {
         send(level, at, ModParticles.BLAST.get().of(colour, power * 0.34F),
                 4 + (int) (power * 1.6F), power * 0.16, power * 0.035);
         send(level, at, ModParticles.BLAST_SMOKE.get().of(SOOT, power * 0.42F),
                 8 + (int) (power * 3.0F), power * 0.28, power * 0.022);
         sparks(level, at, EMBER, power);
-    }
-
-    /**
-     * 衝撃波。パーティクル1個が輪の描画と土煙の巻き上げを自分でやる。
-     * {@link com.ashvehicles.client.particle.ShockwaveParticle} 参照。
-     *
-     * <p>持たせる色は土煙の色で、輪の側はそれに対して自分を白くする（地面ではなく圧縮された空気なので）。
-     * 持たせる大きさは波面が走る距離で、これは爆発規模だけで決まる（{@link #WAVE_REACH} 参照）。
-     * つまり閾値を超えた弾頭だけでなく、どの弾頭も自分の規模に比例した波を出す。
-     */
-    public static void wave(ServerLevel level, Vec3 at, float power) {
-        send(level, at.add(0.0, WAVE_LIFT, 0.0),
-                ModParticles.SHOCKWAVE.get().of(DUST, power * WAVE_REACH), 1, 0.0, 0.0);
     }
 
     /**

@@ -3,9 +3,11 @@ package com.ashvehicles.entity;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.network.HitReportPayload;
+import com.ashvehicles.registry.ModEntities;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -148,6 +150,23 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         return velocity.lengthSqr() < 1.0E-8 ? Vec3.ZERO : velocity.normalize();
     }
 
+    /**
+     * 追っているのが地上の光点なら、それをまだ保持していると伝える。
+     *
+     * <p>{@link DesignationEntity} は誰も保持しなくなると数秒で自ら消える。撃った側が撃った直後に手を離す
+     * 兵器——座標を渡して架台を畳む弾道弾発射機（{@code TurretLauncher}）——では、その数秒の後に弾の目標が
+     * 消えることになる。だから飛んでいる弾自身が保持者になる。渡された物を最後まで持っていくのは弾の仕事
+     * であり、渡した側がまだそれを見ているかどうかとは無関係だ。
+     *
+     * <p>解除がマークを<em>破棄</em>する経路（機体の照準ポッド、{@code AircraftEntity.clearDesignation}）は
+     * これに影響されない。破棄されたマークは死んでおり、保持を主張する相手も残っていない。
+     */
+    private void holdMark() {
+        if (this.getTarget() instanceof DesignationEntity mark) {
+            mark.held();
+        }
+    }
+
     /** パイロットがロックしていた相手をミサイルへ渡す。これが無ければ無誘導ロケットとして飛ぶ。 */
     public void setTarget(@Nullable Entity target) {
         this.target = target;
@@ -206,8 +225,12 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
 
         // 失探中のシーカーは黙って弾道飛行に落ちるのではなく、まず視野内を探し直す。目標を決めてよいのは
         // サーバーだけなので、こちらだけで回す。捉え直せばこの tick からもう誘導が戻っている。
-        if (!this.level().isClientSide && this.lost) {
-            this.searchAgain(heading);
+        if (!this.level().isClientSide) {
+            this.holdMark();
+
+            if (this.lost) {
+                this.searchAgain(heading);
+            }
         }
 
         boolean burning = this.isBurning() && round.hasMotor();
@@ -331,7 +354,7 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         float glare = Math.max(FAINTEST_TARGET, switch (guidance.seeker()) {
             case HEAT -> AircraftEntity.heatVisibility(chasing);
             case RADAR -> AircraftEntity.visibility(chasing);
-            case LASER -> 1.0F;
+            case LASER, POINT -> 1.0F;
         });
         AABB box = this.getBoundingBox().inflate(DECOY_REACH);
 
@@ -562,7 +585,44 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
             this.warhead(chasing, where, guidance.proximity());
         }
 
+        this.scatter(where);
         super.detonate(where);
+    }
+
+    /**
+     * クラスター弾頭を開く。炸裂点から子弾を撒く。
+     *
+     * <p>撒くだけで、ここは何も壊さない。破壊は子弾が地面に着いた時に、子弾自身のファイルが書いている規模で
+     * 起こる。だから親の {@code explosion} は開傘の合図であるべきで、0でも構わない——弾頭の重さは数×規模の
+     * 方に入っている。{@link WeaponDefinition.Cluster} 参照。
+     *
+     * <p><b>子弾は普通の弾だ。</b>誘導を持たないので落ちるに任せ、触れた物で炸裂し、着弾は他の弾とまったく
+     * 同じ経路を通る。撃った者も撃った機体も親から受け継ぐので、当てた責任の行き先も変わらない。
+     *
+     * <p>撒く速度は3つの合成だ。親の速度の一部（{@code inherit}）で前方向の勢いを残し、横向きのばらつき
+     * （{@code spread}）で撒布界を作り、鉛直成分は与えない——落下は重力の仕事であって、撒く側の仕事ではない。
+     */
+    private void scatter(Vec3 where) {
+        WeaponDefinition.Cluster cluster = this.getWeapon().cluster().orElse(null);
+
+        if (cluster == null || !(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+
+        Entity vehicle = this.firedFrom();
+        Vec3 inherited = this.getDeltaMovement().scale(cluster.inherit());
+
+        for (int i = 0; i < cluster.count(); i++) {
+            RocketEntity bomblet = new RocketEntity(ModEntities.ROCKET.get(), level);
+
+            bomblet.setup(cluster.submunition(), vehicle == null ? this : vehicle, this.getOwner());
+            bomblet.setPos(where);
+            bomblet.launch(inherited.add(
+                    this.random.nextGaussian() * cluster.spread(), 0.0,
+                    this.random.nextGaussian() * cluster.spread()));
+
+            level.addFreshEntity(bomblet);
+        }
     }
 
     /** 弾頭1発分を、外した距離で目減りさせて相手へ。 */

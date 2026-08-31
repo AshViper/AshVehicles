@@ -674,6 +674,28 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
+     * 乗員が世界を見る視点。砲に取り付いた目——ガンカメラ——だけが機体構造から離れて動く。
+     *
+     * <p>{@code "mount": "gun"} と書かれた席の目は、その席が受け持つ砲座の耳軸周りに運ばれる。撃つ物に
+     * 固定された箱であり、砲が振れれば一緒に振れ、俯角を取れば一緒に下を向く。AC-130 の砲手のように、
+     * 席が機体の反対側にあって胴体しか見えない乗員のためのもの——見るべき物は自分の砲の向こうにある。
+     *
+     * <p>その席が砲座を持たない機体ファイルでは、書かれた点をそのまま使う。砲を降ろした機体でも、砲座の
+     * 番号が席と食い違っている機体でも、視点が原点へ飛ぶよりは席に留まる方がよい。
+     */
+    @Override
+    protected Vec3 eyeToWorld(int seat, VehicleShape.Mount mount, Vec3 eye, float partialTick) {
+        if (mount == VehicleShape.Mount.HULL) {
+            return this.toWorld(eye, partialTick);
+        }
+
+        int station = this.stations.stationForSeat(seat);
+
+        return this.toWorld(station == GunStations.NONE ? eye : this.stations.carry(station, eye),
+                partialTick);
+    }
+
+    /**
      * パイロン。当たり判定の箱には含めない。兵装を吊る場所は機体の一部というより機体上の位置であり、単独で
      * クリックできる価値がある。
      */

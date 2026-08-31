@@ -1,19 +1,16 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_bomb",
-  "key": {
-    "S": {
-      "item": "ashvehicles:steel_plate"
+  "tab": "weapon",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 4
     },
-    "X": {
-      "item": "minecraft:tnt"
+    {
+      "item": "minecraft:tnt",
+      "count": 1
     }
-  },
-  "pattern": [
-    " S ",
-    "SXS",
-    " S "
   ],
   "result": {
     "count": 1,

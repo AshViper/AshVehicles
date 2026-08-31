@@ -5,7 +5,9 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.client.BlastShake;
 import com.ashvehicles.network.BlastSoundPayload;
+import com.ashvehicles.particle.Effects;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.AbstractSoundInstance;
@@ -53,6 +55,18 @@ public final class BlastSounds {
     private static final float DULLING = 0.5F;
     /** これ以上は保持しない。その頃にはプレイヤーがまったく別の場所にいるかもしれないからだ。 */
     private static final int LONGEST_WAIT = 200;
+
+    /**
+     * 規模が上がるほど再生速度を落とす、その下限。
+     *
+     * <p>Minecraft の音響エンジンはピッチを 0.5〜2.0 に丸めるので、これが出せる限界の遅さ——録音そのものの
+     * 2倍の長さになる。核の轟音を核の轟音にしているのは音量ではなく<b>低さと長さ</b>だ。同じ録音でも、
+     * 再生を落とせば破裂音は轟きになり、轟きは地鳴りになる。
+     *
+     * <p>{@link Effects#BIGGEST} から {@link Effects#LARGEST} までかけて連続的に落ちるので、境目は無い。
+     * 規模を上げれば上げただけ低く、長くなり続ける。
+     */
+    private static final float SLOWEST = 0.5F;
 
     private static final List<Pending> WAITING = new ArrayList<>();
 
@@ -107,6 +121,10 @@ public final class BlastSounds {
      * 飛んでいたからだ。
      */
     private static void play(Minecraft minecraft, Vec3 at, float power) {
+        // 到達したのは音ではなく空気の壁で、音はその一部でしかない。近ければ同じ壁が体も叩くので、揺れも
+        // ここから始まる。到達時刻の計算をもう一度書かずに済むのは副産物で、本質は同じ現象だということ。
+        BlastShake.felt(at, power);
+
         double fade = Mth.clamp(earTo(minecraft, at) / BlastSoundPayload.carry(power), 0.0, 1.0);
         float volume = (float) Math.pow(1.0 - fade, FALLOFF);
 
@@ -115,7 +133,22 @@ public final class BlastSounds {
         }
 
         minecraft.getSoundManager().play(new BlastSoundInstance(
-                recording(minecraft), volume, NEAR_PITCH - (float) fade * DULLING, at));
+                recording(minecraft), volume, pitch(power, (float) fade), at));
+    }
+
+    /**
+     * この規模・この距離の爆発を再生する速さ。
+     *
+     * <p>2つが重なっている。<b>距離</b>——空気は高周波から先に吸うので、遠いほど籠もる。そして<b>規模</b>
+     * ——大きい爆発は低く、そして長い。後者はピッチを下げることで長さも一緒に稼いでいる。同じ録音を遅く回せば
+     * 破裂音は轟きになり、轟きは地鳴りになるからで、別の音を重ねるより1つの音が伸び続ける方が「大きい」に
+     * 聞こえる。
+     */
+    private static float pitch(float power, float fade) {
+        float dulled = NEAR_PITCH - fade * DULLING;
+        float heavy = Mth.clamp((power - Effects.BIGGEST) / (Effects.LARGEST - Effects.BIGGEST), 0.0F, 1.0F);
+
+        return Mth.lerp(heavy, dulled, SLOWEST);
     }
 
     private static double earTo(Minecraft minecraft, Vec3 at) {

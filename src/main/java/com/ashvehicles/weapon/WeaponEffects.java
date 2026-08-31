@@ -69,9 +69,7 @@ public final class WeaponEffects {
         float power = Mth.clamp(round.explosion(), 0.0F, Effects.BIGGEST);
 
         if (power > 0.0F) {
-            Effects.fireball(level, at, power, round.tracer());
-            Effects.boom(level, at, power);
-            Effects.wave(level, at, power);
+            Effects.detonate(level, at, power, round.tracer());
         } else if (onPlate) {
             strike(level, at, along, round);
         } else {

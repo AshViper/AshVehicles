@@ -1,25 +1,24 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_missile",
-  "key": {
-    "E": {
-      "item": "minecraft:ender_eye"
+  "tab": "weapon",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 2
     },
-    "S": {
-      "item": "ashvehicles:steel_plate"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "C": {
-      "item": "ashvehicles:circuit_board"
+    {
+      "item": "minecraft:ender_eye",
+      "count": 1
     },
-    "G": {
-      "item": "minecraft:gunpowder"
+    {
+      "item": "minecraft:gunpowder",
+      "count": 1
     }
-  },
-  "pattern": [
-    " E ",
-    "SCS",
-    " G "
   ],
   "result": {
     "count": 1,

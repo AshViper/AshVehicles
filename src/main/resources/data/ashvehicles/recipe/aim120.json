@@ -1,25 +1,24 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_missile",
-  "key": {
-    "V": {
-      "item": "ashvehicles:avionics"
+  "tab": "weapon",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 4
     },
-    "S": {
-      "item": "ashvehicles:steel_plate"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "C": {
-      "item": "ashvehicles:circuit_board"
+    {
+      "item": "ashvehicles:avionics",
+      "count": 1
     },
-    "B": {
-      "item": "minecraft:blaze_powder"
+    {
+      "item": "minecraft:blaze_powder",
+      "count": 1
     }
-  },
-  "pattern": [
-    " V ",
-    "SCS",
-    "SBS"
   ],
   "result": {
     "count": 1,

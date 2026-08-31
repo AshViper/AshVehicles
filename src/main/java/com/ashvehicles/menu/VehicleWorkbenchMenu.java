@@ -2,9 +2,11 @@ package com.ashvehicles.menu;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import com.ashvehicles.crafting.MaterialPool;
 import com.ashvehicles.crafting.VehicleWorkbenchRecipe;
+import com.ashvehicles.crafting.WorkbenchTab;
 import com.ashvehicles.registry.ModBlocks;
 import com.ashvehicles.registry.ModMenus;
 import com.ashvehicles.registry.ModRecipes;
@@ -24,7 +26,7 @@ import net.minecraft.world.level.Level;
  * 車両工廠の中身。作業台ではない。
  *
  * <p>枠はプレイヤーの持ち物36個だけで、材料を置く場所は無い。組めるものの一覧を持っていて、押された
- * 番号の1機を、持ち物から材料を引いて渡す。押した合図はバニラの「容器のボタン」——本棚や石切台と同じ
+ * 番号の1つを、持ち物から材料を引いて渡す。押した合図はバニラの「容器のボタン」——本棚や石切台と同じ
  * 経路——で届くので、自前のパケットは要らないし、届いた時点でサーバーは既に
  * {@link #stillValid} を確かめている。
  *
@@ -79,6 +81,19 @@ public class VehicleWorkbenchMenu extends AbstractContainerMenu {
     /** 組めるものの一覧。画面はこれを並べる。 */
     public List<RecipeHolder<VehicleWorkbenchRecipe>> recipes() {
         return this.recipes;
+    }
+
+    /**
+     * その棚に載るものの、一覧全体での番号。
+     *
+     * <p>画面はタブごとにこれを並べるが、押されたときに送るのはここに入っている番号そのもので、
+     * タブの中で何行目かではない。タブは見せ方であって、番号の付け直しではない——付け直せば、
+     * 棚が1つ増えた瞬間に、押したのとは違う物が出てくる。
+     */
+    public int[] indices(WorkbenchTab tab) {
+        return IntStream.range(0, this.recipes.size())
+                .filter(index -> this.recipes.get(index).value().tab() == tab)
+                .toArray();
     }
 
     /** 今の持ち物で作れるか。画面がボタンの生き死にを決めるのに使う。 */

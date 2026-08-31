@@ -157,13 +157,24 @@ public final class ModKeyMappings {
      */
     public static final KeyMapping SWITCH_SEAT = create("switch_seat", GLFW.GLFW_KEY_K);
 
+    /**
+     * 砲手席のセンサー映像の極性を、白熱と黒熱で入れ替える。{@link ThermalView} 参照。
+     *
+     * <p>実機の切り替えであり、飾りではない。雪原と砂漠、そして地面が既に燃えている場所では、逆の方が物が
+     * 見える。押せる場所は砲座の映像の中だけなので、他の座席では何も起きない。
+     *
+     * <p>{@code N} はバニラのゲーム内キーと衝突せず、砲手が既に触れている物——マウスと、隣り合った降車・
+     * 座席移動のキー——の近くに来る。
+     */
+    public static final KeyMapping SENSOR_POLARITY = create("sensor_polarity", GLFW.GLFW_KEY_N);
+
     public static final KeyMapping[] ALL = {PITCH_UP, PITCH_DOWN, ROLL_LEFT, ROLL_RIGHT,
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
             AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_VTOL, CYCLE_WEAPON, JETTISON,
             RELEASE_FLARE, RELEASE_CHAFF,
             RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,
-            DISMOUNT, OPEN_HOLD, SWITCH_SEAT};
+            DISMOUNT, OPEN_HOLD, SWITCH_SEAT, SENSOR_POLARITY};
 
     private static KeyMapping create(String name, int key) {
         return create(name, InputConstants.Type.KEYSYM, key);

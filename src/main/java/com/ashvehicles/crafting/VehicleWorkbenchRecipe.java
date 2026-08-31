@@ -21,7 +21,10 @@ import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.common.crafting.SizedIngredient;
 
 /**
- * 車両工廠で組める1機ぶんの図面。素材と、その必要数と、出来上がる物。
+ * 車両工廠で組める1つぶんの図面。素材と、その必要数と、出来上がる物と、それが載る棚。
+ *
+ * <p>出来上がる物は機体とは限らない。兵装も装備も弾薬も同じ形の図面で、違うのは
+ * {@link WorkbenchTab 棚} だけだ。
  *
  * <p>配置は無い。工廠は作業台ではなく、素材を持って行けば組み上げてくれる場所だ。何をどこに置くかを
  * 覚えることと、機体を作れるようになることの間には何の関係も無い——覚えることに意味があるのは
@@ -32,11 +35,14 @@ import net.neoforged.neoforge.common.crafting.SizedIngredient;
  */
 public class VehicleWorkbenchRecipe implements Recipe<MaterialPool> {
     private final String group;
+    private final WorkbenchTab tab;
     private final List<SizedIngredient> materials;
     private final ItemStack result;
 
-    public VehicleWorkbenchRecipe(String group, List<SizedIngredient> materials, ItemStack result) {
+    public VehicleWorkbenchRecipe(String group, WorkbenchTab tab, List<SizedIngredient> materials,
+            ItemStack result) {
         this.group = group;
+        this.tab = tab;
         this.materials = List.copyOf(materials);
         this.result = result;
     }
@@ -54,6 +60,11 @@ public class VehicleWorkbenchRecipe implements Recipe<MaterialPool> {
     @Override
     public String getGroup() {
         return this.group;
+    }
+
+    /** どの棚に載るか。画面のタブはこれで分ける。 */
+    public WorkbenchTab tab() {
+        return this.tab;
     }
 
     /** 必要な素材と数。画面もこの順に並べる。 */
@@ -105,11 +116,18 @@ public class VehicleWorkbenchRecipe implements Recipe<MaterialPool> {
                 || this.materials.stream().anyMatch(material -> material.ingredient().hasNoItems());
     }
 
-    /** 読み書き。素材は {@code {"item": ..., "count": n}} の並び。 */
+    /**
+     * 読み書き。素材は {@code {"item": ..., "count": n}} の並び。
+     *
+     * <p>{@code "tab"} は省ける。省いた図面は機体の棚に載る——棚が無かった頃に書かれた図面を、
+     * 1枚残らず書き直させないため。
+     */
     public static class Serializer implements RecipeSerializer<VehicleWorkbenchRecipe> {
         public static final MapCodec<VehicleWorkbenchRecipe> CODEC = RecordCodecBuilder.mapCodec(
                 instance -> instance.group(
                                 Codec.STRING.optionalFieldOf("group", "").forGetter(recipe -> recipe.group),
+                                WorkbenchTab.CODEC.optionalFieldOf("tab", WorkbenchTab.VEHICLE)
+                                        .forGetter(recipe -> recipe.tab),
                                 SizedIngredient.FLAT_CODEC.listOf().fieldOf("materials")
                                         .forGetter(recipe -> recipe.materials),
                                 ItemStack.STRICT_CODEC.fieldOf("result").forGetter(recipe -> recipe.result))
@@ -118,6 +136,7 @@ public class VehicleWorkbenchRecipe implements Recipe<MaterialPool> {
         public static final StreamCodec<RegistryFriendlyByteBuf, VehicleWorkbenchRecipe> STREAM_CODEC =
                 StreamCodec.composite(
                         ByteBufCodecs.STRING_UTF8, recipe -> recipe.group,
+                        WorkbenchTab.STREAM_CODEC, recipe -> recipe.tab,
                         SizedIngredient.STREAM_CODEC.apply(ByteBufCodecs.list()), recipe -> recipe.materials,
                         ItemStack.STREAM_CODEC, recipe -> recipe.result,
                         VehicleWorkbenchRecipe::new);

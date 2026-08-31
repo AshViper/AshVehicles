@@ -1,0 +1,30 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_vehicle",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 3
+    },
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:engine",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:m3a3_bradley"
+  }
+}

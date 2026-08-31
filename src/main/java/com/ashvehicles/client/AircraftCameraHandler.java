@@ -3,6 +3,7 @@ package com.ashvehicles.client;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.weapon.GunStations;
 
 import org.joml.Quaternionf;
 
@@ -56,6 +57,15 @@ public final class AircraftCameraHandler {
         CockpitView.follow(aircraft);
         MouseAim.follow(aircraft);
 
+        // 砲手席のガンカメラが受け持つ砲座。映像は砲から来るので、頭がどこを向いていようと画面は砲腔線を
+        // 中心に据える。頭の方は動き続けており、砲はそれを追っている。GunCamera 参照。三人称とポッド視点
+        // では砲に縛る理由が無い——あちらは機体全体を映す物と、別の装置が映している物だ。
+        int station = aircraft == null || camera.isDetached() || PodCamera.isShowing()
+                ? GunStations.NONE
+                : GunCamera.stationOf(aircraft, camera.getEntity());
+
+        GunCamera.follow(aircraft, station);
+
         if (aircraft == null) {
             return;
         }
@@ -73,6 +83,15 @@ public final class AircraftCameraHandler {
         }
 
         if (camera.isDetached()) {
+            return;
+        }
+
+        if (station != GunStations.NONE) {
+            Quaternionf bore = GunCamera.world(aircraft, station, (float) event.getPartialTick());
+            event.setYaw(Attitude.heading(bore));
+            event.setPitch(Attitude.elevation(bore));
+            event.setRoll(Attitude.bank(bore));
+
             return;
         }
 
@@ -102,9 +121,15 @@ public final class AircraftCameraHandler {
         }
 
         if (!detached) {
+            // 砲手席のガンカメラは砲身に固定された箱で、砲と一緒に振れて上下する。機体が答える点と同じ点
+            // だが、砲の角を2tickの間で補間して置き直してある。GunCamera.eye 参照。
+            int station = GunCamera.stationOf(aircraft, viewer);
+
             // 実際に座っている座席の視点。複座機ではパイロットの物ではない。F-14 の後席は前部キャノピーの
             // 1.5ブロック後ろにおり、自分のキャノピーから外を見るべきだ。
-            camera.setPosition(aircraft.eyeOf(viewer, partialTick));
+            camera.setPosition(station == GunStations.NONE
+                    ? aircraft.eyeOf(viewer, partialTick)
+                    : GunCamera.eye(aircraft, station, viewer, partialTick));
 
             return;
         }

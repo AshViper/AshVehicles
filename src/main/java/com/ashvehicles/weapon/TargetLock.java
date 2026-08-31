@@ -367,7 +367,7 @@ public final class TargetLock {
             case HEAT -> seeker * AircraftEntity.heatVisibility(candidate);
             // 目標指示は人間がカメラ越しに物を見ること。反射断面積が小さくても排気が冷たくても見えにくく
             // はならないので、ここでは何も割り引かず、ポッド自身の到達距離が答えの全部になる。
-            case LASER -> seeker;
+            case LASER, POINT -> seeker;
         };
     }
 

@@ -1,22 +1,20 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_ammo",
-  "key": {
-    "S": {
-      "item": "ashvehicles:steel_plate"
+  "tab": "ammo",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 1
     },
-    "K": {
-      "tag": "c:ingots/copper"
+    {
+      "tag": "c:ingots/copper",
+      "count": 1
     },
-    "G": {
-      "item": "minecraft:gunpowder"
+    {
+      "item": "minecraft:gunpowder",
+      "count": 1
     }
-  },
-  "pattern": [
-    " S ",
-    " K ",
-    " G "
   ],
   "result": {
     "count": 2,

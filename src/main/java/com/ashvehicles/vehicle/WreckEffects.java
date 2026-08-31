@@ -75,6 +75,14 @@ public final class WreckEffects {
      */
     private static final double HARD_ARRIVAL = 0.35;
 
+    /**
+     * 着地の音を、同じ規模の爆発に対してどれだけ小さくするか。
+     *
+     * <p>土煙と炎は落ちてきた機体の大きさで立ってよい。だが音まで同じにすると、墜落が数km先まで炸薬として
+     * 聞こえる。落ちたのは機体であって弾頭ではない。
+     */
+    private static final float HEARD_AS_A_FALL = 0.6F;
+
     // ------------------------------------------------------------------
     // 被弾
     // ------------------------------------------------------------------
@@ -99,12 +107,9 @@ public final class WreckEffects {
 
         // 機体に沿って並べる。機首・中央・尾部の3つ。炎が機体の形を持つには十分で、3回の爆発に見えない
         // 程度に少ない。
-        Effects.fireball(level, at, sized, Effects.EMBER);
+        Effects.detonate(level, at, sized, Effects.EMBER);
         Effects.fireball(level, at.add(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER);
         Effects.fireball(level, at.subtract(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER);
-
-        Effects.wave(level, at, sized);
-        Effects.boom(level, at, sized);
         wreckage(level, at, sized, reach);
     }
 
@@ -250,9 +255,7 @@ public final class WreckEffects {
 
         float force = (float) Mth.clamp(speed * reach * 0.5, 1.0, Effects.BIGGEST);
 
-        Effects.fireball(level, at, force, Effects.EMBER);
-        Effects.wave(level, at, force);
-        Effects.boom(level, at, force * 0.6F);
+        Effects.detonate(level, at, force, Effects.EMBER, force * HEARD_AS_A_FALL);
         Effects.send(level, at, ModParticles.DEBRIS.get().of(SCRAP, 1.2F),
                 8 + (int) (force * 2.0F), reach * 0.2, 0.12 + speed * 0.1);
     }

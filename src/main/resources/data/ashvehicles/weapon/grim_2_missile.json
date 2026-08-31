@@ -1,0 +1,49 @@
+{
+  "type": "missile",
+  "item": false,
+  "ammo": 2,
+  "firing": {
+    "rounds_per_second": 0.05,
+    "spread": 0.05
+  },
+  "projectile": {
+    "damage": 120,
+    "speed": 1.2,
+    "thrust": 0.4,
+    "burn_ticks": 300,
+    "spool_ticks": 30,
+    "top_speed": 40,
+    "gravity": 0.0009,
+    "range": 0,
+    "explosion": 1.5,
+    "tracer": "FFF0D0",
+    "chunk_loading": true,
+    "trail": {
+      "colour": "E4E0D6",
+      "exhaust": "6E6860",
+      "density": 3,
+      "size": 2
+    }
+  },
+  "guidance": {
+    "turn_rate": 4,
+    "lock_angle": 90,
+    "lock_range": 60000,
+    "lock_ticks": 1,
+    "track_angle": 180,
+    "proximity": 45,
+    "arm_ticks": 20,
+    "reacquire_ticks": 0,
+    "seeker": "point"
+  },
+  "cluster": {
+    "submunition": "ashvehicles:bomblet",
+    "count": 18,
+    "spread": 0.3,
+    "inherit": 0.05
+  },
+  "sound": {
+    "volume": 3,
+    "pitch": 0.75
+  }
+}

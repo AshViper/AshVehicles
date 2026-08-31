@@ -223,6 +223,14 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             return;
         }
 
+        // 座標へ飛ぶ弾はシーカーを持たないので、環も、進行度も、捕捉枠も描く物が無い。代わりに描くのは
+        // 「どこを撃つと言ったか」だ。drawLaunchPoint 参照。
+        if (vehicle.laysPoint()) {
+            drawLaunchPoint(graphics, minecraft, vehicle, partialTick, centreX, centreY);
+
+            return;
+        }
+
         float focal = AircraftHud.focalLength(minecraft, graphics);
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
         Vec3 rail = vehicle.turretToWorld(vehicle.getStats().launcher().rail(), partialTick);
@@ -281,6 +289,58 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         int range = (int) Math.round(vehicle.position().distanceTo(target.position()));
         String reach = range + " m";
         graphics.drawString(minecraft.font, reach, centreX - minecraft.font.width(reach) / 2,
+                centreY + 64, AircraftHud.DIM, true);
+    }
+
+    /**
+     * 座標で狙う発射機の照準。
+     *
+     * <p><b>据える前に描く物は無い。</b>照準環も、捕捉枠も、十字線の下の地面も出さない——この発射機は見える物を
+     * 撃たないので、画面のどこにも「狙っている方向」が無いからだ。代わりに出すのは、目標を入れる盤の開け方
+     * 1つ。{@link LaunchPoint} 参照。
+     *
+     * <p><b>据えた後は点そのものと、そこまでの距離と、撃てるまでの間。</b>座標が視界の中にあれば——普通は無い
+     * ——そこに印が乗る。無くても数字は出る。射程は地平線の向こうであり、乗員が確かめられるのは数字の方だ。
+     */
+    private static void drawLaunchPoint(GuiGraphics graphics, Minecraft minecraft,
+            GroundVehicleEntity vehicle, float partialTick, int centreX, int centreY) {
+        float focal = AircraftHud.focalLength(minecraft, graphics);
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        Vec3 laid = vehicle.getDesignatedPoint();
+        boolean loaded = vehicle.getMissiles() > 0;
+        boolean settled = vehicle.getMissileReload() <= 0;
+
+        if (laid == null) {
+            String prompt = loaded ? "NO TARGET" : "TUBES EMPTY";
+
+            graphics.drawString(minecraft.font, prompt, centreX - minecraft.font.width(prompt) / 2,
+                    centreY + 54, AircraftHud.WARNING, true);
+
+            // 盤の開け方。乗員が自分で見つけられる物ではないし、この車両には他に押す物が無い。実際の
+            // バインドから引くので、割り当てを変えれば表示も変わる。
+            String key = ModKeyMappings.RADAR_LOCK.getTranslatedKeyMessage().getString()
+                    + "  FIRE CONTROL";
+            graphics.drawString(minecraft.font, key, centreX - minecraft.font.width(key) / 2,
+                    centreY + 64, AircraftHud.DIM, true);
+
+            return;
+        }
+
+        int[] at = AircraftHud.project(minecraft, laid.subtract(camera).normalize(), focal, centreX, centreY);
+        int colour = settled ? AircraftHud.WARNING : AircraftHud.GREEN;
+
+        if (at != null) {
+            AircraftHud.diamond(graphics, at[0], at[1], 7, colour);
+            AircraftHud.circle(graphics, at[0], at[1], 12, colour);
+        }
+
+        String status = settled ? "TARGET SET" : "ALIGNING";
+        graphics.drawString(minecraft.font, status, centreX - minecraft.font.width(status) / 2,
+                centreY + 54, colour, true);
+
+        String where = String.format("%d  %d  %d m", Math.round(laid.x), Math.round(laid.z),
+                Math.round(vehicle.position().distanceTo(laid)));
+        graphics.drawString(minecraft.font, where, centreX - minecraft.font.width(where) / 2,
                 centreY + 64, AircraftHud.DIM, true);
     }
 
@@ -391,11 +451,12 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         if (vehicle.getMissileReload() <= 0) {
             // 「準備完了」と「発射可能」は別だ。追う相手の無い誘導弾は筒に留まるし、乗員にはどちらが妨げているのかを
-            // 伝えるべきだ。
-            boolean locked = vehicle.isSeekerLocked();
+            // 伝えるべきだ。座標へ飛ぶ弾では、妨げているのがロックではなく「まだどこも指していない」ことになる。
+            boolean armed = vehicle.laysPoint() ? vehicle.getDesignated() != null : vehicle.isSeekerLocked();
+            String state = armed ? "READY" : vehicle.laysPoint() ? "NO TARGET" : "NO LOCK";
 
-            AircraftHud.value(graphics, font, locked ? "READY" : "NO LOCK", left, bottom - 20,
-                    locked ? AircraftHud.GREEN : AircraftHud.WARNING);
+            AircraftHud.value(graphics, font, state, left, bottom - 20,
+                    armed ? AircraftHud.GREEN : AircraftHud.WARNING);
 
             return;
         }

@@ -113,6 +113,24 @@ public final class GunStations {
         return slots;
     }
 
+    /**
+     * その席が受け持つ砲座。無ければ {@link #NONE}。
+     *
+     * <p>{@link #stationsOf} とは別物で、あちらは「今この人が撃つ砲」——空席の砲がパイロットへ回った分を
+     * 含む——を答える。こちらが答えるのは機体ファイルに書かれた対応そのもので、誰が乗っているかを見ない。
+     * 席に据え付けられている物、たとえばその席の照準具や視点は、砲手が降りたからといって操縦席へ移っては
+     * ならない。
+     */
+    public int stationForSeat(int seat) {
+        for (int index = 0; index < this.count(); index++) {
+            if (this.station(index).seat() == seat) {
+                return index;
+            }
+        }
+
+        return NONE;
+    }
+
     /** そのハードポイントを振る砲座。無ければ {@link #NONE}。 */
     public int stationForSlot(int slot) {
         if (!this.exists()) {
@@ -381,6 +399,17 @@ public final class GunStations {
         return Attitude.toWorld(this.aircraft.getAttitude(partialTick), body);
     }
 
+    /**
+     * その砲座の向きが分かっているか。
+     *
+     * <p>クライアントは配列を同期タグから受け取るので、機体が見えてからそれが届くまでの数フレームは、どの
+     * 砲座も「まだ何も向いていない」。{@link #direction} はそこで機首方向を返す——描く物にとっては無害な
+     * 当て推量だが、その1回きりの値を元に何かを据え付ける側にとっては違う。訊けるようにしてある。
+     */
+    public boolean isLaid(int index) {
+        return index >= 0 && index < this.yaw.length;
+    }
+
     /** 砲座の方位（度）。機体に対する角で、正が右。吊っている物をその向きへ描くために描画側が読む。 */
     public float yawOf(int index) {
         return index >= 0 && index < this.yaw.length ? this.yaw[index] : 0.0F;
@@ -393,12 +422,51 @@ public final class GunStations {
 
     /** その砲座の砲口（ワールド座標）。振っているパイロンのうち最初の1つの位置。 */
     public Vec3 muzzle(int index, float partialTick) {
-        List<Integer> slots = this.slotsOf(index);
-        Vec3 place = slots.isEmpty()
-                ? Vec3.ZERO
-                : this.aircraft.getWeapons().placeOf(slots.get(0), 0);
+        return this.aircraft.toWorld(this.trunnion(index), partialTick);
+    }
 
-        return this.aircraft.toWorld(place, partialTick);
+    /**
+     * 砲座が振れる中心。機体座標系で、振っているパイロンのうち最初の1つの位置。
+     *
+     * <p>砲を描く側が振る中心もここだ（{@code AircraftRenderer.draw} は取り付け点で回す）ので、砲と一緒に
+     * 動く物はここを支点に置けば砲身と離れない。
+     */
+    public Vec3 trunnion(int index) {
+        List<Integer> slots = this.slotsOf(index);
+
+        return slots.isEmpty() ? Vec3.ZERO : this.aircraft.getWeapons().placeOf(slots.get(0), 0);
+    }
+
+    /**
+     * 機体座標系の一点を、砲が運んだ先へ。砲身に付いている物——ガンカメラ——のためのもの。
+     *
+     * <p>点は砲が正面を向いている（方位も仰角も0の）状態で書く。戦車の砲塔上の点とまったく同じ約束で、
+     * 砲座の {@code bearing} を書き手が織り込む必要は無い。順序も描画側と揃える：先に仰角、次に方位。
+     * 逆にすると、横を向いた砲が上を向いた時に点が砲身から外れる。
+     */
+    public Vec3 carry(int index, Vec3 point) {
+        return this.carry(index, point, this.yawOf(index), this.pitchOf(index));
+    }
+
+    /**
+     * 同じ物を、砲座が今持っている角ではなく渡された角で。
+     *
+     * <p>砲の向きは1tickに1つの値なので、それを直に使う物は毎秒20回だけ動く。描く物にはそれで足りるが、
+     * 視界そのものを預けている物——{@code GunCamera}——には足りない。あちらが2tickの間を補間した角を持って
+     * いるので、その角で同じ計算をする口を開けてある。
+     */
+    public Vec3 carry(int index, Vec3 point, float yawDegrees, float pitchDegrees) {
+        Vec3 trunnion = this.trunnion(index);
+        Vec3 arm = point.subtract(trunnion);
+        double yaw = Math.toRadians(yawDegrees);
+        double pitch = Math.toRadians(pitchDegrees);
+
+        // 機体座標系は x が右・y が上・z が機首方向。仰角は x 軸回り（上げが正）、方位は y 軸回り（右が正）。
+        double y = arm.y * Math.cos(pitch) + arm.z * Math.sin(pitch);
+        double z = arm.z * Math.cos(pitch) - arm.y * Math.sin(pitch);
+
+        return trunnion.add(arm.x * Math.cos(yaw) + z * Math.sin(yaw), y,
+                z * Math.cos(yaw) - arm.x * Math.sin(yaw));
     }
 
     // ------------------------------------------------------------------

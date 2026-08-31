@@ -1,25 +1,24 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_bomb",
-  "key": {
-    "E": {
-      "item": "minecraft:ender_eye"
+  "tab": "weapon",
+  "materials": [
+    {
+      "item": "ashvehicles:fab_500",
+      "count": 1
     },
-    "S": {
-      "item": "ashvehicles:steel_plate"
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 2
     },
-    "P": {
-      "item": "ashvehicles:fab_500"
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
     },
-    "C": {
-      "item": "ashvehicles:circuit_board"
+    {
+      "item": "minecraft:ender_eye",
+      "count": 1
     }
-  },
-  "pattern": [
-    " E ",
-    "SPS",
-    " C "
   ],
   "result": {
     "count": 1,

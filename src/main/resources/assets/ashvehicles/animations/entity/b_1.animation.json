@@ -1,0 +1,109 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "gear_up": {
+      "loop": "hold_on_last_frame",
+      "animation_length": 1.0,
+      "bones": {
+        "FGear": {
+          "rotation": {
+            "0.0": {
+              "vector": [0, 0, 0]
+            },
+            "0.7": {
+              "vector": [-90, 0, 0]
+            }
+          }
+        },
+        "LGear": {
+          "rotation": {
+            "0.0": {
+              "vector": [0, 0, 0]
+            },
+            "0.7": {
+              "vector": [-90, 0, 0]
+            }
+          }
+        },
+        "RGear": {
+          "rotation": {
+            "0.0": {
+              "vector": [0, 0, 0]
+            },
+            "0.7": {
+              "vector": [-90, 0, 0]
+            }
+          }
+        },
+        "FGearHatch": {
+          "rotation": {
+            "0.0": {
+              "vector": [0, 0, 0]
+            },
+            "0.6": {
+              "vector": [0, 0, 0]
+            },
+            "1.0": {
+              "vector": [-45, 0, 0]
+            }
+          }
+        }
+      }
+    },
+    "gear_down": {
+      "loop": "hold_on_last_frame",
+      "animation_length": 1.0,
+      "bones": {
+        "FGearHatch": {
+          "rotation": {
+            "0.0": {
+              "vector": [-45, 0, 0]
+            },
+            "0.4": {
+              "vector": [0, 0, 0]
+            }
+          }
+        },
+        "FGear": {
+          "rotation": {
+            "0.0": {
+              "vector": [-90, 0, 0]
+            },
+            "0.3": {
+              "vector": [-90, 0, 0]
+            },
+            "1.0": {
+              "vector": [0, 0, 0]
+            }
+          }
+        },
+        "LGear": {
+          "rotation": {
+            "0.0": {
+              "vector": [-90, 0, 0]
+            },
+            "0.3": {
+              "vector": [-90, 0, 0]
+            },
+            "1.0": {
+              "vector": [0, 0, 0]
+            }
+          }
+        },
+        "RGear": {
+          "rotation": {
+            "0.0": {
+              "vector": [-90, 0, 0]
+            },
+            "0.3": {
+              "vector": [-90, 0, 0]
+            },
+            "1.0": {
+              "vector": [0, 0, 0]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,12 +9,20 @@ import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.entity.VehicleHold;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.item.AmmoItem;
+import com.ashvehicles.network.MissileTrackPayload;
 import com.ashvehicles.registry.ModEntities;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import java.util.ArrayList;
+import java.util.List;
+
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
@@ -22,6 +30,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
  * 発射筒の中のミサイル。シーカー、弾倉、そして発射間隔。
@@ -65,7 +74,22 @@ public final class TurretLauncher {
     /** この速度（1tickあたりブロック）未満なら停止中と見なし、装填できる。 */
     private static final float STANDING = 1.0E-4F;
 
+    /** 架台が「立ち上がり切った」と数える、上限までの残り角度（度）。 */
+    private static final float ERECT_MARGIN = 2.0F;
+
+    /** 飛んでいる弾の位置を撃った乗員へ知らせる間隔（tick）。 */
+    private static final int REPORT_TICKS = 5;
+
     private final GroundVehicleEntity vehicle;
+    /**
+     * この発射機が撃って、まだ飛んでいる弾のエンティティ番号。
+     *
+     * <p>撃った乗員の射撃指揮盤へ位置を送るために持つ。クライアントは自分の周りの弾しか知らないので、
+     * 地平線の向こうへ飛んでいく弾を地図に出す道はこれしか無い。{@link MissileTrackPayload} 参照。
+     *
+     * <p>サーバー専用。消えた弾は次の報告で自然に落ちる。
+     */
+    private final IntList inFlight = new IntArrayList();
     /** 乗員がシーカーで捉えている相手。決めるのは常にサーバーだけ。 */
     private final TargetLock lock;
     /** 前 tick に引き金が引かれていたか。押しっぱなしで筒を空にしないため。 */
@@ -193,9 +217,20 @@ public final class TurretLauncher {
             return;
         }
 
-        // シーカーは筒を選択している間だけでなく常に見ている。新しい目標を取るのは砲手がキーを押している
-        // 間だけ。クラス冒頭の説明参照。
-        this.lock.tick(missile.guidance().orElse(null), wantsLock);
+        this.report();
+
+        // 座標へ飛ぶ弾にはシーカーが無い。掃引もしなければ捕捉も進まず、追われている側の警戒受信機も鳴らない
+        // ——狙われていることを相手が知る手段が無いのがこの種の兵器であり、それが弾道ミサイルの怖さだ。行き先は
+        // 乗員が据えた点で、それは {@link GroundVehicleEntity#designate} が持っている。
+        boolean laid = this.vehicle.laysPoint();
+
+        if (laid) {
+            this.lock.clear();
+        } else {
+            // シーカーは筒を選択している間だけでなく常に見ている。新しい目標を取るのは砲手がキーを押している
+            // 間だけ。クラス冒頭の説明参照。
+            this.lock.tick(missile.guidance().orElse(null), wantsLock);
+        }
 
         boolean pressed = trigger && (missile.isAutomatic() || !this.triggerWasDown);
         this.triggerWasDown = trigger;
@@ -204,14 +239,68 @@ public final class TurretLauncher {
             return;
         }
 
-        // 追う相手が無ければ筒からは何も出ない。
-        if (missile.isGuided() && !this.lock.isLocked()) {
+        // 追う相手が無ければ筒からは何も出ない。据える弾では「相手」が点であることだけが違う。
+        if (missile.isGuided() && (laid ? this.vehicle.getDesignated() == null : !this.lock.isLocked())) {
+            return;
+        }
+
+        // そして据える発射機は、架台が立ち上がるまで撃たない。弾は筒が向いている方向へ出ていくので
+        // （{@link #fire} 参照）、寝たままの筒から出た弾は目の前の地面へ向かって飛ぶ。実物が発射前に必ず
+        // 起立するのと同じ理由であり、その数秒は乗員から見ても「据えた」ことの手応えになる。
+        if (laid && !this.erected()) {
             return;
         }
 
         if (this.vehicle.level() instanceof ServerLevel level) {
             this.fire(level, missileId, missile);
         }
+    }
+
+    /**
+     * 飛んでいる弾の位置を、撃った乗員へ。
+     *
+     * <p>数tickに1度。弾は速いが地図の縮尺はもっと粗く、1秒に4回で線が引ける程度には滑らかだ。消えた弾は
+     * ここで一覧から落ちるので、掃除の仕組みは別に要らない。
+     *
+     * <p>送るのは今その席に座っている者にだけ。撃った本人が降りていれば、続きを見る資格は次に座った者に
+     * 移る——盤はその発射機の物であって、個人の記憶ではない。
+     */
+    private void report() {
+        if (this.inFlight.isEmpty() || this.vehicle.tickCount % REPORT_TICKS != 0) {
+            return;
+        }
+
+        List<MissileTrackPayload.Shot> shots = new ArrayList<>(this.inFlight.size());
+
+        for (int at = this.inFlight.size() - 1; at >= 0; at--) {
+            Entity shot = this.vehicle.level().getEntity(this.inFlight.getInt(at));
+
+            if (shot == null || !shot.isAlive()) {
+                this.inFlight.removeInt(at);
+
+                continue;
+            }
+
+            shots.add(new MissileTrackPayload.Shot(shot.getId(), shot.getX(), shot.getY(), shot.getZ()));
+        }
+
+        if (this.vehicle.getControllingPassenger() instanceof ServerPlayer crew) {
+            PacketDistributor.sendToPlayer(crew, new MissileTrackPayload(List.copyOf(shots)));
+        }
+    }
+
+    /**
+     * 架台が立ち上がり切っているか。座標へ据える発射機だけが問う。
+     *
+     * <p>据えた発射機の仰角は目標に関係なく架台の上限へ向かう——{@code GroundVehicleEntity.tickTurret} 参照——
+     * ので、そこへ着いたかどうかだけを見ればよい。方位は問わない。回っている途中で撃っても弾は自分で目標へ
+     * 向き直るが、下を向いた筒から出た弾には向き直る高度が無い。
+     */
+    private boolean erected() {
+        GroundVehicleDefinition.Turret turret = this.vehicle.getStats().turret();
+
+        return !turret.exists()
+                || this.vehicle.getGunPitch(1.0F) >= turret.elevation() - ERECT_MARGIN;
     }
 
     /**
@@ -237,7 +326,12 @@ public final class TurretLauncher {
         Vec3 up = right.cross(bore).normalize();
         LivingEntity crew = this.vehicle.getControllingPassenger();
         RandomSource random = this.vehicle.getRandom();
-        Entity locked = missile.isGuided() && this.lock.isLocked() ? this.lock.target() : null;
+        // 弾が持っていく相手。シーカーが掴んだ物か、乗員が据えた点か。どちらも発射の瞬間に確定し、以後
+        // 変わらない——撃った後に据え直しても、出て行った弾は出て行った時の点へ飛ぶ。
+        Entity locked = !missile.isGuided() ? null
+                : this.vehicle.laysPoint() ? this.vehicle.getDesignated()
+                : this.lock.isLocked() ? this.lock.target()
+                : null;
 
         double scatter = Math.tan(Math.toRadians(missile.firing().spread())) * 0.5;
         double spread = Math.tan(Math.toRadians(missile.firing().salvoSpread())) * 0.5;
@@ -263,6 +357,7 @@ public final class TurretLauncher {
             }
 
             level.addFreshEntity(shot);
+            this.inFlight.add(shot.getId());
         }
 
         WeaponEffects.muzzleBlast(level, rail, bore, BOOST_BLAST, missile.projectile().tracer());
@@ -270,6 +365,13 @@ public final class TurretLauncher {
 
         this.vehicle.setMissiles(this.vehicle.getMissiles() - 1);
         this.vehicle.setMissileReload(ticksFor(missile.firing().roundsPerSecond()));
+
+        // 撃ったら架台を畳む。弾はもう座標を持っているので、発射機がそこを見続ける理由は無い——実物が
+        // 撃った直後にすることであり（撃って走る）、次の座標は次に据える物だ。マーク自体は消さず、飛んで
+        // いる弾へ持たせる。GroundVehicleEntity.releaseDesignation 参照。
+        if (this.vehicle.laysPoint()) {
+            this.vehicle.releaseDesignation();
+        }
     }
 
     /**

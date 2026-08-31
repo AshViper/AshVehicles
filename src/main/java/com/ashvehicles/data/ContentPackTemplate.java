@@ -82,6 +82,11 @@ final class ContentPackTemplate {
             with type "ashvehicles:vehicle_crafting" and your aeroplane can be built at the vehicle
             workbench like the rest. Copy one of the mod's own recipe files to see the shape.
 
+            The workbench keeps its list on four tabs, and an optional "tab" field says which one a
+            recipe lands on: "vehicle" (the default, so aircraft and vehicles need not say it),
+            "weapon" for missiles and bombs, "equipment" for racks and pods, "ammo" for what feeds
+            a gun.
+
 
             What to copy from
             -----------------

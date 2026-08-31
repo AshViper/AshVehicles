@@ -1,22 +1,20 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
+  "type": "ashvehicles:vehicle_crafting",
   "group": "ashvehicles_pod",
-  "key": {
-    "S": {
-      "item": "ashvehicles:steel_plate"
+  "tab": "equipment",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 7
     },
-    "M": {
-      "item": "ashvehicles:machine_parts"
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 1
     },
-    "G": {
-      "item": "minecraft:gunpowder"
+    {
+      "item": "minecraft:gunpowder",
+      "count": 1
     }
-  },
-  "pattern": [
-    "SSS",
-    "SMS",
-    "SGS"
   ],
   "result": {
     "count": 1,

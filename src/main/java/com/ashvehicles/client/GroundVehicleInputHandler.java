@@ -39,6 +39,10 @@ public final class GroundVehicleInputHandler {
             return;
         }
 
+        // 砲手照準の出入りをここで済ませる。砲塔が据えられるのはこのtickの中であり、覗いているかどうかで
+        // 倒し角も頭の可動範囲も変わる。TurretSight 参照。
+        TurretSight.follow();
+
         // 1つのキーが MOD 内すべての兵装を順送りするが、キーマッピングはクリックを最初に要求した呼び出し元へ
         // 渡す。このハンドラと AircraftInputHandler は順序の定めなく毎tick走るので、2つの条件は互いの正確な鏡で
         // なければ競合する。こちらはプレイヤーが地上車両に乗っているとき押下を取り、あちらは乗っていないとき取る。
@@ -68,6 +72,11 @@ public final class GroundVehicleInputHandler {
 
         while (minecraft.options.keyUse.consumeClick()) {
         }
+
+        // 座標で狙う発射機では、シーカーのキーが射撃指揮盤を開く。掴む物が無い弾には捕捉の手順が無く、代わりに
+        // 座標を打ち込む手順があるからで、キーが言っていることは同じ——「この筒に次は何を撃たせるか」。
+        // LaunchPoint 参照。
+        LaunchPoint.tick(vehicle);
 
         GroundVehicleInput input = new GroundVehicleInput(
                 axis(ModKeyMappings.DRIVE_FORWARD, ModKeyMappings.DRIVE_BACK),
@@ -113,6 +122,12 @@ public final class GroundVehicleInputHandler {
      * 2つの視点は別の場所を指しており、砲は乗員が覗いている方に従う。
      */
     private static float sightTilt(Minecraft minecraft, GroundVehicleEntity vehicle) {
+        // 砲手照準を覗いている間は倒されていない。あれは砲腔線に沿って覗く物で、三人称で覗いても同じだ——
+        // そこで倒し続ければ、砲は乗員が実際に見ている線から傾き分ずれた所へ据わる。TurretSight 参照。
+        if (TurretSight.vehicle() == vehicle) {
+            return 0.0F;
+        }
+
         return minecraft.options.getCameraType().isFirstPerson() ? 0.0F : vehicle.getStats().camera().tilt();
     }
 

@@ -175,6 +175,16 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
          */
         public static final String NOZZLE = "nozzle";
         /**
+         * 左右で別々のボーンを振る機体のための同じ物。
+         *
+         * <p>ノズルが1つのボーンで済むのは、それが機体の下に1組だけ付いている場合だ。ティルトローター機の
+         * ナセルは主翼の両端にあり、モデル上も2つのボーンになる——{@code nozzle} 1つでは片方しか傾かず、
+         * 機体は片肺で立ち上がることになる。舵面や可変翼が左右別々に名指しされているのと同じ理由であり、
+         * 同じように、どちらを名指ししても振れ方は同じだ。角度は共通で、実機でも2つは常に揃って動く。
+         */
+        public static final String NOZZLE_LEFT = "nozzle_left";
+        public static final String NOZZLE_RIGHT = "nozzle_right";
+        /**
          * ヘリコプターのメインローター。自分のマスト回り——つまり機体が何をしていようとモデルの垂直軸回り
          * ——に回る。アニメーションではなくここで名指しするのは、これが一連の動きではなく1つの角度だから。
          * 回転速度は機体が既に知っており、アニメーションファイルではそれが変わるたびにタイミングを取り直す

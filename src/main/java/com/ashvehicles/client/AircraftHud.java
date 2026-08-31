@@ -159,6 +159,14 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
+        // 砲座の乗員も同じ。あちらの画面は砲身に固定された箱から来る映像で、以下の各マークはどれも、機首の
+        // 向きに対して置かれるか、操縦桿を握っている者にしか意味が無いかのどちらかだ。GunnerDisplay 参照。
+        if (GunnerDisplay.draw(graphics, minecraft, aircraft, partialTick, centreX, centreY)) {
+            HitReadout.draw(graphics, minecraft.font);
+
+            return;
+        }
+
         drawAttitude(graphics, attitude, centreX, centreY);
         drawMarkers(graphics, minecraft, aircraft, attitude, velocity, speed, centreX, centreY);
         drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
@@ -1073,7 +1081,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
         return (float) (graphics.guiHeight() / 2.0 / Math.tan(Math.toRadians(fov) / 2.0));
     }
 
-    static String cardinal(int heading) {
+    public static String cardinal(int heading) {
         String[] points = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
 
         return points[Math.floorMod((int) Math.round(heading / 45.0), 8)];
