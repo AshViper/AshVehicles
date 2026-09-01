@@ -457,7 +457,9 @@ public final class GhostRenderDispatcher {
         GhostRenderContext.enter(ghostStyle, 0.0F);
 
         try {
-            dispatcher.render(entity, to.x, to.y, to.z, yaw, partialTick, poseStack, buffers, light);
+            // ゴーストとして描く間は光を引かない。理由と経緯は GhostRenderContext.packedLight 参照。
+            dispatcher.render(entity, to.x, to.y, to.z, yaw, partialTick, poseStack, buffers,
+                    ghostStyle ? LightTexture.FULL_BRIGHT : light);
         } finally {
             GhostRenderContext.exit();
             poseStack.popPose();

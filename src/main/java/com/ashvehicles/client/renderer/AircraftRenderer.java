@@ -166,9 +166,10 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
         GeoObjectRenderer<MountedStore> renderer = MountedStore.renderer();
         ResourceLocation texture = renderer.getTextureLocation(store);
         // ゴーストの兵装もゴーストの一部だ。不透明のまま残せば、半透明の機体で唯一の不透明物になり、ミサイル
-        // ではなくバグに見える。どの型で描くかは機体本体とまったく同じ問いなので、答えも同じ場所から取る。
-        // GhostGeoRenderer#renderType 参照——特に、なぜ自発光の透過型では駄目なのか。
-        RenderType type = GhostGeoRenderer.renderType(texture, this.drawingGhost);
+        // ではなくバグに見える。
+        RenderType type = this.drawingGhost
+                ? RenderType.entityTranslucentCull(texture)
+                : RenderType.entityCutoutNoCull(texture);
 
         renderer.render(poseStack, store, bufferSource, type, bufferSource.getBuffer(type),
                 packedLight, partialTick);
@@ -176,15 +177,17 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
     }
 
     /**
-     * ゴーストは半透明で描く。何にも照らされないようにするのは型ではなく光量の仕事で、クライアントが一度も
-     * ロードしておらず光量値も持たない地面の上に立つ物には {@code FULL_BRIGHT} が渡る。型の選択と、そこで
-     * 自発光の透過型を選んではならない理由は {@link GhostGeoRenderer#renderType} にある。
+     * ゴーストは半透明で、しかも自ら光って描く。自ら光らせるのは何にも照らされないようにするためで、
+     * クライアントが一度もロードしておらず光量値も持たない地面の上に立つ物には、それが唯一まともな答えだ。
+     *
+     * <p>裏面を捨てる型を使う理由は {@code GhostGeoRenderer.renderType} と同じ。閉じた立体を裏表なし・
+     * 深度書き込みなしで半透明に描けば、向こう側の外板が手前の外板の上に乗る。
      */
     @Override
     public RenderType getRenderType(AircraftEntity animatable, ResourceLocation texture,
             MultiBufferSource bufferSource, float partialTick) {
         return this.drawingGhost
-                ? GhostGeoRenderer.renderType(texture, true)
+                ? RenderType.entityTranslucentCull(texture)
                 : super.getRenderType(animatable, texture, bufferSource, partialTick);
     }
 

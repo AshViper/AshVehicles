@@ -473,6 +473,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private Vec3 lastTravel = Vec3.ZERO;
     /** 飛行中この機体が開いたまま保持しているチャンク（あれば）。 */
     private Set<ChunkPos> heldChunks = Set.of();
+    /**
+     * 回廊を最後に引き直した tick。{@link #claimCorridorTick} 参照。
+     *
+     * <p>保存しない。再起動の向こうで意味を持つのはチケットの方であって、この番号ではない。
+     */
+    private long corridorTick = Long.MIN_VALUE;
     /** 操縦していないクライアントでこの機体をどう描くか。 */
     private final AircraftInterpolation interpolation = new AircraftInterpolation();
     /** パイロットのクライアントが申告する速度。飛行中、サーバーが持つ唯一の正直な答え。 */
@@ -2935,6 +2941,26 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vector3f reported = this.entityData.get(DATA_VELOCITY);
 
         return new Vec3(reported.x(), reported.y(), reported.z());
+    }
+
+    /**
+     * この tick でまだ回廊を引き直していなければ true を返し、引いたことにする。
+     *
+     * <p>{@code AircraftChunkLoader.update} は2か所から呼ばれる——機体自身の tick と、パイロットの移動報告
+     * の処理だ。普段はどちらか片方が先に走り、もう片方は同じ答えを出して短絡する。だが報告は固まって届く
+     * ので、詰まった直後には同じ tick に数十本が着き、その1本1本がちがう位置からちがう回廊を要求する。
+     * 回廊が答えるべき問いは1tick に1つなので、最初の1本に答えて残りは断る。
+     */
+    boolean claimCorridorTick() {
+        long now = this.level().getGameTime();
+
+        if (this.corridorTick == now) {
+            return false;
+        }
+
+        this.corridorTick = now;
+
+        return true;
     }
 
     /**
