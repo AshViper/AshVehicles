@@ -101,12 +101,27 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     private static final float FOGGED = 0.01F;
 
     /**
-     * 背後に何も無いゴーストは半透明かつ自発光で描く。自発光なのは、あの距離に照らす光が無いから。半透明なのは、
-     * 近くの物ではなく「接触点」として読ませるためだ。描画済み地形の上では実体として描くが、自発光は保つ。
+     * 背後に何も無いゴーストは半透明で描く。近くの物ではなく「接触点」として読ませるためだ。描画済み地形の上では
+     * 実体として描く。
+     *
+     * <p><b>透過側に {@code entityTranslucentEmissive} を使ってはならない。</b>あれは既に描かれた実体の<em>上へ
+     * 重ねる</em>ための層で、バニラは深度を書かず（{@code COLOR_WRITE}）面の裏表も見ない（{@code NO_CULL}）状態で
+     * 組んでいる。光る目のような小さな上塗りならそれで正しい。だがモデル全体をそれで描くと、その2つが揃って牙を剥く
+     * ——裏返った奥の面が捨てられず、しかも手前の面が奥の面を深度で隠さないので、機体の全ポリゴンが互いに透けて
+     * 混ざる。胴体の中身も、反対側の内壁も、全部が一度に見える。「テクスチャが裏返っていて機内が見える、
+     * 胴体が透明だ」という報告の正体はこれ1つだ。
+     *
+     * <p>{@code entityTranslucentCull} は同じ半透明のまま裏面を捨て深度を書くので、手前の一枚が奥を隠す。この
+     * MOD のジオメトリは38個すべてが閉じた箱で出来ていて（poly_mesh は1つも無い）、面の向きは箱が決めている。
+     * 裏面を捨てて消える物は、そもそも見えてはいけなかった物だけだ。
+     *
+     * <p>自発光を手放しても暗くはならない。ゴーストの光量は描画側が決めており、構築済み世界の外では
+     * {@code FULL_BRIGHT} が渡る。内側ではむしろ、その場の実光量で描く方が正しい——そこは霧も光も効く世界であり、
+     * 霧に薄まり始めただけの機体が自発光に切り替わって光り出すのは、それ自体が嘘だった。
      */
     public static RenderType renderType(ResourceLocation texture, boolean ghostStyle) {
         return ghostStyle
-                ? RenderType.entityTranslucentEmissive(texture)
+                ? RenderType.entityTranslucentCull(texture)
                 : RenderType.entityCutoutNoCull(texture);
     }
 

@@ -93,10 +93,13 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
  * はその位置の実光量で描き、霧はそのままにする。そうすればゲーム自身のループが描いた物と何も変わらない。それが要点だ。
  * 引き継ぎを手前へ動かしたせいで、150ブロック先の機体が暗闇で光ってはならない。
  *
- * <p><b>その外側</b>では光レベルが「不明」ではなく0を返すので、それで照らしたゴーストは黒い染みになる。しかも霧は
- * モデルではなくシェーダーの性質なので、何かを霧から外す唯一の方法は霧を動かすことだ。それらのゴーストは最大輝度で、
- * 霧の面を押し広げた状態で描き、まだ動かしているうちにバッチをフラッシュする。さもないと変更が次に描かれる物へ乗って
- * しまう。第1フェーズを霧を動かす前にフラッシュするのも同じ理由だ。
+ * <p><b>その外側</b>では光レベルが「不明」ではなく0を返すので、それで照らしたゴーストは黒い染みになる。しかも自動霧は
+ * 頂点シェーダーが引き寄せ後の頂点距離で計算する性質なので、遠方面へ引き寄せられたゴーストにそのまま掛けると距離が
+ * 偽られる。だから自動霧は動かして押し広げ、最大輝度で描き、まだ動かしているうちにバッチをフラッシュする。さもないと
+ * 変更が次に描かれる物へ乗ってしまう。第1フェーズを霧を動かす前にフラッシュするのも同じ理由だ。ただし自動霧を切っても
+ * 霧そのものを無視してよいわけではない——DH の霧（{@link DHFog}）とゲーム自身がこのフレームに立てた霧の帯の両方を、
+ * 真の距離から自分で計算し直してアルファへ畳み込む。空を背にした点として読める不透明度は保ちつつ、霧や雲の壁の中では
+ * その壁と同じだけ薄くなる。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class GhostRenderDispatcher {
@@ -220,6 +223,13 @@ public final class GhostRenderDispatcher {
         // DH の霧の1フレーム分の写し。ゴーストはこの分だけ透明へ寄る——DH は自分の地形にしか霧を掛けない
         // ので、これが無いと霧に沈んだ山の上をくっきりした機影が滑る。DHFog 参照。
         DHFog fogCurve = DHIntegration.fog();
+        // ゲーム自身がこのフレームに設定した霧の帯。天候・バイオーム・描画距離設定で動くが、DH の管轄では
+        // 無いのでDHFogは知らない。第2フェーズでこの値をFloat.MAX_VALUEへ潰す前に読んでおく——潰す理由は
+        // 変わらない（引き寄せられた頂点の距離に基づく自動霧は距離を偽るので使えない）が、真の距離から
+        // 自分で同じ濃さを計算し、DHの霧と同じやり方でアルファへ畳み込む。これが無いと、霧や雲の壁の中でも
+        // ゴーストだけが素の色のまま浮かんで見える。
+        float vanillaFogStart = RenderSystem.getShaderFogStart();
+        float vanillaFogEnd = RenderSystem.getShaderFogEnd();
 
         // 先に集める。霧を動かすのは、それで描く物が実際にある場合だけにするためだ。
         List<EntityGhost> ghosts = GATHERED;
@@ -269,16 +279,20 @@ public final class GhostRenderDispatcher {
                 GhostSnapshot snapshot = ghost.current();
                 double pull = pull(Math.sqrt(distanceSq), farPlane);
                 // 真の距離で測る。引き寄せ後の頂点距離で測れば、遠方面の向こうのゴーストほど霧が薄くなって
-                // しまう。距離は水平——DH の霧は円筒形だ。
-                float fog = fogCurve == null ? 0.0F
+                // しまう。DH の霧の距離は水平——円筒形だ。ゲーム自身の霧は3D距離で測る。
+                float dhFog = fogCurve == null ? 0.0F
                         : fogCurve.thickness(position.x - eye.x, position.z - eye.z);
+                float vanillaFog = vanillaFogThickness(position.distanceTo(eye), vanillaFogStart, vanillaFogEnd);
+                // 2つの霧源のどちらか濃い方ではなく、両方が同時に晴れて初めて素通しになる——合成則。
+                float fog = 1.0F - (1.0F - dhFog) * (1.0F - vanillaFog);
 
                 // 構築済み世界の内側では深度バッファが遮蔽を決着させる——ピクセル単位で、実際に遮っている地面に
                 // よって——し、線は一切トレースしない（GhostOcclusion 参照）。フラグは機体が世界の外にいた頃の答えを
                 // まだ保持しうるし、再問い合わせは数tickごとだ。ここでそれを鵜呑みにすると、ロード範囲の縁を越えて
                 // 入ってくる機体がその時間だけ消えてしまう。
                 if (fog >= DHFog.OPAQUE) {
-                    // 霧に沈み切った。DH の地形がそこで見えなくなるのと同じ場所で、ゴーストも見えなくなる。
+                    // 霧に沈み切った。DH の地形であれゲーム自身の天候・描画距離の霧であれ、地形がそこで見えなく
+                    // なるのと同じ場所で、ゴーストも見えなくなる。
                     verdict = GhostVerdict.HIDDEN;
                 } else if (ghost.isOccluded() && !isBuilt(BlockPos.containing(position))) {
                     verdict = GhostVerdict.OCCLUDED;
@@ -308,9 +322,9 @@ public final class GhostRenderDispatcher {
 
         buffers.endBatch();
 
-        // 第2フェーズ。その外の全てを、何にも照らされず霧からも外して描く。
-        float fogStart = RenderSystem.getShaderFogStart();
-        float fogEnd = RenderSystem.getShaderFogEnd();
+        // 第2フェーズ。その外の全てを、何にも照らされず自動霧からも外して描く。自動霧を切るのは、それが引き寄せ後の
+        // 頂点距離という誤った距離で計算されるからであって、霧そのものを無視してよいからではない——正しい距離での
+        // 霧の濃さは既に上で fog として求めてあり、各ゴーストのアルファへ畳み込まれる。
         RenderSystem.setShaderFogStart(Float.MAX_VALUE);
         RenderSystem.setShaderFogEnd(Float.MAX_VALUE);
 
@@ -325,8 +339,8 @@ public final class GhostRenderDispatcher {
             // ジオメトリ」になってしまい、それは誤ったジオメトリだ。
             buffers.endBatch();
         } finally {
-            RenderSystem.setShaderFogStart(fogStart);
-            RenderSystem.setShaderFogEnd(fogEnd);
+            RenderSystem.setShaderFogStart(vanillaFogStart);
+            RenderSystem.setShaderFogEnd(vanillaFogEnd);
         }
 
         drawnLastFrame = drawn;
@@ -502,6 +516,21 @@ public final class GhostRenderDispatcher {
         return drawnAt / away;
     }
 
+    /**
+     * ゲーム自身の霧が、このフレーム、この真の距離でどれだけ濃いか。0が素通し、1が霧の色そのもの。
+     *
+     * <p>{@code start}・{@code end} はゲームが this frame 用に立てた値そのものであり、天候・バイオーム・視界内の
+     * 液体・描画距離設定の全てを既に織り込んでいる——{@link DHFog} が知らないのはまさにこの帯だ。ゲームのシェーダー
+     * 自身と同じ線形補間を、線形フォールオフの {@link DHFog#thickness} と同じ式で行う。
+     */
+    private static float vanillaFogThickness(double distance, float start, float end) {
+        if (end <= start) {
+            return 0.0F;
+        }
+
+        return Mth.clamp((float) ((distance - start) / (end - start)), 0.0F, 1.0F);
+    }
+
     /** ゴーストの箱が、描かれる形で視錐台内にあるか。 */
     private static boolean inView(Frustum frustum, GhostSnapshot snapshot, Vec3 position, Vec3 eye, double pull) {
         AABB bounds = snapshot.bounds();
@@ -522,11 +551,18 @@ public final class GhostRenderDispatcher {
     /**
      * 誰かが地面を描いている距離（ブロック）。その9/10を超えるとゴーストは実体ではなくゴースト——半透明の、空を背にした
      * 接触点——として描かれる。内側では背後に地面があるので実体として描かれる。
+     *
+     * <p><b>引き継ぎ距離より手前には決して来ない。</b>描画距離8チャンク（128ブロック）で DH を使っていないクライアント
+     * では、9/10 は115ブロックであり、ゴーストパスが受け取る {@code ghostStartDistance}（既定128）より手前に落ちる。
+     * するとゴーストは生まれた瞬間から半透明側にいることになり、上の階層——背後に地面がある間は実体として描く方——が
+     * 一度も使われない。目の前の機体が引き継ぎ距離を跨いだ途端に透け始めるのはこれが理由だ。半透明は「背後に何も
+     * 無い」ことの表現なのだから、地面がまだ描かれている場所でそれを出してはならない。
      */
     public static double ghostStyleRadius() {
         double vanilla = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16.0;
+        double drawn = Math.max(vanilla, DHIntegration.drawnRadius()) * 0.9;
 
-        return Math.max(vanilla, DHIntegration.drawnRadius()) * 0.9;
+        return Math.max(drawn, GhostConfig.startDistance());
     }
 
     // ------------------------------------------------------------------

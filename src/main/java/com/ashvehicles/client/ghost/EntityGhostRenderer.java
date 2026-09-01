@@ -66,7 +66,10 @@ public final class EntityGhostRenderer {
         float size = (float) Math.max(bounds.getXsize(), Math.max(bounds.getYsize(), bounds.getZsize()));
         float half = size * 0.5F;
         PoseStack poseStack = context.poseStack();
-        RenderType type = RenderType.entityTranslucentEmissive(texture);
+        // モデルと同じ理由で自発光の透過型は使わない——あれは深度を書かないので、重なったビルボード同士が
+        // 前後関係を失って互いに透ける（GhostGeoRenderer#renderType 参照）。ただしこちらは裏表を捨てる型でもない。
+        // カメラを向く板1枚に裏面は無く、向きは頂点の並び順次第なので、捨てさせれば消えかねない方に賭けるだけだ。
+        RenderType type = RenderType.entityTranslucent(texture);
         VertexConsumer buffer = context.buffers().getBuffer(type);
         // モデルと同じ式で。DH の霧の濃さの分だけ薄れる。
         float opacity = (context.ghostStyle() ? GhostGeoRenderer.GHOST_ALPHA : 1.0F)
