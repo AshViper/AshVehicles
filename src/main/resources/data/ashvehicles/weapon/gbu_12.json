@@ -2,6 +2,7 @@
   "type": "bomb",
   "item": true,
   "ammo": 1,
+  "mass": 277,
   "requires": "targeting_pod",
   "firing": {
     "rounds_per_second": 2.0,

@@ -254,8 +254,6 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * 無い。{@link Ricochet} 参照。
      */
     private int deflections;
-    /** この弾が自分の前方に開いたまま保持している地面。あれば。{@link WeaponChunkLoader} 参照。 */
-    private final WeaponChunkLoader.Hold hold = new WeaponChunkLoader.Hold();
     /**
      * 弾が直前に踏んだ1歩。今それに沿って描かれている歩でもある。
      *
@@ -600,8 +598,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * 兵装はそこでは端的に動作しない。ここでそう宣言するコストは無い——小さく、数が少なく、短命で、どれも
      * 世界に「答えられない問い」を投げないから。
      *
-     * <p>飛ぶことと当たることは別で、外にいる弾は前方の地面も開いたまま保持する。到着した時に当たる物がある
-     * ように。{@link WeaponChunkLoader} 参照。
+     * <p>ただしこの宣言はバニラの門を1枚しか開けない。エンティティは世界に残るが、tick を通すのは
+     * {@code inEntityTickingRange} で、そこに常時 tick の例外は無い。外へ出た弾に次の tick を渡すのは
+     * {@link WeaponTicker} で、そのために chunk を開くことはしない。
+     *
+     * <p>飛ぶことと当たることは別だ。外にいる弾は地面を1 chunk も開かないので、ロード済みの世界の外では
+     * ブロックに当たらない。当たるのはそこにいるエンティティだけ。
      */
     @Override
     public boolean isAlwaysTicking() {
@@ -614,7 +616,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         // 物も訊く価値のある物も無く、それでも訊くのが高くつく間違いだ。サーバーではその外のブロックや流体
         // を1回引くごとにその場・メインスレッドで chunk が生成されるので、空を横切るミサイル1発が1tickに
         // 30ブロック幅で新しい地形の回廊を刻んでいくことになる。訊くのは「チケットが在るか」ではなく
-        // 「chunk が在るか」。先読みはチケットを先に置くので、両者は同じ物ではない。spanIsLoaded 参照。
+        // 「chunk が在るか」。両者は同じ物ではない。spanIsLoaded 参照。
         boolean overTheWorld = this.chunkIsThere(this.getX(), this.getZ());
 
         if (overTheWorld) {
@@ -676,10 +678,11 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
             this.mergeAnchor();
         }
 
-        // 最後に置く。確保が「弾がいた場所」ではなく「弾が到達した場所」から行われるように。ここからだけ
-        // 呼ぶこと。チケットの取得は chunk システムへ再入するので、tick からは安全でもそのコールバックから
-        // は安全でない。WeaponChunkLoader 参照。
-        WeaponChunkLoader.update(this, this.hold);
+        // この弾がまだ空にいることを記録しておく。ロード済みの世界を出た次の tick を運ぶのは、バニラの
+        // エンティティループではなくそちらになる。WeaponTicker 参照。
+        if (!this.level().isClientSide) {
+            WeaponTicker.flying(this);
+        }
     }
 
     /**
@@ -705,12 +708,22 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     }
 
     @Override
+    public void onAddedToLevel() {
+        super.onAddedToLevel();
+        // 生まれた瞬間に載せる。tick からの登録だけでは足りない——ロード済みの世界の外で撒かれた子弾は
+        // バニラのループに一度も拾われないので、自分で名乗り出る機会が来ない。
+        if (!this.level().isClientSide) {
+            WeaponTicker.flying(this);
+        }
+    }
+
+    @Override
     public void onRemovedFromLevel() {
         super.onRemovedFromLevel();
-        // 炸裂しようと寿命切れだろうと chunk ごとアンロードされただけだろうと、手放す。手放すだけにする
-        // こと。これは chunk システム自身の更新ループの中からも飛ぶし、そこで chunk を要求すれば反復の途中
-        // でそのループへ再入する。
-        WeaponChunkLoader.release(this, this.hold);
+        // 炸裂しようと寿命切れだろうと chunk ごとアンロードされただけだろうと、帳簿から外す。外すだけに
+        // すること。これは chunk システム自身の更新ループの中からも飛ぶので、ここで chunk に触れてはいけ
+        // ない。
+        WeaponTicker.landed(this);
     }
 
     /**
@@ -774,19 +787,18 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      *
      * <p><b>箱ではなく線。</b> このあと読まれるのは {@code Level.clip} が歩の線分に沿って踏むブロック
      * だけで、その線が通るのは斜めの歩を囲む長方形のごく一部だ。26ブロックの斜めの歩を囲む箱は 4 chunk に
-     * またがるが、線が通るのは対角の 2 chunk だけ。残りの2つを誰もロードしない——確保も先読みも、どちらも
-     * 弾の<em>経路</em>を指定するものだから——ので、箱で訊けばロード済みの世界の外での答えは常に「未ロー
-     * ド」になり、弾はブロックに一度も問い合わせないまま斜面を突き抜けていく。狙って撃った物が地形をすり
-     * 抜けていた仕組みはこれだ。だから線が実際に跨ぐ chunk だけを歩いて訊く。斜めに撃つほど、箱と線の差は
-     * 開く。
+     * またがるが、線が通るのは対角の 2 chunk だけ。ロード済みの世界の縁を掠める歩では、残りの2つが未ロード
+     * であることは珍しくない——弾は誰かが開いている地面の上を飛ぶのであって、自分のために四方を開かせるの
+     * ではないから（{@link WeaponTicker} 参照）。箱で訊けばそこでの答えは「未ロード」になり、弾はブロックに
+     * 一度も問い合わせないまま斜面を突き抜けていく。狙って撃った物が地形をすり抜けていた仕組みはこれだ。
+     * だから線が実際に跨ぐ chunk だけを歩いて訊く。斜めに撃つほど、箱と線の差は開く。
      *
      * <p><b>チケットではなくブロック。</b> {@code hasChunkAt} が答えるのは「その chunk のチケット水準が
      * 足りているか」であって「その chunk が在るか」ではない（{@code ServerChunkCache.chunkAbsent} 参照）。
-     * {@link WeaponChunkLoader} の先読みはチケットを置いた瞬間にこれを true にするが、地形はまだ生成器の
-     * スレッドで作られている最中だ。そこでブロックを引けば、このファイルと先読みが避けるために存在する物
-     * ——tick スレッド上でのワールド生成——がそのまま起きる。{@code getChunkNow} はロード済みの chunk か
-     * null しか返さないので、答えは「待たずに読めるか」になる。読めない chunk の下は、地形がまだ無いのと
-     * 同じに扱う。次の tick には在る。
+     * チケットは先に立ち、地形はその後で生成器のスレッドが作る——機体の回廊がまさにそうやって前方の地面を
+     * 頼んでいる——ので、水準で訊いて真を得た chunk のブロックを引けば、tick スレッド上でその生成の完了を
+     * 待つことになる。{@code getChunkNow} はロード済みの chunk か null しか返さないので、答えは「待たずに
+     * 読めるか」になる。読めない chunk の下は、地形がまだ無いのと同じに扱う。
      */
     private boolean spanIsLoaded(Vec3 from, Vec3 to) {
         ChunkSource chunks = this.level().getChunkSource();

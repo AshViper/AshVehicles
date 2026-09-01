@@ -1,0 +1,28 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_material",
+  "key": {
+    "G": {
+      "item": "minecraft:glass_pane"
+    },
+    "C": {
+      "item": "ashvehicles:circuit_board"
+    },
+    "E": {
+      "item": "minecraft:ender_eye"
+    },
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    }
+  },
+  "pattern": [
+    " G ",
+    "CEC",
+    "SSS"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:seeker"
+  }
+}

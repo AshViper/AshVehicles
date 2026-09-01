@@ -201,7 +201,7 @@ public final class GunStations {
             }
         }
 
-        return this.aircraft.getControllingPassenger();
+        return this.aircraft.getAviator();
     }
 
     /** その乗員が持っている砲座。持っていなければ空。 */
@@ -236,7 +236,7 @@ public final class GunStations {
             return NONE;
         }
 
-        if (crew != this.aircraft.getControllingPassenger()) {
+        if (crew != this.aircraft.getAviator()) {
             return mine.contains(this.selected) ? this.selected : mine.get(0);
         }
 
@@ -251,7 +251,7 @@ public final class GunStations {
 
     /** パイロットの引き金が今、パイロンの兵装ではなく砲座に繋がっているか。 */
     public boolean pilotHoldsStation() {
-        return this.liveStationOf(this.aircraft.getControllingPassenger()) != NONE;
+        return this.liveStationOf(this.aircraft.getAviator()) != NONE;
     }
 
     /**
@@ -261,7 +261,7 @@ public final class GunStations {
      *         兵装選択だけを進める
      */
     public boolean cycle() {
-        List<Integer> mine = this.stationsOf(this.aircraft.getControllingPassenger());
+        List<Integer> mine = this.stationsOf(this.aircraft.getAviator());
 
         if (mine.isEmpty()) {
             return false;
@@ -318,7 +318,7 @@ public final class GunStations {
 
     /** その乗員が今撃っているか。パイロットは操縦入力から、それ以外は自前の報告から。 */
     private boolean isFiring(LivingEntity crew) {
-        if (crew == this.aircraft.getControllingPassenger()) {
+        if (crew == this.aircraft.getAviator()) {
             return this.aircraft.getInput().fire();
         }
 

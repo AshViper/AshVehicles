@@ -37,7 +37,9 @@ public final class LaunchPoint {
     /**
      * 毎tick。ロックキーが押されたら盤を開く。
      *
-     * <p>押下で読む。押しっぱなしは「押している間ずっと開き直す」であって、乗員の意図ではない。
+     * <p>押下で読む。押しっぱなしは「押している間ずっと開き直す」であって、乗員の意図ではない。クリックを
+     * ここで吸い出すので、シーカー側の押下判定（サーバーの {@code TargetLock}）に届くのは押下<em>状態</em>
+     * だけ——盤を開く車両でシーカーの捕捉が同時に走ることは、そもそもこの車両にシーカーが無いので起きない。
      */
     public static void tick(GroundVehicleEntity vehicle) {
         if (!lays(vehicle)) {

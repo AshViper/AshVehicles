@@ -13,6 +13,7 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.util.Mth;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -82,6 +83,28 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      */
     private static final float FAINTEST_TARGET = 0.25F;
 
+    /**
+     * 視線誘導が残差のどれだけを1tickで詰めようとするか。
+     *
+     * <p>1にすると残差をその tick で消しに行く——舵一杯で突っ込み、線に乗った瞬間に行き過ぎる。小さいほど
+     * 滑らかで、遅い。0.2 は残差が5tickで概ね1/3になる速さで、照準の振りには十分付いてくる。
+     */
+    private static final double BEAM_GAIN = 0.2;
+
+    /**
+     * 旋回速度が命令に追い付く速さ（1tickあたりの割合）。フィンの効きの立ち上がりで、軌跡の角を落とす。
+     */
+    private static final double BEAM_SMOOTH = 0.25;
+
+    /**
+     * 狙っている点がこれより後ろにあれば、もう追わない（ラジアン）。
+     *
+     * <p>誘導を手放された弾が点を追い越したときの振る舞いを決める。振り返らせると点の周りを回り続けるので、
+     * そのまま飛ばす。90度より少し広く取ってあるのは、照準を大きく振った瞬間の一時的な大角度で誘導を
+     * 捨てないため。
+     */
+    private static final double BEAM_ABANDON = Math.toRadians(110.0);
+
     private static final EntityDataAccessor<Integer> DATA_TARGET =
             SynchedEntityData.defineId(RocketEntity.class, EntityDataSerializers.INT);
 
@@ -112,6 +135,14 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      * <p>発射速度が分かるまでは0。{@link #launched} と {@link #axis()} 参照。
      */
     private Vec3 axis = Vec3.ZERO;
+
+    /**
+     * 視線誘導の弾が今出している旋回速度（1tickあたりラジアン）。{@link #follow} 参照。
+     *
+     * <p>命令ではなく<em>効き</em>を持つ。フィンは命令の跳ねをそのまま出さないので、ここが1次遅れで命令を
+     * 追い、軌跡が折れるのを防ぐ。同期しない——両側が同じ命令から同じ値へ収束するし、ずれても絵の話だ。
+     */
+    private double beamRate;
 
     public RocketEntity(EntityType<? extends RocketEntity> type, Level level) {
         super(type, level);
@@ -354,7 +385,7 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         float glare = Math.max(FAINTEST_TARGET, switch (guidance.seeker()) {
             case HEAT -> AircraftEntity.heatVisibility(chasing);
             case RADAR -> AircraftEntity.visibility(chasing);
-            case LASER, POINT -> 1.0F;
+            case LASER, POINT, BEAM -> 1.0F;
         });
         AABB box = this.getBoundingBox().inflate(DECOY_REACH);
 
@@ -450,6 +481,12 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     private boolean couldReacquire(Entity candidate) {
         Entity vehicle = this.firedFrom();
 
+        // 他人のミサイルは有効目標。自分と同じレールから出た物は違う——並走する僚弾を「再取得」した
+        // 迎撃弾は、撃たれた理由だった相手を見捨てて味方を食う。
+        if (candidate instanceof RocketEntity missile) {
+            return missile.isInterceptable() && !missile.wasFiredBy(vehicle);
+        }
+
         if (candidate instanceof VehicleProjectile || candidate instanceof CountermeasureEntity) {
             return false;
         }
@@ -540,6 +577,20 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
             this.lose();
 
             return heading;
+        }
+
+        // 視線誘導は見越さない。狙っている点そのものへ機首を向ける。
+        //
+        // <p>比例航法は<em>動く物に当てる</em>ための式で、視線の回転率を打ち消すことで衝突針路を作る。追って
+        // いるのが照準線上に置かれた一点では、打ち消すべき回転が最初からほとんど無い——点は動かないし、その
+        // うえ射手が線を振ると位置が飛ぶだけで速度を持たないので、式に渡る回転率は距離で割られてほぼ0になる。
+        // 3750ブロック先の点に対しては、要求される旋回が実際に持っている舵の1%にもならなかった。
+        //
+        // <p>だからこの弾は追尾ではなく追従で飛ぶ。狙われている線へ機首を向け、舵の許す速さでそこへ寄せる。
+        // 有線誘導のミサイルが実際にすることであり、射手が照準を振った分だけ弾が付いてくるという操作感も、
+        // 見越しではなくこちらから出る。
+        if (guidance.seeker() == WeaponDefinition.Guidance.Seeker.BEAM) {
+            return this.follow(heading, losDirection, guidance);
         }
 
         // 視線が回転する速さをベクトルで。向きが回転軸、長さが回転率そのもの（1tickあたりラジアン）。
@@ -662,6 +713,53 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     }
 
     /** {@code vector} を {@code axis} 回りに {@code radians} だけ回す。軸は単位ベクトル前提。 */
+    /**
+     * 機首を、狙っている方向へ舵の許す分だけ寄せる。見越しは無い。
+     *
+     * <p>{@link #guidedHeading} の比例航法と対になる、単純な追従。ただし<em>単純に舵一杯</em>ではない。
+     * 命じる旋回は残差に比例させ（{@link #BEAM_GAIN}）、そのうえで実際の旋回速度を1次遅れで追わせる
+     * （{@link #BEAM_SMOOTH}）。理由は2つとも同じで、角の立った軌跡を出さないためだ:
+     *
+     * <ul>
+     * <li><b>比例</b>——残差が小さいときまで舵一杯を切れば、線に乗った瞬間に行き過ぎる。残差に比例させれば
+     *     指数的に寄って、乗ったところで止まる。</li>
+     * <li><b>1次遅れ</b>——舵は瞬時に効かない。命令が跳ねてもフィンの効きは数tickかけて立ち上がるので、
+     *     照準を急に振っても軌跡は折れずに曲がる。</li>
+     * </ul>
+     *
+     * <p>上限は {@code turn_rate} のまま。だから照準を速く振れば弾は遅れて付いてくるし、振り切れば置いて
+     * いかれる。
+     *
+     * <p><b>後ろにある点は追わない。</b>照準が別の兵装へ移れば点は更新されなくなり、弾はやがてその点を追い
+     * 越す。そこで振り返らせると、弾は点の周りを永遠に回る——空に輪を描く。追い越したらそのまま飛ばす方が、
+     * 誘導を手放された弾のすることとして正しい。
+     */
+    private Vec3 follow(Vec3 heading, Vec3 wanted, WeaponDefinition.Guidance guidance) {
+        double away = Math.acos(Mth.clamp(heading.dot(wanted), -1.0, 1.0));
+
+        if (away > BEAM_ABANDON) {
+            this.beamRate = 0.0;
+
+            return heading;
+        }
+
+        Vec3 axis = heading.cross(wanted);
+
+        // ちょうど正面か正反対。回す軸が決まらないので、この tick は舵を戻すだけにする。
+        if (away < 1.0E-6 || axis.lengthSqr() < 1.0E-12) {
+            this.beamRate *= 1.0 - BEAM_SMOOTH;
+
+            return heading;
+        }
+
+        double demand = Math.min(away * BEAM_GAIN, Math.toRadians(guidance.turnRate()));
+
+        this.beamRate += (demand - this.beamRate) * BEAM_SMOOTH;
+
+        return this.beamRate < 1.0E-7 ? heading
+                : rotateAbout(heading, axis.normalize(), Math.min(this.beamRate, away));
+    }
+
     private static Vec3 rotateAbout(Vec3 vector, Vec3 axis, double radians) {
         double cos = Math.cos(radians);
         double sin = Math.sin(radians);
@@ -765,6 +863,45 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         double t = Mth.clamp(target.subtract(from).dot(along) / lengthSqr, 0.0, 1.0);
 
         return from.add(along.scale(t));
+    }
+
+    /**
+     * 迎撃の対象になり得るか。飛行中の誘導ミサイルだけ。
+     *
+     * <p>ミサイルだけなのは名簿の各所（{@link com.ashvehicles.weapon.TargetLock} など）がシーカーに
+     * 見せる物を選ぶ問いだから。機関砲の1発や無誘導ロケットの雨をロック候補に載せれば、スコープは
+     * 撃ち合いの間じゅう弾で埋まり、本当の脅威——こちらへ向かって曲がってくる1本——がその中に紛れる。
+     */
+    public boolean isInterceptable() {
+        return this.isAlive() && this.getWeapon().type() == WeaponDefinition.Type.MISSILE;
+    }
+
+    /** この弾を撃ったのがその機体か。自分の撃った物をロックしないための問い。 */
+    public boolean wasFiredBy(@Nullable Entity vehicle) {
+        return vehicle != null && this.firedFrom() == vehicle;
+    }
+
+    /**
+     * 撃たれたミサイルはそこで終わる。骨組みとモーターと弾頭を薄皮で包んだ物に、破片を受けて飛び続ける
+     * 余地は無い。
+     *
+     * <p>届く経路は2つ。迎撃弾の弾頭渡し（{@link #warhead}——近接信管はここへ来る）と、至近で起きた爆発の
+     * 爆風。どちらも量は見ない。1点でも届けば炸裂して落ちる。
+     */
+    @Override
+    public boolean hurt(DamageSource source, float amount) {
+        if (this.level().isClientSide || this.isRemoved()) {
+            return true;
+        }
+
+        if (this.isInvulnerableTo(source) || amount <= 0.0F) {
+            return false;
+        }
+
+        this.markHurt();
+        this.burst(this.position().add(0.0, this.getBbHeight() * 0.5, 0.0), null);
+
+        return true;
     }
 
     /** 寿命を迎えたロケットは静かに消えるのではなく炸裂する。 */

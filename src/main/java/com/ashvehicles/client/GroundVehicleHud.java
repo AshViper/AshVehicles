@@ -66,10 +66,6 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     /** 残弾表示が琥珀色に変わる閾値。交戦2回分。 */
     private static final int LOW_ROUNDS = 6;
 
-    private static final int RELOAD_BAR_WIDTH = 62;
-    /** 装填バーの空の部分。存在はするが、埋まった部分と目立ち合わない色。 */
-    private static final int TRACK = 0x40FFFFFF;
-
     @SubscribeEvent
     public static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
         event.registerAbove(VanillaGuiLayers.CROSSHAIR, ID, new GroundVehicleHud());
@@ -101,11 +97,18 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         drawCompass(graphics, minecraft.font, vehicle, partialTick, centreX, centreY);
 
-        // 機体の平面図は隅そのものへ置き、数値表示はその分ずらす。両者が重なるのではなく左下を分け合うようにする
-        // ためだ。
+        // ここから下は計器で、機体のそれと同じく1段小さく描く。窓の外に対応する印——照準と方位——は上に
+        // 済ませてあり、あちらは縮まない。{@link HudScale} 参照。
+        //
+        // 機体の平面図は隅そのものへ置き、数値表示はその分ずらす。両者が重なるのではなく左下を分け合う
+        // ようにするためだ。
+        HudScale.push(graphics);
+
         PlanView.draw(graphics, vehicle, partialTick);
-        drawStatus(graphics, minecraft.font, vehicle, partialTick, PlanView.SIZE + 6);
-        drawCrew(graphics, minecraft.font, vehicle);
+        drawPanels(graphics, minecraft.font, vehicle, partialTick);
+
+        HudScale.pop(graphics);
+
         // 直近の着弾があれば、その結果。独立レイヤーではなく乗員自身の計器から描くので、何かに搭乗している間だけ
         // 表示され、降りた瞬間に消える。
         HitReadout.draw(graphics, minecraft.font);
@@ -232,6 +235,12 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         }
 
         float focal = AircraftHud.focalLength(minecraft, graphics);
+
+        if (isBeam(missile)) {
+            drawBeam(graphics, minecraft, vehicle, partialTick, focal, centreX, centreY);
+
+            return;
+        }
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
         Vec3 rail = vehicle.turretToWorld(vehicle.getStats().launcher().rail(), partialTick);
         Vec3 bore = vehicle.getAimDirection(partialTick);
@@ -290,6 +299,53 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         String reach = range + " m";
         graphics.drawString(minecraft.font, reach, centreX - minecraft.font.width(reach) / 2,
                 centreY + 64, AircraftHud.DIM, true);
+    }
+
+    /** 発射筒の弾が視線誘導か。捕捉の手順を持たないので、計器の形がまるごと変わる。 */
+    private static boolean isBeam(WeaponDefinition missile) {
+        return missile.guidance()
+                .map(guidance -> guidance.seeker() == WeaponDefinition.Guidance.Seeker.BEAM)
+                .orElse(false);
+    }
+
+    /**
+     * 視線誘導の照準。環も枠も進行度も無い——捕捉という手順が無いからだ。
+     *
+     * <p>あるのは砲腔線の印1つと、その意味を言う1語だけ。この弾に対して乗員がすべきことは「照準を目標へ
+     * 置き、当たるまで置き続ける」ことの1つしか無いので、計器がそれ以上言えば嘘になる。飛んでいる間は印を
+     * 警告色にして、まだ手を離してはいけないことを示す。
+     */
+    private static void drawBeam(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
+            float partialTick, float focal, int centreX, int centreY) {
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        Vec3 rail = vehicle.turretToWorld(vehicle.getStats().launcher().rail(), partialTick);
+        Vec3 bore = vehicle.getAimDirection(partialTick);
+        boolean guiding = !MissileTrack.shots().isEmpty();
+        boolean loaded = vehicle.getMissiles() > 0 && vehicle.getMissileReload() <= 0;
+        int colour = guiding ? AircraftHud.WARNING : loaded ? AircraftHud.GREEN : AircraftHud.DIM;
+        int[] at = AircraftHud.project(minecraft, rail.add(bore.scale(64.0)).subtract(camera).normalize(),
+                focal, centreX, centreY);
+
+        if (at != null) {
+            // 弾が乗る線の印。実際に据えるのは線であって点ではないので、中央を開けた十字にする。
+            graphics.fill(at[0] - 11, at[1], at[0] - 4, at[1] + 1, colour);
+            graphics.fill(at[0] + 5, at[1], at[0] + 12, at[1] + 1, colour);
+            graphics.fill(at[0], at[1] - 11, at[0] + 1, at[1] - 4, colour);
+            graphics.fill(at[0], at[1] + 5, at[0] + 1, at[1] + 12, colour);
+            graphics.fill(at[0] - 1, at[1] - 1, at[0] + 2, at[1] + 2, colour);
+        }
+
+        String status = guiding ? "GUIDING" : loaded ? "BEAM" : "RELOADING";
+
+        graphics.drawString(minecraft.font, status, centreX - minecraft.font.width(status) / 2,
+                centreY + 54, colour, true);
+
+        if (guiding) {
+            String hold = "HOLD ON TARGET";
+
+            graphics.drawString(minecraft.font, hold, centreX - minecraft.font.width(hold) / 2,
+                    centreY + 64, AircraftHud.DIM, true);
+        }
     }
 
     /**
@@ -361,90 +417,127 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         graphics.fill(centreX - 1, centreY - 66, centreX + 1, centreY - 62, AircraftHud.GREEN);
     }
 
-    /** 車両の残存度、速度、そして兵装が伝えること。 */
-    private static void drawStatus(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
-            float partialTick, int indent) {
-        int left = 8 + indent;
-        int bottom = graphics.guiHeight() - 8;
+    /**
+     * 下の両隅の計器。機体のそれと同じ分け方だ——右下に兵装と残存度、左下にそれ以外。
+     *
+     * <p>左下は平面図が隅そのものを取っているので、こちらはその分だけ内側へ寄せる。重なるのではなく左下を
+     * 分け合う。
+     */
+    private static void drawPanels(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
+            float partialTick) {
+        int bottom = HudScale.height(graphics) - 8;
 
-        float health = vehicle.getHealth();
-        int healthColour = vehicle.getHealthFraction() <= LOW_HEALTH ? AircraftHud.WARNING : AircraftHud.GREEN;
-        AircraftHud.value(graphics, font,
-                String.format("HP %d/%d", Math.round(health), Math.round(vehicle.getMaxHealth())),
-                left, bottom - 52, healthColour);
+        crew(vehicle).bottomLeft(graphics, font, 8 + PlanView.SIZE + 6, bottom);
+        arms(vehicle, partialTick).bottomRight(graphics, font, HudScale.width(graphics) - 8, bottom);
+    }
 
-        // 1ブロック=1m、1秒=20tick。符号付きにするのは、戦車が生涯のかなりを後進で過ごすし、運転手にはどちらか
-        // 伝えるべきだからだ。
+    /** 左下。乗員と、車体が今どれだけの速さで動いているか。 */
+    private static HudPanel crew(GroundVehicleEntity vehicle) {
+        HudPanel panel = new HudPanel();
+        List<Entity> aboard = vehicle.getPassengers();
+
+        panel.title("CREW / STATUS");
+
+        if (!aboard.isEmpty()) {
+            Entity commander = vehicle.getControllingPassenger();
+
+            for (Entity rider : aboard) {
+                panel.crew((rider == commander ? "C " : "- ") + rider.getName().getString(),
+                        rider == commander ? AircraftHud.GREEN : AircraftHud.DIM);
+            }
+        }
+
+        panel.divider();
+
+        // 1ブロック=1m、1秒=20tick。後進かどうかを添えるのは、戦車が生涯のかなりを後進で過ごすし、運転手には
+        // どちらか伝えるべきだからだ。
         float speed = vehicle.getSpeed();
         int kmh = (int) Math.round(Math.abs(speed) * 20.0 * 3.6);
-        String gear = speed < -0.001F ? " R" : "";
-        AircraftHud.value(graphics, font, kmh + " km/h" + gear, left, bottom - 42);
 
-        // 機関銃。下の2行のどちらにも属さない。決して選択されない——ただそこにある——ので、トリガーが何を向いていても
-        // 表示するし、2列目に置くことで「乗員が代わりに撃てる3つ目の物」に見えないようにする。ベルトが尽きたら琥珀に
-        // する。二度見に値するのはそれだけだ。
-        if (vehicle.hasCoaxial()) {
-            int belt = vehicle.getCoaxRounds();
+        panel.pair("SPD", AircraftHud.DIM, kmh + " km/h" + (speed < -0.001F ? " R" : ""), AircraftHud.GREEN);
 
-            AircraftHud.value(graphics, font, String.format("MG %d/%d", belt, vehicle.getCoaxCapacity()),
-                    left + 84, bottom - 20, belt > 0 ? AircraftHud.GREEN : AircraftHud.WARNING);
-        }
+        return panel;
+    }
 
+    /** 右下。引き金が何を撃つか、あと何発あるか、いつ撃てるか、そして車体があと何発受けられるか。 */
+    private static HudPanel arms(GroundVehicleEntity vehicle, float partialTick) {
+        HudPanel panel = new HudPanel();
         boolean missiles = vehicle.isMissileMode();
+        boolean gun = vehicle.getStats().armament().exists();
 
-        if (missiles) {
-            drawTubes(graphics, font, vehicle, left, bottom);
-        } else if (vehicle.getStats().armament().exists()) {
-            drawGun(graphics, font, vehicle, left, bottom);
-        } else {
-            return;
-        }
-
-        // 砲塔内で砲身がどうなっているか。ワールド上のマークでは示せない情報だ。斜面のマークは仰角10度でも2度でも
-        // 同じに見えるし、頭上の機体に対しては「砲架がストッパーに当たるまであとどれだけか」が、掃射できるか1秒を
-        // 無駄にするかの違いになる。
-        int elevation = Math.round(vehicle.getGunPitch(partialTick));
-        AircraftHud.value(graphics, font, String.format("ELV %+d°", elevation), left + 84, bottom - 32);
+        panel.title("WEAPONS / STATUS");
 
         // 両方積む車両では、トリガーがどちらを撃つか。1種しか積まない車両では何も出さない。答えが疑わしくなることは
         // 無いからだ。
-        if (vehicle.hasMissiles() && vehicle.getStats().armament().exists()) {
-            AircraftHud.value(graphics, font, missiles ? "SEL MSL" : "SEL GUN", left + 84, bottom - 42);
+        if (vehicle.hasMissiles() && gun) {
+            panel.pair("SEL", AircraftHud.DIM, missiles ? "MSL" : "GUN", AircraftHud.GREEN);
         }
+
+        if (missiles) {
+            tubes(panel, vehicle);
+        } else if (gun) {
+            gun(panel, vehicle);
+        }
+
+        if (missiles || gun) {
+            // 砲塔内で砲身がどうなっているか。ワールド上のマークでは示せない情報だ。斜面のマークは仰角10度でも2度でも
+            // 同じに見えるし、頭上の機体に対しては「砲架がストッパーに当たるまであとどれだけか」が、掃射できるか1秒を
+            // 無駄にするかの違いになる。
+            panel.pair("ELV", AircraftHud.DIM,
+                    String.format("%+d°", Math.round(vehicle.getGunPitch(partialTick))), AircraftHud.GREEN);
+        }
+
+        // 機関銃。上の行のどちらにも属さない。決して選択されない——ただそこにある——ので、トリガーが何を向いていても
+        // 表示する。ベルトが尽きたら琥珀にする。二度見に値するのはそれだけだ。
+        if (vehicle.hasCoaxial()) {
+            int belt = vehicle.getCoaxRounds();
+
+            panel.pair("MG", AircraftHud.DIM, String.format("%d / %d", belt, vehicle.getCoaxCapacity()),
+                    belt > 0 ? AircraftHud.GREEN : AircraftHud.WARNING);
+        }
+
+        float health = vehicle.getHealth();
+
+        panel.divider();
+        panel.pair("HP", AircraftHud.DIM,
+                String.format("%d / %d", Math.round(health), Math.round(vehicle.getMaxHealth())),
+                vehicle.getHealthFraction() <= LOW_HEALTH ? AircraftHud.WARNING : AircraftHud.GREEN);
+
+        return panel;
     }
 
     /** 砲。残弾と装填の進行。 */
-    private static void drawGun(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle, int left, int bottom) {
+    private static void gun(HudPanel panel, GroundVehicleEntity vehicle) {
         int rounds = vehicle.getRounds();
 
-        AircraftHud.value(graphics, font, String.format("RDS %d/%d", rounds, vehicle.getRoundCapacity()),
-                left, bottom - 32, rounds > LOW_ROUNDS ? AircraftHud.GREEN : AircraftHud.WARNING);
+        panel.pair("RDS", AircraftHud.DIM, String.format("%d / %d", rounds, vehicle.getRoundCapacity()),
+                rounds > LOW_ROUNDS ? AircraftHud.GREEN : AircraftHud.WARNING);
 
-        if (vehicle.getRounds() <= 0) {
-            AircraftHud.value(graphics, font, "NO ROUNDS", left, bottom - 20, AircraftHud.WARNING);
+        if (rounds <= 0) {
+            panel.line("NO ROUNDS", AircraftHud.WARNING);
 
             return;
         }
 
         if (vehicle.isLoaded()) {
-            AircraftHud.value(graphics, font, "LOADED", left, bottom - 20);
+            panel.line("LOADED");
 
             return;
         }
 
-        drawWait(graphics, left, bottom - 20, vehicle.getReload(), vehicle.getReloadTicks());
+        panel.bar("LOAD", done(vehicle.getReload(), vehicle.getReloadTicks()),
+                seconds(vehicle.getReload()), AircraftHud.WARNING);
     }
 
     /** 発射筒。残ミサイル数と、次弾までの待ち時間。 */
-    private static void drawTubes(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle,
-            int left, int bottom) {
+    private static void tubes(HudPanel panel, GroundVehicleEntity vehicle) {
         int tubes = vehicle.getMissiles();
 
-        AircraftHud.value(graphics, font, String.format("MSL %d/%d", tubes, vehicle.getMissileCapacity()),
-                left, bottom - 32, tubes > 0 ? AircraftHud.GREEN : AircraftHud.WARNING);
+        panel.pair("MSL", AircraftHud.DIM, String.format("%d / %d", tubes, vehicle.getMissileCapacity()),
+                tubes > 0 ? AircraftHud.GREEN : AircraftHud.WARNING);
 
         if (tubes <= 0) {
-            AircraftHud.value(graphics, font, "TUBES EMPTY", left, bottom - 20, AircraftHud.WARNING);
+            panel.line("TUBES EMPTY", AircraftHud.WARNING);
 
             return;
         }
@@ -452,49 +545,34 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         if (vehicle.getMissileReload() <= 0) {
             // 「準備完了」と「発射可能」は別だ。追う相手の無い誘導弾は筒に留まるし、乗員にはどちらが妨げているのかを
             // 伝えるべきだ。座標へ飛ぶ弾では、妨げているのがロックではなく「まだどこも指していない」ことになる。
-            boolean armed = vehicle.laysPoint() ? vehicle.getDesignated() != null : vehicle.isSeekerLocked();
+            // 視線誘導には捕捉が無いので、装填されていればいつでも撃てる。座標を据える弾は据えるまで撃てず、
+            // シーカーを持つ弾はロックするまで撃てない。妨げているのがどれかを乗員に伝える。
+            WeaponDefinition missile = missileOf(vehicle);
+            boolean beam = missile != null && isBeam(missile);
+            boolean armed = beam || (vehicle.aimsAtPoint()
+                    ? vehicle.getDesignated() != null : vehicle.isSeekerLocked());
             String state = armed ? "READY" : vehicle.laysPoint() ? "NO TARGET" : "NO LOCK";
 
-            AircraftHud.value(graphics, font, state, left, bottom - 20,
-                    armed ? AircraftHud.GREEN : AircraftHud.WARNING);
+            panel.line(state, armed ? AircraftHud.GREEN : AircraftHud.WARNING);
 
             return;
         }
 
-        drawWait(graphics, left, bottom - 20, vehicle.getMissileReload(), vehicle.getMissileReloadTicks());
+        panel.bar("LOAD", done(vehicle.getMissileReload(), vehicle.getMissileReloadTicks()),
+                seconds(vehicle.getMissileReload()), AircraftHud.WARNING);
+    }
+
+    /** 装填がどこまで進んだか。残りtick数を、目盛りが読む向きの割合に直す。 */
+    private static float done(int left, int total) {
+        return Mth.clamp(1.0F - (float) left / Math.max(total, 1), 0.0F, 1.0F);
     }
 
     /**
-     * 次弾までの待ち時間。カウントダウンに応じて埋まっていくバー。
+     * 待ちの残り。目盛りの隣に置く数字なので、tickではなく秒で出す。
      *
-     * <p>秒数ではなくバーにしてある。乗員が実際に判断しているのは「留まるか後退するか」であり、それは残り時間が何tick
-     * かではなく、待ちがどれだけ残っているかについての問いだからだ。
+     * <p>目盛りは「留まるか下がるか」に答え、秒は「あと1回撃てるか」に答える。乗員は交戦の途中で両方を問う。
      */
-    private static void drawWait(GuiGraphics graphics, int x, int y, int left, int total) {
-        float done = Mth.clamp(1.0F - (float) left / Math.max(total, 1), 0.0F, 1.0F);
-
-        graphics.fill(x - 2, y - 2, x + RELOAD_BAR_WIDTH + 2, y + 8, AircraftHud.SHADOW);
-        graphics.fill(x, y, x + RELOAD_BAR_WIDTH, y + 6, TRACK);
-        graphics.fill(x, y, x + Math.round(RELOAD_BAR_WIDTH * done), y + 6, AircraftHud.WARNING);
-    }
-
-    private static void drawCrew(GuiGraphics graphics, Font font, GroundVehicleEntity vehicle) {
-        List<Entity> aboard = vehicle.getPassengers();
-
-        if (aboard.isEmpty()) {
-            return;
-        }
-
-        Entity commander = vehicle.getControllingPassenger();
-        int right = graphics.guiWidth() - 8;
-        int y = graphics.guiHeight() - 8 - aboard.size() * 10;
-
-        for (Entity rider : aboard) {
-            String name = (rider == commander ? "C  " : "-  ") + rider.getName().getString();
-
-            graphics.drawString(font, name, right - font.width(name), y,
-                    rider == commander ? AircraftHud.GREEN : AircraftHud.DIM, true);
-            y += 10;
-        }
+    private static String seconds(int left) {
+        return String.format(java.util.Locale.ROOT, "%.1fs", left / 20.0F);
     }
 }

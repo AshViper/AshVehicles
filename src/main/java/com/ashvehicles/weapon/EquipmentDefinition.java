@@ -34,9 +34,12 @@ import net.minecraft.world.phys.Vec3;
  *                  は積んでいる機体ではなく撃とうとしている相手に効く——だから熱源追尾には何もしない。
  *                  電波を濁らせるのであって排気を冷やすのではないから。{@code TargetLock} 参照
  * @param camera このポッドのレンズ位置。{@link #lensAt} 参照
+ * @param mass ポッドの重さ（kg）。実物の重量をそのまま書く——照準ポッドが200、ジャマーが300あたり。
+ *             専用ステーションは兵装パイロンと場所を奪い合わないが、重さは奪い合う。翼下に何を吊ろうと
+ *             機体は1つで、持ち上げるのは同じ主翼だからだ
  */
 public record EquipmentDefinition(Kind kind, boolean item, float seekerRange, float lockRate,
-        float radarGain, float heatGain, float lockDelay, Vec3 camera) {
+        float radarGain, float heatGain, float lockDelay, Vec3 camera, float mass) {
 
     public static final Codec<EquipmentDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Kind.CODEC.optionalFieldOf("type", Kind.TARGETING).forGetter(EquipmentDefinition::kind),
@@ -46,7 +49,8 @@ public record EquipmentDefinition(Kind kind, boolean item, float seekerRange, fl
             Codec.FLOAT.optionalFieldOf("radar_gain", 1.0F).forGetter(EquipmentDefinition::radarGain),
             Codec.FLOAT.optionalFieldOf("heat_gain", 1.0F).forGetter(EquipmentDefinition::heatGain),
             Codec.FLOAT.optionalFieldOf("lock_delay", 1.0F).forGetter(EquipmentDefinition::lockDelay),
-            Vec3.CODEC.optionalFieldOf("camera", Vec3.ZERO).forGetter(EquipmentDefinition::camera)
+            Vec3.CODEC.optionalFieldOf("camera", Vec3.ZERO).forGetter(EquipmentDefinition::camera),
+            Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(EquipmentDefinition::mass)
     ).apply(instance, EquipmentDefinition::new));
 
     /**
@@ -54,7 +58,7 @@ public record EquipmentDefinition(Kind kind, boolean item, float seekerRange, fl
      * 動き続け、ステーションが穴を抱えないようにする。
      */
     public static final EquipmentDefinition FALLBACK =
-            new EquipmentDefinition(Kind.TARGETING, true, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, Vec3.ZERO);
+            new EquipmentDefinition(Kind.TARGETING, true, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, Vec3.ZERO, 0.0F);
 
     /**
      * 吊られているステーションを与えたときの、このポッドのレンズの位置。

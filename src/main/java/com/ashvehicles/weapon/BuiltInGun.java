@@ -2,13 +2,13 @@ package com.ashvehicles.weapon;
 
 import java.util.Optional;
 
+import javax.annotation.Nullable;
+
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.entity.RocketEntity;
-import com.ashvehicles.entity.VehicleHold;
-import com.ashvehicles.item.AmmoItem;
 import com.ashvehicles.registry.ModEntities;
 
 import net.minecraft.nbt.CompoundTag;
@@ -32,7 +32,7 @@ import net.minecraft.world.phys.Vec3;
  * {@code data/ashvehicles/weapon/} から読む。だから火砲は、砲塔に埋め込まれていようと翼下に吊られていよう
  * と1箇所で記述される。
  *
- * <p><b>2門を1クラスで扱う理由。</b> 以下の処理はどちらでも同じだ。弾は同じ弾庫から出て、射撃間隔は同じ
+ * <p><b>2門を1クラスで扱う理由。</b> 以下の処理はどちらでも同じだ。弾は同じ手から装填され、射撃間隔は同じ
  * ファイルから読んだ同じ値で、弾は同じように出て同じ円錐に散る。違うのは5つ——どの兵装か、どの2つの
  * カウンタを使うか、砲口はどこか、砲口は何本か、セーブで弾数を何と呼ぶか——で、その5つが
  * {@link Mount} の全部。2回書いていれば、どちらかを直した最初の瞬間に食い違い始めていた。
@@ -42,9 +42,9 @@ import net.minecraft.world.phys.Vec3;
  * っぱなしにする物であり、連射こそが照準の方法だ。どちらもこのクラスで、どちらであるかは兵装ファイルから
  * 読む {@link WeaponDefinition#isAutomatic()}。
  *
- * <p><b>撃てるのは誰かが積んだ分だけ。</b> 弾倉は車両自身の弾庫から、砲弾1発かベルト1本ずつ、しかも車両
- * が停止している間だけ満たされる（{@link #resupply} 参照）。無料装填は無い。クリエイティブタブから出した
- * 戦車は、誰かが弾薬を入れるまで砲が空のまま。機体のパイロンがずっとそうであったのと同じ取り決め。
+ * <p><b>撃てるのは誰かが積んだ分だけ。</b> 弾倉が満たされるのは、誰かが弾薬箱を持って車両を右クリック
+ * した時だけだ（{@link #load} 参照）。無料装填も自動装填も無い。クリエイティブタブから出した戦車は、
+ * 誰かが弾薬を押し込むまで砲が空のまま。機体のパイロンがずっとそうであったのと同じ取り決め。
  *
  * <p><b>状態の置き場。</b> 残弾と再装填カウンタは、ここのフィールドではなく車両の同期データにある。
  * クライアントが両方を必要とするから。主砲の再装填カウンタは砲身の後座を描く元であり、それだけで足りる
@@ -184,15 +184,6 @@ public final class BuiltInGun {
      */
     private static final int FLASH_EVERY = 3;
 
-    /**
-     * 停止中の車両が空の弾倉を自分の弾庫から満たすのにかかる tick 数。装填手を抽象化した値で、機体の
-     * 地上要員がパイロン1本にかける10秒と同じ。
-     */
-    private static final int RESUPPLY_TICKS = 200;
-
-    /** この速度（1tickあたりブロック）未満なら停止中と見なし、装填できる。 */
-    private static final float STANDING = 1.0E-4F;
-
     private final GroundVehicleEntity vehicle;
     private final Mount mount;
     /** 前 tick に引き金が引かれていたか。押しっぱなしで弾倉を空にしないため。 */
@@ -213,7 +204,8 @@ public final class BuiltInGun {
     }
 
     /**
-     * サーバー側で毎tick。引き金は乗員の物、装填は装填手の物で、誰が乗っているかに関わらず進む。
+     * サーバー側で毎tick。引き金と待ち時間だけ。装填はここでは起きない——車両の外に立っている誰かの
+     * クリックで起きる。{@link #load} 参照。
      */
     public void tick(boolean trigger) {
         int reload = this.mount.reload(this.vehicle);
@@ -234,12 +226,6 @@ public final class BuiltInGun {
         ResourceLocation weaponId = fitted.get();
         WeaponDefinition weapon = Definitions.weapon(weaponId);
 
-        // 停止中の車両で乗員が働く。砲弾やベルトを弾庫から弾倉へ。走行中はやらない。車体が揺れている
-        // 最中に砲弾を手渡す者はいないから。そして空中からも湧かせない——以前はそうだった。
-        if (Math.abs(this.vehicle.getSpeed()) < STANDING) {
-            this.resupply(weapon);
-        }
-
         // 引き金を押し続けて撃ち続けられるかは、このクラスではなく兵装が決める。戦車砲は「押す」物だ
         // ——装填手は数秒かかるし、終わった瞬間に離す撃ち方をする者はいない——ので、フィールドを省略して
         // 毎秒1発未満の発射速度を書いたファイルは今もそうなる。同じ防盾の機銃は同じ種類の物であり、
@@ -254,52 +240,51 @@ public final class BuiltInGun {
     }
 
     /**
-     * 装填手の1tick分。この tick に番が来ていて空きがあれば、砲弾1発かベルト1本を丸ごと弾庫から弾倉へ。
-     *
-     * <p><b>丸ごとか、無しか。</b> 弾倉は発数で、弾庫はアイテム数で数える。乗員はベルトを半分に切らない。
-     * アイテム1個分に満たない空きしか無い弾倉はもう満載扱い。コストはほぼ無く——ここの砲は1つを除き全部
-     * アイテム個数がちょうど整数で、パーンツィリの1400発も46.05本のベルトになる——引き換えに、弾薬アイテム
-     * は「自分の残量を覚える物」ではなく素朴にスタックできる箱でいられる。
-     *
-     * <p>速度は大きさに関わらず「{@link #RESUPPLY_TICKS} で弾倉1つ分」。砲弾40発の戦車なら4tickに1発、
-     * ベルト46本の機関砲でもほぼ同じ。つまり大きい砲ほど速く装填されることはなく、1tickで満載になる物も
-     * 無い。
+     * この砲に入る弾薬の種類。砲を積んでいなければ null。手に持った物がこの砲のための物かを、車両が
+     * クリックの意味を決めるときに訊く。
      */
-    private void resupply(WeaponDefinition weapon) {
-        AmmoKind kind = weapon.ammoKind();
-        int capacity = weapon.ammo();
-        int perItem = kind.roundsPerItem();
-
-        if (capacity - this.mount.rounds(this.vehicle) < perItem) {
-            return;
-        }
-
-        int every = Math.max(1, Math.round((float) RESUPPLY_TICKS * perItem / capacity));
-
-        if (this.vehicle.tickCount % every != 0 || !this.take(kind)) {
-            return;
-        }
-
-        this.mount.rounds(this.vehicle, this.mount.rounds(this.vehicle) + perItem);
+    @Nullable
+    public AmmoKind ammoKind() {
+        return this.mount.weapon(this.vehicle)
+                .map(id -> Definitions.weapon(id).ammoKind())
+                .orElse(null);
     }
 
     /**
-     * 弾庫から弾薬アイテムを1個取る。取る順は積んだ者が並べた順。
+     * 差し出された弾薬アイテムを弾倉へ押し込み、実際に受け取った<em>個数</em>を返す。装填は誰かが手で
+     * 行う作業になったので、時間で刻む必要はもう無い——1回のクリックが1回の積み込みだ。
      *
-     * @return 取れる物があったか
+     * <p><b>丸ごとか、無しか。</b> 弾倉は発数で、弾薬箱はアイテム数で数える。誰もベルトを半分に切らない
+     * ので、1個分に満たない空きしか無い弾倉はもう満載扱い。コストはほぼ無く——ここの砲は1つを除き全部
+     * アイテム個数がちょうど整数で、パーンツィリの1400発も46.05本のベルトになる——引き換えに、弾薬アイテム
+     * は「自分の残量を覚える物」ではなく素朴にスタックできる箱でいられる。
+     *
+     * @param offered 手にある個数
+     * @return 弾倉が受け取った個数。0 なら満載か、そもそも入らない種類
      */
-    private boolean take(AmmoKind kind) {
-        VehicleHold hold = this.vehicle.getHold();
+    public int load(AmmoKind kind, int offered) {
+        WeaponDefinition weapon = this.mount.weapon(this.vehicle).map(Definitions::weapon).orElse(null);
 
-        for (int at = 0; at < hold.getContainerSize(); at++) {
-            if (AmmoItem.isKind(hold.getItem(at), kind)) {
-                hold.removeItem(at, 1);
-
-                return true;
-            }
+        if (weapon == null || weapon.ammoKind() != kind || offered <= 0) {
+            return 0;
         }
 
-        return false;
+        int perItem = kind.roundsPerItem();
+        int room = (weapon.ammo() - this.mount.rounds(this.vehicle)) / perItem;
+        int taken = Math.min(offered, room);
+
+        if (taken <= 0) {
+            return 0;
+        }
+
+        this.mount.rounds(this.vehicle, this.mount.rounds(this.vehicle) + taken * perItem);
+
+        return taken;
+    }
+
+    /** 今この弾倉にある発数。 */
+    public int rounds() {
+        return this.mount.rounds(this.vehicle);
     }
 
     /** この砲がそもそも搭載されているか。 */
@@ -347,7 +332,7 @@ public final class BuiltInGun {
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
         Vec3 right = across(bore);
         Vec3 up = right.cross(bore).normalize();
-        LivingEntity crew = this.vehicle.getControllingPassenger();
+        LivingEntity crew = this.vehicle.getAviator();
         RandomSource random = this.vehicle.getRandom();
 
         double scatter = Math.tan(Math.toRadians(weapon.firing().spread())) * 0.5;

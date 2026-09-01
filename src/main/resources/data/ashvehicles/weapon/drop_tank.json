@@ -2,6 +2,7 @@
   "type": "tank",
   "item": true,
   "ammo": 600,
+  "mass": 1100,
   "drag": 0.000003,
   "firing": {
     "rounds_per_second": 1.0,
@@ -15,8 +16,7 @@
     "range": 1.0,
     "explosion": 0.0,
     "tracer": "8A8F7A",
-    "trail": false,
-    "chunk_loading": false
+    "trail": false
   },
   "sound": {
     "volume": 0.8,

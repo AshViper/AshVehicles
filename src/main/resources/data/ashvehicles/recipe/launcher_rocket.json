@@ -8,11 +8,15 @@
       "count": 1
     },
     {
-      "item": "minecraft:tnt",
+      "item": "ashvehicles:rocket_motor",
       "count": 1
     },
     {
-      "item": "minecraft:gunpowder",
+      "item": "ashvehicles:high_explosive",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:fuze",
       "count": 1
     }
   ],

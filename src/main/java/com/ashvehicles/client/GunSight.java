@@ -9,6 +9,7 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
@@ -632,12 +633,22 @@ public final class GunSight {
     }
 
     /**
-     * 照準器が見越しを提示する対象。生きている物か、別の機体。見ている当の機体、その搭乗者、そして他の何かに乗っている
-     * 者は除く——目標は乗員ではなく彼らが乗っている機体だ——し、MOD 自身の弾やデコイも除く。
+     * 照準器が見越しを提示する対象。生きている物か、別の機体、そして飛んでくる誘導ミサイル。見ている当の機体、その
+     * 搭乗者、そして他の何かに乗っている者は除く——目標は乗員ではなく彼らが乗っている機体だ——し、ミサイル以外の弾や
+     * デコイも除く。
      */
     private static boolean couldTarget(VehicleEntityBase vehicle, Entity candidate) {
-        if (candidate == vehicle || candidate instanceof VehicleProjectile
-                || candidate instanceof CountermeasureEntity || WeaponMounts.isPartOf(vehicle, candidate)) {
+        if (candidate == vehicle || candidate instanceof CountermeasureEntity
+                || WeaponMounts.isPartOf(vehicle, candidate)) {
+            return false;
+        }
+
+        // 誘導ミサイルには見越しを出す。シーカー（TargetLock）と同じ区別で、自分の撃った物は除く。
+        if (candidate instanceof RocketEntity missile) {
+            return missile.isInterceptable() && !missile.wasFiredBy(vehicle);
+        }
+
+        if (candidate instanceof VehicleProjectile) {
             return false;
         }
 

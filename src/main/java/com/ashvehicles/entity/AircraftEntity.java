@@ -2,6 +2,7 @@ package com.ashvehicles.entity;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.Optional;
 
@@ -18,11 +19,14 @@ import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.particle.TintedParticleOption;
 import com.ashvehicles.sensor.Sensors;
 import com.ashvehicles.registry.ModParticles;
+import com.ashvehicles.item.AmmoItem;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.RackItem;
 import com.ashvehicles.item.WeaponItem;
+import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.item.WrenchItem;
+import com.ashvehicles.weapon.AmmoKind;
 import com.ashvehicles.weapon.Dispenser;
 import com.ashvehicles.weapon.TargetLock;
 import com.ashvehicles.weapon.EquipmentDefinition;
@@ -33,6 +37,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.FloatTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -204,6 +209,64 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private static final double WING_HEIGHT = 1.5;
     /** 凝結は水と光なので、翼のどこにできても同じ淡い塊になる。 */
     private static final int VAPOUR_COLOUR = 0xF2F5F7;
+
+    /** {@link #reloadWith} の補給先指定で「機体上のどこでもよい」を意味する値。 */
+    private static final int ANY_STATION = -1;
+
+    /**
+     * 飛行機雲が出始める高度。
+     *
+     * <p>実際の対流圏上層に相当する。エンジンの排気には燃焼で生じた水蒸気が含まれていて、外気が十分冷たく薄い
+     * 高度では、それが排気の後ろで氷の結晶になって残る——低空で同じ機体が何も曳かないのは、そこの空気が暖かく
+     * 水蒸気を抱えたままにできるからだ。だから高度が条件であって、速度でもGでもない。
+     */
+    private static final double CONTRAIL_ALTITUDE = 220.0;
+
+    /**
+     * 曳き始めてから完全な太さになるまでの高度差（ブロック）。
+     *
+     * <p>閾値1つで切り替えると、その高度を跨いで飛ぶ機体の後ろで航跡が点いたり消えたりする。実際の飛行機雲も
+     * 境界では切れ切れに現れるので、帯にして濃さを渡す方が正しく、見た目にも境界を跨いだ瞬間が分からない。
+     */
+    private static final double CONTRAIL_BAND = 60.0;
+
+    /** 飛行機雲の色。翼端ベイパーより白い——あちらは水滴、こちらは氷。 */
+    private static final int CONTRAIL_COLOUR = 0xFFFFFF;
+
+    /**
+     * ノズル1つあたり、飛行経路1ブロックにつき置く粒数。
+     *
+     * <p>tick あたりではなく距離あたりで数える。この高度の機体は tick 間に数ブロック進むので、tick あたりで
+     * 数えると航跡の密度が速度で変わり、加速するほど筋が透けていく。粒の大きさが1ブロック強あるので、1粒/
+     * ブロックで隣に届き、途切れない1本になる。
+     */
+    private static final double CONTRAIL_DENSITY = 1.0;
+
+    /** 1tick・1ノズルあたりの粒数の上限。速度がいくら出ても、これ以上は撒かない。 */
+    private static final int CONTRAIL_MOST_PUFFS = 8;
+
+    /** 粒の大きさ（ブロック）。 */
+    private static final float CONTRAIL_SIZE = 1.1F;
+
+    /** 粒が航跡の軸からどれだけ外れて出てよいか。線ではなく筋に見せる。 */
+    private static final double CONTRAIL_SCATTER = 0.35;
+
+    /**
+     * 出た粒が機体の速度をどれだけ受け継ぐか。
+     *
+     * <p>0 にすると航跡は機体の後ろに完全に静止し、置かれた瞬間から空に描かれた線になる。少しだけ持たせると
+     * 引き出されたように見え、しかもすぐ止まる——{@link com.ashvehicles.client.particle.SmokeParticle#CONTRAIL}
+     * は摩擦が強いので、この速度は最初の数tickで消える。
+     */
+    private static final double CONTRAIL_DRIFT = 0.25;
+
+    /**
+     * これ以下のスロットルでは曳かない。
+     *
+     * <p>飛行機雲はエンジンが吐いた水蒸気であって、機体が空気を掻き回した跡ではない。絞り切って滑空している
+     * 機体の後ろには何も出ないのが正しい。
+     */
+    private static final float CONTRAIL_THROTTLE = 0.15F;
     /** ベイパーコーンが発生する最高速度に対する割合。 */
     private static final double VAPOUR_SPEED = 0.88;
     private static final double VAPOUR_RADIUS = 3.0;
@@ -571,6 +634,29 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.getStats().wing().drag();
     }
 
+    /**
+     * 吊り物を含めた今の重さが、機体ファイルが書いた空虚時の何倍か。
+     *
+     * <p>飛行計算が推力・揚力・抗力を加速度に直すときに割る値であり、満載の機体が鈍く感じる理由の全部だ。
+     * 重さを書いていない機体では常に1で、その機体は書く前とまったく同じに飛ぶ。
+     *
+     * <p>両側で同じ答えが要る。搭載物は既にクライアントへ届いており（計器も描画もそれを読んでいる）、
+     * 抗力が同じ場所から同じように引かれているので、予測と実際がここで食い違うことはない。
+     */
+    public double getBurden() {
+        return this.getStats().airframe().burden(this.weapons.storeMass());
+    }
+
+    /** 今吊っている物の合計重量（kg）。計器が出す物であり、地上要員が次の1発の可否を決める物。 */
+    public float getStoreMass() {
+        return this.weapons.storeMass();
+    }
+
+    /** この機体がパイロンに吊れる合計重量（kg）。0なら無制限。 */
+    public float getPayloadCapacity() {
+        return this.weapons.payloadCapacity();
+    }
+
     /** 舵一杯・操舵権限全開時のピッチ角速度（度/tick）。 */
     public float getPitchRate() {
         return this.getStats().handling().pitchRate();
@@ -654,6 +740,85 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     @Override
     protected List<VehicleChassis.Seat> seats() {
         return this.getStats().airframe().seats();
+    }
+
+    // ------------------------------------------------------------------
+    // 無人機
+    // ------------------------------------------------------------------
+
+    /**
+     * 乗員の乗る場所が無い機体か。無人機はこれで名乗る。
+     *
+     * <p><b>座席が0であること自体が申告だ。</b>専用の真偽値は置いていない。置けば、座席を持つのに無人と
+     * 書いた機体や、その逆が書けてしまう——そして意味を決めるのは結局どちらか一方になる。座席の一覧が
+     * 空であることは、それだけで「この機体に人は乗らない」と言い切っており、矛盾のしようが無い。
+     *
+     * <p>{@code AircraftDefinition} の最上位フィールドが Mojang の codec の16個上限にちょうど達している、
+     * という事情もある。だがそちらは理由ではなく、都合が良かっただけだ。
+     */
+    public boolean isUnmanned() {
+        return this.getStats().airframe().seats().isEmpty();
+    }
+
+    /**
+     * 今この機体を遠隔操作している者。誰も繋いでいなければ null。
+     *
+     * <p><b>接続は搭乗そのものだ。</b>別の台帳は持たない。操作者は無人機の搭乗者として乗っており、それが
+     * リンクである。乗っている限り繋がっているし、降りれば切れる——プレイヤーの切断でも、機体の破壊でも、
+     * チャンクの外へ出ることでも。Minecraft が既に完璧に管理している関係を、もう一度別の場所で管理し直す
+     * 理由が無い。{@link com.ashvehicles.entity.RemoteLink} 参照。
+     *
+     * <p>操作者が機体の位置に「本当にいる」ことは副作用ではなく目的だ。クライアントに chunk を送らせ、
+     * 世界を描かせ、カメラと HUD を従来通り動かすのは、そこに座っている乗員だけである。
+     */
+    public Player getOperator() {
+        return this.isUnmanned() && this.getFirstPassenger() instanceof Player operator ? operator : null;
+    }
+
+    /**
+     * <b>無人機は決して搭乗者に操縦権を渡さない。</b>
+     *
+     * <p>操縦権を渡すとは「その者のクライアントが飛行モデルを回す」という意味で
+     * （{@link #isControlledByLocalInstance}）、遠隔操作ではそれが成立しない。操作者のクライアントは
+     * 機体の位置をサーバーへ送れないからだ——バニラの ServerboundMoveVehiclePacket は操縦している乗り物に
+     * しか使えず、それを回避する道は無い。
+     *
+     * <p>よって無人機はサーバーが飛ばす。操作者が送るのは操縦桿の位置だけで、機体がどこにいるかを決めるのは
+     * 常にサーバーだ。往復1回分の遅れが乗るが、それは無人機の操作感として正しい方向の誤差でもある。
+     */
+    @Override
+    public LivingEntity getControllingPassenger() {
+        return this.isUnmanned() ? null : super.getControllingPassenger();
+    }
+
+    /** 席のパイロット、いなければ回線の向こうの操作者。 */
+    @Override
+    public LivingEntity getAviator() {
+        LivingEntity pilot = this.getControllingPassenger();
+
+        return pilot != null ? pilot : this.getOperator();
+    }
+
+    /**
+     * 今、サーバーが操作者の舵を受けて飛ばしているか。
+     *
+     * <p>操作者のいない無人機は舵中立で飛び続ける——{@link #tick} の「操縦者不在」と同じ扱いで、繋ぎ直す
+     * まで最後のスロットルのまま進む。落ちるのではなく、待っている。
+     */
+    public boolean isRemotelyFlown() {
+        return !this.level().isClientSide && this.getOperator() != null;
+    }
+
+    /**
+     * <b>無人機には歩いて乗り込めない。</b>座席が無いのだから当然だが、明示的に断る。
+     *
+     * <p>遠隔リンクはここを通らない。{@link com.ashvehicles.entity.RemoteLink} は force 付きで乗せるので、
+     * バニラはこの判定を飛ばす——「操作者だけ許す」という条件をここに書くと、実際には誰も通らない条件文が
+     * 残るだけになる。ここが守っているのは、リンク以外のあらゆる経路から機体に人が入らないことだ。
+     */
+    @Override
+    protected boolean canAddPassenger(Entity passenger) {
+        return !this.isUnmanned() && super.canAddPassenger(passenger);
     }
 
     @Override
@@ -1421,6 +1586,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         super.tick();
+        // 撃ち落とされた無人機に繋いだままにはしない。残骸は飛ばないので操縦桿は何もせず、操作者は燃えている
+        // 機体の中で回線を握り続けることになる。ここで切れば RemoteLink が基地へ帰す——失うのは機体だけだ。
+        if (!this.level().isClientSide && this.isWrecked() && this.getOperator() != null) {
+            this.getOperator().stopRiding();
+        }
+
         this.attitudeO = new Quaternionf(this.attitude);
         this.tickGear();
         this.tickVtol();
@@ -1428,9 +1599,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.tickLerp();
 
         if (this.isControlledByLocalInstance()) {
-            if (!(this.getControllingPassenger() instanceof Player)) {
+            // 遠隔操作中の無人機はここを通る。サーバーが飛ばしているので「操縦者不在」だが、舵は不在では
+            // ない——操作者が毎tick送ってくる。DroneInputPayload 参照。
+            if (!(this.getControllingPassenger() instanceof Player) && !this.isRemotelyFlown()) {
                 // 操縦者不在: 舵は中立へ戻るが、スロットルは置かれたまま。機体は何かに落とされるまで飛び
-                // 続ける。
+                // 続ける。無人機で操作者が切れた場合もこれで、繋ぎ直すまで最後の針路を保って飛ぶ。
                 this.input = AircraftInput.NONE;
             }
 
@@ -1992,10 +2165,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 ? definition.engine().maxThrust()
                 : Mth.lerp(lifting, definition.engine().maxThrust(), vtol.liftThrust());
 
+        // 吊り物を含めた今の重さ。ここから下で積み上げる力は全部、最後にこれで割られて加速度になる。重力
+        // だけはこの袋に入らない——重力は力ではなく加速度としてこの MOD に入っているので、重い機体も軽い
+        // 機体も同じ速さで落ちる。{@link AircraftDefinition.Airframe#burden} 参照。
+        double burden = this.getBurden();
+
         // 吸い込んでいる空気に対して、レバーの要求値ではなくエンジンの実出力に対して、さらにその上へバーナー
         // を乗せて計算する。
-        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0)
-                .add(thrustAxis.scale(thrust * this.thrustLevel * this.reheatThrust() * density));
+        Vec3 forces = thrustAxis.scale(thrust * this.thrustLevel * this.reheatThrust() * density);
 
         // そしてホバリングは滑走ではない。歩行速度では空力は何も効かない——抗力は2乗則で、小さい数の2乗は無に
         // 等しい——ので、ホバリング中に横へ押された機体は何かに当たるまで横へ流れ続ける。これは揚力系による
@@ -2018,10 +2195,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
             // 迎角。空気が主翼のどれだけ下から来ているか。
             this.angleOfAttack = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(up), -1.0, 1.0)));
-            double liftCoefficient = wing.liftCoefficient(this.angleOfAttack)
-                    * (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
+            // 主翼の素の係数に掛かる分。フラップ、後退角、地面効果。トリム（下）が同じ翼について解くので、
+            // 係数と分けて保持する。
+            double liftGain = (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
                     * this.sweepLift()
                     * this.groundEffect();
+            double liftCoefficient = wing.liftCoefficient(this.angleOfAttack) * liftGain;
 
             // 揚力は気流に直角に働き、主翼と共に傾く。その傾きが機体を旋回させる。バンクすれば、支えていた
             // のと同じ力が機体を回し始める。
@@ -2067,7 +2246,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 // {@link #limitToWing} が既にパイロットの操縦桿を無効まで落としている。これが無いと失速機は最後に
                 // 操縦桿が残した向きを指したまま、重力だけが実際の行き先を決めることになる。待つ以外に抜け道の
                 // 無いテールスライドだ。
-                weathervanePitch = (float) (flow.dot(up) * handling.weathervane() * aeroAuthority / damping);
+                //
+                // <b>引き戻す先は迎角0ではなくトリム迎角だ。</b>この MOD の翼は対称翼で、迎角0の揚力係数は0
+                // ——気流にぴったり沿った機体は何も支えていない。尾翼をそこへ向けると、機体は水平飛行に必要な
+                // 迎角を自分で毎tick捨てることになる。パイロットから見えるのは「速度は十分あるのに機首が下がり
+                // 続け、操縦桿を引きっぱなしにしなければ真っ直ぐ飛べない」機体で、それは実機で言えばトリムが
+                // 取れていない状態そのものだ。実機の水平尾翼は迎角0を向いてなどおらず、水平安定板が据えられた
+                // 角度——つまり1G を支える迎角——を向いている。{@link #trimAngleOfAttack} 参照。
+                double trim = this.trimAngleOfAttack(wing, speed, density, liftGain);
+
+                weathervanePitch = (float) (Math.sin(Math.toRadians(trim - this.angleOfAttack))
+                        * handling.weathervane() * aeroAuthority / damping);
 
                 // そして胴体は横向きに飛ぶことを拒む。
                 motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()));
@@ -2077,13 +2266,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         // 荷重のうちタイヤに残っている割合。下の地上操作用に保持する。離陸滑走の終盤が最後の瞬間まで食い付か
-        // ずに軽くなるのはこれのおかげだ。
-        this.weightOnWheels = (float) Mth.clamp(1.0 - lift / GRAVITY, 0.0, 1.0);
+        // ずに軽くなるのはこれのおかげだ。満載の機体はここで長く重いままになる——同じ主翼が同じ揚力を作って
+        // いても、支えるべき機体が重いのだから。
+        this.weightOnWheels = (float) Mth.clamp(1.0 - lift / burden / GRAVITY, 0.0, 1.0);
 
         this.applyBodyRotation(this.rollVelocity, this.pitchVelocity + weathervanePitch,
                 this.yawVelocity + weathervaneYaw + nosewheel);
         this.deltaRotation = Mth.wrapDegrees(this.getYRot() - previousYRot);
-        motion = motion.add(forces);
+        motion = motion.add(forces.scale(1.0 / burden)).add(0.0, -GRAVITY, 0.0);
 
         if (rolling) {
             motion = this.groundTick(motion);
@@ -2212,8 +2402,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         Vec3 right = Attitude.right(this.attitude);
         Vec3 nose = this.getNoseVector();
 
+        // 固定翼機と同じ袋。吊り物を含めた重さで最後に割られ、重力だけがそこから外れる。ヘリではこれが
+        // 最も分かりやすく効く——満載のガンシップがホバリングから上がらないのは、ローターが弱いのではなく
+        // ローターが持ち上げる物が重いからだ。
+        double burden = this.getBurden();
         double disc = this.rotorLift(rotor, speed);
-        Vec3 forces = new Vec3(0.0, -GRAVITY, 0.0).add(up.scale(disc));
+        Vec3 forces = up.scale(disc);
 
         // 上下から来る空気はローターとその下に吊られた全てに横腹から当たり、前から来る空気は胴体に当たる。
         // 差は1桁近くあり、ヘリの上昇率がフィート/分で、隣の速度がノットで示される理由でもある——胴体自身の
@@ -2294,12 +2488,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         // 車輪がまだ支えている機体の割合。上のサイクリックゲートは1tick遅れでこれを読むが、誰にも見えない
         // 1tickであり、ローターを2度計算せずに済む。
-        this.weightOnWheels = (float) Mth.clamp(1.0 - (disc + lift) / GRAVITY, 0.0, 1.0);
+        this.weightOnWheels = (float) Mth.clamp(1.0 - (disc + lift) / burden / GRAVITY, 0.0, 1.0);
 
         this.applyBodyRotation(this.rollVelocity, this.pitchVelocity,
                 this.yawVelocity + weathervaneYaw + nosewheel + torqueYaw);
         this.deltaRotation = Mth.wrapDegrees(this.getYRot() - previousYRot);
-        motion = motion.add(forces);
+        motion = motion.add(forces.scale(1.0 / burden)).add(0.0, -GRAVITY, 0.0);
 
         if (rolling) {
             motion = this.groundTick(motion);
@@ -2794,6 +2988,39 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return (float) Math.abs(wing.lift() * coefficient * speed * speed / GRAVITY);
     }
 
+    /**
+     * 水平尾翼が機首を向ける迎角。その速度・その空気で機体の重量を支えるのに要る分（度）。
+     *
+     * <p>実機の水平安定板が据えられている角度に相当する。だから操縦桿から手を離した機体は、機首を落とすの
+     * ではなくその高度を保つ——それがトリムの定義だ。
+     *
+     * <p>解いているのは1本の式でしかない。揚力＝重量、つまり
+     * {@code lift * Cl * v^2 * density == GRAVITY} を {@code Cl} について解き、{@code lift_slope} で迎角へ
+     * 戻す。速いほど小さく、薄い空気の高高度ほど大きく、フラップを下ろせば小さくなる——実機のトリムが
+     * 速度と高度と形態で変わるのとまったく同じ理由で、同じ向きに変わる。
+     *
+     * <p><b>失速角で頭打ちにする。</b>翼が出せる以上の係数を尾翼が要求しても、翼はそれを作らない。失速速度
+     * より遅い機体は要求が上限に張り付いたまま沈み、沈めば速度が戻り、要求は上限より下へ帰ってくる。上限を
+     * 置かずに解を信じると、尾翼は失速の遥か奥の迎角へ機首を持ち上げ続け、機体は自力で抜けられなくなる。
+     * 逆に言えば、この上限に触れない速度——ファイルの {@code stall_speed} 以上——では、機体はパイロットが
+     * 何もしなくても真っ直ぐ飛ぶ。
+     *
+     * @param gain 主翼の素の係数に掛かる分。フラップ・後退角・地面効果。呼び出し側が揚力そのものに使うのと
+     *             同じ値でなければならない——違う値で解けば、機体は自分が実際に作る揚力とは別の迎角へ
+     *             トリムされる
+     */
+    private double trimAngleOfAttack(AircraftDefinition.Wing wing, double speed, double density, double gain) {
+        double pressure = wing.lift() * speed * speed * density * gain;
+
+        if (pressure <= 1.0E-8) {
+            return 0.0;
+        }
+
+        double slope = Math.max(wing.liftSlope(), 1.0E-4F);
+
+        return Math.min(Math.toDegrees(GRAVITY / pressure / slope), wing.stallAngle());
+    }
+
     /** 揚力の作用方向。キャノピーを貫いて上向き。その向きがどこであれ。 */
     public Vec3 getLiftVector() {
         return Attitude.up(this.attitude);
@@ -2896,7 +3123,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return;
         }
 
-        boolean running = this.getControllingPassenger() != null;
+        // 無人回転翼機のローターは操作者が繋がっている間回る。回すのはそこにいる乗員ではなく、そこに
+        // 誰かが繋がっているという事実だ。
+        boolean running = this.getControllingPassenger() != null || this.getOperator() != null;
 
         this.rotorSpeed = approach(this.rotorSpeed, running ? 1.0F : 0.0F,
                 1.0F / Math.max(rotor.spoolTicks(), 1));
@@ -3213,6 +3442,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return;
         }
 
+        this.spawnContrail(velocity, speed);
+
         Vec3 position = this.position();
         Vec3 up = this.getLiftVector();
         Vec3 right = Attitude.right(this.attitude);
@@ -3259,6 +3490,65 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                         .add(up.scale(Math.sin(angle) * radius));
 
                 this.level().addParticle(vapour, rim.x, rim.y, rim.z, drift.x, drift.y, drift.z);
+            }
+        }
+    }
+
+    /**
+     * 高高度で機体が曳く飛行機雲。
+     *
+     * <p>翼端ベイパー（{@link #spawnFlightEffects}）とは別物だ。あちらは主翼が引き回した空気の中の水分が凝結
+     * した物で、Gを抜けば消える。こちらはエンジンが吐いた水蒸気が冷たい薄い空気の中で凍った物なので、機体が
+     * 何をしていようと、高いところをエンジンを回して飛んでいる限り後ろに残り続ける。だから条件は高度と
+     * スロットルであって、速度でもGでもない。
+     *
+     * <p><b>1tickに1粒では航跡にならない。</b>ミサイルの航跡（{@code VehicleProjectile.spawnTrail}）と同じ
+     * 事情で、この高度を飛ぶ機体は tick 間に数ブロック進む。実際に飛んだ区間に沿って粒を分けて置くので、
+     * 巡航でも全開でも同じ密度の1本の筋になる。
+     *
+     * <p>ノズルから出す。双発機は2本曳き、単発機は1本——実機を見上げて数えられるのと同じ本数になる。
+     * ノズル位置を書いていない機体は当たり判定形状の後端から1本で、これは{@code nozzles} のフォールバックが
+     * 元から言っている通り。
+     */
+    private void spawnContrail(Vec3 velocity, double speed) {
+        // 濃さ。閾値の高度で0から始まり、そこから帯の分だけ上で完全になる。
+        double thickness = Mth.clamp((this.getY() - CONTRAIL_ALTITUDE) / CONTRAIL_BAND, 0.0, 1.0);
+
+        // エンジンが回っていなければ吐く水蒸気も無い。読むのはスロットルではなく実際に出ている推力
+        // （スプール済み）だ。絞った直後の機体はエンジンがまだ回っており、航跡はすぐには切れない。
+        //
+        // ローター機は曳かない。ターボシャフトも排気は出すが、この航跡は機体の後ろへ真っ直ぐ引き出される
+        // 筋であって、ローターが吹き下ろす空気の中に置いた粒はそう振る舞わない。そしてヘリがこの高度を
+        // 飛ぶこと自体がほとんど無い。
+        if (thickness <= 0.0 || this.thrustLevel <= CONTRAIL_THROTTLE
+                || this.getStats().rotor().isPresent()) {
+            return;
+        }
+
+        AircraftDefinition.Afterburner burner = this.getStats().engine().afterburner().orElse(null);
+        List<Vec3> nozzles = burner == null
+                ? List.of(new Vec3(0.0, WING_HEIGHT, -this.getBbWidth() / 2.0))
+                : this.nozzles(burner);
+        RandomSource random = this.level().random;
+        TintedParticleOption ice = ModParticles.CONTRAIL.get()
+                .of(CONTRAIL_COLOUR, (float) (CONTRAIL_SIZE * thickness));
+        Vec3 drift = velocity.scale(CONTRAIL_DRIFT);
+        // 飛んだ区間をこれだけに割る。速い機体ほど多く——間隔ではなく密度を一定に保つのが狙いなので。
+        int puffs = Mth.clamp((int) (speed * CONTRAIL_DENSITY), 1, CONTRAIL_MOST_PUFFS);
+
+        for (Vec3 nozzle : nozzles) {
+            Vec3 lip = this.position().add(Attitude.toWorld(this.attitude, nozzle));
+
+            for (int i = 0; i < puffs; i++) {
+                // この tick に通ってきた区間へ遡って置く。揺らぎを混ぜるのは、連続する tick が同じ位置に
+                // 粒を積んで筋が杭垣にならないようにするため。
+                Vec3 at = lip.subtract(velocity.scale((i + random.nextDouble()) / puffs));
+
+                this.level().addParticle(ice,
+                        at.x + random.nextGaussian() * CONTRAIL_SCATTER,
+                        at.y + random.nextGaussian() * CONTRAIL_SCATTER,
+                        at.z + random.nextGaussian() * CONTRAIL_SCATTER,
+                        drift.x, drift.y, drift.z);
             }
         }
     }
@@ -3460,20 +3750,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return InteractionResult.SUCCESS;
         }
 
-        // スニーク中は弾庫を意味する。手に何を持っていても、機体のどの箱にクリックが当たっても同じ。
-        //
-        // パイロットや兵装より前に置く必要がある。機体の前でスニークしている者が最も持っていそうな物がそれだ
-        // からだ——空のパイロンへミサイルを差し出せばパイロンに載る。スニークしていないクリックには正しく、
-        // スニーク中のクリックにはまったく誤りだ。スニークすれば代わりに弾庫へ入る。
-        //
-        // これが置き換えたのは、スニーク中のクリックが「今はやめておく」を意味し、本来のクリック動作へ素通り
-        // していた挙動だ。それは今もクリックにできることだが、スニーク無しで綴られるようになった。
-        if (player.isSecondaryUseActive()) {
-            this.openHold(player);
-
-            return InteractionResult.CONSUME;
-        }
-
         // 視線がパイロンを貫いたクリックは、ゲームがどの箱へ渡したかに関わらずそのパイロンへのクリックだ。
         //
         // ピック任せにせずここで決める必要がある。パイロンの箱は大抵主翼の箱の内側にあるからだ。ゲームは視線が
@@ -3482,7 +3758,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         //
         // 差し出す物が無いパイロン——空のパイロンに素手——は PASS を返し、クリックはそのまま下へ流れて通常の
         // 意味を持つ。
-        VehiclePart pylon = this.pylonInSight(player);
+        //
+        // しゃがんでいる者だけは例外で、それはステーションではなく機体そのものを指す。主翼下面の大半はクリック
+        // の観点ではパイロンなので、これが無いとレンチで機体を畳むことができない——手が届く場所が全部
+        // 「そこの兵装を1つ外す」になってしまう。{@code VehiclePart.interact} が同じ規則を守っている。
+        VehiclePart pylon = player.isSecondaryUseActive() ? null : this.pylonInSight(player);
 
         if (pylon != null) {
             InteractionResult reached = this.interactPylon(player, hand, pylon.getPylon());
@@ -3493,6 +3773,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         ItemStack held = player.getItemInHand(hand);
+
+        // 弾薬箱も搭乗より先に見る。ベルトを抱えて機体へ歩み寄る者は内蔵砲を装填したいのであって、乗り
+        // 込みたいのではない。入る砲が無ければクリックは素通りして通常の意味を持つ——満載の機体を撫でて
+        // ベルトを1本失うことは起きない。戦車が弾薬箱を受ける場所と同じ位置づけ。
+        if (held.getItem() instanceof AmmoItem ammo) {
+            InteractionResult loaded = this.loadAmmo(player, held, ammo.getKind());
+
+            if (loaded.consumesAction()) {
+                return loaded;
+            }
+        }
 
         // 燃料缶を持って機体へ歩み寄る者は給油したいのであって、乗り込みたいのではない。兵装と同じ理由で
         // 搭乗より先に置く。満タンなら缶は減らず、クリックは素通りして通常の意味を持つ——それが「満タンの
@@ -3510,11 +3801,23 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 兵装を差し出せば、クリックは素通りして通常の意味を持つ。
         if (this.canBeArmedWith(held)) {
             if (this.fitAnywhere(held)) {
+                this.report(player, "message.ashvehicles.mounted", held.getHoverName());
                 held.consume(1, player);
                 this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
             }
 
             return InteractionResult.CONSUME;
+        }
+
+        // 吊る場所はもう無いが、吊ってある同じ物にまだ弾が入る。半分撃ったガンポッドを翼から降ろさずに満たす
+        // 手段であり、弾庫が担っていた仕事のうち「補給」だった部分の行き先。搭載より後に置くのは、新品を差し
+        // 出した者がまず空きレールへ吊りたいからだ。
+        if (held.getItem() instanceof WeaponItem store && this.isParked()) {
+            InteractionResult loaded = this.reloadWith(player, held, store.getWeaponId(), ANY_STATION);
+
+            if (loaded.consumesAction()) {
+                return loaded;
+            }
         }
 
         if (held.getItem() instanceof WrenchItem) {
@@ -3557,8 +3860,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return InteractionResult.CONSUME;
         }
 
-        // ここへ来る頃にはパイロンは空だが弾庫は空ではない。積んだまま畳めば積荷ごと持って行かれてしまう。
-        this.spillHold();
         this.destroy(this.getDropItem());
 
         return InteractionResult.CONSUME;
@@ -3598,10 +3899,22 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         ItemStack held = player.getItemInHand(hand);
 
         if (this.fitAt(slot, held)) {
+            this.report(player, "message.ashvehicles.mounted", held.getHoverName());
             held.consume(1, player);
             this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
 
             return InteractionResult.CONSUME;
+        }
+
+        // 満載のラックへ同じ兵装を差し出したなら、それは「装填」だ。ステーションを名指ししたクリックが機体
+        // 全体へのクリックより出来ることが少ない理由は無い。補給先はこのステーションだけ——名指しした以上、
+        // 反対の翼のポッドが黙って満たされてはならない。
+        if (held.getItem() instanceof WeaponItem store) {
+            InteractionResult loaded = this.reloadWith(player, held, store.getWeaponId(), slot);
+
+            if (loaded.consumesAction()) {
+                return loaded;
+            }
         }
 
         // 「決して受け取れない物」ではなく「今は受け取れない物」を差し出した場合——空のパイロンへミサイル、
@@ -3625,6 +3938,107 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         return InteractionResult.PASS;
+    }
+
+    /**
+     * 手持ちの兵装アイテム1個を、既に吊ってある同じ兵装へ注ぎ込む。
+     *
+     * <p><b>通貨は「発」で、アイテムは財布。</b> 60発残ったポッドは60発分の補給であり、入りきらなかった分は
+     * 中身の残ったポッドとして手元へ戻る——満載間際の兵装へ新品を差し出しても、残りは失われない。弾庫が
+     * 「半分のベルトを半分のまま返す」ことでやっていたのと同じ取り決めを、手の中で行う。
+     *
+     * @param slot 補給先を1ステーションに限るならその番号。{@link #ANY_STATION} なら機体上のどこでも
+     * @return 何発か入ったなら CONSUME。入る先が無ければ PASS で、クリックは本来の意味へ流れる
+     */
+    private InteractionResult reloadWith(Player player, ItemStack held, ResourceLocation weapon, int slot) {
+        WeaponDefinition fitted = Definitions.weapon(weapon);
+
+        // 増槽だけはここを通さない。増槽の「残弾」は燃料であり、素直に通せば1本を溶かして吊ってある方へ
+        // 注ぐ処理になる。増槽を満たすのは燃料缶で、空にした物を投棄して新しい1本を吊るのも変わらず正しい。
+        if (fitted.type() == WeaponDefinition.Type.TANK) {
+            return InteractionResult.PASS;
+        }
+
+        int capacity = fitted.ammo();
+        int stored = WeaponItem.ammoOf(held);
+        // 残弾の記載が無ければ満載。そこから1発も撃たれていないということ。
+        int offered = stored < 0 ? capacity : stored;
+        Component name = held.getHoverName();
+        int taken = this.weapons.reload(slot, weapon, offered);
+
+        if (taken <= 0) {
+            return InteractionResult.PASS;
+        }
+
+        held.consume(1, player);
+
+        // 余りは中身の残ったポッドとして返す。クリエイティブでは元のアイテムが減っていないので、返す物も無い。
+        if (taken < offered && !player.getAbilities().instabuild) {
+            ItemStack rest = WeaponItem.stackOf(weapon, offered - taken);
+
+            if (!player.addItem(rest)) {
+                player.drop(rest, false);
+            }
+        }
+
+        this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+        this.report(player, "message.ashvehicles.reloaded", name, taken, this.weapons.ammoOf(weapon));
+
+        return InteractionResult.CONSUME;
+    }
+
+    /**
+     * 手にある弾薬箱を、それが入る内蔵砲の弾倉へ押し込む。
+     *
+     * <p>機体の機関砲はかつて駐機しているだけで満ちた。撃ち尽くしても着陸して数秒待てば満載で、つまり
+     * 空戦で弾を数える必要も、ベルトを作る必要も無かった。翼下のミサイルが「誰かが積んだ分だけ」である
+     * 一方で、内蔵砲だけが無限だったことになる。今は戦車の主砲と同じ手順を踏む
+     * （{@code WeaponMounts.loadAmmo} 参照）。
+     *
+     * <p><b>駐機中の機体だけ。</b>飛んでいる機体へベルトを差し出せる者はいない。戦車が停止を求めるのと
+     * 同じ規則で、機外に立っている者が装填するのだから機体側が答える。
+     *
+     * @return 何か入ったなら CONSUME。入らなければ PASS で、クリックは搭乗などの本来の意味へ流れる
+     */
+    private InteractionResult loadAmmo(Player player, ItemStack held, AmmoKind kind) {
+        if (this.isWrecked() || !this.isParked()) {
+            return InteractionResult.PASS;
+        }
+
+        WeaponMounts.Resupply loaded = this.weapons.loadAmmo(kind, held.getCount());
+
+        if (loaded == null) {
+            return InteractionResult.PASS;
+        }
+
+        held.consume(loaded.taken(), player);
+        WeaponMounts.playLoadSound(this, true);
+        this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+        this.report(player, "message.ashvehicles.loaded",
+                Component.literal(weaponLabel(loaded.weapon())), loaded.rounds(), loaded.capacity());
+
+        return InteractionResult.CONSUME;
+    }
+
+    /**
+     * 砲の呼び名。計器が出しているのと同じ形で、ファイル名をそのまま読む。
+     *
+     * <p>機体の砲には「主砲」「同軸」のような決まった呼び名が無い。座席と砲座の対応は機体ごとに違い、
+     * 同じ砲が機首にも翼根にも付く。乗員にとっての名前はそこに載っている砲の名前だけだ。
+     */
+    private static String weaponLabel(ResourceLocation weapon) {
+        return weapon.getPath().replace('_', '-').toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * 地上作業の結果を、それを行った者のホットバー上へ1行で。
+     *
+     * <p>音だけでは足りない。機外に立っている者の画面にはこの機体の計器が1つも出ておらず、翼下で何が起きたか
+     * ——何が載ったか、何発入ったか、あと何発入るか——を言える場所が他に無い。チャットではなくアクションバー
+     * なのは、これが履歴に残す知らせではなく「今のクリックの手応え」だからだ。
+     */
+    private void report(Player player, String key, Object... args) {
+        player.displayClientMessage(Component.translatable(key, args), true);
     }
 
     /**
@@ -3696,12 +4110,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return false;
         }
 
-        if (held.getItem() instanceof RackItem) {
-            return this.weapons.hasBarePylon();
+        if (held.getItem() instanceof RackItem rack) {
+            return this.weapons.hasBarePylon(rack.getRackId());
         }
 
-        if (held.getItem() instanceof EquipmentItem) {
-            return this.weapons.hasBareSpecial();
+        if (held.getItem() instanceof EquipmentItem pod) {
+            return this.weapons.hasBareSpecial(pod.getEquipmentId());
         }
 
         return held.getItem() instanceof WeaponItem weapon && this.weapons.canMount(weapon.getWeaponId());

@@ -8,18 +8,22 @@ import javax.annotation.Nullable;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.vehicle.Attitude;
+import com.ashvehicles.item.AmmoItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 import com.ashvehicles.vehicle.Ride;
 import com.ashvehicles.vehicle.VehicleChassis;
+import com.ashvehicles.weapon.AmmoKind;
 import com.ashvehicles.weapon.BuiltInGun;
 import com.ashvehicles.weapon.TargetLock;
 import com.ashvehicles.weapon.TurretLauncher;
 import com.ashvehicles.weapon.WeaponDefinition;
+import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -260,7 +264,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     /** 砲塔の主砲（あれば）。発砲はサーバーのみ。 */
     private final BuiltInGun gun = new BuiltInGun(this, BuiltInGun.Mount.MAIN);
     /**
-     * それに固定された機関銃（あれば）。上の主砲と同じクラス・同じ条件——同じ弾庫から装填し、サーバーで発砲
+     * それに固定された機関銃（あれば）。上の主砲と同じクラス・同じ条件——同じクリックで装填し、サーバーで発砲
      * ——だが独自のトリガーを持つ。同軸機銃は<em>選択</em>される物ではなく、主兵装が何をしていようとそこに
      * あるからだ。
      */
@@ -355,8 +359,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 最初のtickではなくここで構築する。レベルはエンティティ追加時にそのパーツを記録するので、まだ
         // パーツを持たないエンティティは「無し」として覚えられてしまう。
         this.buildParts();
-        // 新造車両は無傷であり、かつ空である。砲も発射筒も車両自身の乗員が弾庫から装填するしかないので、
-        // 何も積まずに置かれた車両は誰かが装填するまで撃つ弾を持たない。BuiltInGun と TurretLauncher 参照。
+        // 新造車両は無傷であり、かつ空である。砲も発射筒も誰かが弾薬を持って右クリックしない限り満たされ
+        // ないので、置かれたばかりの車両は撃つ弾を持たない。BuiltInGun と TurretLauncher 参照。
         // ワールドから読み戻した個体はタグでこれを上書きし、クライアントには他の同期データと共に実値が届く。
         this.setHealth(this.getMaxHealth());
         // 弾は空でもタンクは満タン。置いた場所から動かせない車両を配りたい者はいない。
@@ -556,12 +560,36 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 名前で変わるのではない——同じ筒に別の弾を入れたパックの車両も、書き足す物なしにこちらの手順で動く。
      */
     public boolean laysPoint() {
+        return this.seeker() == WeaponDefinition.Guidance.Seeker.POINT;
+    }
+
+    /**
+     * この車両の発射機が、シーカーの捕捉ではなく<em>据えた点</em>へ弾を送るか。
+     *
+     * <p>{@link #laysPoint} より広い問い。座標を打ち込む物（POINT）と、照準線を追わせる物（BEAM）の両方が
+     * ここに入る。どちらも {@link #designate} が置いたマークを弾に渡すので、目標の持ち方は同じだ——違うのは
+     * 誰がその点を決めるか（乗員が盤で／照準そのものが毎tick）だけである。
+     *
+     * <p><b>{@code LASER} は入らない。</b>{@link WeaponDefinition.Guidance.Seeker#laid()} には入るが、あちらは
+     * 機体の話だ——光点を当て続けるのは照準ポッドであり、それを積んでいる車両はこの MOD に1台も無い。だから
+     * 車両に載ったレーザー誘導弾は従来どおりシーカーで捕捉する。ここで {@code laid()} をそのまま使うと、
+     * 誰も当てていない光点を待って永遠に撃てない発射機ができる。
+     */
+    public boolean aimsAtPoint() {
+        WeaponDefinition.Guidance.Seeker seeker = this.seeker();
+
+        return seeker == WeaponDefinition.Guidance.Seeker.POINT
+                || seeker == WeaponDefinition.Guidance.Seeker.BEAM;
+    }
+
+    /** 発射筒に入っている弾のシーカー種別。積んでいないか誘導を持たなければ null。 */
+    @Nullable
+    private WeaponDefinition.Guidance.Seeker seeker() {
         WeaponDefinition missile = this.getStats().launcher().missile()
                 .map(Definitions::weapon).orElse(null);
 
-        return missile != null && missile.guidance()
-                .map(guidance -> guidance.seeker() == WeaponDefinition.Guidance.Seeker.POINT)
-                .orElse(false);
+        return missile == null ? null
+                : missile.guidance().map(WeaponDefinition.Guidance::seeker).orElse(null);
     }
 
     /**
@@ -621,8 +649,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      *                  （{@link com.ashvehicles.client.Terrain} 参照）
      */
     public boolean designate(@Nullable Vec3 point, boolean estimated) {
-        if (point == null || this.isWrecked() || !this.laysPoint()
-                || point.subtract(this.position()).horizontalDistance() > this.launcherReach()) {
+        if (point == null || this.isWrecked() || !this.aimsAtPoint()) {
+            this.clearDesignation();
+
+            return false;
+        }
+
+        // 射程の検査は打ち込まれた座標にだけ掛ける。照準線の先に置く点（BEAM）は弾が届く距離に置いた物で
+        // あって乗員が選んだ場所ではないし、そもそも弾はそこへ行き着く前に何かへ当たる。
+        if (this.laysPoint()
+                && point.subtract(this.position()).horizontalDistance() > this.launcherReach()) {
             this.clearDesignation();
 
             return false;
@@ -642,7 +678,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         }
 
         this.entityData.set(DATA_DESIGNATED, this.marker.getId());
-        this.setMissileReload(Math.max(this.getMissileReload(), LAY_SETTLE_TICKS));
+
+        // 据え付けの間も、打ち込まれた座標にだけ。照準線は毎tick置き直される物なので、そのたびに待ちを
+        // 入れれば発射機は永遠に撃てない。
+        if (this.laysPoint()) {
+            this.setMissileReload(Math.max(this.getMissileReload(), LAY_SETTLE_TICKS));
+        }
 
         return true;
     }
@@ -683,7 +724,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return;
         }
 
-        if (this.isWrecked() || !this.laysPoint() || this.getDesignated() == null) {
+        if (this.isWrecked() || !this.aimsAtPoint() || this.getDesignated() == null) {
             this.clearDesignation();
 
             return;
@@ -2317,15 +2358,18 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return InteractionResult.SUCCESS;
         }
 
-        // スニーク中は手に何を持っていても弾庫を開く——航空機の弾庫を開くのと同じ操作。乗員が目の前の機種を
-        // いちいち思い出す必要は無いからだ。解体はスニーク無しのレンチの仕事。
-        if (player.isSecondaryUseActive()) {
-            this.openHold(player);
-
-            return InteractionResult.CONSUME;
-        }
-
         ItemStack held = player.getItemInHand(hand);
+
+        // 弾薬箱は搭乗より先に見る。砲弾を抱えて戦車へ歩み寄る者は装填したいのであって、乗り込みたいので
+        // はない。入る場所が無ければクリックは素通りして通常どおり乗車になる——満載の車両を撫でて弾薬を
+        // 1個失うことは起きない。
+        if (held.getItem() instanceof AmmoItem ammo) {
+            InteractionResult loaded = this.loadAmmo(player, held, ammo.getKind());
+
+            if (loaded.consumesAction()) {
+                return loaded;
+            }
+        }
 
         // 燃料缶は搭乗より先に見る。缶を持って戦車へ歩み寄る者は給油したいのであって、乗り込みたいのでは
         // ない。満タンなら缶は減らず、クリックは素通りして通常どおり乗車になる。
@@ -2348,6 +2392,61 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return player.startRiding(this, true) ? InteractionResult.CONSUME : InteractionResult.PASS;
     }
 
+    /**
+     * 手にある弾薬箱を、それが入る弾倉へ押し込む。かつて車両が持っていた弾庫と装填手の仕事は、全部この1
+     * クリックになった。
+     *
+     * <p><b>1回のクリックで、入るだけ入る。</b> 砲弾40発の戦車に1発ずつ40回クリックさせる仕組みは装填では
+     * なく作業だ。手にあるスタックのうち弾倉に収まる分を取り、残りは手に残る。
+     *
+     * <p>探す順は主砲・同軸機銃・発射筒。同じ種類を2箇所が受け付ける車両——主砲も機関砲で同軸も機関砲の
+     * 場合——では主砲が先に満ちる。主兵装だからだ。1回のクリックが満たすのは1箇所だけで、それは
+     * 「何が装填されたか」を1行で言えるようにするためでもある。
+     *
+     * <p><b>停止している車両だけ。</b> 揺れている車体に砲弾を手渡す者はいない。以前この規則は装填の側に
+     * 書かれていたが、今は装填する者が車外に立っているので、車両が答える。
+     *
+     * @return 何か入ったなら CONSUME。入らなければ PASS で、クリックは乗車などの本来の意味へ流れる
+     */
+    private InteractionResult loadAmmo(Player player, ItemStack held, AmmoKind kind) {
+        if (this.isWrecked() || Math.abs(this.speed) > STANDSTILL) {
+            return InteractionResult.PASS;
+        }
+
+        int offered = held.getCount();
+        int taken = this.gun.load(kind, offered);
+        String station = "main";
+        int rounds = this.gun.rounds();
+        int capacity = this.gun.capacity();
+
+        if (taken == 0) {
+            taken = this.coax.load(kind, offered);
+            station = "coaxial";
+            rounds = this.getCoaxRounds();
+            capacity = this.coax.capacity();
+        }
+
+        if (taken == 0) {
+            taken = this.launcher.load(kind, offered);
+            station = "launcher";
+            rounds = this.getMissiles();
+            capacity = this.launcher.capacity();
+        }
+
+        if (taken == 0) {
+            return InteractionResult.PASS;
+        }
+
+        held.consume(taken, player);
+        WeaponMounts.playLoadSound(this, true);
+        // 弾倉は車両の同期データにあるので、乗っていない者の画面には何も出ない。装填したことが分かる手段は
+        // 音とこの1行しかなく、行為の結果——どこへ何発入り、満載まであとどれだけか——はここでしか言えない。
+        player.displayClientMessage(Component.translatable("message.ashvehicles.loaded",
+                Component.translatable("station.ashvehicles." + station), rounds, capacity), true);
+
+        return InteractionResult.CONSUME;
+    }
+
     /** 車両をアイテムへ畳み戻す。地上作業であり、誰か乗っている間は不可。 */
     private InteractionResult dismantle(Player player) {
         // 残骸は先に、別の答えを返す。畳む車両はもう無く、片付けるべき残骸とその中の金属があるだけだ。
@@ -2359,8 +2458,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return InteractionResult.PASS;
         }
 
-        // 弾庫の中身はプレイヤーの物であり、積んだまま畳めば積荷ごと持って行かれてしまう。
-        this.spillHold();
         this.destroy(this.getDropItem());
 
         return InteractionResult.CONSUME;

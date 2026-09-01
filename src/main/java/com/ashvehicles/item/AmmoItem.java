@@ -13,9 +13,9 @@ import net.minecraft.world.item.TooltipFlag;
 /**
  * 火砲の補給元。主砲なら砲弾、機関砲ならベルト。
  *
- * <p>車両の弾庫に入れておけば、停止中に乗員が積み込む（{@code BuiltInGun.resupply} 参照）。弾庫が空の
- * 車両は装填済みの分だけ持って出て、空で帰ってくる。それがこの仕組みの狙いで、戦車が撃てるのは誰かが
- * 積んだ分だけ——機体が翼下に積む物と全く同じ考え方。
+ * <p>持って停止中の車両を右クリックすれば、入る弾倉へその場で入る（{@code BuiltInGun.load} 参照）。
+ * 車両が積んで出るのはそうして入れた分だけで、空で出た車両は空で帰ってくる。それがこの仕組みの狙いで、
+ * 戦車が撃てるのは誰かが装填した分だけ——機体が翼下に積む物と全く同じ考え方。
  *
  * <p><b>スタックには何も書かない。</b> 砲弾は砲弾、ベルトはベルトなので、1個は必ずその種類の
  * {@link AmmoKind#roundsPerItem()} 相当で、端数にはならない。乗員は1個丸ごと取るか取らないかで、
@@ -34,11 +34,6 @@ public class AmmoItem extends Item {
     /** どの火砲に供給するか。 */
     public AmmoKind getKind() {
         return this.kind;
-    }
-
-    /** そのスタックが指定種類の弾薬か。弾庫を探すときの条件。 */
-    public static boolean isKind(ItemStack stack, AmmoKind kind) {
-        return stack.getItem() instanceof AmmoItem ammo && ammo.kind == kind;
     }
 
     @Override

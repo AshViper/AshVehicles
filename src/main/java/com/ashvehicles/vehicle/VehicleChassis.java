@@ -89,9 +89,10 @@ public final class VehicleChassis {
      */
     public record Model(float scale, Map<String, String> bones, List<String> roadWheels,
             List<String> steeredWheels, float steerLock, Optional<Track> track, List<String> slavedTurrets,
-            List<String> propellers) {
+            List<String> propellers, String propellerAxis, float nozzleRest) {
         public static final Model DEFAULT =
-                new Model(1.0F, Map.of(), List.of(), List.of(), 0.0F, Optional.empty(), List.of(), List.of());
+                new Model(1.0F, Map.of(), List.of(), List.of(), 0.0F, Optional.empty(), List.of(),
+                        List.of(), "z", 0.0F);
 
         public static final Codec<Model> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("scale", 1.0F).forGetter(Model::scale),
@@ -104,7 +105,17 @@ public final class VehicleChassis {
                 Track.CODEC.optionalFieldOf("track").forGetter(Model::track),
                 Codec.STRING.listOf().optionalFieldOf("slaved_turrets", List.of())
                         .forGetter(Model::slavedTurrets),
-                Codec.STRING.listOf().optionalFieldOf("propellers", List.of()).forGetter(Model::propellers)
+                Codec.STRING.listOf().optionalFieldOf("propellers", List.of()).forGetter(Model::propellers),
+                // プロペラの円板がボーンのどの軸周りに回るか。既定は Z——機首方向を向いた円板であり、
+                // 固定翼機のプロペラは全部それだ。水平に寝た円板（ホバー姿勢で作られたティルトローターの
+                // ナセル）は Y になる。模型の作られ方の話なので、模型ごとにここで言う。
+                Codec.STRING.optionalFieldOf("propeller_axis", "z").forGetter(Model::propellerAxis),
+                // 模型が既に振られているノズル角（度）。0で巡航姿勢——固定翼機のノズルは全部そう作られて
+                // いる。ティルトローター機のナセルはホバー姿勢で寝かせて作られることがあり、そのままでは
+                // 巡航中に立ってホバーで前を向く、まるごと逆の絵になる。90 と書けばそのぶん差し引かれる。
+                //
+                // 向きが逆に見えたら符号を反転する。振れる向きは模型の作り方次第で、ここがその1機分の答えだ。
+                Codec.FLOAT.optionalFieldOf("nozzle_rest", 0.0F).forGetter(Model::nozzleRest)
         ).apply(instance, Model::new));
 
         /** この機体に操舵で向きが変わる車輪があるか。 */

@@ -1,5 +1,6 @@
 package com.ashvehicles.entity;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,7 +18,8 @@ import com.ashvehicles.vehicle.WreckEffects;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -27,7 +29,6 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
@@ -35,7 +36,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.VehicleEntity;
-import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -169,8 +169,15 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     private VehicleShape shape;
     private int shapeVersion = -1;
 
-    /** 機体が内部に積んでいる物であり、地上要員が再武装に使う元。 */
-    private final VehicleHold hold = new VehicleHold(this);
+    /**
+     * 弾庫が存在した頃のセーブデータから読み戻した積荷。次のサーバー tick で地面へ出て、この参照は消える。
+     *
+     * <p>機械はもう内部に物を積まない——弾は手から直接入る——が、弾庫が消えたバージョンで初めて開かれた
+     * ワールドには、まだ物の入った弾庫を持つ機械が駐まっている。それはプレイヤーの物であり、更新した瞬間に
+     * 黙って消える理由は無い。読む時点では世界がまだアイテムを受け取れないので、置くのは tick まで待つ。
+     */
+    @Nullable
+    private List<ItemStack> spilledHold;
 
     protected VehicleEntityBase(EntityType<?> type, Level level) {
         super(type, level);
@@ -266,6 +273,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         // 残骸専用の分岐に入る資格とは無関係だ。中で自分の条件を見る。
         if (!this.level().isClientSide) {
             this.tickFuel();
+            this.spillOldHold();
         }
 
         if (!this.isWrecked() || !(this.level() instanceof ServerLevel level)) {
@@ -378,13 +386,32 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
+     * 今この機械を動かしている者。
+     *
+     * <p>普通は運転席の乗員そのものだが、<em>席に座っていることが操縦の条件ではない</em>機械が1種類ある
+     * ——無人機だ。操作者は席にいないどころか席が存在せず、それでも計器を読み、引き金を引き、目標を指示
+     * するのはその人物である。{@link com.ashvehicles.entity.AircraftEntity#getOperator} 参照。
+     *
+     * <p><b>「操縦権」とは別の問いだ。</b>{@link #getControllingPassenger} が答えるのは「誰のクライアント
+     * が物理を回すか」で、無人機ではそれが誰でもない（サーバーが回す）。こちらが答えるのは「誰が操って
+     * いるか」。有人機では同じ人物を指すが、同じ問いではない。
+     *
+     * <p>操縦席を条件にしていた物——レーダーの報告先、引き金、指示の受理、撃った弾の持ち主、燃料を燃やす
+     * かどうか——は全部こちらを見るべきだ。どれも「誰のクライアントが物理を回すか」とは無関係だった。
+     */
+    @Nullable
+    public LivingEntity getAviator() {
+        return this.getControllingPassenger();
+    }
+
+    /**
      * エンジンが今かかっているか。燃料を消すかどうかの判断であって、出力の大小ではない。
      *
      * <p>誰かが乗っているか、あるいはレバーが入っているか。放置された機械のエンジンは止まっていると見なす。
      * 野原に置いた戦車が翌週には空タンクになっている——それは誰も望まない現実味だ。
      */
     protected boolean isEngineRunning() {
-        return this.getControllingPassenger() != null || this.getEngineNote() > 0.0F;
+        return this.getAviator() != null || this.getEngineNote() > 0.0F;
     }
 
     /**
@@ -837,10 +864,6 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             return InteractionResult.SUCCESS;
         }
 
-        // 積んでいた物はスクラップと一緒に出てくる。弾庫は撃墜を生き延びる。機体は全損でも、その腹の中の
-        // ミサイル1箱はまだミサイル1箱であり、誰も開けられない残骸と一緒に失わせるのは良い答えではない。
-        this.spillHold();
-
         // バニラの destroy() が従うのと同じゲームルール。エンティティのドロップを切ったワールドが、これ
         // から黙って金属を得ることのないように。
         if (this.level().getGameRules().getBoolean(GameRules.RULE_DOENTITYDROPS)) {
@@ -854,55 +877,6 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         this.discard();
 
         return InteractionResult.CONSUME;
-    }
-
-    // ------------------------------------------------------------------
-    // 弾庫
-    // ------------------------------------------------------------------
-
-    /** 機体内部の9×3。null にはならず、クライアントへ同期もしない。 */
-    public VehicleHold getHold() {
-        return this.hold;
-    }
-
-    /**
-     * 誰かのために弾庫を開く。キー押下が行き着く先はこれで全部。
-     *
-     * <p>意図的にバニラの3行チェストメニューを使う。プレイヤーが気にする全ての面において弾庫はチェストで
-     * あり、ゲーム本体の画面で描かれる物は、プレイヤーがアイテム移動のために持っている全ての癖と全ての MOD
-     * と最初から噛み合う。
-     */
-    public void openHold(Player player) {
-        if (this.level().isClientSide) {
-            return;
-        }
-
-        player.openMenu(new SimpleMenuProvider(
-                (id, inventory, opener) -> ChestMenu.threeRows(id, inventory, this.hold),
-                Component.translatable("container.ashvehicles.hold", this.getDisplayName())));
-    }
-
-    /**
-     * これから存在しなくなる機体のために、弾庫の中身を地面へぶちまける。
-     *
-     * <p>中身はプレイヤーの物であり、どこかへ行かねばならない。さもないとレンチで機体を畳んだ時に、ミサイル
-     * 満載の弾庫が黙ってアイテムの中へ持っていかれる。パイロンを1つずつ外して避けているのと同じ罠であり、
-     * しかも弾庫は翼下に吊った兵装よりずっと忘れやすい。
-     *
-     * <p>バニラの {@code destroy} が従うのと同じゲームルールの下で行う。エンティティのドロップを切った
-     * ワールドが、これから機体の積荷を得ることのないように。
-     */
-    protected void spillHold() {
-        if (!(this.level() instanceof ServerLevel)
-                || !this.level().getGameRules().getBoolean(GameRules.RULE_DOENTITYDROPS)) {
-            this.hold.clearContent();
-
-            return;
-        }
-
-        for (ItemStack stack : this.hold.removeAllItems()) {
-            this.spawnAtLocation(stack);
-        }
     }
 
     // ------------------------------------------------------------------
@@ -1501,6 +1475,50 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
+     * 弾庫と一緒に消えるはずだった積荷を、1度だけ地面へ出す。
+     *
+     * <p>バニラの {@code destroy} が従うのと同じゲームルールの下で行う。エンティティのドロップを切った
+     * ワールドが、これから機体の積荷を得ることのないように。
+     */
+    private void spillOldHold() {
+        List<ItemStack> cargo = this.spilledHold;
+
+        if (cargo == null) {
+            return;
+        }
+
+        this.spilledHold = null;
+
+        if (!this.level().getGameRules().getBoolean(GameRules.RULE_DOENTITYDROPS)) {
+            return;
+        }
+
+        for (ItemStack stack : cargo) {
+            this.spawnAtLocation(stack);
+        }
+    }
+
+    /**
+     * 弾庫を持っていたバージョンのセーブデータから積荷を拾い出す。書き戻すことは二度と無いので、次の tick
+     * で地面へ出すためだけに読む。この鍵を持たない機械——このバージョン以降に保存された全部——では何もしない。
+     */
+    private void readOldHold(CompoundTag tag) {
+        ListTag list = tag.getList("Hold", Tag.TAG_COMPOUND);
+
+        if (list.isEmpty()) {
+            return;
+        }
+
+        List<ItemStack> cargo = new ArrayList<>(list.size());
+
+        for (int at = 0; at < list.size(); at++) {
+            ItemStack.parse(this.registryAccess(), list.getCompound(at)).ifPresent(cargo::add);
+        }
+
+        this.spilledHold = cargo;
+    }
+
+    /**
      * 他に何を保持していようと全機体が書き出す唯一の物であり、ワールドを閉じられても生き延びねばならない
      * 唯一の物。野原に残された残骸は明日も残骸だ。
      *
@@ -1511,7 +1529,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     protected void readAdditionalSaveData(CompoundTag tag) {
         this.setWrecked(tag.getBoolean("Wrecked"));
         this.wreckAge = tag.getInt("WreckAge");
-        this.hold.load(tag, this.registryAccess());
+        this.readOldHold(tag);
         // 燃料システムが存在する前にワールドへ書き出された機械には読む値が無いので、空ではなく満タンで戻る。
         // 耐久と同じ判断だ。空で戻せば、更新した瞬間に世界中の機械が一斉に動かなくなる。
         this.setFuel(tag.contains("Fuel") ? tag.getFloat("Fuel") : this.fuelSetup().capacity());
@@ -1521,7 +1539,6 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     protected void addAdditionalSaveData(CompoundTag tag) {
         tag.putBoolean("Wrecked", this.isWrecked());
         tag.putInt("WreckAge", this.wreckAge);
-        this.hold.save(tag, this.registryAccess());
         tag.putFloat("Fuel", this.getFuel());
     }
 
