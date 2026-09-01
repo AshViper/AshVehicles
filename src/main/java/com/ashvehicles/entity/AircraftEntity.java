@@ -60,10 +60,12 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.VehicleEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
@@ -200,6 +202,26 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 分入っているだけの機体を「山に埋められた機体」と誤判定しないよう、余裕を持たせてある。
      */
     private static final double EMBEDDED_MARGIN = 0.25;
+
+    /**
+     * この側がまだ持っていない地面の上を飛んだ後、衝突を墜落と読まなくなる時間（tick）。
+     *
+     * <p>2秒。機体が生成器を追い越してから、追い抜かれた chunk が実際に届いて機体の周りに地形が現れるまでの
+     * 間隔として測ってある。短すぎれば、通り過ぎた直後に到着した斜面が機体を壊す。長すぎれば、パイロットが
+     * 十分見えていた山へ突っ込んでも無傷で済んでしまう。
+     */
+    private static final int LATE_WORLD_GRACE = 40;
+
+    /** {@link #beyondTheWorld} が経路を辿る刻み幅（ブロック）。半 chunk なので経路上の chunk を飛ばさない。 */
+    private static final double CHUNK_SAMPLE = 8.0;
+
+    /**
+     * {@link #beyondTheWorld} が何tick 先まで経路を見るか。
+     *
+     * <p>1tick 分では遅い。猶予が必要になるのは<em>通り過ぎた後</em>——地面が届いた瞬間——なので、入る前に
+     * 張っておく必要がある。3tick は最速の機体で50ブロックほどの先読みで、chunk 数個分の予告になる。
+     */
+    private static final double CHUNK_LOOK_AHEAD = 3.0;
 
     /** 機体の設計耐G を超えた1G あたり、1tick に受ける機体損傷。 */
     private static final float OVER_G_DAMAGE = 4.0F;
@@ -463,6 +485,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private float angleOfAttack;
     /** 機体が高速で何かに当たったとき、物理を回した側が設定する。 */
     private boolean crashing;
+    /**
+     * この側がまだ持っていない地面の上を飛んでから経った残り時間（tick）。0より大きい間、衝突は墜落と読まれない。
+     *
+     * <p>物理を回す側だけが持ち、同期しない。問いは「この機体は墜落したか」ではなく「<em>この側</em>は、
+     * 機体を止めた地面を、止まる前から持っていたか」であり、答えは側ごとに違う。パイロットのクライアントと
+     * サーバーとでは、届いている chunk が別物だからだ。
+     */
+    private int lateWorld;
     /**
      * 前回の自己移動で機体が実際に進んだ距離（要求距離ではなく）。
      *
@@ -1636,6 +1666,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             // 距離になる。横と上へならそれは脱出だが、地面でできた世界では下へはただ深くなるだけだ。降下率を
             // 持たせたままにすると、低い位置で何かの内側に入った機体は毎tick少しずつ床の下へ送り込まれ、止める
             // 物には決して行き当たらない。水平に保てば対気速度で脱出する。元々それが脱出させるはずの物だ。
+
+            // 到着が間に合わなかった地面は、パイロットが避けられた地面ではない。上の分岐が拾うのは機体を既に
+            // 内包している地形だけで、ここが数える機体はまだその手前にいる——この tick に横切る空間を、この側は
+            // まだ持っていない。危ないのは数えている瞬間ではなく数え終えた後、地面が実際に届く数tick後なので、
+            // 猶予は旗ではなく時計として持つ。beyondTheWorld 参照。
+            if (!this.isWrecked() && this.beyondTheWorld(impactVelocity)) {
+                this.lateWorld = LATE_WORLD_GRACE;
+            } else if (this.lateWorld > 0) {
+                this.lateWorld--;
+            }
+
             if (!this.isWrecked() && this.insideTerrain()) {
                 this.setPos(this.getX() + impactVelocity.x,
                         this.getY() + Math.max(impactVelocity.y, 0.0),
@@ -1646,7 +1687,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 // 残骸が斜面に当たっても、それは残骸が斜面に当たっただけ。全損させる機体はもう残っておらず、
                 // どれだけ強く当たったかを判定する必要も無い。
                 if (!this.isWrecked()) {
-                    this.detectCrash(impactVelocity);
+                    if (this.lateWorld > 0) {
+                        this.flyOnThroughLateWorld(impactVelocity);
+                    } else {
+                        this.detectCrash(impactVelocity);
+                    }
                 }
             }
 
@@ -1793,6 +1838,90 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private boolean insideTerrain() {
         return !this.onGround() && !this.hasRoomHere(EMBEDDED_MARGIN, this.floorLine());
+    }
+
+    /**
+     * この tick に機体が横切る空間のどこかを、この側がまだ持っていないか。
+     *
+     * <p>持っていない chunk は空気として読まれる。{@code PilotChunkGateMixin} が意図してそう決めており、機体は
+     * 実際そこを飛べる。問題はその後だ。追い抜かれた chunk が数tick 遅れて届くと、そこにあるはずだった斜面が
+     * 一度に現れる。既に機体を内包していれば {@link #insideTerrain} が外へ出すが、機体がまだ手前にいれば、
+     * 次に来るのは<em>表面への</em>正面衝突だ。{@link #detectCrash} はそれを読み違えない——本当に何かへ突っ込んで
+     * いる——が、パイロットは何にも突っ込んでいない。突っ込む相手は、避けようと思った瞬間には存在すらしていな
+     * かった。
+     *
+     * <p>だからここが問うのは「墜落したか」ではなく「この側は、機体を止めた地面を、止まる前から持っていたか」。
+     * 側ごとに答えが違う問いであり、そこが要点だ。パイロットのクライアントで走ればクライアントに届いている
+     * chunk を問うので、答えは<em>パイロットに見えていたか</em>と正確に一致する。見えていない地面に殺されない、
+     * というのがこの猶予の全部だ。サーバーが飛ばす無人機では、サーバーがロードしている chunk を問う。
+     *
+     * <p>問い合わせはどちらの側でもロードを起こさない。{@code ChunkSource.hasChunk} は {@code getChunk} を
+     * {@code requireChunk = false} で呼ぶだけで、無ければ生成もロードもせず null が返る。ここで生成を起こせば
+     * それは tick スレッド上のワールド生成——{@code AircraftChunkLoader} が回廊をわざわざ非同期にしてまで避けて
+     * いる、まさにその代償——になる。
+     *
+     * @param step この tick の移動量
+     */
+    private boolean beyondTheWorld(Vec3 step) {
+        ChunkSource chunks = this.level().getChunkSource();
+
+        if (!hasChunkAt(chunks, this.getX(), this.getZ())) {
+            return true;
+        }
+
+        double flat = Math.sqrt(step.x * step.x + step.z * step.z);
+        double reach = flat * CHUNK_LOOK_AHEAD;
+
+        if (reach < CHUNK_SAMPLE) {
+            return false;
+        }
+
+        // 半 chunk ずつ辿る。1tick に十数ブロック進む機体では、端点だけ見ると経路の途中の chunk を丸ごと
+        // 飛び越える。点の列を作らず2つの数値として歩くのは {@code AircraftChunkLoader.ahead} と同じ理由だ。
+        double stepX = step.x / flat * CHUNK_SAMPLE;
+        double stepZ = step.z / flat * CHUNK_SAMPLE;
+        double x = this.getX();
+        double z = this.getZ();
+
+        for (double walked = 0.0; walked < reach; walked += CHUNK_SAMPLE) {
+            x += stepX;
+            z += stepZ;
+
+            if (!hasChunkAt(chunks, x, z)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** その座標の chunk をこの側が持っているか。持っていなければ false。ロードは決して起こさない。 */
+    private static boolean hasChunkAt(ChunkSource chunks, double x, double z) {
+        return chunks.hasChunk(SectionPos.blockToSectionCoord(Mth.floor(x)),
+                SectionPos.blockToSectionCoord(Mth.floor(z)));
+    }
+
+    /**
+     * 遅れて届いた地面に止められた機体を、止められなかったことにして飛ばし続ける。
+     *
+     * <p>{@link #detectCrash} の代わりに走るので機体は全損しない。それだけでは足りない。{@code move} は阻まれた
+     * 軸を既に0にしており、放置すれば機体は無傷のまま速度を失って——数百ノットから1tick で——空から落ちる。
+     * パイロットから見ればそれは墜落しなかっただけで、やはり見えない物に殺されている。だから衝突が奪った物を
+     * 返す。衝突自体が無かったことになるので、衝突フラグも降ろす。この後それを読む物——過G判定も着陸判定も——
+     * にとって、何も当たっていないのが正しい。
+     *
+     * <p>機体は今も動けない場合がある。届いた斜面の面に押し付けられていれば {@code move} は次の tick も阻む。
+     * だがそれは行き止まりではない。速度を保った機体は面に沿って滑るし、めり込んでいれば {@link #insideTerrain}
+     * が外へ出す。猶予が切れる頃には地形は数秒前から見えているので、そこから先の衝突は正真正銘の墜落だ。
+     */
+    private void flyOnThroughLateWorld(Vec3 impactVelocity) {
+        if (!this.horizontalCollision && !this.verticalCollision) {
+            return;
+        }
+
+        this.setDeltaMovement(impactVelocity);
+        this.horizontalCollision = false;
+        this.verticalCollision = false;
     }
 
     /**
