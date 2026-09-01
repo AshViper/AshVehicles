@@ -101,12 +101,23 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     private static final float FOGGED = 0.01F;
 
     /**
-     * 背後に何も無いゴーストは半透明かつ自発光で描く。自発光なのは、あの距離に照らす光が無いから。半透明なのは、
-     * 近くの物ではなく「接触点」として読ませるためだ。描画済み地形の上では実体として描くが、自発光は保つ。
+     * 背後に何も無いゴーストは半透明で、しかも自ら光って描く。自ら光るのは、あの距離に照らす光が無いから。
+     * 半透明なのは、近くの物ではなく「接触点」として読ませるためだ。描画済み地形の上では実体として描く。
+     *
+     * <p><b>半透明の側が裏返って見えていた。</b>使っていた {@code entityTranslucentEmissive} は面の裏表を
+     * 捨てず（NO_CULL）、深度も書かない（COLOR_WRITE）。板を1枚描くならそれでよいが、機体は閉じた立体だ。
+     * 裏表を捨てないので向こう側の外板まで描かれ、深度を書かないので手前の外板がそれを隠せない——後から
+     * 描かれた面が必ず上に乗る。結果、こちら側の胴体の上に反対側の胴体が塗られ、テクスチャが左右裏返しに
+     * 見えていた。実際に裏返っていたのは絵ではなく、見えている面の方だった。
+     *
+     * <p>{@code entityTranslucentCull} は同じ半透明合成のまま裏面を捨て、深度も書く。向こう側の外板は
+     * カメラに背を向けているので落ち、手前の面が深度を書くので残りの重なりも決着する。自ら光る性質は
+     * {@link GhostRenderContext#packedLight} が最大輝度を渡すことで保たれる——ライトマップを最大で引く
+     * ことは、光を無視することと同じだ。
      */
     public static RenderType renderType(ResourceLocation texture, boolean ghostStyle) {
         return ghostStyle
-                ? RenderType.entityTranslucentEmissive(texture)
+                ? RenderType.entityTranslucentCull(texture)
                 : RenderType.entityCutoutNoCull(texture);
     }
 

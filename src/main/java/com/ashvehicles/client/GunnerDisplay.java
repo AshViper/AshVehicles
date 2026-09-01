@@ -26,9 +26,16 @@ import org.joml.Quaternionf;
  * 方向を向いており、しかも砲手は操縦桿を握っていない。その画面に姿勢ラダーを描けば、間違った場所にある
  * 水平線を、それを使えない人に見せることになる。
  *
- * <p><b>機体を選ばない。</b>この画面が出る条件は「砲座を受け持っている乗員が一人称で座っている」ことだけで、
- * AC-130 の30mmでも105mmでも、砲座を持つ他のどの機体でも同じ画面が出る。砲座の一覧も、名前も、可動端も、
- * 全部その機体のファイルから読む。{@link GunStations} 参照。
+ * <p><b>目が砲に載っている席だけ。</b>この画面が出る条件は「一人称で座っている乗員が、砲に据えられたカメラ
+ * から世界を見ている」ことだ。機種名では判定しない——機体ファイルが座席に {@code "mount": "gun"} と書いて
+ * いるかで決まる（{@link GunCamera#stationOf} 参照）。今それに当たるのは AC-130 の2つの砲座だけで、30mmでも
+ * 105mmでも同じ画面が出る。砲座の一覧も名前も可動端も、全部その機体のファイルから読む。
+ *
+ * <p><b>なぜ砲座を持つだけでは足りないのか。</b>アパッチの砲手も、ブラックホークのドアガンナーも砲座を
+ * 受け持っているが、あの人たちは自分の砲のすぐ横に座って、風防越し・ドア越しに<em>肉眼で</em>外を見ている。
+ * 見えているのは普通の景色だ。そこへ白黒の熱画像と火器管制枠を被せれば、装置越しに見ていない物を装置越しの
+ * 映像に描き替えることになり、しかも飛行計器まで取り上げてしまう。この画面が正しいのは、砲手が機内にいて
+ * 目標が反対側の外にあり、カメラが実際に砲へ移されている場合——つまり AC-130 だけだ。
  *
  * <p><b>操縦している者には出さない。</b>1人で飛ぶパイロットは兵装切り替えキーで砲座を持てる
  * （{@link GunStations#pilotHoldsStation}）が、その人はキャノピー越しに前を見ながら機体を飛ばしている。
@@ -94,6 +101,12 @@ public final class GunnerDisplay {
                 || !(minecraft.player.getVehicle() instanceof AircraftEntity aircraft)
                 || aircraft.getControllingPassenger() == minecraft.player
                 || !minecraft.options.getCameraType().isFirstPerson()) {
+            return GunStations.NONE;
+        }
+
+        // 砲に据えられたカメラを覗いている席だけ。そうでない砲手が見ているのは窓の外の普通の景色で、
+        // その上にセンサー画面を描く相手ではない——ドアガンナーは自分の砲の横に座っている。
+        if (GunCamera.stationOf(aircraft, minecraft.player) == GunStations.NONE) {
             return GunStations.NONE;
         }
 

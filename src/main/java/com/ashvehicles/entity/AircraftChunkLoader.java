@@ -57,10 +57,19 @@ public final class AircraftChunkLoader {
     /** 経路をサンプリングする間隔（ブロック）。半 chunk なので経路上の chunk を飛ばさない。 */
     private static final double SAMPLE = 8.0;
     /**
-     * 1機が保持する chunk 数の上限。1つにつき5×5のロード済み地面が付いてくるので、飛行経路に沿って12個
-     * 並べても「領域」ではなく「回廊」になる。しかも機体が止まった瞬間に全部手放される。
+     * 1機が保持する chunk 数の上限。飛行経路に沿った1本の線なので、24個並べても「領域」ではなく「回廊」
+     * になる。しかも機体が止まった瞬間に全部手放される。
+     *
+     * <p>12だった。{@link #LEAD_TICKS} は速度に比例して伸びると書いてあるのに、この上限が低すぎて
+     * 実際には伸びていなかった——192mは毎秒6.4ブロックで頭打ちになる値で、この MOD で一番遅い機体でも
+     * 巡航でそこを越える。F-22 の最大速度（毎tick 37.5ブロック）では回廊の予告は0.26秒しかなく、機体は
+     * 自分の回廊より速く飛んでいた。24なら同じ速度で0.5秒、時速1000km級で1.4秒になる。
+     *
+     * <p>倍にした代償は、飛んでいる1機あたりのロード済み chunk 数がそのまま倍になること。tick あたりの
+     * 仕事は変わらない——毎tick増えるのは先端の1個だけで、増やしたのは「いつロードするか」であって
+     * 「何回ロードするか」ではない。
      */
-    private static final int MOST_CHUNKS = 12;
+    private static final int MOST_CHUNKS = 24;
 
     /** これ未満なら残骸は落ち終わってただ横たわっている、という速度の二乗。 */
     private static final double STOPPED = 1.0E-4;
@@ -68,12 +77,20 @@ public final class AircraftChunkLoader {
     /**
      * 先読みが保持回廊よりどれだけ先まで届くか。飛行 tick 数と chunk 数の両方で。
      *
-     * <p>5秒・750m。先端で要求した地面が、回廊が保持したくなるまでに数秒の生成時間を得られる距離であり、
+     * <p>6秒・3km。先端で要求した地面が、回廊が保持したくなるまでに数秒の生成時間を得られる距離であり、
      * 新規 chunk が実際に必要とする時間でもある。tick だけでなく chunk 数でも頭打ちにしてあるので、速い
      * ジェットは「マップ全部」ではなく「より長い予告」を要求することになる。
+     *
+     * <p>5秒・750mだった。その距離は、機体が速いほど<em>短い</em>予告になる——750mは毎秒2.7秒分の
+     * 予告に見えるが、それは毎tick 7.5ブロックの機体の話で、F-22 の全速では1.0秒しかない。生成器が
+     * 手付かずの地面を1秒で数十 chunk 建てることはないので、そこで機体は自分が要求した地面に追い付いて
+     * いた。3kmなら全速でも2.7秒、時速1800km以下では上限に当たらず、常に6秒の予告になる。
+     *
+     * <p>先読みチケットは非同期・非tick・自動失効なので、伸ばした分の代償は生成器の仕事だけだ。しかも
+     * その仕事は捨てられない——線の上の地面は、機体が旋回しない限り実際に飛ぶ場所である。
      */
-    private static final double PREFETCH_TICKS = 100.0;
-    private static final int PREFETCH_CHUNKS = 48;
+    private static final double PREFETCH_TICKS = 120.0;
+    private static final int PREFETCH_CHUNKS = 192;
 
     /**
      * 各機体が先読みを向け直す間隔（tick）。チケットの寿命はこの30倍なので、消える遥か前に更新される。
@@ -135,6 +152,18 @@ public final class AircraftChunkLoader {
             return held;
         }
 
+        // 1tick に1本。回廊は1tick に1度引き直せば足りるのに、呼ばれる回数はそうではない——パケットは
+        // 固まって届き、その1つ1つが移動として処理され、その1つ1つがここへ来る。詰まった直後には数十本
+        // 分が同じ tick に着く。
+        //
+        // 「答えが同じなら equals() で短絡するので安い」は、答えが同じなら正しい。だが固まって届いた報告
+        // は毎回ちがう位置を告げるので、答えは毎回ちがう。数十回ぶんの確保と解放を1tick で行うことになり、
+        // その1回1回が chunk に触る。つまり詰まるほど1tick の仕事が増える——自分で自分を育てる種類の停止で
+        // あり、まさに詰まった直後に一番効く。
+        if (!aircraft.claimCorridorTick()) {
+            return held;
+        }
+
         boolean flying = shouldStayLoaded(aircraft);
 
         // 回廊の後ではなく前に要求する。この tick が知り得た最も早い時点で、新しい地面のことを生成器へ
@@ -155,15 +184,31 @@ public final class AircraftChunkLoader {
 
             // まだ生成されていない地面はこの tick では取らない。取れば tick スレッド上で生成することに
             // なるし、上の先読みが既に別スレッドで作っている。確保は chunk が存在して保持が帳簿処理になった
-            // 後の tick で成立すればよい。代償を問わない例外が2つ——機体の下の chunk と、次の1歩が届く
-            // chunk。それが無ければ機体は存在しなくなるから。
+            // 後の tick で成立すればよい。
+            //
+            // 代償を問わない例外は機体の下の1個だけになった。それが無ければ機体は存在しなくなるので、
+            // ここは今も無条件で取る。
+            //
+            // 次の1歩の chunk は、パイロットが飛ばしている間は取らない。最高速度の機体にとって「次の1歩」
+            // は2〜3 chunk 先で、そのどれもがまだ無い土地では、毎tick 数十ミリ秒の生成を tick スレッドへ
+            // 積むことになる。サーバーが遅れる、報告が溜まる、溜まった報告が処理される、その1本1本がまた
+            // 新しい地面を要求する——止まるまで加速する輪だ。「最高速度で未踏の土地へ入ると機体が空中で
+            // 止まる」はこれで説明が付く。
+            //
+            // 飛ばしている者がいれば、その先読みは要らない。機体を運んでいるのはサーバーの tick ではなく
+            // 操縦側の報告で、報告は chunk がロードされているかに関わらず届き続ける
+            // （{@code PilotChunkGateMixin} 参照）。先の地面は先読みが3km 手前から別スレッドで作っており、
+            // 機体が着く頃には存在している。無人で飛んでいる機体——投棄された機体、無人機、落下中の残骸
+            // ——は自分の tick でしか動かないので、そちらには今まで通り次の1歩も渡す。
+            boolean flown = aircraft.getAviator() != null;
             Vec3 step = aircraft.position().add(aircraft.getVelocity());
             ChunkPos own = aircraft.chunkPosition();
             ChunkPos next = new ChunkPos(SectionPos.blockToSectionCoord(Mth.floor(step.x)),
                     SectionPos.blockToSectionCoord(Mth.floor(step.z)));
 
-            scratch.removeIf(pos -> !pos.equals(own) && !pos.equals(next) && !held.contains(pos)
-                    && !level.getChunkSource().hasChunk(pos.x, pos.z));
+            scratch.removeIf(pos -> !pos.equals(own) && !held.contains(pos)
+                    && !level.getChunkSource().hasChunk(pos.x, pos.z)
+                    && (flown || !pos.equals(next)));
         }
 
         if (scratch.equals(held)) {
@@ -257,21 +302,31 @@ public final class AircraftChunkLoader {
         double x = aircraft.getX();
         double z = aircraft.getZ();
         double samples = Math.min(speed * PREFETCH_TICKS, PREFETCH_CHUNKS * 16.0) / SAMPLE;
-        ChunkPos last = null;
+        // 直前に要求した chunk を、位置ではなく座標2つで覚える。線が3kmになってサンプルは数百に増えた
+        // ——その大半は同じ chunk の2度目なので、捨てるためだけの ChunkPos をそこで作らない。回廊の
+        // 歩き方と同じ理由だ。
+        int lastX = Integer.MIN_VALUE;
+        int lastZ = Integer.MIN_VALUE;
 
         for (int i = 0; i < samples; i++) {
             x += stepX;
             z += stepZ;
 
-            ChunkPos pos = new ChunkPos(SectionPos.blockToSectionCoord(Mth.floor(x)),
-                    SectionPos.blockToSectionCoord(Mth.floor(z)));
+            int chunkX = SectionPos.blockToSectionCoord(Mth.floor(x));
+            int chunkZ = SectionPos.blockToSectionCoord(Mth.floor(z));
+
+            if (chunkX == lastX && chunkZ == lastZ) {
+                continue;
+            }
+
+            lastX = chunkX;
+            lastZ = chunkZ;
 
             // 距離0。指定 chunk を最後まで生成し、周囲は昇格させず、tick もさせない。tick は機体が到達
             // した時に回廊自身の確保が連れてくる。先読みが買っているのは「生成が既に済んでいること」だけ。
-            if (!pos.equals(last)) {
-                level.getChunkSource().addRegionTicket(PREFETCH, pos, 0, pos);
-                last = pos;
-            }
+            ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+
+            level.getChunkSource().addRegionTicket(PREFETCH, pos, 0, pos);
         }
     }
 

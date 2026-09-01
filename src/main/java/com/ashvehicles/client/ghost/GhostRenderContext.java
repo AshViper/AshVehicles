@@ -3,6 +3,7 @@ package com.ashvehicles.client.ghost;
 import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.client.Camera;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.world.phys.Vec3;
 
@@ -70,9 +71,19 @@ public final class GhostRenderContext {
         return this.partialTick;
     }
 
-    /** 常に最大輝度。あの距離では世界は「不明な光」ではなく「光なし」を報告するからだ。 */
+    /**
+     * ゴースト表示の間は最大輝度。あの距離では世界は「不明な光」ではなく「光なし」を報告するからだ。
+     *
+     * <p>ここで最大を返すことが、ゴーストが自ら光っているということの中身だ。以前は描画型そのものが
+     * 自発光（{@code entityTranslucentEmissive}）でライトマップを引かなかったが、あの型は裏面も深度も
+     * 捨てるので閉じた立体が裏返って見えた（{@code GhostGeoRenderer.renderType} 参照）。ライトマップを
+     * 引く型へ移した以上、光を無視することはここで引く値の側で言う。最大で引けば同じことになる。
+     *
+     * <p>実体として描かれる距離では、記録した通りの光をそのまま返す。あちらは世界が描かれている場所に
+     * 立っていて、影も夜もその機体に掛かるべきだからだ。
+     */
     public int packedLight() {
-        return this.packedLight;
+        return this.ghostStyle ? LightTexture.FULL_BRIGHT : this.packedLight;
     }
 
     /**
