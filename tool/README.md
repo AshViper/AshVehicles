@@ -16,9 +16,13 @@ turret comes round.
 Everything is shown and typed in the machine's own frame in blocks, so what you read on screen is
 exactly what goes in the file.
 
-It edits the rest of a machine's file as well — the thrust, the suspension, the sounds — and the
-three sorts of file a machine's *armament* is made of, which are not in its file at all: the
-weapons, the racks they hang on, and the pods.
+It edits the rest of a machine's file as well — the thrust, the suspension, the sounds, every block
+in it — and the three sorts of file a machine's *armament* is made of, which are not in its file at
+all: the weapons, the racks they hang on, and the pods.
+
+And it builds the whole **pack**: the definitions, the model, the skin, the names people read and
+the recipes at the workbench, out as one zip laid out the way `ashvehiclespack/` reads it. See
+*Building a pack* below.
 
 Open the file in a browser. It needs no server, no build step and no network — it is one page with
 no outside dependencies, so it works offline and from a memory stick.
@@ -32,20 +36,31 @@ file, so they are shown exactly as they are written there.
 日本語で開きます。右上のボタンで英語と切り替えられ、選んだほうが次回も使われます。ボーン名と
 ボックス名だけは、ファイルに書かれるとおりの綴りで表示します。
 
-It comes in three themes — **Slate**, the blue-grey it opens in; **Noir**, near-black and sharper,
-for a dark room; and **Paper**, for a bright one or a projector. The button beside the language one
-walks through them and <kbd>T</kbd> does the same, and the choice is remembered. A theme is not
-just the panels: the grid, the model's own shading and every label on the canvas come out of the
-same list of colours, so *Paper* is a genuinely light tool rather than a light frame round a dark
-picture. The colours a box, a seat or the ring is drawn in keep their meanings in all three.
+It is drawn in two colours: near-black for everything the tool is *made* of, and one yellow-green
+for everything it wants you to look at. A heading, a hovered button, a focused field, the pack
+panel's chrome — all the same green at different weights, so nothing on screen has to be learnt.
+Brighter is nearer to hand.
+
+The one thing that is deliberately *not* two colours is the half-dozen colours that stand for
+something: a hull box is green, a turret box is blue, a pylon is red, a seat is violet. Those are
+the legend rather than the furniture, and painting them all one colour would say that a seat and a
+station are the same thing — which is exactly what the drawing is there to tell apart.
+
+It comes in three weights of that one scheme — **Black**, the one it opens in; **Pitch**, taken all
+the way down for a dark room; and **Paper**, for a bright one or a projector, the same green
+darkened until it holds up on white. The button beside the language one walks through them and
+<kbd>T</kbd> does the same, and the choice is remembered. A theme is not just the panels: the grid,
+the model's own shading and every label on the canvas come out of the same list of colours, so
+*Paper* is a genuinely light tool rather than a light frame round a dark picture.
 
 The bar between the panels and the view is draggable: a machine with forty boxes wants a wider
 list than one with four, and a name like `hull_glacis_left` wants more room than `hull`.
 Double-clicking it puts the width back, <kbd>\\</kbd> hides the panels altogether, and the width
 you leave it at is the width it opens at next time.
 
-配色は 3 種類（スレート／ノワール／ペーパー）。言語ボタンの隣、または <kbd>T</kbd> で切り替わり、
-次回も同じ配色で開きます。パネルとビューの境界はドラッグで幅を変えられます（ダブルクリックで既定に戻ります）。
+配色は黒と黄緑の 2 色で統一されています（3 段階：ブラック／ピッチ／ペーパー）。言語ボタンの隣、
+または <kbd>T</kbd> で切り替わり、次回も同じ配色で開きます。ボックスや座席の色だけは、
+種類を見分けるための色なのでそのままです。パネルとビューの境界はドラッグで幅を変えられます（ダブルクリックで既定に戻ります）。
 
 *(It supersedes `hitbox-editor.html`, which did the boxes and the pylons for aircraft only. That
 file is still in the history if you want it: `git show cf0ee44:tool/hitbox-editor.html`.)*
@@ -177,8 +192,21 @@ Two rules about what gets written, both of which matter more than they look:
 Every machine file in this repository goes in and comes back out of the editor byte for byte, which
 is the check that both of those rules are right.
 
+There is a third rule, and it is the one that took the longest to notice: **a file is read onto a
+clean sheet.** Everything goes back to the codec's own before the new file is read, because "the
+file does not say" has to mean the same thing on the second machine opened as on the first. Without
+that, opening a bomber and then a helicopter left the helicopter carrying the bomber's fuel tank,
+its heat signature and its slaved turret — figures no file on screen had ever mentioned, written
+into the helicopter's file the moment it was saved.
+
 The blocks a machine either has or has not — an afterburner, a rotor or a thrust-vectoring system,
-a missile rail, a radar — have a switch beside their heading. The rest are always there.
+a swing wing, an ejection seat, a coaxial machine gun, a missile rail, a radar — have a switch
+beside their heading. The rest are always there.
+
+`GROUPS` covers every block of both codecs: the fuel tank an engine drinks out of, the swing wing,
+the ejection seat, what the suspension does with the weight on it, the gun beside the main one, the
+hull in the water and what it drives through rather than round. If the mod can read a figure, the
+panel can write it.
 
 ### What it carries
 
@@ -215,6 +243,109 @@ the way its own files are written rather than restyling one into the other.
 フォルダーを渡せば中の兵装ファイルが一覧になり、選べば読み込み、**新規作成**なら既定値のまま新しい
 ファイルを起こします。書き戻しも機体と同じで、<kbd>Ctrl</kbd>+<kbd>S</kbd> は機体と兵装のうち最後に
 触っていたほうを書き込みます。
+
+### Crew guns, extra barrels, and what the file calls itself
+
+Three things in a machine's file are neither a figure nor a place, and so belong to neither panel.
+
+**What it calls itself** is one word, under **Machine**. The tool works in two modes — a thing that
+flies and a thing that drives — but the mod files four kinds: `aircraft`, `helicopter`,
+`ground_vehicle` and `ship`. The extra two are not a different mode, they are the same mode saying
+something more about itself: a helicopter is an aeroplane held up by its rotor rather than its wing,
+and a ship is a ground vehicle that settles on the water rather than the ground. So it is a select
+beside the kind, written into the file only where it is not the one the mod would have assumed. Pick
+*helicopter* and switch the lift over to **rotor** under **Performance**; pick *ship* and the
+**buoyancy** block is the one that says how deep it floats.
+
+**Crew guns** (`stations`, aircraft) are the guns somebody who is not flying swings and fires: the
+gunner looks, the gun follows, inside an arc the file gives it. A station does not *place* anything —
+it names pylons that are already placed and named on the machine — so it picks them off a row of
+buttons, one per pylon, rather than asking you to spell them. That is the whole reason it is not in
+the table of figures: `pylons` is a list of names that only mean anything against this machine.
+
+An aeroplane with no stations fires everything straight down the nose, which is every fighter. The
+ones that have them are the gunships and the helicopters, and the seat number is what decides whose
+gun it is — `0` is the pilot's, so a single-seat aeroplane's turret is the pilot's turret.
+
+**Extra barrels** (`armament.barrels`, ground) are the second and third guns of a ship, each with a
+trunnion of its own and, if it needs one, a ring of its own. The *main* gun is not one of these: it
+is the trunnion you drag under **Parts**, and these hang off it. A vehicle with none has the one
+gun, which is every tank in this repository but two.
+
+**機体**パネルの種別（固定翼機／ヘリコプター／地上車両／艦艇）は、ファイルの `type` にそのまま
+書かれます。**旋回機銃**は乗員が自分で振って撃つ砲（`stations`）で、機体に置いたパイロンを名前で
+選びます。**追加の砲**は軍艦の第 2・第 3 砲塔（`armament.barrels`）で、主砲は含みません。
+
+### Building a pack
+
+Everything above makes one file. A pack is not one file. An aeroplane somebody can actually build
+and fly is five things, and three of them live nowhere near the definition:
+
+| | where | who writes it |
+| --- | --- | --- |
+| the definition | `data/<ns>/aircraft/foo.json` | this tool |
+| the model | `assets/<ns>/geo/entity/foo.geo.json` | Blockbench |
+| the skin | `assets/<ns>/textures/entity/foo.png` | you |
+| the name people read | `assets/<ns>/lang/en_us.json` | this tool |
+| the recipe at the workbench | `data/<ns>/recipe/foo.json` | this tool |
+
+**Pack** keeps a list of them. Whatever is open goes on it with one button — **Put the machine on**
+takes the definition the Export box would have written, along with the model and the skin that were
+loaded with it, and **Put the armament on** does the same for the weapon, rack or pod. Pick a row
+and you get the two things the definition has no room for: what it is called, in English and in
+Japanese, and what it is built out of.
+
+**Build the pack** hands over one `.zip`, laid out exactly the way `ashvehiclespack/` reads it —
+which is the same layout the mod itself is written in, so a pack made here and the mod's own files
+are the same shape. Drop it in the game folder's `ashvehiclespack/`. There is nothing to enable.
+
+What comes out, for a pack called `mypack` holding one aeroplane and one missile:
+
+```
+mypack.zip
+  data/mypack/aircraft/foo.json          the definition
+  data/mypack/recipe/foo.json            what it is built out of
+  data/mypack/weapon/mymissile.json
+  data/mypack/recipe/mymissile.json
+  assets/mypack/geo/entity/foo.geo.json  the model, as it was loaded
+  assets/mypack/textures/entity/foo.png  the skin, as it was loaded
+  assets/mypack/models/item/mymissile.json
+  assets/mypack/lang/en_us.json
+  assets/mypack/lang/ja_jp.json
+  assets/mypack/sounds.json              only where the files name a sound of their own
+  README.txt                             what is in it, and what is still missing from it
+```
+
+Three things about that list are worth saying out loud.
+
+- **The namespace is the folder and the first half of every name.** `data/mypack/aircraft/foo.json`
+  is the aeroplane `mypack:foo`; its entity, its item, its model and its skin are all looked for
+  under that one word. Two packs can both ship a `foo` without either losing. Calling your namespace
+  `ashvehicles` is how you would *replace* something the mod ships — do that on purpose or not at
+  all.
+- **A machine gets its inventory icon for free** — the mod draws it off the model you already
+  shipped — and nothing else does. A weapon, a rack or a pod is an ordinary item and wants an
+  ordinary 16×16 `assets/<ns>/textures/item/<id>.png`, which is the one file in the whole pack that
+  has to be drawn rather than written. The item *model* that points at it is written for you.
+- **A row with something still missing is marked**, and the reason is in the zip's own `README.txt`
+  as well as beside the row. A pack that is short a name or a model still builds; it is better to
+  have the zip and the list of what is left than neither.
+
+The list survives closing the tab — the typing does, at least. The models and the skins do not,
+because four aeroplanes' worth of them is several megabytes and browser storage is not the place for
+that; open the machine again and press **Re-take**.
+
+The zip is written by the tool itself, stored rather than compressed. That is the whole reason it
+can be done at all without an outside library, which this page has managed to do without everywhere
+else and was not going to start here.
+
+**パック**パネルで、パック 1 つ分をまとめて zip として書き出せます。開いている機体や兵装を
+**機体を載せる**／**兵装を載せる**でリストに追加し、行を選んで表示名（英語・日本語）と作業台の
+レシピを入力します。**パックを書き出す**で、`ashvehiclespack/` がそのまま読める形の zip が
+できます——定義ファイル、モデル、スキン、`lang`、レシピ、必要なら `sounds.json` まで。
+名前空間はフォルダ名であり ID の前半でもあるので、他のパックと衝突しません。機体のアイテム画像は
+MOD がモデルから描きますが、兵装・ラック・ポッドのアイテム画像だけは自分で用意する必要があり、
+足りない物は行の脇と zip 内の `README.txt` に書き出されます。
 
 ### Reading it all again
 

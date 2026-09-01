@@ -13,7 +13,6 @@
     "range": 4000,
     "explosion": 1.8,
     "tracer": "C8C0B0",
-    "chunk_loading": true,
     "trail": false
   },
   "sound": {

@@ -17,7 +17,6 @@
     "range": 0,
     "explosion": 1.5,
     "tracer": "FFF0D0",
-    "chunk_loading": true,
     "trail": {
       "colour": "E4E0D6",
       "exhaust": "6E6860",

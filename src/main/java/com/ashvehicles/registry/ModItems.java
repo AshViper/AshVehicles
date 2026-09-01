@@ -12,6 +12,7 @@ import com.ashvehicles.AshVehicles;
 import com.ashvehicles.item.AircraftItem;
 import com.ashvehicles.item.AmmoItem;
 import com.ashvehicles.item.BlastWandItem;
+import com.ashvehicles.item.DroneTerminalItem;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.GroundVehicleItem;
@@ -56,6 +57,15 @@ public final class ModItems {
             ITEMS.registerItem("fuel_can", FuelItem::new, new Item.Properties().stacksTo(16));
 
     /**
+     * 携帯管制端末。無人機へ繋ぐための箱。
+     *
+     * <p>機体でも機体に付く物でもないのでここに並ぶ。1個持っていれば世界中のどの無人機にも繋げるので、
+     * 束ねる意味は無い（{@link DroneTerminalItem} 参照）。
+     */
+    public static final DeferredItem<DroneTerminalItem> DRONE_TERMINAL =
+            ITEMS.registerItem("drone_terminal", DroneTerminalItem::new, new Item.Properties().stacksTo(1));
+
+    /**
      * 標的ドローンの投入器。これも機体に付く物ではなく、撃つ相手を空へ上げる道具。
      *
      * <p>ソロでミサイルを試すための的なので、機体・兵装のどれからも独立してここに置く。使えば1機、
@@ -72,12 +82,18 @@ public final class ModItems {
             ITEMS.registerItem("blast_wand", BlastWandItem::new, new Item.Properties().stacksTo(1));
 
     /**
-     * 中間素材。機体も車両も、鉄と赤石を卓に積み上げれば出てくる物ではなくなった。
+     * 中間素材。機体も車両も兵装も、鉄と赤石と TNT を卓に積み上げれば出てくる物ではなくなった。
      *
-     * <p>7種のうち板と部品と基板が土台で、そこから装甲板・エンジン・ジェットエンジン・アビオニクスが
-     * 出る。どの機体もどの車両もこの7種だけで組める——違うのは何を何枚どこに置くかだけだ。素材の種類
-     * を機体ごとに増やさないのは、格納庫に必要な物が7種の山として見えていた方が、レシピを1つずつ
-     * 覚えるより先に進めるから。
+     * <p>前半の7種が機体の側。板と部品と基板が土台で、そこから装甲板・エンジン・ジェットエンジン・
+     * アビオニクスが出る。どの機体もどの車両もこの7種だけで組める——違うのは何を何枚どこに置くかだけだ。
+     *
+     * <p>後半の4種が撃つ物の側。シーカー・推力部品・信管・高性能爆薬で、ミサイルも爆弾も、目・足・
+     * 起爆の判断・炸薬という同じ4つの部品でできている。以前はここに TNT とガンパウダーとエンダーアイ
+     * が直に置かれていたが、それだと「誘導弾を作る」が「エンダーアイを1個持つ」と同義になり、弾の
+     * 中身がレシピから見えなかった。
+     *
+     * <p>素材の種類を機体ごと・兵装ごとに増やさないのは、格納庫に必要な物が11種の山として見えていた
+     * 方が、レシピを1つずつ覚えるより先に進めるから。
      */
     public static final DeferredItem<Item> STEEL_PLATE = ITEMS.registerSimpleItem("steel_plate");
     public static final DeferredItem<Item> MACHINE_PARTS = ITEMS.registerSimpleItem("machine_parts");
@@ -87,9 +103,22 @@ public final class ModItems {
     public static final DeferredItem<Item> JET_ENGINE = ITEMS.registerSimpleItem("jet_engine");
     public static final DeferredItem<Item> AVIONICS = ITEMS.registerSimpleItem("avionics");
 
+    /** 誘導弾の目。これ1個が「その弾は何かを追える」ということ。 */
+    public static final DeferredItem<Item> SEEKER = ITEMS.registerSimpleItem("seeker");
+
+    /** 推力部品。撃ち出される物と、落とすだけの物を分ける1個。 */
+    public static final DeferredItem<Item> ROCKET_MOTOR = ITEMS.registerSimpleItem("rocket_motor");
+
+    /** 信管。炸薬をいつ起こすかを決める部品。 */
+    public static final DeferredItem<Item> FUZE = ITEMS.registerSimpleItem("fuze");
+
+    /** 高性能爆薬。弾頭に詰める方の火薬で、装薬のガンパウダーとは別物。 */
+    public static final DeferredItem<Item> HIGH_EXPLOSIVE = ITEMS.registerSimpleItem("high_explosive");
+
     /** 中間素材を作った順に。クリエイティブのタブもこの順で出す。 */
     public static final List<DeferredItem<Item>> MATERIALS =
-            List.of(STEEL_PLATE, MACHINE_PARTS, CIRCUIT_BOARD, ARMOR_PLATE, ENGINE, JET_ENGINE, AVIONICS);
+            List.of(STEEL_PLATE, MACHINE_PARTS, CIRCUIT_BOARD, ARMOR_PLATE, ENGINE, JET_ENGINE, AVIONICS,
+                    SEEKER, ROCKET_MOTOR, FUZE, HIGH_EXPLOSIVE);
 
     /** 車両工廠を置くためのアイテム。機体と車両はこの上でしか組めない。 */
     public static final DeferredItem<VehicleWorkbenchItem> VEHICLE_WORKBENCH =
@@ -105,7 +134,8 @@ public final class ModItems {
      */
     private static final Set<String> FIXED_NAMES = Set.of("wrench", "fuel_can", "target_drone",
             "blast_wand", "vehicle_workbench",
-            "steel_plate", "machine_parts", "circuit_board", "armor_plate", "engine", "jet_engine", "avionics");
+            "steel_plate", "machine_parts", "circuit_board", "armor_plate", "engine", "jet_engine", "avionics",
+            "seeker", "rocket_motor", "fuze", "high_explosive");
 
     private static final Map<ResourceLocation, DeferredItem<AircraftItem>> AIRCRAFT = registerAircraft();
     private static final Map<ResourceLocation, DeferredItem<GroundVehicleItem>> VEHICLES = registerVehicles();

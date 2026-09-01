@@ -4,31 +4,27 @@
   "materials": [
     {
       "item": "ashvehicles:steel_plate",
-      "count": 5
-    },
-    {
-      "item": "ashvehicles:armor_plate",
-      "count": 1
+      "count": 3
     },
     {
       "item": "ashvehicles:machine_parts",
-      "count": 4
+      "count": 2
     },
     {
       "item": "ashvehicles:circuit_board",
-      "count": 2
+      "count": 4
     },
     {
-      "item": "ashvehicles:engine",
-      "count": 2
+      "item": "ashvehicles:jet_engine",
+      "count": 1
     },
     {
       "item": "ashvehicles:avionics",
-      "count": 2
+      "count": 4
     }
   ],
   "result": {
     "count": 1,
-    "id": "ashvehicles:v_22"
+    "id": "ashvehicles:mq_9"
   }
 }

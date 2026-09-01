@@ -5,6 +5,7 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
@@ -70,6 +71,8 @@ public final class TargetLock {
     /** 目標を最後に見てからの tick 数。一瞬のぶれでロックを捨てないため。 */
     private int missing;
     private boolean locked;
+    /** 前tickにロックキーが押されていたか。押しっぱなしから1押しを切り出すための記憶。 */
+    private boolean wasWanted;
     /**
      * 直近の遠距離掃引が見つけた物。毎tick、各自の現在位置で検討し直す。保持は最大 {@link #SWEEP_TICKS}
      * で、使うたびに {@link #couldTarget} で再判定するので、死んだ物や去った物が撃たれることはない。
@@ -163,19 +166,29 @@ public final class TargetLock {
     }
 
     /**
-     * 1tick分の捜索。現在の目標がまだそこにいて前方にいるなら保持する。新しい目標を取ってよいかは別の者が
-     * 決める。
+     * 1tick分の捜索。捕捉は乗員の押下で始まり、押下で終わる。
+     *
+     * <p>ロックキーの1押しが、その瞬間に照準線と射程の中にいる物を掴む——視野に何も無い押下は何も掴まない。
+     * 掴んでいる間は<em>その相手だけ</em>を追う。新しい目標は取らないし、隣により中央の何かが現れても
+     * 乗り換えない。実物のシーカーは航跡を1本追っている装置で、勝手に次の獲物へ移ったりしないからだ。
+     * もう1押しで手放す——それがロックを<em>外す</em>手順。
+     *
+     * <p>熱源シーカーだけは押下を見ない。IR ヘッドは受動素子で、視野に入った熱を勝手に掴む——切る物が
+     * 無いので切れない。従来通り自動で捕捉し、自動で乗り換える。
      *
      * @param guidance 現在選択中の兵装のシーカー。無ければ null
-     * @param wantsLock まだ追尾していない目標を取ってよいか。既存のロックは、閉じている途中でも成立済み
-     *                  でもこれに影響されない——制限されるのは最初の一噛みだけで、実物のレーダーも
-     *                  「アンテナの前を何かが横切った」だけで新しい航跡を描いたりしない。
-     *                  {@code ModKeyMappings#RADAR_LOCK} 参照
+     * @param wantsLock ロックキーが今押されているか。立ち上がりをここで検出するので、呼び出し側は
+     *                  押しっぱなしをそのまま渡してよい
      * @return クライアントへ伝えるべき変化があったか
      */
     public boolean tick(@Nullable WeaponDefinition.Guidance guidance, boolean wantsLock) {
         Entity was = this.target;
         boolean wasLocked = this.locked;
+        // 立ち上がり検出。クライアントの入力は毎tickの押下状態で届き、パケットの都合で同じ状態を2tick
+        // 見ることがある。エッジをここで取れば、1押しが「掴んで即座に手放す」に化けることは無い。
+        boolean pressed = wantsLock && !this.wasWanted;
+
+        this.wasWanted = wantsLock;
 
         if (guidance == null) {
             this.clear();
@@ -183,11 +196,30 @@ public final class TargetLock {
             return was != null || wasLocked;
         }
 
-        if (this.target == null && !wantsLock) {
+        // 自動なのは熱源シーカー、ただし誰かが操縦している間だけ。IR ヘッドが受動素子なのは本当だが、
+        // この行の実体は索敵の箱の問い合わせで、そのコストは箱の大きさで払う（bestCandidate 参照）。
+        // 乗り手のいない機体まで毎tick空を掃かせると、駐機場に並んだ数だけ「サーバーで最も高価な処理」
+        // が常時走る——押している間しか掃かなかった頃には存在しなかった負荷だ。無人機の遠隔操縦者は
+        // getAviator が数えるので、ドローンのシーカーはこれまで通り生きている。
+        boolean automatic = guidance.seeker() == WeaponDefinition.Guidance.Seeker.HEAT
+                && this.vehicle.getAviator() != null;
+
+        // トグルの「切」。追っている物があれば、押下はそれを手放す合図。
+        if (!automatic && pressed && this.target != null) {
+            this.clear();
+
+            return was != null || wasLocked;
+        }
+
+        boolean acquiring = automatic || (pressed && this.target == null);
+
+        if (this.target == null && !acquiring) {
             return false;
         }
 
-        Entity best = this.bestCandidate(guidance);
+        // 取得の tick だけ空を探す。それ以外の tick は、追っている当人がまだ見えているかだけを問う。
+        Entity best = acquiring ? this.bestCandidate(guidance)
+                : this.stillSees(guidance, this.target) ? this.target : null;
 
         // デコイに紛れて見失った場合。何も無かったのとまったく同じに扱うので猶予時間が走り、雲が薄れた
         // 瞬間に復帰するのではなくロックが落ちる。
@@ -206,7 +238,8 @@ public final class TargetLock {
             this.missing = 0;
             this.locked = this.lockTicks(guidance, best) <= 1;
         } else if (best != null) {
-            // より良い相手が現れたか、前の相手が消えた。新しい相手で最初からやり直す。
+            // より良い相手が現れたか、前の相手が消えた。新しい相手で最初からやり直す。来るのは自動捕捉の
+            // シーカーだけ——押下で掴む物は取得の tick に目標を持っていない。
             this.target = best;
             this.held = 1;
             this.missing = 0;
@@ -216,6 +249,51 @@ public final class TargetLock {
         }
 
         return this.target != was || this.locked != wasLocked;
+    }
+
+    /**
+     * 追っている相手がまだこのシーカーに見えているか。保持の判定であり、新しい候補は一切見ない。
+     *
+     * <p>供給源は取得（{@link #bestCandidate}）と同じ2本。シーカー自身の視野と距離、そしてレーダー追尾弾
+     * ならレーダーが捉え続けている航跡。取得で使った線がそのまま保持の線になるので、掴めた相手を同じ場所で
+     * 「見えない」と言い出すことは無い。
+     */
+    private boolean stillSees(WeaponDefinition.Guidance guidance, Entity target) {
+        if (!this.couldTarget(target)) {
+            return false;
+        }
+
+        Vec3 gap = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0)
+                .subtract(this.vehicle.position());
+        double distance = gap.length();
+
+        if (distance < 1.0E-3) {
+            return false;
+        }
+
+        double alignment = gap.scale(1.0 / distance).dot(this.vehicle.getAimDirection(1.0F));
+        double seeker = guidance.lockRange() * Math.max(0.0F, this.vehicle.seekerRangeGain());
+        double ownAngle = Math.cos(Math.toRadians(guidance.lockAngle()));
+
+        if (alignment >= ownAngle && distance <= reachAgainst(guidance, target, seeker)) {
+            return true;
+        }
+
+        // シーカー単独では外れているが、レーダーが走査範囲で捉え続けているならそれで足りる。
+        VehicleChassis.Radar radar = this.vehicle.radar();
+
+        if (guidance.seeker() != WeaponDefinition.Guidance.Seeker.RADAR || !radar.fitted()
+                || alignment < Math.cos(Math.toRadians(radar.arc()))) {
+            return false;
+        }
+
+        for (Contact contact : this.vehicle.getSensors().contacts()) {
+            if (contact.id() == target.getId()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -367,7 +445,7 @@ public final class TargetLock {
             case HEAT -> seeker * AircraftEntity.heatVisibility(candidate);
             // 目標指示は人間がカメラ越しに物を見ること。反射断面積が小さくても排気が冷たくても見えにくく
             // はならないので、ここでは何も割り引かず、ポッド自身の到達距離が答えの全部になる。
-            case LASER, POINT -> seeker;
+            case LASER, POINT, BEAM -> seeker;
         };
     }
 
@@ -409,12 +487,22 @@ public final class TargetLock {
     }
 
     /**
-     * シーカーが見る対象。生き物か、他の機体。見ている本人の機体、それに乗っている者、そしてこの MOD の
-     * 発射物は対象外——ミサイルがミサイルを追うのは誰も頼んでいない。
+     * シーカーが見る対象。生き物か、他の機体、そして飛んでくる誘導ミサイル。見ている本人の機体、それに
+     * 乗っている者、そしてミサイル以外の発射物は対象外——機関砲の1発ずつをロック候補に載せれば、撃ち合いの
+     * 間スコープが弾で埋まる。
      */
     private boolean couldTarget(Entity candidate) {
-        if (candidate == this.vehicle || candidate instanceof VehicleProjectile
-                || WeaponMounts.isPartOf(this.vehicle, candidate)) {
+        if (candidate == this.vehicle || WeaponMounts.isPartOf(this.vehicle, candidate)) {
+            return false;
+        }
+
+        // 誘導ミサイルは迎撃対象。ただし自分のレールから出た物は違う——発射直後のシーカーが最も強く
+        // 見るのは、まさに今自分が撃った1本だから。
+        if (candidate instanceof RocketEntity missile) {
+            return missile.isInterceptable() && !missile.wasFiredBy(this.vehicle);
+        }
+
+        if (candidate instanceof VehicleProjectile) {
             return false;
         }
 

@@ -196,7 +196,7 @@
     "lift": 0.0055,
     "lift_slope": 5,
     "stall_angle": 13,
-    "drag": 4.5e-05,
+    "drag": 0.000045,
     "induced_drag": 0.00022,
     "lateral_drag": 0.15,
     "ground_effect": 0.26,
@@ -212,13 +212,15 @@
     "aero_damping": 0.09
   },
   "airframe": {
+    "mass": 152600,
+    "payload": 18000,
     "health": 700,
     "crash_speed": 2.2,
     "explosion_power": 7,
     "max_g": 2.5,
     "seats": [
-      [-0.6, 2.95, 7.3],
-      [0.6, 2.95, 7.3]
+      [-0.5, 2.65, 7.05],
+      [0.55, 2.65, 7.05]
     ],
     "ejection": {
       "speed": 1.2,
@@ -242,7 +244,7 @@
   },
   "camera": {
     "pos": [0.0, 9.0, -30.0],
-    "cockpit": [-0.6, 4.15, 7.6]
+    "cockpit": [-0.5, 4.25, 7.05]
   },
   "sound": {
     "volume": 1.1,
@@ -273,42 +275,50 @@
     {
       "name": "bay1_left",
       "pos": [-1.2, 2.4, 3.2],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay1_right",
       "pos": [1.2, 2.4, 3.2],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay2_left",
       "pos": [-1.2, 2.4, 1.1],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay2_right",
       "pos": [1.2, 2.4, 1.1],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay3_left",
       "pos": [-1.2, 2.4, -1.0],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay3_right",
       "pos": [1.2, 2.4, -1.0],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay4_left",
       "pos": [-1.2, 2.4, -3.1],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay4_right",
       "pos": [1.2, 2.4, -3.1],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "sensor_left",

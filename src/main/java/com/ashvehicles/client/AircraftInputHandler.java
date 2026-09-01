@@ -3,7 +3,9 @@ package com.ashvehicles.client;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.AircraftInput;
+import com.ashvehicles.entity.RemoteLink;
 import com.ashvehicles.network.AircraftInputPayload;
+import com.ashvehicles.network.DroneInputPayload;
 import com.ashvehicles.network.GunTriggerPayload;
 
 import net.minecraft.client.KeyMapping;
@@ -71,17 +73,22 @@ public final class AircraftInputHandler {
         }
 
         AircraftEntity aircraft = pilotedAircraft(player);
+        // 遠隔操作中の無人機。操縦席に座っている訳ではないが、操縦桿を握っているのはこのプレイヤーだ。
+        // 以下は最後の1行——どのパケットで送るか——を除いて、有人機と完全に同じ経路を通る。同じキーで
+        // 同じ機体を飛ばすのだから、違う経路を作れば必ずどちらかが遅れる。
+        AircraftEntity drone = aircraft == null ? RemoteLink.linkedDrone(player) : null;
+        AircraftEntity flown = aircraft != null ? aircraft : drone;
 
         // 誰か操縦中かに関わらずtickする。キーを押したまま降りたパイロットの視界がポッドから戻るようにするためだ。
-        PodCamera.tick(aircraft);
+        PodCamera.tick(flown);
 
-        if (aircraft == null) {
+        if (flown == null) {
             gunnerControls(minecraft, player);
 
             return;
         }
 
-        podControls(minecraft, player, aircraft);
+        podControls(minecraft, player, flown);
 
         // ここでは Q・E・F は方向舵とフラップだ。バニラは同じtickの後段でそれらを読むので、今クリックキューを空に
         // しておけば、パイロットが剣をコックピットの外へ落としたり、キャノピー越しにインベントリを開いたり、旋回中に
@@ -129,7 +136,19 @@ public final class AircraftInputHandler {
                 // の間隔が決める。
                 ModKeyMappings.RELEASE_FLARE.isDown(),
                 ModKeyMappings.RELEASE_CHAFF.isDown(),
+                // 押下状態をそのまま送る。1押しの切り出し（掴む・手放す）はサーバーのシーカーが行う。
+                // TargetLock.tick 参照。
                 ModKeyMappings.RADAR_LOCK.isDown());
+
+        if (drone != null) {
+            // 無人機はサーバーが飛ばす。ここで local に入力を置いても飛行モデルは回らない
+            // （{@code isControlledByLocalInstance} が false）ので、置かない。舵を出すのはこのクライアント
+            // でも、舵を切るのはサーバーだ——その境目をここではっきりさせておく。DroneInputPayload 参照。
+            PacketDistributor.sendToServer(
+                    new DroneInputPayload(input, toggleGear, toggleFlaps, cycleWeapon, jettison));
+
+            return;
+        }
 
         aircraft.setInput(input);
         // 速度も同送する。サーバーには見えないからだ。ここから操縦される機体はサーバー上でtickの合間に届く

@@ -84,7 +84,7 @@ public final class GroundVehicleInputHandler {
                 ModKeyMappings.VEHICLE_BRAKE.isDown(),
                 minecraft.options.keyAttack.isDown(),
                 ModKeyMappings.FIRE_COAXIAL.isDown(),
-                // シーカーの引き金。コックピットとまったく同じキーで、まったく同じ意味を持つ
+                // シーカーのキー。コックピットとまったく同じ押下・同じ意味で、1押しの切り出しはサーバーが行う
                 ModKeyMappings.RADAR_LOCK.isDown());
 
         vehicle.setInput(input);

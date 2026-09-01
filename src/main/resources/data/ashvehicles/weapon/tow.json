@@ -10,9 +10,9 @@
     "damage": 220,
     "speed": 0.8,
     "thrust": 0.25,
-    "burn_ticks": 110,
+    "burn_ticks": 200,
     "spool_ticks": 16,
-    "top_speed": 13.9,
+    "top_speed": 9.4,
     "gravity": 0.0006,
     "range": 0,
     "explosion": 4,
@@ -25,13 +25,15 @@
     }
   },
   "guidance": {
-    "turn_rate": 4,
+    "turn_rate": 7,
     "lock_angle": 10,
     "lock_range": 3750,
-    "lock_ticks": 12,
-    "track_angle": 55,
-    "proximity": 2,
-    "seeker": "laser"
+    "lock_ticks": 1,
+    "track_angle": 180,
+    "proximity": 0,
+    "arm_ticks": 10,
+    "reacquire_ticks": 0,
+    "seeker": "beam"
   },
   "sound": {
     "volume": 1.8,

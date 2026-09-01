@@ -9,6 +9,7 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.sensor.Contact;
 import com.ashvehicles.sensor.Iff;
+import com.ashvehicles.sensor.Threat;
 import com.ashvehicles.weapon.GunStations;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -114,12 +115,30 @@ public final class AircraftHud implements LayeredDraw.Layer {
      */
     private static final int ROTOR_READY = 95;
 
-    /** ピッチ1度あたり水平線が滑る画面ピクセル数。 */
-    private static final float PIXELS_PER_DEGREE = 3.0F;
+    /**
+     * ピッチ1度あたり水平線が滑る画面ピクセル数。
+     *
+     * <p>ワールドの見え方に近い値であること。この目盛りが答えるのは「機首が何度上を向いているか」ではなく
+     * 「あの尾根の上を越えられるか」であり、それはラダーの段が窓の外の物と同じ場所に乗っているときにしか
+     * 答えられない。標準的な視野角で1度はおよそ4〜5pxになる。
+     */
+    private static final float PIXELS_PER_DEGREE = 5.0F;
     /** ピッチラダーの目盛り間隔（度）。 */
-    private static final int[] LADDER = {10, 20, 30, 45, 60};
-    private static final int LADDER_WIDTH = 34;
-    private static final int HORIZON_WIDTH = 60;
+    private static final int[] LADDER = {5, 10, 15, 20, 30, 45, 60};
+    private static final int LADDER_WIDTH = 46;
+    /**
+     * 水平線の長さ。機体シンボルの翼より長い。
+     *
+     * <p>短いと水平飛行で翼の下に丸ごと隠れてしまい、「水平線が見えない」のか「水平線がそこに無い」のかが
+     * 区別できなくなる。翼の外へ突き出ていれば、重なっている間もそこに在ることが見えている。
+     */
+    private static final int HORIZON_WIDTH = 100;
+    /**
+     * 水平線と、その外に置く目盛りとの間に必ず空ける幅（本体の座標系のピクセル）。
+     *
+     * <p>0でも重なりはしないが、隣り合った2本の縦線は1本の太い線に見える。外を見る帯はここから始まる。
+     */
+    private static final int TAPE_GAP = 22;
     /**
      * 爆弾の着弾環の地上での幅（ブロック）。画面上の大きさではなくワールド上の大きさで描くので、乗っている地面と同様に
      * 距離とともに縮むし、意味も持つ——爆弾が到達したときおおよそ何を吹き飛ばすか、である。
@@ -167,20 +186,31 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
+        // 先に、窓の外に合わせて描かれる印。水平線もラダーも照準も、そこに在る物と同じ場所に乗っている
+        // ことに意味があるので、大きさは本体の座標系のまま動かさない。{@link HudScale} 参照。
         drawAttitude(graphics, attitude, centreX, centreY);
         drawMarkers(graphics, minecraft, aircraft, attitude, velocity, speed, centreX, centreY);
         drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
-        drawNumbers(graphics, minecraft.font, aircraft, attitude, velocity, speed);
-        drawStatus(graphics, minecraft.font, aircraft, attitude, velocity, speed);
-        drawStores(graphics, minecraft.font, aircraft, centreX, centreY);
-        drawStations(graphics, minecraft.font, minecraft, aircraft, centreX, centreY);
         drawLock(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawHMDCues(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
-        drawCrew(graphics, minecraft.font, aircraft);
-        drawEject(graphics, minecraft.font, centreX, centreY);
+
+        // 次に計器。こちらは外の何にも対応していない——読む物であって、見る物の上に乗る物ではない——ので
+        // 1段小さく描き、その分だけ画面を空ける。
+        HudScale.push(graphics);
+
+        int panelCentreX = HudScale.width(graphics) / 2;
+        int panelCentreY = HudScale.height(graphics) / 2;
+
+        drawNumbers(graphics, minecraft.font, aircraft, attitude, velocity, speed);
+        drawPanels(graphics, minecraft, aircraft, attitude, velocity, speed);
+        drawCaution(graphics, minecraft.font, aircraft, attitude, velocity, speed, panelCentreX);
+        drawEject(graphics, minecraft.font, panelCentreX, panelCentreY);
+
+        HudScale.pop(graphics);
+
         // 直近の着弾があれば、その結果。戦車乗員が得るのと同じ計器で、理由も同じだ。空から機関砲を撃つ距離では、
-        // 当たった連射と外れた連射は照準の後ろからは見分けが付かない。
+        // 当たった連射と外れた連射は照準の後ろからは見分けが付かない。この2つは自分で縮むので外に置く。
         HitReadout.draw(graphics, minecraft.font);
         RadarDisplay.draw(graphics, minecraft.font, aircraft);
     }
@@ -680,7 +710,13 @@ public final class AircraftHud implements LayeredDraw.Layer {
         graphics.fill(x, Math.min(y, y + alongY * arm), x + 1, Math.max(y, y + alongY * arm), colour);
     }
 
-    /** 人工水平儀。主翼と共にロールし、機首と共に上下する線。 */
+    /**
+     * 人工水平儀。主翼と共にロールし、機首と共に上下する目盛り。
+     *
+     * <p>段は5度ごと。水平線より上は実線で、端の爪が下——つまり水平線の側——を向く。下は破線で、爪が上を向く。
+     * 逆さまになった機体でも、爪の向きだけで空がどちらかが分かる。これは実機の作法そのままで、そうなっている
+     * 理由も同じだ。パイロットが姿勢を見失うのは、姿勢の情報が無いときではなく、あるが読むのに一拍かかるときだ。
+     */
     private static void drawAttitude(GuiGraphics graphics, Quaternionf attitude, int centreX, int centreY) {
         float bank = Attitude.bank(attitude);
         float elevation = -Attitude.elevation(attitude);
@@ -692,33 +728,54 @@ public final class AircraftHud implements LayeredDraw.Layer {
         pose.translate(0.0F, elevation * PIXELS_PER_DEGREE, 0.0F);
 
         // 水平線本体。中央に隙間を空け、機体シンボルを隠さないようにする。
-        graphics.fill(-HORIZON_WIDTH, -1, -14, 0, GREEN);
-        graphics.fill(14, -1, HORIZON_WIDTH, 0, GREEN);
+        graphics.fill(-HORIZON_WIDTH, -1, -20, 0, GREEN);
+        graphics.fill(20, -1, HORIZON_WIDTH, 0, GREEN);
+
+        Font font = Minecraft.getInstance().font;
 
         for (int rung : LADDER) {
-            drawRung(graphics, rung);
-            drawRung(graphics, -rung);
+            drawRung(graphics, font, rung);
+            drawRung(graphics, font, -rung);
         }
 
         pose.popPose();
 
-        // 機体シンボル。画面に固定する。動くのは水平線であってこちらではない。
-        graphics.fill(centreX - 13, centreY - 1, centreX - 4, centreY, GREEN);
-        graphics.fill(centreX + 4, centreY - 1, centreX + 13, centreY, GREEN);
-        graphics.fill(centreX - 1, centreY - 1, centreX + 1, centreY + 1, GREEN);
+        // 機体シンボル。画面に固定する。動くのは水平線であってこちらではない。長い翼にしてあるのは、これが
+        // 「機首がどこを向いているか」ではなく「機体のどこが正面か」の基準線だからで、短い印では水平線と
+        // 見分けが付かない。
+        graphics.fill(centreX - 74, centreY - 1, centreX - 16, centreY, GREEN);
+        graphics.fill(centreX + 16, centreY - 1, centreX + 74, centreY, GREEN);
+        graphics.fill(centreX - 74, centreY - 1, centreX - 73, centreY + 4, GREEN);
+        graphics.fill(centreX + 73, centreY - 1, centreX + 74, centreY + 4, GREEN);
     }
 
-    private static void drawRung(GuiGraphics graphics, int degrees) {
+    /** ラダー1段。左右の棒、端の爪、そしてその外側の度数。 */
+    private static void drawRung(GuiGraphics graphics, Font font, int degrees) {
         int y = Math.round(-degrees * PIXELS_PER_DEGREE);
-        int half = LADDER_WIDTH / 2;
+        int half = LADDER_WIDTH;
+        int gap = 16;
+        int claw = degrees < 0 ? -4 : 4;
 
-        if (degrees > 0) {
-            graphics.fill(-half, y, half, y + 1, DIM);
+        if (degrees >= 0) {
+            graphics.fill(-half, y, -gap, y + 1, DIM);
+            graphics.fill(gap, y, half, y + 1, DIM);
         } else {
             // 水平線より下ではラダーを破線にする。実物と同じだ。
-            graphics.fill(-half, y, -half + 10, y + 1, DIM);
-            graphics.fill(half - 10, y, half, y + 1, DIM);
+            for (int dash = 0; dash < 4; dash++) {
+                int from = gap + dash * 8;
+
+                graphics.fill(-Math.min(from + 6, half), y, -from, y + 1, DIM);
+                graphics.fill(from, y, Math.min(from + 6, half), y + 1, DIM);
+            }
         }
+
+        graphics.fill(-half, Math.min(y, y + claw), -half + 1, Math.max(y + 1, y + claw), DIM);
+        graphics.fill(half - 1, Math.min(y, y + claw), half, Math.max(y + 1, y + claw), DIM);
+
+        String text = String.valueOf(degrees);
+
+        graphics.drawString(font, text, -half - 5 - font.width(text), y - 3, DIM, false);
+        graphics.drawString(font, text, half + 5, y - 3, DIM, false);
     }
 
     /** 機首の指す方向と、機体が実際に進んでいる方向。 */
@@ -740,120 +797,157 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int[] path = project(minecraft, velocity.scale(1.0 / speed), focal, centreX, centreY);
 
         if (path != null) {
-            // 古典的な円と翼。この大きさなら十分近い。
-            graphics.fill(path[0] - 3, path[1] - 3, path[0] + 4, path[1] - 2, GREEN);
-            graphics.fill(path[0] - 3, path[1] + 3, path[0] + 4, path[1] + 4, GREEN);
-            graphics.fill(path[0] - 4, path[1] - 3, path[0] - 3, path[1] + 4, GREEN);
-            graphics.fill(path[0] + 3, path[1] - 3, path[0] + 4, path[1] + 4, GREEN);
-            graphics.fill(path[0] - 9, path[1], path[0] - 4, path[1] + 1, GREEN);
-            graphics.fill(path[0] + 4, path[1], path[0] + 9, path[1] + 1, GREEN);
+            flightPath(graphics, path[0], path[1]);
         }
     }
 
-    /** 左に対気速度、右に高度、上に方位。いつもの配置。 */
+    /**
+     * 飛行経路マーカー。輪と、そこから四方へ出る短い爪。
+     *
+     * <p>機体シンボルとの隙間が迎角そのものだ。数字で読むより先に、機首と進行方向がどれだけ食い違っているかが
+     * 見えている。着陸で見るのはこちらであって機首ではない——輪の乗っている場所が、機体が実際に着く場所だ。
+     */
+    private static void flightPath(GuiGraphics graphics, int x, int y) {
+        circle(graphics, x, y, 7, GREEN);
+
+        graphics.fill(x - 14, y, x - 7, y + 1, GREEN);
+        graphics.fill(x + 8, y, x + 15, y + 1, GREEN);
+        graphics.fill(x, y - 14, x + 1, y - 7, GREEN);
+        graphics.fill(x - 1, y - 1, x + 2, y + 2, GREEN);
+    }
+
+    /**
+     * 動く目盛り。左に対気速度、右に高度、上端に方位。
+     *
+     * <p>3本とも同じ作りで、同じ読み方をする。箱が今の値、その下を流れる目盛りが変化。パイロットが覚える
+     * のは1つの読み方だけで済む。
+     */
     private static void drawNumbers(GuiGraphics graphics, Font font, AircraftEntity aircraft,
             Quaternionf attitude, Vec3 velocity, double speed) {
-        int centreX = graphics.guiWidth() / 2;
-        int centreY = graphics.guiHeight() / 2;
+        int centreX = HudScale.width(graphics) / 2;
+        int centreY = HudScale.height(graphics) / 2;
+        // レーダースコープが左辺を、警戒受信機が右辺を取っている。目盛りはその内側だが、内側のどこでもよい
+        // わけではない——人工水平線の外に出ていなければならない。
+        //
+        // 水平線は縮まないので、避けるのはこちらだ。だから距離を本体の座標系で決めてから、こちらの座標系へ
+        // 直す（{@link HudScale#at} 参照）。以前は中心からの距離を直に書いていて、その値は水平線の端より
+        // 内側だった——速度計と高度計が水平線の両端に重なり、外を見る帯が計器で埋まっていた。
+        //
+        // スコープに突き当たったらそこで止める。目盛りが読めなくなるより、狭い画面で水平線に触れる方がまし。
+        int clear = HudScale.at(HORIZON_WIDTH + TAPE_GAP) + HudTape.RIGHT_REACH;
+        int room = centreX - RadarDisplay.SCOPE_RIGHT - TAPE_GAP - HudTape.LEFT_REACH;
+        int offset = Math.max(Math.min(clear, room), HudTape.RIGHT_REACH + TAPE_GAP);
 
         // 1ブロック=1m、1秒=20tick。
         int kmh = (int) Math.round(speed * 20.0 * 3.6);
-        int altitude = (int) Math.round(aircraft.getY());
         int climb = (int) Math.round(velocity.y * 20.0);
         int heading = Math.floorMod(Math.round(Attitude.heading(attitude)) + 180, 360);
 
-        label(graphics, font, "SPD", centreX - 118, centreY - 14);
-        value(graphics, font, kmh + " km/h", centreX - 118, centreY - 4);
+        HudTape.vertical(graphics, font, centreX - offset, centreY, "SPD", kmh, "km/h", null, null);
+        HudTape.vertical(graphics, font, centreX + offset - 40, centreY, "ALT", aircraft.getY(), "m",
+                "V/S", String.format("%+d m/s", climb));
 
-        label(graphics, font, "ALT", centreX + 74, centreY - 14);
-        value(graphics, font, altitude + " m", centreX + 74, centreY - 4);
-        value(graphics, font, String.format("%+d m/s", climb), centreX + 74, centreY + 8);
-
-        String compass = heading + "  " + cardinal(heading);
-        graphics.drawString(font, compass, centreX - font.width(compass) / 2, centreY - 78, GREEN, true);
-        graphics.fill(centreX - 1, centreY - 66, centreX + 1, centreY - 62, GREEN);
+        HudTape.horizontal(graphics, font, centreX, 12, heading, true, heading + "  " + cardinal(heading));
     }
 
-    /** エンジン、可動部、そして噛み付いてくる2つ——迎角と失速。 */
-    private static void drawStatus(GuiGraphics graphics, Font font, AircraftEntity aircraft,
+    /**
+     * 下の両隅の計器。
+     *
+     * <p><b>分け方は「撃つ物」と「飛ぶ物」だ。</b>右下には兵装と機体の残存度——引き金を引くかどうかを決める
+     * ときに読む物を全部。左下にはそれ以外、つまり機体を飛ばし続けるために読む物。パイロットが答えを探して
+     * 画面を舐める距離は、その2つの問いが2箇所にある限り短い。
+     *
+     * <p>残存度が兵装の側に居るのは、それが「あと何回撃たれてよいか」の数字だからだ。燃料や後退角と並べて
+     * しまうと、飛ぶための数字の列に紛れて、判断のいちばん近くには無くなる。
+     *
+     * <p>レーダーは両隅のどちらでもない。スコープは左辺、受信機は右辺、どちらも高さ中央のまま——あれは機体の
+     * 状態ではなく空にいる他人の話であり、この2枚とは別の問いに答えている。
+     */
+    private static void drawPanels(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
             Quaternionf attitude, Vec3 velocity, double speed) {
-        int left = 8;
-        int bottom = graphics.guiHeight() - 8;
+        int bottom = HudScale.height(graphics) - 8;
 
-        // 残燃料。割合と、その割合で燃料計に何が起きているか。
+        flight(aircraft, attitude, velocity, speed).bottomLeft(graphics, minecraft.font, 8, bottom);
+        arms(minecraft, aircraft).bottomRight(graphics, minecraft.font, HudScale.width(graphics) - 8, bottom);
+    }
+
+    /**
+     * 左下。機体を飛ばし続けるために読む物——搭乗者、燃料、エンジン、可動部、そして噛み付いてくる2つ、迎角と
+     * 荷重。
+     *
+     * <p>行数の変わる物を上へ、変わらない物を下へ積む。乗員が1人乗り降りするたびに迎角の行が上下すれば、
+     * 一番よく読む数字が一番落ち着かない場所に居ることになる。枠は上へ伸びる。
+     */
+    private static HudPanel flight(AircraftEntity aircraft, Quaternionf attitude, Vec3 velocity, double speed) {
+        HudPanel panel = new HudPanel();
+
+        // 搭乗者。パイロットが先頭。
+        //
+        // 無人機では「乗員」ではなく「回線」だ。操作者は実際には機体に乗っているが、それは世界を描かせる
+        // ための実装であって、機体に人が乗っているという意味ではない（{@code RemoteLink} 参照）。計器が
+        // それを乗員として読み上げれば、その実装が画面に漏れる。
+        List<Entity> aboard = aircraft.getPassengers();
+        boolean remote = aircraft.isUnmanned();
+
+        panel.title(remote ? "LINK / STATUS" : "CREW / STATUS");
+
+        if (!aboard.isEmpty()) {
+            Entity pilot = aircraft.getControllingPassenger();
+
+            for (Entity rider : aboard) {
+                panel.crew((remote ? "R " : rider == pilot ? "P " : "- ") + rider.getName().getString(),
+                        remote || rider == pilot ? GREEN : DIM);
+            }
+        }
+
+        // 残燃料。割合の目盛りと、その数字。
         //
         // 割合で出すのは、パイロットが実際に問うのがそれだからだ。「あと何単位あるか」は機種ごとに意味が
         // 変わるが、「あと何割か」はどの機体でも同じことを意味する。BINGO——帰投を決める残量——を下回れば
-        // 琥珀になり、そこから先は「戦闘を続けるか帰るか」の判断が始まる。空になれば下の中央に警告が出る。
+        // 琥珀になり、そこから先は「戦闘を続けるか帰るか」の判断が始まる。
         //
         // 燃料を持たない機体では1行も割かない。動かない数字はパイロットが読むことを覚え、それから読むのを
         // やめる物であり、そのとき隣の数字も一緒に読まれなくなる。
         if (aircraft.fuelSetup().fitted()) {
             float fuel = aircraft.getFuelFraction();
-            value(graphics, font, String.format("FUEL %d%%", Math.round(fuel * 100.0F)),
-                    left, bottom - 72, fuel <= BINGO_FUEL ? WARNING : GREEN);
 
-            // 増槽の残量。本体の割合とは別に、量そのもので出す。パイロットがこの数字に対して問うのは「あと
-            // 何割か」ではなく「まだ落とせないか」だからだ。0 になれば落としてよく、そこからは抗力だけを
-            // 払っていることになる——だから空でも表示は残す。吊っていなければ1文字も出さない。
-            if (aircraft.getWeapons().hasTank()) {
-                int tanks = aircraft.getTankFuel();
-                value(graphics, font, String.format("EXT %d", tanks), left + 84, bottom - 72,
-                        tanks > 0 ? GREEN : DIM);
-            }
+            panel.bar("FUEL", fuel, Math.round(fuel * 100.0F) + "%", fuel <= BINGO_FUEL ? WARNING : GREEN);
         }
 
-        // 機体の残存度。パイロットが戦闘より帰投を考えるべき量まで減ったら警告色にする。
-        float health = aircraft.getHealth();
-        int colour = aircraft.getHealthFraction() <= LOW_HEALTH ? WARNING : GREEN;
-        value(graphics, font, String.format("HP %d/%d", Math.round(health), Math.round(aircraft.getMaxHealth())),
-                left, bottom - 62, colour);
+        // レバー。目盛りにするのは燃料と同じ理由——今どこにあるかより、上限までどれだけ残っているかを問う
+        // 物だからだ。アフターバーナーは百分率ではない。ゲートを抜けたか抜けていないかなので、目盛りは
+        // 振り切ったまま字だけが変わる。
+        boolean reheat = aircraft.isAfterburning();
+        float throttle = aircraft.getThrottle();
+        String lever = aircraft.isRotorcraft() ? "COLL" : "THR";
 
-        // 放出できる残量。両方の数を1行にまとめ、どちらかが尽きたら琥珀にする。どちらが尽きたかが、次のロックを生き延び
-        // られるかを決めるからだ。
-        int flares = aircraft.getCountermeasures(true);
-        int chaff = aircraft.getCountermeasures(false);
-        value(graphics, font, String.format("CM  FL %d  CH %d", flares, chaff), left, bottom - 52,
-                flares > 0 && chaff > 0 ? GREEN : WARNING);
-
-        // 探している者に対して機体が返している反射と、それが現時点でどれだけのコストになっているか。1行割く価値がある
-        // のは見つかりにくく作られた機体だけで、それ以外では値が動かず、意味を持ったこともない。
-        float clean = aircraft.getStats().signature().radar();
-
-        if (clean < 1.0F) {
-            float cross = aircraft.radarCrossSection();
-
-            value(graphics, font, String.format("RCS %.2f", cross), left + 84, bottom - 52,
-                    cross > clean ? WARNING : GREEN);
-        }
-
-        int throttle = Math.round(aircraft.getThrottle() * 100.0F);
+        panel.bar(lever, reheat ? 1.0F : throttle, reheat ? "A/B" : Math.round(throttle * 100.0F) + "%",
+                reheat ? WARNING : GREEN);
 
         if (aircraft.isRotorcraft()) {
-            // 同じレバーをヘリでの呼び名で表示し、その隣に、ヘリのパイロットだけが持つ値——ローターの状態——を置く。
-            // 回転が上がる前にコレクティブを引いてもまったく何も起きないので、待ち時間はパイロットが推測するのではなく
-            // 見られる物である必要がある。到達するまでは琥珀。
-            int rotor = Math.round(aircraft.getRotorSpeed() * 100.0F);
+            // ヘリのパイロットだけが持つ値。回転が上がる前にコレクティブを引いてもまったく何も起きないので、
+            // 待ち時間はパイロットが推測するのではなく見られる物である必要がある。到達するまでは琥珀。
+            float rotor = aircraft.getRotorSpeed();
+            int percent = Math.round(rotor * 100.0F);
 
-            value(graphics, font, "COLL " + throttle + "%", left, bottom - 42);
-            value(graphics, font, "RTR " + rotor + "%", left, bottom - 32,
-                    rotor >= ROTOR_READY ? GREEN : WARNING);
-        } else {
-            // レバーと、その上限の向こうの1段。アフターバーナーは百分率ではない——ゲートを抜けたか抜けていないかだ——
-            // し、あの加速をしている機体の隣の「THR 100%」は、その理由について何も語らない。
-            boolean reheat = aircraft.isAfterburning();
+            panel.bar("RTR", rotor, percent + "%", percent >= ROTOR_READY ? GREEN : WARNING);
+        }
 
-            value(graphics, font, reheat ? "THR A/B" : "THR " + throttle + "%", left, bottom - 42,
-                    reheat ? WARNING : GREEN);
-            value(graphics, font, "GEAR " + (aircraft.isGearDown() ? "DOWN" : "UP"), left, bottom - 32);
-            value(graphics, font, "FLAP " + (aircraft.isFlapsDown() ? "DOWN" : "UP"), left, bottom - 22);
+        panel.divider();
+
+        if (!aircraft.isRotorcraft()) {
+            panel.pair("GEAR", DIM, aircraft.isGearDown() ? "DOWN" : "UP", GREEN,
+                    aircraft.isGearDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
+            panel.pair("FLAP", DIM, aircraft.isFlapsDown() ? "DOWN" : "UP", GREEN,
+                    aircraft.isFlapsDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
         }
 
         // 可変翼を持つ機体のみ。翼はパイロットが動かす物ではないが、だからこそ今どこにあるかは見えている必要が
         // ある——後退角は、この機体が同じ速度で何ができるかを丸ごと決めてしまう。作動中は琥珀。
         if (aircraft.hasSweepWing()) {
-            value(graphics, font, "WING " + Math.round(aircraft.getWingSweep(1.0F)) + "°", left + 84, bottom - 32,
-                    aircraft.getWingSweep(1.0F) == aircraft.getWingSweep(0.0F) ? GREEN : WARNING);
+            boolean settled = aircraft.getWingSweep(1.0F) == aircraft.getWingSweep(0.0F);
+
+            panel.pair("WING", DIM, Math.round(aircraft.getWingSweep(1.0F)) + "°", settled ? GREEN : WARNING);
         }
 
         // 転換可能な機体のみ。ノズルが動作中は琥珀にする。転換は、この機体の飛行のうち「エンジンがどこを向いているか」
@@ -862,33 +956,231 @@ public final class AircraftHud implements LayeredDraw.Layer {
             int nozzle = Math.round(aircraft.getNozzleAngle());
             boolean settled = nozzle == 0 || nozzle == Math.round(aircraft.getStats().vtol().get().maxAngle());
 
-            value(graphics, font, "VTOL " + nozzle + "°", left + 84, bottom - 22,
-                    settled ? GREEN : WARNING);
+            panel.pair("VTOL", DIM, nozzle + "°", settled ? GREEN : WARNING);
         }
 
+        // 増槽の残量。本体の割合とは別に、量そのもので出す。パイロットがこの数字に対して問うのは「あと
+        // 何割か」ではなく「まだ落とせないか」だからだ。0 になれば落としてよく、そこからは抗力だけを
+        // 払っていることになる——だから空でも表示は残す。吊っていなければ1文字も出さない。
+        if (aircraft.getWeapons().hasTank()) {
+            int tanks = aircraft.getTankFuel();
+
+            panel.pair("EXT TANK", DIM, String.valueOf(tanks), tanks > 0 ? GREEN : DIM);
+        }
+
+        // 探している者に対して機体が返している反射と、それが現時点でどれだけのコストになっているか。1行割く価値がある
+        // のは見つかりにくく作られた機体だけで、それ以外では値が動かず、意味を持ったこともない。
+        float clean = aircraft.getStats().signature().radar();
+
+        if (clean < 1.0F) {
+            float cross = aircraft.radarCrossSection();
+
+            panel.pair("RCS", DIM, String.format("%.2f", cross), cross > clean ? WARNING : GREEN);
+        }
+
+        panel.divider();
+        panel.pair(String.format("AOA  %+.0f°", angleOfAttack(attitude, velocity, speed)), GREEN,
+                String.format("%.1f G", aircraft.getLoadFactor(velocity)), GREEN);
+
+        return panel;
+    }
+
+    /**
+     * 右下。引き金についての物を全部——パイロンの搭載物、砲座、放出できる残量、そして機体の残存度。
+     *
+     * <p>ここも行数の変わる物が上だ。重量と残存度と対抗手段は常に最下段に居るので、目をやる場所が搭載の内容で
+     * 動かない。
+     */
+    private static HudPanel arms(Minecraft minecraft, AircraftEntity aircraft) {
+        HudPanel panel = new HudPanel();
+
+        panel.title("STORES / WEAPONS");
+        stores(panel, aircraft);
+        stations(panel, minecraft, aircraft);
+        panel.divider();
+        load(panel, aircraft);
+
+        // 機体の残存度。パイロットが戦闘より帰投を考えるべき量まで減ったら警告色にする。
+        float health = aircraft.getHealth();
+
+        panel.pair("HP", DIM, String.format("%d / %d", Math.round(health), Math.round(aircraft.getMaxHealth())),
+                aircraft.getHealthFraction() <= LOW_HEALTH ? WARNING : GREEN);
+
+        // 放出できる残量。両方の数を1行にまとめ、どちらかが尽きたら琥珀にする。どちらが尽きたかが、次のロックを生き延び
+        // られるかを決めるからだ。
+        int flares = aircraft.getCountermeasures(true);
+        int chaff = aircraft.getCountermeasures(false);
+
+        panel.divider();
+        panel.pair("CM", DIM, String.format("FL %d   CH %d", flares, chaff),
+                flares > 0 && chaff > 0 ? GREEN : WARNING);
+
+        return panel;
+    }
+
+    /**
+     * 砲座の一覧。各砲の名前・残弾・今それを持っているのが誰か。砲座を持たない機体では1行も足さない。
+     *
+     * <p>この画面の持ち主が撃てる砲には矢印を付ける。1人で飛んでいれば全部が自分の物で、そのうち1つだけに
+     * 矢印が付く——兵装切り替えキーが選んでいる砲だ。誰かが砲手席に着いていれば、その砲の行はその人の名前に
+     * なり、矢印は消える。他人の砲だからだ。
+     */
+    private static void stations(HudPanel panel, Minecraft minecraft, AircraftEntity aircraft) {
+        GunStations stations = aircraft.getStations();
+
+        if (!stations.exists()) {
+            return;
+        }
+
+        int mine = stations.liveStationOf(minecraft.player);
+
+        panel.divider();
+
+        for (int index = 0; index < stations.count(); index++) {
+            AircraftDefinition.Station station = stations.station(index);
+            Entity crew = stations.operatorOf(index);
+            ResourceLocation gun = stations.weaponOf(index);
+            int rounds = stations.rounds(index);
+            boolean own = index == mine;
+            int colour = gun == null || rounds <= 0 ? WARNING : own ? GREEN : DIM;
+            // 砲座の名前ではなく、そこに今載っている砲の名前を出す。空の旋回パイロンは「積んでいない」と
+            // 言うべきであって、砲座の名前だけを出せば「あるのに撃てない」に見える。
+            String name = gun == null ? station.label().toUpperCase(java.util.Locale.ROOT) : name(gun);
+
+            panel.pair((own ? "> " : "  ") + name, colour, gun == null ? "--" : String.valueOf(rounds), colour);
+
+            // 誰が撃つか。自分の砲では言うまでもないので、他人が持っている砲についてだけ名前を出す。
+            if (crew != null && crew != minecraft.player) {
+                panel.crew(crew.getName().getString(), DIM);
+            }
+        }
+    }
+
+    /**
+     * パイロンの搭載物。選択中の兵装とその残弾を出し、その下に他の搭載物を暗く列挙するので、切り替えると次に何が来るか
+     * が分かる。
+     *
+     * <p>機体が使う手段を持たない兵装は、トリガーを押して発見させるのではなく明示する。指示装置を積んでいない機体の
+     * レーザー誘導爆弾がその例だ。吊られており、一覧にも出るが、投下されない。どれがどれかを地上で知らされる方が、目標
+     * 上空で気付くよりはるかに有用だ。{@link com.ashvehicles.weapon.WeaponDefinition#requires} 参照。
+     *
+     * <p>何も積んでいない機体では1行も足さない。非武装機の計器を従来通りに保つためだ。
+     */
+    private static void stores(HudPanel panel, AircraftEntity aircraft) {
+        // 撃てる物だけでなく吊っている物全部。増槽は選択されないが、翼の下にぶら下がっており、パイロットが
+        // 搭載一覧に対して問うのは「今この機体は何を持っているか」だ。
+        List<ResourceLocation> carried = aircraft.getWeapons().carriedStores();
+
+        if (carried.isEmpty()) {
+            return;
+        }
+
+        ResourceLocation selected = aircraft.getWeapons().selected();
+
+        for (ResourceLocation weapon : carried) {
+            boolean armed = weapon.equals(selected);
+            int rounds = armed ? aircraft.getWeapons().selectedAmmo() : ammoOf(aircraft, weapon);
+            boolean unusable = aircraft.getWeapons().missingPod(weapon) != null;
+            int colour = unusable || rounds <= 0 ? WARNING : (armed ? GREEN : DIM);
+
+            panel.pair((armed ? "> " : "  ") + name(weapon), colour,
+                    unusable ? "NO POD" : String.valueOf(rounds), colour);
+        }
+    }
+
+    /**
+     * 吊っている物の総重量。
+     *
+     * <p>これが無いと搭載可能重量は「あと1発吊ろうとして初めて分かる上限」になる。パイロンが空いていて、
+     * ラックも付いていて、それでも次の1発が載らない理由は、目に見える所に無ければ不具合に見える。
+     *
+     * <p>重さを書いていない機体では1行も足さない。この行が出る機体では、必ず数字に意味がある。
+     */
+    private static void load(HudPanel panel, AircraftEntity aircraft) {
+        float carried = aircraft.getStoreMass();
+        float capacity = aircraft.getPayloadCapacity();
+
+        if (carried <= 0.0F && capacity <= 0.0F) {
+            return;
+        }
+
+        String text = capacity > 0.0F
+                ? String.format(java.util.Locale.ROOT, "%.0f / %.0f KG", carried, capacity)
+                : String.format(java.util.Locale.ROOT, "%.0f KG", carried);
+        // 満載に近づいたら琥珀。残りが最も軽い兵装1発を切っている、という以上のことは言わない——どの1発が
+        // 載るかは兵装ごとの重さの問題であり、地上で吊ろうとすれば分かる。
+        int colour = capacity > 0.0F && carried >= capacity * 0.95F ? WARNING : DIM;
+
+        panel.pair("LOAD", DIM, text, colour);
+    }
+
+    /**
+     * 警告灯1つ。今この機体に起きている最悪のことを、方位帯のすぐ下に1行で出す。
+     *
+     * <p><b>なぜ1つなのか。</b>失速も、燃料切れも、ミサイルも、パイロットに同じことを要求する——今すぐ何か
+     * しろ、だ。それを画面の3箇所に散らせば、どれか1つが起きているとき残り2箇所は「何も起きていない」と
+     * 言い続ける。1箇所に集めれば、その1行を見るかどうかだけが問題になる。
+     *
+     * <p><b>何も起きていなければ1枚も描かない。</b>常時点いている警告灯は警告ではなく背景になる。灯が出て
+     * いること自体が知らせであり、そこに何と書いてあるかは2番目の問いだ。だから色も1つ——この計器で赤は
+     * 「今すぐ何かしろ」の色で、灯はそれ以外のことを言わない。
+     */
+    private static void drawCaution(GuiGraphics graphics, Font font, AircraftEntity aircraft,
+            Quaternionf attitude, Vec3 velocity, double speed, int centreX) {
         float stallAngle = aircraft.getStats().wing().stallAngle();
-        float angleOfAttack = angleOfAttack(attitude, velocity, speed);
         boolean stalled = speed > 0.05 && !aircraft.onGround() && !aircraft.isHovering()
-                && Math.abs(angleOfAttack) > stallAngle;
+                && Math.abs(angleOfAttack(attitude, velocity, speed)) > stallAngle;
+        Threat.Kind threat = RadarReadout.worst();
 
-        value(graphics, font, String.format("AOA %+.0f", angleOfAttack), left, bottom - 12);
-        value(graphics, font, String.format("%.1f G", aircraft.getLoadFactor(velocity)), left, bottom - 2);
+        // 深刻な順に1つだけ選ぶ。2件同時に起きていても灯は1つで、上の1件を消してからでないと下の1件は
+        // 出てこない——先に手を打つべきなのは常に上の方だからだ。
+        String text;
 
-        if (stalled) {
-            String warning = "STALL";
-            int centreX = graphics.guiWidth() / 2;
-            graphics.drawString(font, warning, centreX - font.width(warning) / 2,
-                    graphics.guiHeight() / 2 + 42, WARNING, true);
+        if (threat == Threat.Kind.MISSILE) {
+            text = "MISSILE";
+        } else if (stalled) {
+            text = "STALL";
+        } else if (aircraft.isOutOfFuel()) {
+            text = "FUEL OUT";
+        } else if (threat == Threat.Kind.LOCK) {
+            text = "LOCKED";
+        } else if (threat == Threat.Kind.SEARCH) {
+            text = "SCANNED";
+        } else if (aircraft.fuelSetup().fitted() && aircraft.getFuelFraction() <= BINGO_FUEL) {
+            text = "BINGO FUEL";
+        } else {
+            return;
         }
 
-        // 燃料切れ。失速の1行下に出すのは、両方同時に起こりうるからだ——エンジンが止まった機体は速度を失い、
-        // やがて主翼も止まる。そのときパイロットは2つとも知る必要がある。
-        if (aircraft.isOutOfFuel()) {
-            String warning = "FUEL OUT";
-            int centreX = graphics.guiWidth() / 2;
-            graphics.drawString(font, warning, centreX - font.width(warning) / 2,
-                    graphics.guiHeight() / 2 + 52, WARNING, true);
+        // 点滅させるのは撃たれているときだけ。動く物は視野の端でも拾えるが、拾わせる価値があるのは、
+        // 読む前に操縦桿を倒すべき1件だけだ。
+        if (threat == Threat.Kind.MISSILE && (aircraft.tickCount % 10) < 4) {
+            return;
         }
+
+        int colour = WARNING;
+        int width = font.width(text) + 26;
+        int left = centreX - width / 2;
+        int top = 46;
+
+        graphics.fill(left, top, left + width, top + 14, 0xB0000000);
+        graphics.fill(left, top, left + width, top + 1, colour);
+        graphics.fill(left, top + 13, left + width, top + 14, colour);
+        graphics.fill(left, top, left + 1, top + 14, colour);
+        graphics.fill(left + width - 1, top, left + width, top + 14, colour);
+
+        bang(graphics, left + 7, top + 3, colour);
+        graphics.drawString(font, text, left + 20, top + 4, colour, false);
+    }
+
+    /** 三角の中に感嘆符。字ではなく形で描くのは、この計器のフォントに在るとは限らないからだ。 */
+    private static void bang(GuiGraphics graphics, int x, int y, int colour) {
+        for (int step = 0; step < 4; step++) {
+            graphics.fill(x + 3 - step, y + step * 2, x + 4 + step, y + step * 2 + 2, colour);
+        }
+
+        graphics.fill(x + 3, y + 2, x + 4, y + 5, 0xFF000000);
+        graphics.fill(x + 3, y + 6, x + 4, y + 7, 0xFF000000);
     }
 
     /**
@@ -919,46 +1211,6 @@ public final class AircraftHud implements LayeredDraw.Layer {
         graphics.fill(left, top, left + Math.round(EJECT_BAR * charge), top + 3, WARNING);
     }
 
-    /**
-     * パイロンの搭載物。選択中の兵装とその残弾を出し、その下に他の搭載物を暗く列挙するので、切り替えると次に何が来るか
-     * が分かる。
-     *
-     * <p>機体が使う手段を持たない兵装は、トリガーを押して発見させるのではなく明示する。指示装置を積んでいない機体の
-     * レーザー誘導爆弾がその例だ。吊られており、一覧にも出るが、投下されない。どれがどれかを地上で知らされる方が、目標
-     * 上空で気付くよりはるかに有用だ。{@link com.ashvehicles.weapon.WeaponDefinition#requires} 参照。
-     *
-     * <p>何も積んでいない機体では何も描かない。非武装機の計器を従来通りに保つためだ。
-     */
-    private static void drawStores(GuiGraphics graphics, Font font, AircraftEntity aircraft, int centreX, int centreY) {
-        // 撃てる物だけでなく吊っている物全部。増槽は選択されないが、翼の下にぶら下がっており、パイロットが
-        // 搭載一覧に対して問うのは「今この機体は何を持っているか」だ。
-        List<ResourceLocation> carried = aircraft.getWeapons().carriedStores();
-
-        if (carried.isEmpty()) {
-            return;
-        }
-
-        ResourceLocation selected = aircraft.getWeapons().selected();
-        int right = graphics.guiWidth() - 8;
-        // 警戒受信機を避ける。あれはこの辺の中央に座り、MISSILE と LOCKED の表示を自分の少し下に出す。
-        int y = centreY + 52;
-
-        label(graphics, font, "STORES", right - font.width("STORES"), y);
-        y += 11;
-
-        for (ResourceLocation weapon : carried) {
-            boolean armed = weapon.equals(selected);
-            int rounds = armed ? aircraft.getWeapons().selectedAmmo() : ammoOf(aircraft, weapon);
-            boolean unusable = aircraft.getWeapons().missingPod(weapon) != null;
-            String line = (armed ? "> " : "  ") + name(weapon)
-                    + (unusable ? "  NO POD" : "  " + rounds);
-            int colour = unusable || rounds <= 0 ? WARNING : (armed ? GREEN : DIM);
-
-            graphics.drawString(font, line, right - font.width(line), y, colour, true);
-            y += 10;
-        }
-    }
-
     /** 特定の兵装を積む全ステーションの残弾合計。 */
     private static int ammoOf(AircraftEntity aircraft, ResourceLocation weapon) {
         return aircraft.getWeapons().ammoOf(weapon);
@@ -967,69 +1219,6 @@ public final class AircraftHud implements LayeredDraw.Layer {
     /** 計器が表示する兵装名。名前空間を除いたパスを大文字にした物。 */
     private static String name(ResourceLocation weapon) {
         return weapon.getPath().replace('_', '-').toUpperCase(java.util.Locale.ROOT);
-    }
-
-    /**
-     * 砲座の一覧。各砲の名前・残弾・今それを持っているのが誰か。砲座を持たない機体では何も描かない。
-     *
-     * <p>この画面の持ち主が撃てる砲には矢印を付ける。1人で飛んでいれば全部が自分の物で、そのうち1つだけに
-     * 矢印が付く——兵装切り替えキーが選んでいる砲だ。誰かが砲手席に着いていれば、その砲の行はその人の名前に
-     * なり、矢印は消える。他人の砲だからだ。
-     */
-    private static void drawStations(GuiGraphics graphics, Font font, Minecraft minecraft,
-            AircraftEntity aircraft, int centreX, int centreY) {
-        GunStations stations = aircraft.getStations();
-
-        if (!stations.exists()) {
-            return;
-        }
-
-        int mine = stations.liveStationOf(minecraft.player);
-        int left = 8;
-        int y = centreY + 52;
-
-        label(graphics, font, "GUNS", left, y);
-        y += 11;
-
-        for (int index = 0; index < stations.count(); index++) {
-            AircraftDefinition.Station station = stations.station(index);
-            Entity crew = stations.operatorOf(index);
-            ResourceLocation gun = stations.weaponOf(index);
-            int rounds = stations.rounds(index);
-            boolean own = index == mine;
-            // 砲座の名前ではなく、そこに今載っている砲の名前を出す。空の旋回パイロンは「積んでいない」と
-            // 言うべきであって、砲座の名前だけを出せば「あるのに撃てない」に見える。
-            String line = (own ? "> " : "  ")
-                    + (gun == null ? station.label().toUpperCase(java.util.Locale.ROOT) : name(gun))
-                    + (gun == null ? "  --" : "  " + rounds);
-
-            graphics.drawString(font, line, left, y,
-                    gun == null || rounds <= 0 ? WARNING : own ? GREEN : DIM, true);
-
-            // 誰が撃つか。自分の砲では言うまでもないので、他人が持っている砲についてだけ名前を出す。
-            if (crew != null && crew != minecraft.player) {
-                graphics.drawString(font, crew.getName().getString(), left + 12, y + 9, DIM, true);
-                y += 9;
-            }
-
-            y += 10;
-        }
-    }
-
-    /** 搭乗者。パイロットが先頭。 */
-    private static void drawCrew(GuiGraphics graphics, Font font, AircraftEntity aircraft) {
-        List<Entity> aboard = aircraft.getPassengers();
-        Entity pilot = aircraft.getControllingPassenger();
-        int right = graphics.guiWidth() - 8;
-        int y = graphics.guiHeight() - 8 - aboard.size() * 10;
-
-        label(graphics, font, "CREW", right - font.width("CREW"), y - 10);
-
-        for (Entity rider : aboard) {
-            String name = (rider == pilot ? "P  " : "-  ") + rider.getName().getString();
-            graphics.drawString(font, name, right - font.width(name), y, rider == pilot ? GREEN : DIM, true);
-            y += 10;
-        }
     }
 
     /**

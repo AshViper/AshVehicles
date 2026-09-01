@@ -27,8 +27,12 @@ import net.minecraft.world.phys.Vec3;
  *                 装填される順なので、装填したい順に並べること。空なら「パイロン位置に1発」で、それが
  *                 ただのレール
  * @param accepts このラックが受ける兵装の種類。空なら全種類
+ * @param mass 金具そのものの重さ（kg）。実物の重量をそのまま書く——単装レールが40、多連装ラックが100
+ *             あたり。機体の搭載可能重量から、その上に載る兵装と一緒に引かれる。爆弾4発を吊るために
+ *             ラックを付けたパイロンは、ラックの分だけ先に重くなっている
  */
-public record RackDefinition(boolean item, List<Vec3> stations, List<WeaponDefinition.Type> accepts) {
+public record RackDefinition(boolean item, List<Vec3> stations, List<WeaponDefinition.Type> accepts,
+        float mass) {
     /** 自前の搭載位置を持たないラック。パイロン位置に1発だけ。 */
     private static final List<Vec3> SINGLE = List.of(Vec3.ZERO);
 
@@ -36,14 +40,15 @@ public record RackDefinition(boolean item, List<Vec3> stations, List<WeaponDefin
             Codec.BOOL.optionalFieldOf("item", true).forGetter(RackDefinition::item),
             Vec3.CODEC.listOf().optionalFieldOf("stations", List.of()).forGetter(RackDefinition::stations),
             WeaponDefinition.Type.CODEC.listOf().optionalFieldOf("accepts", List.of())
-                    .forGetter(RackDefinition::accepts)
+                    .forGetter(RackDefinition::accepts),
+            Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(RackDefinition::mass)
     ).apply(instance, RackDefinition::new));
 
     /**
      * ゲームが読めるファイルが1つも無いラックに使う値。何でも受ける単装レールにして、正体不明のラックが
      * 付いたステーションでも0発ではなく1発は積めるようにする。
      */
-    public static final RackDefinition FALLBACK = new RackDefinition(true, List.of(), List.of());
+    public static final RackDefinition FALLBACK = new RackDefinition(true, List.of(), List.of(), 0.0F);
 
     /** このラック上の全搭載位置。パイロンからのオフセットで。空にはならない。 */
     public List<Vec3> places() {

@@ -24,9 +24,9 @@ import net.neoforged.neoforge.common.world.chunk.TicketController;
  * <p>これが無いとドローンは輪の途中で凍る。{@code isAlwaysTicking} はエンティティを世界に残し、問い合わせ
  * にも追跡にも応じさせるが、tick そのものは通さない——{@code ServerLevel} は乗り物に乗っていない全エンティ
  * ティを {@code inEntityTickingRange} で門前払いし、そこに常時 tick の例外は無い。弾が chunk の外でも飛び
- * 続けるのは {@link WeaponChunkLoader} の確保が「その chunk を entity-ticking 水準（NeoForge の
- * {@code forceChunk} は非tickでもレベル31）へ引き上げている」からで、確保を持たないドローンはシミュレー
- * ション距離の縁——半径150の輪なら中心に立っていても届く距離——で tick を止め、空中で静止する。クライアント
+ * 続けるのは、{@link WeaponTicker} がワールド tick の後に自分で tick を渡しているからで（弾は地面を1
+ * chunk も開かない。当たり判定を捨てて生成を捨てた側だ）、そのどちらも持たないドローンはシミュレーション
+ * 距離の縁——半径150の輪なら中心に立っていても届く距離——で tick を止め、空中で静止する。クライアント
  * だけが円を描き続け、5tickごとの位置パケットが凍った真実へ引き戻す。あの震えがこれだ。
  *
  * <p>作りは {@link AircraftChunkLoader} の縮小版。エンティティ所有のチケットの短い回廊を輪に沿って手渡して

@@ -172,9 +172,14 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         // ノズルは舵面のような数度ではなく下まで一杯に振れる。アニメーションではなくここでポーズを付けるのは、
         // これが手順ではなく1つの角度だからだ。機体は転換がどこまで進んだか既に知っているし、それに伴って開く扉は
         // アニメーションファイルの管轄だ。AircraftAnimations 参照。
-        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE, pose.nozzle() * NOZZLE_TRAVEL);
-        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_LEFT, pose.nozzle() * NOZZLE_TRAVEL);
-        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_RIGHT, pose.nozzle() * NOZZLE_TRAVEL);
+        // 模型が既にどの姿勢で作られているかを引く。0で巡航姿勢——固定翼機のノズルは全部そう作られている
+        // ——だが、ティルトローター機のナセルはホバー姿勢で寝かせて作られることがあり、そのままでは巡航中に
+        // 立ち、ホバーで前を向く。まるごと逆だ。AircraftDefinition.Vtol#nozzleRest 参照。
+        float nozzle = pose.nozzle() * NOZZLE_TRAVEL - setup.nozzleRest();
+
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE, nozzle);
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_LEFT, nozzle);
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_RIGHT, nozzle);
 
         // ローター。同じ考え方を1回転まで押し進めた物だ。ここでポーズを付ける理由はノズルと同じで、加えてもう
         // 1つある。ローターの回転速度は機体ファイルの数値であり、その数値が動くたびアニメーションファイルを手作業
@@ -186,8 +191,14 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         // プロペラ。ローターと同じ角度を、同じ理由でここから使う——1機が両方を持つことはないので、機体が
         // 既に算出している角度がそのままプロペラの角度だ。回すのは各ボーン自身の中心周りで、それが
         // {@link #spinZ} の存在理由になる。
+        boolean flatDisc = "y".equalsIgnoreCase(setup.propellerAxis());
+
         for (String propeller : setup.propellers()) {
-            spinZ(model, propeller, pose.rotor());
+            if (flatDisc) {
+                spinY(model, propeller, pose.rotor());
+            } else {
+                spinZ(model, propeller, pose.rotor());
+            }
         }
     }
 

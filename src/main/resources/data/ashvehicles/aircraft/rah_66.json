@@ -6,77 +6,64 @@
     "boxes": [
       {
         "name": "allbody",
-        "offset": [0.0, 1.573, 3.42],
-        "size": [2.21, 1.336, 3.704]
-      },
-      {
-        "name": "allbody_2",
-        "offset": [0.0, 1.189, -2.778],
-        "size": [2.215, 0.959, 4.086]
-      },
-      {
-        "name": "allbody_3",
-        "offset": [0.0, 2.656, 0.426],
-        "size": [2.093, 1.069, 2.738],
-        "rotation": [2.0, 0.0, 0.0]
-      },
-      {
-        "name": "allbody_right",
-        "offset": [-0.69, 2.026, -1.375],
-        "size": [0.683, 1.418, 6.206],
-        "rotation": [4.0, -3.0, 7.0]
-      },
-      {
-        "name": "allbody_left",
-        "offset": [0.69, 2.026, -1.375],
-        "size": [0.683, 1.418, 6.206],
-        "rotation": [4.0, 3.0, -7.0]
-      },
-      {
-        "name": "allbody_4",
         "offset": [0.0, 1.667, -5.459],
         "size": [0.873, 2.096, 2.088],
         "rotation": [-45.0, 0.0, 0.0]
       },
       {
+        "name": "allbody_2",
+        "offset": [0.667, 2.262, 0.59],
+        "size": [0.582, 1.652, 3.024],
+        "rotation": [2.425, -0.009, -34.999]
+      },
+      {
+        "name": "allbody_3",
+        "offset": [-0.667, 2.262, 0.59],
+        "size": [0.582, 1.652, 3.024],
+        "rotation": [2.425, 0.009, 34.999]
+      },
+      {
+        "name": "allbody_4",
+        "offset": [0.0, 1.941, 2.462],
+        "size": [0.882, 1.944, 1.658]
+      },
+      {
         "name": "allbody_5",
-        "offset": [0.0, 1.502, 4.768],
-        "size": [1.194, 1.146, 2.257],
-        "rotation": [-10.5, 0.0, 0.0]
-      },
-      {
-        "name": "hull_right",
-        "offset": [-1.306, 1.297, 0.397],
-        "size": [1.435, 0.757, 2.588],
-        "rotation": [0.0, 0.0, 1.5]
-      },
-      {
-        "name": "hull_left",
-        "offset": [1.306, 1.297, 0.397],
-        "size": [1.435, 0.757, 2.588],
-        "rotation": [0.0, 0.0, -1.5]
+        "offset": [-0.04, 1.277, 5.485],
+        "size": [0.941, 1.188, 1.819],
+        "rotation": [0.0, 0.0, 30.0]
       },
       {
         "name": "allbody_6",
-        "offset": [0.0, 1.896, 2.904],
-        "size": [1.35, 1.832, 0.85],
-        "rotation": [-7.5, 0.0, 0.0]
+        "offset": [0.0, 2.829, 0.42],
+        "size": [1.012, 0.731, 2.738],
+        "rotation": [2.5, 0.0, 0.0]
       },
       {
         "name": "allbody_7",
-        "offset": [0.0, 1.937, 1.862],
-        "size": [2.011, 2.024, 0.437]
+        "offset": [0.0, 1.861, 4.133],
+        "size": [1.045, 0.649, 2.518],
+        "rotation": [-35.0, 0.0, 0.0]
       },
       {
         "name": "allbody_8",
-        "offset": [0.0, 4.329, 0.849],
-        "size": [1.24, 0.926, 1.24]
+        "offset": [0.0, 1.073, 3.334],
+        "size": [1.39, 0.336, 3.45]
+      },
+      {
+        "name": "hull",
+        "offset": [1.476, 1.279, 0.404],
+        "size": [1.11, 0.692, 2.001]
+      },
+      {
+        "name": "hull_2",
+        "offset": [-1.476, 1.279, 0.404],
+        "size": [1.11, 0.692, 2.001]
       },
       {
         "name": "allbody_9",
-        "offset": [0.0, 2.63, 3.112],
-        "size": [0.882, 0.504, 2.984],
-        "rotation": [-17.5, 0.0, 0.0]
+        "offset": [0.0, 4.368, 0.849],
+        "size": [1.234, 0.848, 1.234]
       },
       {
         "name": "allbody_10",
@@ -84,61 +71,196 @@
         "size": [0.403, 0.323, 9.278]
       },
       {
-        "name": "hull",
-        "offset": [0.0, 0.753, 4.665],
-        "size": [0.799, 0.323, 3.458]
+        "name": "lefttyrehatch",
+        "offset": [-0.879, 1.279, 2.448],
+        "size": [0.476, 1.273, 1.673],
+        "rotation": [0.0, 7.5, 22.5]
+      },
+      {
+        "name": "righttyrehatch",
+        "offset": [0.879, 1.279, 2.448],
+        "size": [0.476, 1.273, 1.673],
+        "rotation": [0.0, -7.5, -22.5]
       },
       {
         "name": "allbody_11",
-        "offset": [0.0, 3.106, -6.352],
-        "size": [0.27, 1.194, 2.468],
-        "rotation": [-45.0, 0.0, 0.0]
+        "offset": [0.529, 2.218, -1.469],
+        "size": [0.48, 1.135, 1.602],
+        "rotation": [2.425, 24.991, -34.999]
       },
       {
         "name": "allbody_12",
+        "offset": [-0.529, 2.218, -1.469],
+        "size": [0.48, 1.135, 1.602],
+        "rotation": [2.425, -24.991, 34.999]
+      },
+      {
+        "name": "allbody_13",
+        "offset": [0.0, 3.189, -6.257],
+        "size": [0.27, 2.39, 1.254],
+        "rotation": [37.5, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_14",
+        "offset": [0.0, 0.968, -2.527],
+        "size": [1.418, 0.12, 3.585]
+      },
+      {
+        "name": "allbody_15",
+        "offset": [0.0, 1.917, 1.715],
+        "size": [2.011, 1.984, 0.143]
+      },
+      {
+        "name": "backlefttyrehatch",
+        "offset": [-0.441, 1.112, -3.934],
+        "size": [0.413, 0.612, 1.757],
+        "rotation": [-10.0, -10.0, 0.0]
+      },
+      {
+        "name": "backrighttyrehatch",
+        "offset": [0.441, 1.112, -3.934],
+        "size": [0.413, 0.612, 1.757],
+        "rotation": [-10.0, 10.0, 0.0]
+      },
+      {
+        "name": "allbody_16",
         "offset": [0.0, 0.965, 0.383],
         "size": [1.402, 0.12, 2.583]
       },
       {
-        "name": "allbody_13",
-        "offset": [0.0, 2.002, -3.296],
-        "size": [1.012, 0.139, 2.253],
-        "rotation": [6.5, 0.0, 0.0]
+        "name": "hull_3",
+        "offset": [0.0, 0.753, 3.756],
+        "size": [0.799, 0.323, 1.639]
       },
       {
-        "name": "lefttyrehatch_right",
-        "offset": [-1.032, 1.028, 2.323],
-        "size": [0.722, 0.272, 1.386],
-        "rotation": [0.0, 7.5, -40.0]
+        "name": "allbody_17",
+        "offset": [0.512, 1.288, -2.808],
+        "size": [0.12, 0.809, 3.971],
+        "rotation": [0.0, 10.0, 30.0]
       },
       {
-        "name": "righttyrehatch_left",
-        "offset": [1.032, 1.028, 2.323],
-        "size": [0.722, 0.272, 1.386],
-        "rotation": [0.0, -7.5, 40.0]
+        "name": "allbody_18",
+        "offset": [-0.512, 1.288, -2.808],
+        "size": [0.12, 0.809, 3.971],
+        "rotation": [0.0, -10.0, -30.0]
       },
       {
-        "name": "allbody_14",
+        "name": "allbody_19",
+        "offset": [0.645, 1.739, -2.635],
+        "size": [0.12, 0.849, 3.65],
+        "rotation": [6.32, 5.954, -32.723]
+      },
+      {
+        "name": "allbody_20",
+        "offset": [-0.645, 1.739, -2.635],
+        "size": [0.12, 0.849, 3.65],
+        "rotation": [6.32, -5.954, 32.723]
+      },
+      {
+        "name": "allbody_21",
+        "offset": [-0.113, 2.001, -3.298],
+        "size": [1.006, 0.16, 2.271],
+        "rotation": [6.32, 5.954, 2.277]
+      },
+      {
+        "name": "allbody_22",
+        "offset": [0.617, 1.286, 3.428],
+        "size": [0.12, 0.812, 3.693],
+        "rotation": [0.0, -7.5, 30.0]
+      },
+      {
+        "name": "allbody_23",
+        "offset": [-0.617, 1.286, 3.428],
+        "size": [0.12, 0.812, 3.693],
+        "rotation": [0.0, 7.5, -30.0]
+      },
+      {
+        "name": "allbody_24",
+        "offset": [0.0, 3.963, 0.849],
+        "size": [1.24, 0.195, 1.24],
+        "rotation": [0.0, -45.0, 0.0]
+      },
+      {
+        "name": "allbody_25",
         "offset": [0.0, 3.594, -6.802],
         "size": [3.904, 0.073, 0.934]
       },
       {
-        "name": "allbody_right_2",
+        "name": "allbody_26",
+        "offset": [0.852, 1.286, 0.397],
+        "size": [0.12, 0.814, 2.588],
+        "rotation": [0.0, 0.0, 30.0]
+      },
+      {
+        "name": "allbody_27",
+        "offset": [-0.852, 1.286, 0.397],
+        "size": [0.12, 0.814, 2.588],
+        "rotation": [0.0, 0.0, -30.0]
+      },
+      {
+        "name": "allbody_28",
+        "offset": [0.586, 1.676, 3.455],
+        "size": [0.12, 0.565, 3.672],
+        "rotation": [-4.329, -10.005, -32.405]
+      },
+      {
+        "name": "allbody_29",
+        "offset": [-0.586, 1.676, 3.455],
+        "size": [0.12, 0.565, 3.672],
+        "rotation": [-4.329, 10.005, 32.405]
+      },
+      {
+        "name": "allbody_30",
         "offset": [-1.958, 3.628, -6.83],
-        "size": [0.11, 0.804, 2.552],
-        "rotation": [-41.0, -21.0, 30.5]
+        "size": [0.105, 0.796, 2.554],
+        "rotation": [-40.789, -20.941, 30.361]
       },
       {
-        "name": "allbody_left_2",
+        "name": "allbody_31",
         "offset": [1.958, 3.628, -6.83],
-        "size": [0.11, 0.804, 2.552],
-        "rotation": [-41.0, 21.0, -30.5]
+        "size": [0.105, 0.796, 2.554],
+        "rotation": [-40.789, 20.941, -30.361]
       },
       {
-        "name": "allbody_15",
+        "name": "allbody_32",
+        "offset": [-0.455, 1.708, 4.413],
+        "size": [0.116, 1.009, 1.765],
+        "rotation": [-6.091, 8.697, 14.343]
+      },
+      {
+        "name": "allbody_33",
+        "offset": [0.455, 1.708, 4.413],
+        "size": [0.116, 1.009, 1.765],
+        "rotation": [-6.091, -8.697, -14.343]
+      },
+      {
+        "name": "allbody_34",
+        "offset": [0.0, 2.085, 2.856],
+        "size": [1.045, 0.574, 0.271],
+        "rotation": [-35.0, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_35",
+        "offset": [0.0, 1.487, 3.98],
+        "size": [0.311, 0.715, 0.693]
+      },
+      {
+        "name": "allbody_36",
         "offset": [0.0, 2.345, -1.694],
         "size": [1.0, 0.08, 1.794],
         "rotation": [22.5, 0.0, 0.0]
+      },
+      {
+        "name": "allbody_37",
+        "offset": [-0.439, 2.389, 2.926],
+        "size": [0.076, 1.153, 0.974],
+        "rotation": [-30.162, -4.027, 19.879]
+      },
+      {
+        "name": "allbody_38",
+        "offset": [0.439, 2.389, 2.926],
+        "size": [0.076, 1.153, 0.974],
+        "rotation": [-30.162, 4.027, -19.879]
       }
     ]
   },
@@ -186,18 +308,35 @@
     "aero_damping": 0.05
   },
   "airframe": {
+    "mass": 5600,
+    "payload": 1400,
     "health": 200,
     "crash_speed": 0.3,
     "explosion_power": 3,
     "max_g": 3.5,
     "seats": [
-      [0.0, 1.1, 2.3],
+      [0.0, 0.85, 2.3],
       {
-        "pos": [0.0, 1.1, 0.6],
-        "eye": [0.0, 1.5, 4.3],
-        "mount": "gun"
+        "pos": [0.0, 0.65, 3.45],
+        "eye": [0.0, 2.25, 3.45]
       }
     ]
+  },
+  "rotor": {
+    "lift": 0.033,
+    "spool_ticks": 80,
+    "translational_lift": 0.16,
+    "translational_speed": 0.2,
+    "authority": 1.1,
+    "max_tilt": 25,
+    "trim": 0.5,
+    "stability": 0.15,
+    "hover_drag": 0.021,
+    "disc_drag": 0.024,
+    "bluff_drag": 10,
+    "torque": 0.12,
+    "rpm": 320,
+    "tail_rpm": 1420
   },
   "landing_gear": {
     "cycle_ticks": 50,
@@ -216,7 +355,7 @@
   },
   "camera": {
     "pos": [0.0, 3.2, -13.0],
-    "cockpit": [0.0, 2.75, 2.3]
+    "cockpit": [0.0, 2.5, 2.3]
   },
   "sound": {
     "volume": 0.75,
@@ -243,23 +382,6 @@
     "reload_ticks": 300,
     "speed": 0.35
   },
-  "rotor": {
-    "lift": 0.033,
-    "spool_ticks": 80,
-    "translational_lift": 0.16,
-    "translational_speed": 0.2,
-    "authority": 1.1,
-    "max_tilt": 25,
-    "trim": 0.5,
-    "stability": 0.15,
-    "hover_drag": 0.021,
-    "disc_drag": 0.024,
-    "bluff_drag": 10,
-    "torque": 0.12,
-    "rpm": 320,
-    "tail_rpm": 1420
-  },
-  "type": "helicopter",
   "hardpoints": [
     {
       "name": "gun",
@@ -269,22 +391,26 @@
     {
       "name": "bay_left",
       "pos": [-1.4, 1.2, 0.4],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay_left_2",
       "pos": [-1.4, 1.2, -0.3],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay_right",
       "pos": [1.4, 1.2, 0.4],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "bay_right_2",
       "pos": [1.4, 1.2, -0.3],
-      "internal": true
+      "internal": true,
+      "kind": "weapon"
     },
     {
       "name": "sensor_left",
@@ -297,12 +423,11 @@
       "kind": "special"
     }
   ],
+  "type": "helicopter",
   "stations": [
     {
       "name": "20mm",
-      "pylons": [
-        "gun"
-      ],
+      "pylons": ["gun"],
       "seat": 1,
       "bearing": 0,
       "traverse": 120,

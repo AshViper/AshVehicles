@@ -100,12 +100,17 @@ public class AshVehicles {
                             }).build());
 
     /**
-     * ばらす道具と注ぐ燃料、そして撃つ的。機体にも車両にも要るものなので、機体のタブと車両のタブの
-     * 両方に出す。バニラでも道具は行き先の数だけ顔を出す。
+     * ばらす道具と注ぐ燃料、無人機へ繋ぐ端末、そして撃つ的。機体にも車両にも要るものなので、機体の
+     * タブと車両のタブの両方に出す。バニラでも道具は行き先の数だけ顔を出す。
+     *
+     * <p><b>タブに並べるのはここだけだ。</b>{@link ModItems} への登録はアイテムを存在させるが、
+     * クリエイティブタブには何も出さない。機体と車両はファイル由来なので上の2つが自動で拾うが、
+     * 手書きの道具はこの一覧に足さない限り、作れるのに誰も見つけられないアイテムになる。
      */
     private static void tools(CreativeModeTab.Output output) {
         output.accept(ModItems.WRENCH.get());
         output.accept(ModItems.FUEL_CAN.get());
+        output.accept(ModItems.DRONE_TERMINAL.get());
         output.accept(ModItems.TARGET_DRONE.get());
         output.accept(ModItems.BLAST_WAND.get());
     }

@@ -63,6 +63,11 @@ public class RackItem extends Item {
                     .withStyle(ChatFormatting.GRAY));
         }
 
+        if (definition.mass() > 0.0F) {
+            lines.add(Component.translatable("tooltip.ashvehicles.mass", Math.round(definition.mass()))
+                    .withStyle(ChatFormatting.GRAY));
+        }
+
         lines.add(Component.translatable("tooltip.ashvehicles.rack").withStyle(ChatFormatting.DARK_GRAY));
     }
 }

@@ -263,6 +263,8 @@
     "aero_damping": 0.05
   },
   "airframe": {
+    "mass": 21320,
+    "payload": 8050,
     "health": 300,
     "crash_speed": 2.4,
     "explosion_power": 3,

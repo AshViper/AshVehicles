@@ -93,9 +93,10 @@ public record DesignatePayload(boolean clear, Vec3 point, int entityId, boolean 
             }
 
             // ポッドはパイロットの計器。同じキーを押した搭乗者は搭乗者のままで、複座機の後席に仕事を
-            // 与えるのは別の課題。VehicleEntityBase.getControllingPassenger 参照。
+            // 与えるのは別の課題。無人機では席にいない操作者がそのパイロットだ——照準ポッドを積んだ機体を
+            // 遠隔で飛ばす目的の大半がそれである。VehicleEntityBase.getAviator 参照。
             if (!(riding instanceof AircraftEntity aircraft)
-                    || aircraft.getControllingPassenger() != context.player()) {
+                    || aircraft.getAviator() != context.player()) {
                 return;
             }
 

@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_material",
+  "key": {
+    "C": {
+      "tag": "c:ingots/copper"
+    },
+    "R": {
+      "tag": "c:dusts/redstone"
+    },
+    "B": {
+      "item": "ashvehicles:circuit_board"
+    }
+  },
+  "pattern": [
+    " C ",
+    "RBR",
+    " C "
+  ],
+  "result": {
+    "count": 4,
+    "id": "ashvehicles:fuze"
+  }
+}

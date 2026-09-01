@@ -6,9 +6,7 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.entity.RocketEntity;
-import com.ashvehicles.entity.VehicleHold;
 import com.ashvehicles.entity.VehicleProjectile;
-import com.ashvehicles.item.AmmoItem;
 import com.ashvehicles.network.MissileTrackPayload;
 import com.ashvehicles.registry.ModEntities;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
@@ -36,8 +34,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * 発射筒の中のミサイル。シーカー、弾倉、そして発射間隔。
  *
  * <p>{@link WeaponMounts} との関係は {@link BuiltInGun} と同じで、理由も同じ。パイロンは物を<em>吊る
- * </em>場所で、あのクラスの大半は「どのステーションが選択されているか」「誰が何を積んだか」「弾庫から
- * 積み直す」話だ。発射筒はそのどれでもない。組み込みで、全部同じ弾を持ち、問いは残数とシーカーが1発
+ * </em>場所で、あのクラスの大半は「どのステーションが選択されているか」「誰が何を積んだか」の
+ * 話だ。発射筒はそのどれでもない。組み込みで、全部同じ弾を持ち、問いは残数とシーカーが1発
  * 使う価値のある物を捉えているかだけ。共有するのは兵装ファイルの方で、威力・シーカー探知距離・旋回性能・
  * 何に騙されるかは機体と同じく {@code data/ashvehicles/weapon/} から読む。だからミサイルは、翼下に吊ら
  * れていようと筒に入っていようと1箇所で記述される。
@@ -65,20 +63,30 @@ public final class TurretLauncher {
     /** 発射炎の大きさ。砲の発砲ではなくブースターの点火。 */
     private static final float BOOST_BLAST = 2.0F;
 
-    /**
-     * 停止中の車両が空の発射筒を自分の弾庫から満たすのにかかる tick 数。砲の装填手の2倍。ロケットは
-     * 吊り込む物で、砲弾は手渡しできるから。
-     */
-    private static final int RESUPPLY_TICKS = 400;
-
-    /** この速度（1tickあたりブロック）未満なら停止中と見なし、装填できる。 */
-    private static final float STANDING = 1.0E-4F;
-
     /** 架台が「立ち上がり切った」と数える、上限までの残り角度（度）。 */
     private static final float ERECT_MARGIN = 2.0F;
 
     /** 飛んでいる弾の位置を撃った乗員へ知らせる間隔（tick）。 */
     private static final int REPORT_TICKS = 5;
+
+    /**
+     * 視線誘導の点を、先頭の弾の前に置く距離を、その弾の<em>旋回半径</em>の何倍にするか。
+     *
+     * <p><b>短くしてはいけない。</b>点が近いほど食い付くように見えて、実際には弾が線の周りで振れ回る。弾は
+     * 横へずれた分だけ点の方へ機首を向けるが、機首が向くのに何tickもかかり、その間も横速度は残っている——
+     * 点までの距離が旋回半径より短いと、修正が間に合う前に行き過ぎ、逆へ切り返し、また行き過ぎる。
+     *
+     * <p>安定する条件は「点までの距離の2乗 ≫ 横ずれ × 旋回半径」だ。旋回半径は最高速÷旋回速度で、TOW なら
+     * 13.9 ÷ 7度 = 114ブロック。3倍の340ブロック先に置けば、100ブロックの横ずれ（発射直後に大きく振った
+     * 場合）でも余裕がある。横ずれは距離／速度の時定数で指数的に消えるので、1秒少々で線に乗る。
+     *
+     * <p>60ブロックで試したときは旋回半径の半分しかなく、照準を15度振っただけで点が弾のほぼ真横へ来た。弾は
+     * 90度近い旋回を命じられ、7度/tickでは追い付かず、空に輪を描いた。
+     */
+    private static final double BEAM_LEAD_TURNS = 3.0;
+
+    /** 同じ距離の下限（ブロック）。旋回半径が求まらない弾のため。 */
+    private static final double LEAST_BEAM_LEAD = 80.0;
 
     private final GroundVehicleEntity vehicle;
     /**
@@ -126,50 +134,52 @@ public final class TurretLauncher {
     }
 
     /**
-     * 装填手の1tick分。この tick に1発分の番が来ていて、入れる筒があれば、弾庫から1発を筒へ移す。
+     * この発射機に入る弾薬の種類。積んでいなければ null。
      *
-     * <p><b>手作業で、1発ずつ、車両が停止している間だけ。</b> ロケットはトラックから吊り込む物で、実物
-     * なら装填車と30分近くを要する。だから発射機は誰かが積んだ分しか撃てない。以前は車両を置いた瞬間に
-     * 空中から自分を満たしており、それでは一斉射が無料になり弾庫は飾りだった。
-     *
-     * <p>砲より遅いのは意図的で、{@link #RESUPPLY_TICKS} は筒1セット分。24発積む発射機なら数秒に1発。
-     * 筒を空にすることが形式ではなく判断になる程度には長い。
-     *
-     * <p>形は {@code BuiltInGun.resupply} と同じだが、数える物が違う（弾数と再装填 対 筒数と待ち時間、
-     * それぞれ自分の同期フィールド）ので1階層離してある。共有しているのは弾庫・速度・停止条件という
-     * 「取り決め」であってコードではなく、その取り決めの方が数行より価値がある。
+     * <p>ミサイルの種類はシーカーが見る物で分かれる（{@link AmmoKind} 参照）ので、対空発射機に対地
+     * ミサイルの箱を差し出しても入らない。それが正しい。
      */
-    private void resupply(WeaponDefinition missile) {
-        if (Math.abs(this.vehicle.getSpeed()) >= STANDING || this.vehicle.getMissiles() >= missile.ammo()) {
-            return;
-        }
-
-        int every = Math.max(1, Math.round((float) RESUPPLY_TICKS / missile.ammo()));
-
-        if (this.vehicle.tickCount % every != 0 || !this.take(missile.ammoKind())) {
-            return;
-        }
-
-        this.vehicle.setMissiles(this.vehicle.getMissiles() + 1);
+    @Nullable
+    public AmmoKind ammoKind() {
+        return this.vehicle.getStats().launcher().missile()
+                .map(id -> Definitions.weapon(id).ammoKind())
+                .orElse(null);
     }
 
     /**
-     * 弾庫からロケットを1本取る。取る順は積んだ者が並べた順。
+     * 差し出されたロケットを筒へ吊り込み、実際に受け取った本数を返す。
      *
-     * @return 取れる物があったか
+     * <p><b>手作業。</b> ロケットはトラックから吊り込む物で、実物なら装填車と30分近くを要する。だから
+     * 発射機は誰かが積んだ分しか撃てない。以前は車両を置いた瞬間に空中から自分を満たしており、それでは
+     * 一斉射が無料だった。停止しているかどうかを見るのは車両側だ——3つの弾倉に別々の規則を持たせない。
+     *
+     * <p>1本＝1筒。砲弾がベルトになりうるのと違い、ロケットに端数は無い。
+     *
+     * @param offered 手にある本数
+     * @return 筒が受け取った本数。0 なら満載か、そもそも入らない種類
      */
-    private boolean take(AmmoKind kind) {
-        VehicleHold hold = this.vehicle.getHold();
+    public int load(AmmoKind kind, int offered) {
+        GroundVehicleDefinition.Launcher tubes = this.vehicle.getStats().launcher();
 
-        for (int at = 0; at < hold.getContainerSize(); at++) {
-            if (AmmoItem.isKind(hold.getItem(at), kind)) {
-                hold.removeItem(at, 1);
-
-                return true;
-            }
+        if (!tubes.exists() || offered <= 0) {
+            return 0;
         }
 
-        return false;
+        WeaponDefinition missile = Definitions.weapon(tubes.missile().orElseThrow());
+
+        if (missile.ammoKind() != kind) {
+            return 0;
+        }
+
+        int taken = Math.min(offered, missile.ammo() - this.vehicle.getMissiles());
+
+        if (taken <= 0) {
+            return 0;
+        }
+
+        this.vehicle.setMissiles(this.vehicle.getMissiles() + taken);
+
+        return taken;
     }
 
     private static int ticksFor(float roundsPerSecond) {
@@ -203,10 +213,6 @@ public final class TurretLauncher {
         ResourceLocation missileId = tubes.missile().orElseThrow();
         WeaponDefinition missile = Definitions.weapon(missileId);
 
-        // シーカーより前、引き金より前。装填だけは誰が乗っているかに関わらず進む——それは地上要員の仕事
-        // であって砲手の仕事ではないから。
-        this.resupply(missile);
-
         // 無人の陣地は何も追尾していない。見たままにすれば、放置された発射機が数km四方の空を永遠に掃引
         // し、マップ中の警戒受信機を鳴らし続ける。レーダー自体が守っている規則と同じ——Sensors.tick 参照。
         // あちらも同じ2つの理由で無人の機体では停止する。
@@ -222,10 +228,17 @@ public final class TurretLauncher {
         // 座標へ飛ぶ弾にはシーカーが無い。掃引もしなければ捕捉も進まず、追われている側の警戒受信機も鳴らない
         // ——狙われていることを相手が知る手段が無いのがこの種の兵器であり、それが弾道ミサイルの怖さだ。行き先は
         // 乗員が据えた点で、それは {@link GroundVehicleEntity#designate} が持っている。
-        boolean laid = this.vehicle.laysPoint();
+        boolean laid = this.vehicle.aimsAtPoint();
+        boolean beam = missile.guidance()
+                .map(guidance -> guidance.seeker() == WeaponDefinition.Guidance.Seeker.BEAM)
+                .orElse(false);
 
         if (laid) {
             this.lock.clear();
+
+            if (beam) {
+                this.aimBeam(tubes, missile);
+            }
         } else {
             // シーカーは筒を選択している間だけでなく常に見ている。新しい目標を取るのは砲手がキーを押している
             // 間だけ。クラス冒頭の説明参照。
@@ -244,16 +257,89 @@ public final class TurretLauncher {
             return;
         }
 
-        // そして据える発射機は、架台が立ち上がるまで撃たない。弾は筒が向いている方向へ出ていくので
+        // そして<em>座標を据える</em>発射機は、架台が立ち上がるまで撃たない。弾は筒が向いている方向へ出ていくので
         // （{@link #fire} 参照）、寝たままの筒から出た弾は目の前の地面へ向かって飛ぶ。実物が発射前に必ず
         // 起立するのと同じ理由であり、その数秒は乗員から見ても「据えた」ことの手応えになる。
-        if (laid && !this.erected()) {
+        if (this.vehicle.laysPoint() && !this.erected()) {
             return;
         }
 
         if (this.vehicle.level() instanceof ServerLevel level) {
             this.fire(level, missileId, missile);
         }
+    }
+
+    /**
+     * 照準線の先へ点を置き直す。視線誘導の弾はそこを追うので、照準を振れば飛んでいる弾も付いてくる。
+     *
+     * <p><b>地面は探さない。</b>置くのは弾の届く距離だけ先の、線上の一点だ。射手が狙っているのはその線で
+     * あって、線が最初にぶつかる物ではない——だから毎tickの地形走査は要らないし、払う理由も無い。弾は線に
+     * 乗り、線の上に何かが立っていればそれに当たる。近接信管を持たないのはそのためだ（{@code tow.json} の
+     * {@code proximity} は 0）。
+     *
+     * <p><b>照準を覗いている間だけ。</b>別の兵装へ切り替えれば線は更新されなくなり、飛んでいる弾は最後に
+     * 命じられた線を飛び続ける。有線誘導を手放した弾がすることであり、切り替えた乗員の意図でもある。
+     */
+    private void aimBeam(GroundVehicleDefinition.Launcher tubes, WeaponDefinition missile) {
+        if (!this.vehicle.isMissileMode()) {
+            return;
+        }
+
+        double reach = missile.guidance().map(WeaponDefinition.Guidance::lockRange).orElse(0.0F);
+
+        if (reach <= 0.0) {
+            return;
+        }
+
+        Vec3 rail = this.vehicle.turretToWorld(tubes.rail(), 1.0F);
+        Vec3 along = this.vehicle.getAimDirection(1.0F);
+
+        this.vehicle.designate(rail.add(along.scale(this.beamAt(rail, along, reach, missile))), false);
+    }
+
+    /**
+     * 照準線上のどこに点を置くか。飛んでいる弾の少し前。
+     *
+     * <p><b>線の果てに置いてはいけない。</b>弾は点そのものへ機首を向ける（{@code RocketEntity.follow}）ので、
+     * 点が遠いほど「線から横に何ブロックずれているか」が小さな角度にしかならない。3750ブロック先の点に対して
+     * 20ブロックの横ずれは0.3度で、弾は線に乗らないまま平行に飛んでいく。
+     *
+     * <p>先頭の弾の少し前に置けば、同じ横ずれが十数度になる。弾は数tickで線へ乗り、そのまま線を伝っていく
+     * ——ビームライダーが実際にすることであり、この点が毎tick前へ送られていくのが「線を伝う」ことの中身だ。
+     *
+     * <p>飛んでいる弾が無ければ線の果て。発射条件（据えた点があるか）を満たすためだけの点で、誰も追わない。
+     */
+    private double beamAt(Vec3 rail, Vec3 along, double reach, WeaponDefinition missile) {
+        double furthest = 0.0;
+
+        for (int at = 0; at < this.inFlight.size(); at++) {
+            Entity shot = this.vehicle.level().getEntity(this.inFlight.getInt(at));
+
+            if (shot != null && shot.isAlive()) {
+                furthest = Math.max(furthest, shot.position().subtract(rail).dot(along));
+            }
+        }
+
+        return furthest <= 0.0 ? reach : Math.min(reach, furthest + beamLead(missile));
+    }
+
+    /**
+     * 点を弾の前に置く距離。弾自身の旋回半径から求める。
+     *
+     * <p>兵装ファイルの値だけで決まるので、別の弾を筒に入れれば距離もその弾の物になる。
+     * {@link #BEAM_LEAD_TURNS} 参照。
+     */
+    private static double beamLead(WeaponDefinition missile) {
+        float turn = missile.guidance().map(WeaponDefinition.Guidance::turnRate).orElse(0.0F);
+        float speed = missile.projectile().topSpeed() > 0.0F
+                ? missile.projectile().topSpeed()
+                : missile.projectile().speed();
+
+        if (turn <= 0.0F || speed <= 0.0F) {
+            return LEAST_BEAM_LEAD;
+        }
+
+        return Math.max(LEAST_BEAM_LEAD, speed / Math.toRadians(turn) * BEAM_LEAD_TURNS);
     }
 
     /**
@@ -329,7 +415,7 @@ public final class TurretLauncher {
         // 弾が持っていく相手。シーカーが掴んだ物か、乗員が据えた点か。どちらも発射の瞬間に確定し、以後
         // 変わらない——撃った後に据え直しても、出て行った弾は出て行った時の点へ飛ぶ。
         Entity locked = !missile.isGuided() ? null
-                : this.vehicle.laysPoint() ? this.vehicle.getDesignated()
+                : this.vehicle.aimsAtPoint() ? this.vehicle.getDesignated()
                 : this.lock.isLocked() ? this.lock.target()
                 : null;
 

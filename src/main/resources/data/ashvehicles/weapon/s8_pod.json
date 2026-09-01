@@ -2,6 +2,7 @@
   "type": "rocket",
   "item": true,
   "ammo": 20,
+  "mass": 380,
   "firing": {
     "rounds_per_second": 4.0,
     "spread": 0.8,

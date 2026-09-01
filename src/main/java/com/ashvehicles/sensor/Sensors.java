@@ -271,6 +271,6 @@ public final class Sensors {
 
     @Nullable
     private ServerPlayer crew() {
-        return this.vehicle.getControllingPassenger() instanceof ServerPlayer player ? player : null;
+        return this.vehicle.getAviator() instanceof ServerPlayer player ? player : null;
     }
 }
