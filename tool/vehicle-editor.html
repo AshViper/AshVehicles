@@ -14,79 +14,93 @@
    * drawing code.
    * ================================================================== */
 
+  /**
+   * Black, and one green.
+   *
+   * <p>Every panel, button, field and canvas in the tool is drawn out of this one list, and the
+   * list is two colours: near-black for everything the tool is made of, and a yellow-green for
+   * everything it wants you to look at. There is no second accent. A heading, a hovered button, a
+   * focused field, a selected part and the pack panel's own chrome are all the same green at
+   * different weights, so nothing on screen has to be learnt — brighter is nearer to hand.
+   *
+   * <p>What is <em>not</em> in that scheme is deliberate and is only ever the six or seven colours
+   * that stand for something: a hull box is green, a turret box is blue, a pylon is red. Those are
+   * the legend, not the furniture. Painting them all one colour would say that a seat and a station
+   * are the same thing, which is exactly what the drawing is there to tell apart.
+   */
   :root {
     color-scheme: dark;
 
     /* -- surfaces and text -- */
-    --bg: #10141a; --panel: #171d25; --head: #1e252e; --sunk: #0c1015;
-    --line: #313b47;
-    --ink: #e8eef5; --ink-mid: #b9c6d4; --dim: #8b9aab;
-    --accent: #5aa9ff; --accent-ink: #071220; --accent-soft: rgba(90,169,255,.16);
-    --btn: #262f3a; --btn-hi: #33404e; --field: #0d1219;
-    --item-line: #232c36; --item-hi: #232d38; --item-sel: #1e3346;
-    --overlay: rgba(8,11,15,.95);
-    --shadow: 0 12px 34px rgba(0,0,0,.5);
-    --scroll: #3a4450;
+    --bg: #050704; --panel: #0c110a; --head: #121a0f; --sunk: #020301;
+    --line: #27331d;
+    --ink: #e9f4de; --ink-mid: #b5c9a4; --dim: #7e9270;
+    --accent: #9ede1a; --accent-ink: #0a1203; --accent-soft: rgba(158,222,26,.16);
+    --btn: #19230f; --btn-hi: #27351a; --field: #070a05;
+    --item-line: #1b2413; --item-hi: #1f2b16; --item-sel: #2d3f1a;
+    --overlay: rgba(4,6,3,.95);
+    --shadow: 0 12px 34px rgba(0,0,0,.6);
+    --scroll: #35462a;
 
-    /* -- the things being placed -- */
-    --sel: #ffd23b; --hover: #dff0ff;
+    /* -- the things being placed: the legend, and the one part of the tool that is not two colours -- */
+    --sel: #d8ff4d; --hover: #f2ffd9;
     --hull: #3be86a; --turret: #2fc6ff; --pylon: #ff5252; --seat: #c07dff;
     --special: #ffa03b; --pod: #4de0c0;
-    --ring: #ff9f43; --gun: #ffcf5c; --eye: #7fd7ff; --chase: #ff7ad9; --aabb: #52708c;
+    --ring: #ff9f43; --gun: #ffcf5c; --eye: #7fd7ff; --chase: #ff7ad9; --aabb: #6a7f52;
     --warn: #ffb454;
 
     /* -- the canvases -- */
     --model-ink: dark;
-    --c-grid: #202834; --c-axis: #47555f; --c-num: #6e7d8d; --c-scale: #8393a3;
-    --c-wire: #9dc2e2; --c-wire-dim: #3c4a57; --c-ground: #1d242d;
-    --c-plate: rgba(10,14,20,.78);
-    --c-x: #e06060; --c-y: #60e090; --c-z: #6090e0;
+    --c-grid: #17210e; --c-axis: #3f5130; --c-num: #6b7d5c; --c-scale: #8ba07b;
+    --c-plate: rgba(4,7,3,.8);
+    --c-wire: #c3e39b; --c-wire-dim: #3a4a2d; --c-ground: #101609;
+    --c-x: #e06060; --c-y: #9ede1a; --c-z: #6090e0;
 
     /* -- measurements -- */
     --side-w: 384px;
   }
 
-  /** The old look, deeper and sharper: near-black, and green for the chrome as well as the hull. */
+  /** The same two colours with the black taken all the way down and the green brought up. */
   :root[data-theme="noir"] {
     color-scheme: dark;
-    --bg: #06090c; --panel: #0e1318; --head: #141a21; --sunk: #04070a;
-    --line: #2b343f;
-    --ink: #f1f6fb; --ink-mid: #c3cfdb; --dim: #8797a8;
-    --accent: #3be86a; --accent-ink: #06120a; --accent-soft: rgba(59,232,106,.15);
-    --btn: #1e262e; --btn-hi: #2a343e; --field: #080b0f;
-    --item-line: #1b222a; --item-hi: #1c242d; --item-sel: #16302a;
-    --overlay: rgba(4,6,9,.96);
-    --shadow: 0 12px 34px rgba(0,0,0,.66);
-    --scroll: #333d48;
-    --c-grid: #1a212a; --c-axis: #3e4b56; --c-num: #64727f; --c-scale: #7a8794;
-    --c-ground: #161c23;
-    --c-plate: rgba(4,7,11,.8);
+    --bg: #000000; --panel: #070a05; --head: #0c1207; --sunk: #000000;
+    --line: #223019;
+    --ink: #f2fbe9; --ink-mid: #c2d5b1; --dim: #86997a;
+    --accent: #b4ec2f; --accent-ink: #050c00; --accent-soft: rgba(180,236,47,.18);
+    --btn: #131c0b; --btn-hi: #202d13; --field: #030502;
+    --item-line: #161e0f; --item-hi: #1a2412; --item-sel: #2a3c17;
+    --overlay: rgba(0,0,0,.96);
+    --shadow: 0 12px 34px rgba(0,0,0,.75);
+    --scroll: #2e3d24;
+    --c-grid: #121a0b; --c-axis: #384929; --c-num: #5f7051; --c-scale: #7c9070;
+    --c-ground: #0a0f06;
+    --c-plate: rgba(0,0,0,.82);
   }
 
-  /** Paper: the same tool with the lights on, for a bright room or a projector. */
+  /** Paper: the lights on, for a bright room or a projector. The same green, darkened to hold up. */
   :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #eceff4; --panel: #f7f9fc; --head: #e4eaf1; --sunk: #ffffff;
-    --line: #c5d0dc;
-    --ink: #141c26; --ink-mid: #3b4a5b; --dim: #61718a;
-    --accent: #1668d0; --accent-ink: #ffffff; --accent-soft: rgba(22,104,208,.12);
-    --btn: #e7edf4; --btn-hi: #d8e2ed; --field: #ffffff;
-    --item-line: #e3eaf2; --item-hi: #e7eef6; --item-sel: #d5e5f8;
-    --overlay: rgba(240,244,249,.96);
-    --shadow: 0 12px 34px rgba(22,38,60,.16);
-    --scroll: #b5c2d1;
+    --bg: #eef1e7; --panel: #f8faf3; --head: #e3e9d8; --sunk: #ffffff;
+    --line: #c6d0b6;
+    --ink: #141a0e; --ink-mid: #3f4a33; --dim: #67735a;
+    --accent: #4f7a06; --accent-ink: #ffffff; --accent-soft: rgba(79,122,6,.14);
+    --btn: #e8eedd; --btn-hi: #d9e3c8; --field: #ffffff;
+    --item-line: #e4ebd8; --item-hi: #e8efdc; --item-sel: #d7e7b8;
+    --overlay: rgba(243,246,238,.96);
+    --shadow: 0 12px 34px rgba(30,40,20,.16);
+    --scroll: #b8c4a8;
 
-    --sel: #a86a00; --hover: #0d3f66;
+    --sel: #5d7d00; --hover: #26400d;
     --hull: #0f9c41; --turret: #0577b2; --pylon: #cf2020; --seat: #7132d2;
     --special: #b06000; --pod: #0a7f6c;
-    --ring: #bd6108; --gun: #9c6d05; --eye: #0c7ba9; --chase: #ba278c; --aabb: #6b8caa;
-    --warn: #a96305;
+    --ring: #bd6108; --gun: #7d6a05; --eye: #0c7ba9; --chase: #ba278c; --aabb: #6f7f57;
+    --warn: #8a6205;
 
     --model-ink: light;
-    --c-grid: #dbe2ec; --c-axis: #a5b3c2; --c-num: #7a8899; --c-scale: #5a6a7c;
-    --c-wire: #3c5a78; --c-wire-dim: #c1cdda; --c-ground: #dee5ee;
-    --c-plate: rgba(255,255,255,.84);
-    --c-x: #c22b2b; --c-y: #17864a; --c-z: #2a5fc0;
+    --c-grid: #dde3d1; --c-axis: #a9b69a; --c-num: #7b8871; --c-scale: #5a6a4e;
+    --c-wire: #4a5f33; --c-wire-dim: #c6d0b6; --c-ground: #e1e7d6;
+    --c-plate: rgba(255,255,255,.86);
+    --c-x: #c22b2b; --c-y: #4f7a06; --c-z: #2a5fc0;
   }
 
   * { box-sizing: border-box; }
@@ -347,6 +361,13 @@
       </div>
       <div class="sp"></div>
       <div class="row">
+        <div class="grow"><label data-t>what the file calls it</label>
+          <select id="f-type"></select>
+        </div>
+      </div>
+      <div class="muted" id="typenote" style="margin-top:6px"></div>
+      <div class="sp"></div>
+      <div class="row">
         <button id="m-texture" class="grow" disabled title="the model in its own texture" data-t>Skin</button>
         <button id="m-solid" class="on grow" data-t>Solid</button>
         <button id="m-ghost" class="grow" data-t>Ghost</button>
@@ -482,6 +503,16 @@
       <div class="muted" id="w-where" style="margin-top:6px">&nbsp;</div>
       <div class="muted" style="margin-top:6px" data-t>It goes through the same box as a machine does, under <b>Export</b>, and <kbd>Ctrl</kbd>+<kbd>S</kbd> writes whichever of the two you touched last.</div>
     </div>
+  </details>
+
+  <details id="packbox">
+    <summary data-t>Pack</summary>
+    <div class="pad" id="packpanel"></div>
+  </details>
+
+  <details id="gunsbox">
+    <summary>Crew guns</summary>
+    <div class="pad" id="guns"></div>
   </details>
 
   <details id="posebox">
@@ -730,6 +761,7 @@ const JA = {
   "type|weapon": "種別",
   "item|weapon": "アイテムとして登録する",
   "ammo|weapon": "装弾数（1 基あたり）",
+  "mass|weapon": "重量(kg)",
   "ammo_item|weapon": "補給に使う弾薬",
   "requires|weapon": "必要なポッド",
   "rounds_per_second|weapon.firing": "毎秒発射数",
@@ -748,7 +780,6 @@ const JA = {
   "explosion|weapon.projectile": "爆発力",
   "tracer|weapon.projectile": "曳光の色",
   "ricochet|weapon.projectile": "跳弾角（度）",
-  "chunk_loading|weapon.projectile": "チャンクを保持する",
   "colour|weapon.projectile.trail": "煙の色",
   "exhaust|weapon.projectile.trail": "噴煙の色",
   "density|weapon.projectile.trail": "濃さ",
@@ -767,6 +798,7 @@ const JA = {
 
   /* a rack's */
   "item|rack": "アイテムとして登録する",
+  "mass|rack": "重量(kg)",
   "stations|rack": "搭載位置（パイロンからの相対）",
   "accepts|rack": "積めるもの",
 
@@ -777,6 +809,7 @@ const JA = {
   "lock_rate|equipment": "ロック速度 倍率",
   "radar_gain|equipment": "レーダー反射 倍率",
   "heat_gain|equipment": "赤外線 倍率",
+  "mass|equipment": "重量(kg)",
   "camera|equipment": "レンズ位置（ステーション基準）",
 
   /* ---- tracing and coverage ---- */
@@ -908,6 +941,8 @@ const JA = {
   "explosion_power|airframe": "爆発の威力",
   "max_g|airframe": "耐G",
   "salvage|airframe": "回収できる数",
+  "mass|airframe": "装備重量(kg)",
+  "payload|airframe": "最大搭載重量(kg)",
 
   "max_angle|vtol": "最大偏向角",
   "rate|vtol": "偏向の速さ",
@@ -1379,6 +1414,159 @@ const JA = {
   "arrows": "矢印キー",
   "drag a grip": "面の摘みをドラッグ",
   "drag an edge": "辺をドラッグ",
+
+  /* ---- the blocks that were missing from the panel ---- */
+  "engine.fuel|group": "燃料",
+  "powertrain.fuel|group": "燃料",
+  "wing.sweep|group": "可変後退翼",
+  "airframe.ejection|group": "射出座席",
+  "coaxial|group": "同軸機銃",
+  "buoyancy|group": "浮力",
+  "crush|group": "踏破",
+  "propeller_rpm|engine": "プロペラ回転数（rpm）",
+  "capacity|engine.fuel": "搭載量",
+  "burn_rate|engine.fuel": "消費（1tick）",
+  "idle_fraction|engine.fuel": "アイドル時の割合",
+  "afterburner_rate|engine.fuel": "AB 時の倍率",
+  "refuel_rate|engine.fuel": "給油速度",
+  "capacity|powertrain.fuel": "搭載量",
+  "burn_rate|powertrain.fuel": "消費（1tick）",
+  "idle_fraction|powertrain.fuel": "アイドル時の割合",
+  "refuel_rate|powertrain.fuel": "給油速度",
+  "air_brake_drag|wing": "エアブレーキ倍率",
+  "travel|wing.sweep": "最大後退角（度）",
+  "spread_speed|wing.sweep": "全開前進の速度",
+  "swept_speed|wing.sweep": "全開後退の速度",
+  "cycle_ticks|wing.sweep": "動作時間（tick）",
+  "lift|wing.sweep": "後退時の揚力倍率",
+  "drag|wing.sweep": "後退時の抗力倍率",
+  "speed|airframe.ejection": "射出初速",
+  "canopy|airframe.ejection": "開傘までの時間（tick）",
+  "landing_speed|landing_gear": "接地の目安速度",
+  "travel|suspension": "ストローク",
+  "stiffness|suspension": "ばね定数",
+  "damping|suspension": "減衰",
+  "dive|suspension": "ノーズダイブ",
+  "lean|suspension": "ロール",
+  "gun|coaxial": "同軸機銃の兵装ID",
+  "muzzle|coaxial": "銃口位置",
+  "draught|buoyancy": "喫水",
+  "buoyancy|buoyancy": "浮力",
+  "damping|buoyancy": "上下動の減衰",
+  "trim_rate|buoyancy": "姿勢の追従",
+  "resistance|crush": "抵抗（これ以上の硬さは壊せない）",
+  "drops|crush": "壊した物を落とす",
+  "slaved_turrets|model": "従属砲塔のボーン",
+  "propellers|model": "プロペラのボーン",
+  "propeller_axis|model": "プロペラの回転軸",
+  "nozzle_rest|model": "モデルのノズル角（度）",
+  "Left blank the mod's own tank is used, which is enough for about an hour at full throttle. Every figure here is per tick.":
+    "空欄なら MOD 既定のタンク。全開でおよそ1時間分です。数値はすべて1tickあたり。",
+  "Left blank the mod's own tank is used: about forty minutes at full throttle, far longer idling.":
+    "空欄なら MOD 既定のタンク。全開でおよそ40分、アイドルならその何倍も走ります。",
+  "A swing wing. Left out the wing is fixed, which is every aeroplane but a handful.":
+    "可変後退翼。書かなければ固定翼で、ほとんどの機体はそちらです。",
+  "Left out, the crew of this aeroplane can only climb out of it on the ground.":
+    "書かなければ、この機体の乗員は地上で自分で降りるしかありません。",
+  "The machine gun beside the main one, fired on its own key. Left out there is none.":
+    "主砲の脇に付く機銃。専用キーで撃ちます。書かなければ搭載しません。",
+  "What holds a ship up. Nothing here means anything to a machine that drives.":
+    "艦を浮かせる値。地上を走る車両には何の意味もありません。",
+  "What it drives through rather than round. Higher resistance leaves more standing.":
+    "避けずに踏み潰す相手。抵抗を上げるほど壊せる物が減ります。",
+
+  /* ---- the armament files ---- */
+  "drag|weapon": "吊っている間の抗力",
+  "drag|weapon.projectile": "空気抵抗",
+  "turn_drag|weapon.projectile": "旋回時の抵抗",
+  "arm_ticks|weapon.guidance": "信管が入るまで（tick）",
+  "reacquire_ticks|weapon.guidance": "見失ってから諦めるまで（tick）",
+  "seduction|weapon.guidance": "デコイに釣られやすさ",
+  "lock_delay|equipment": "相手のロック時間 倍率",
+  "cluster|arms": "クラスター弾頭",
+  "submunition|weapon.cluster": "子弾の兵装ID",
+  "count|weapon.cluster": "撒く数",
+  "spread|weapon.cluster": "横に散らす速度",
+  "inherit|weapon.cluster": "親の速度の引き継ぎ",
+  "point|arms word": "座標",
+  "beam|arms word": "視線",
+  "anti_air_missile|arms word": "対空ミサイル",
+  "anti_ground_missile|arms word": "対地ミサイル",
+
+  /* ---- what the file calls itself ---- */
+  "what the file calls it": "ファイル上の種別",
+  "aircraft|arms word": "固定翼機",
+  "helicopter|arms word": "ヘリコプター",
+  "ground_vehicle|arms word": "地上車両",
+  "ship|arms word": "艦艇",
+  "A wing holds it up. Written into the file only when it says something else.":
+    "主翼で飛びます。これ以外を選んだときだけファイルに書かれます。",
+  "A rotor holds it up, and the rotor block says how. Switch the lift over under Performance as well.":
+    "ローターで飛びます。詳しくは rotor ブロックで指定するので、<b>性能</b>の揚力もローターに切り替えてください。",
+  "Wheels or tracks on the ground. Written into the file only when it says something else.":
+    "車輪か履帯で地上を走ります。これ以外を選んだときだけファイルに書かれます。",
+  "A hull in the water: it settles on the surface rather than the ground, and the buoyancy block says how deep.":
+    "水に浮かぶ船体です。地面ではなく水面に落ち着き、沈み方は buoyancy ブロックで決まります。",
+
+  /* ---- the crew guns and the extra barrels ---- */
+  "Crew guns": "旋回機銃",
+  "Extra barrels": "追加の砲",
+  "A gun somebody who is not flying swings and fires: the gunner looks, the gun follows. It names pylons that are already on the machine, so place the pylon first and pick it here. An aeroplane with none of these fires everything straight ahead, which is every fighter.":
+    "操縦していない乗員が自分で振って撃つ砲です。射手が見た方向へ砲が向きます。機体に既に置いたパイロンを名前で指すので、先にパイロンを置いてからここで選んでください。これが1つも無い機体は、すべてを機首方向へ撃ちます——戦闘機はすべてそうです。",
+  "No station on this machine yet. Add a pylon under Parts first.":
+    "この機体にはまだステーションがありません。先に<b>パーツ</b>でパイロンを追加してください。",
+  "the pylons it swings": "この砲座が振るパイロン",
+  "name|a station": "名前",
+  "seat": "座席番号",
+  "bearing (deg)": "正面（度）",
+  "traverse (deg)": "左右の振れ（度）",
+  "Add a crew gun": "旋回機銃を追加",
+  "take this station off": "この砲座を外す",
+  "The second and third guns of a ship, each swinging on a trunnion of its own. The main gun is not one of these — it is the trunnion you drag under Parts. Left empty, a vehicle has the one gun, which is every tank.":
+    "軍艦の第2・第3砲塔のように、それぞれ自分の砲耳で俯仰する砲です。主砲はここには書きません——<b>パーツ</b>でドラッグする砲耳がそれです。空のままなら砲は1門で、戦車はすべてそうです。",
+  "barrel %s": "第 %s 砲",
+  "trunnion &mdash; where it pivots": "砲耳 — 俯仰の中心",
+  "length &mdash; blank for the mount's own": "砲身長 — 空欄で主砲と同じ",
+  "own ring": "専用のリング",
+  "ring &mdash; what it turns about": "リング — 旋回の中心",
+  "Add a barrel": "砲を追加",
+  "take this barrel off": "この砲を外す",
+
+  /* ---- the pack ---- */
+  "Pack": "パック",
+  "A pack is a folder of files under one namespace, dropped in the game's <code>ashvehiclespack/</code>. Put what is open onto the list, give it a name and a recipe, and the whole thing comes out as one zip.":
+    "パックとは、1つの名前空間の下にファイルをまとめたフォルダで、ゲームの <code>ashvehiclespack/</code> に置くだけで読み込まれます。開いている物をリストに載せ、名前とレシピを付ければ、まとめて1つの zip として書き出せます。",
+  "namespace &mdash; the folder, and the first half of every name":
+    "名前空間 — フォルダ名であり、すべての ID の前半",
+  "what the pack is called": "パックの名前",
+  "Put the machine on": "機体を載せる",
+  "Put the armament on": "兵装を載せる",
+  "Nothing on the pack yet.": "まだ何も載っていません。",
+  "Nothing picked. Put something on the list, or click a row to give it its name and its recipe.":
+    "何も選ばれていません。リストに載せるか、行をクリックして名前とレシピを付けてください。",
+  "Build the pack": "パックを書き出す",
+  "Empty it": "空にする",
+  "take it off the pack": "パックから外す",
+  "%s on the pack, %s of them still wanting something.": "%s 件が載っています。うち %s 件はまだ不足があります。",
+  "%s is on the pack": "%s をパックに載せました",
+  "%s files, %s kB": "%s ファイル、%s kB",
+  "take the file on screen again": "画面の内容で取り直す",
+  "Re-take": "取り直す",
+  "name (English)": "名前（英語）",
+  "name (日本語)": "名前（日本語）",
+  "built at the vehicle workbench": "車両作業台で作れるようにする",
+  "tab": "タブ",
+  "how many it makes": "できる個数",
+  "group &mdash; rows of one group sit together in the list. Blank for none":
+    "グループ — 同じグループの物は一覧で隣り合って並びます。空欄で指定なし",
+  "what it is built out of": "材料",
+  "Another material": "材料を追加",
+  "its file": "定義ファイル",
+  "a name": "表示名",
+  "its model": "モデル",
+  "an item texture, which has to be drawn by hand": "アイテム画像（自分で描く必要があります）",
+  "vehicle|arms word": "車両",
+  "ammo|arms word": "弾薬",
 };
 
 /** Which language the tool is in. What the browser is set to, until somebody says otherwise. */
@@ -1454,7 +1642,7 @@ function setLang(code) {
 
   paint();
   renderHelp(); renderLegend(); renderViewbar(); renderChassis(); renderBones(); renderSpec();
-  renderArms(); renderLibrary(); modelInfo(); autoReport();
+  renderArms(); renderPack(); renderLibrary(); modelInfo(); autoReport();
   setPose(state.pose.turret, state.pose.gun);
   refresh();
 }
@@ -1516,6 +1704,9 @@ const state = {
   // by resetSpec, so that a machine started from nothing is a machine that loads.
   spec: {},
   specOn: { afterburner: false, launcher: false },
+  vtype: "",                // the file's own "type": aircraft | helicopter | ground_vehicle | ship
+  stations: [],             // an aeroplane's crew guns; see newStation
+  barrels: [],              // a ship's second and third guns; see newBarrel
   lift: "none",             // what holds an aircraft up besides the wing: none | vtol | rotor
   roles: {},               // role -> bone name
   roadWheels: [],
@@ -2338,8 +2529,8 @@ const TH_VARS = {
 
 /** The themes, in the order the button walks through them. */
 const THEMES = [
-  { id: "dark",  name: "Slate" },
-  { id: "noir",  name: "Noir" },
+  { id: "dark",  name: "Black" },
+  { id: "noir",  name: "Pitch" },
   { id: "light", name: "Paper" },
 ];
 
@@ -4393,6 +4584,8 @@ function liveNumbers() {
 /* ---- the chassis numbers ---- */
 
 function renderChassis() {
+  renderTypes();
+  renderGuns();
   const c = state.chassis;
   const el = document.getElementById("chassis");
   const ground = state.kind === "ground";
@@ -4475,6 +4668,8 @@ const V = (k, d) => ({ k, d: d || [0, 0, 0], kind: "vec3" });
 const VL = (k) => ({ k, d: [], kind: "vec3list" });
 /** A list of bone names, typed as a list because that is how a modeller reads one. */
 const BONES = (k) => ({ k, d: "", kind: "bones" });
+/** One of a short list of words the codec knows. Written only when it is not the codec's own. */
+const E = (k, d, opts) => ({ k, d, opts, kind: "enum" });
 
 /**
  * Every block of a machine's file, in the order the files are written in.
@@ -4490,7 +4685,12 @@ const BONES = (k) => ({ k, d: "", kind: "bones" });
 const GROUPS = [
   { k: "engine", when: "aircraft", f: [
     R("max_thrust", 0.09, 0.001), R("throttle_rate", 0.02, 0.001),
-    N("spool_rate", 0.06, 0.005), N("sea_level_density", 1.0, 0.05)] },
+    N("spool_rate", 0.06, 0.005), N("sea_level_density", 1.0, 0.05),
+    N("propeller_rpm", 0.0, 25)] },
+  { k: "engine.fuel", when: "aircraft",
+    note: "Left blank the mod's own tank is used, which is enough for about an hour at full throttle. Every figure here is per tick.", f: [
+    N("capacity", 1000.0, 50), N("burn_rate", 0.083, 0.005), N("idle_fraction", 0.12, 0.01),
+    N("afterburner_rate", 3.0, 0.25), N("refuel_rate", 250.0, 25)] },
   { k: "engine.afterburner", when: "aircraft", optional: true,
     showIf: () => state.specOn.afterburner, f: [
     N("thrust", 1.5, 0.1), N("light_rate", 0.2, 0.05), N("heat", 3.0, 0.5), VL("nozzles")] },
@@ -4498,14 +4698,22 @@ const GROUPS = [
     N("max_speed", 0.0, 0.05), R("stall_speed", 0.35, 0.01), R("lift", 0.0057, 0.0005),
     N("lift_slope", 5.5, 0.1), N("stall_angle", 15.0, 0.5), R("drag", 0.0004, 0.0001),
     N("induced_drag", 0.0004, 0.0001), N("lateral_drag", 0.15, 0.01),
-    N("ground_effect", 0.28, 0.02), N("span", 10.0, 0.5), N("rotate_speed", 0.0, 0.05)] },
+    N("ground_effect", 0.28, 0.02), N("span", 10.0, 0.5), N("rotate_speed", 0.0, 0.05),
+    N("air_brake_drag", 20.0, 1)] },
+  { k: "wing.sweep", when: "aircraft", optional: true, showIf: () => state.specOn.sweep,
+    note: "A swing wing. Left out the wing is fixed, which is every aeroplane but a handful.", f: [
+    R("travel", 40.0, 1), R("spread_speed", 0.8, 0.05), R("swept_speed", 2.2, 0.05),
+    I("cycle_ticks", 60), N("lift", 1.0, 0.02), N("drag", 1.0, 0.02)] },
   { k: "handling", when: "aircraft", f: [
     R("pitch_rate", 2.2, 0.1), R("roll_rate", 5.0, 0.1), R("yaw_rate", 1.0, 0.1),
     N("control_lag", 0.25, 0.05), N("weathervane", 3.0, 0.5), N("alpha_limit", 0.85, 0.05),
     N("aero_damping", 0.06, 0.01)] },
   { k: "airframe", when: "aircraft", f: [
     N("health", 300.0, 25), R("crash_speed", 1.2, 0.05), R("explosion_power", 6.0, 0.5),
-    N("max_g", 0.0, 0.5), I("salvage", 0)] },
+    N("max_g", 0.0, 0.5), I("salvage", 0), I("mass", 0), I("payload", 0)] },
+  { k: "airframe.ejection", when: "aircraft", optional: true, showIf: () => state.specOn.ejection,
+    note: "Left out, the crew of this aeroplane can only climb out of it on the ground.", f: [
+    N("speed", 1.2, 0.05), I("canopy", 20)] },
   { k: "vtol", when: "aircraft", optional: true, showIf: () => state.lift === "vtol", f: [
     N("max_angle", 90.0, 5), N("rate", 1.0, 0.1), N("lift_thrust", 0.03, 0.001),
     N("authority", 0.9, 0.05), N("hover_drag", 0.06, 0.01), N("conversion_speed", 2.2, 0.1)] },
@@ -4518,7 +4726,8 @@ const GROUPS = [
   { k: "landing_gear", when: "aircraft", f: [
     RI("cycle_ticks", 40), R("drag_penalty", 0.35, 0.05), N("rolling_friction", 0.995, 0.001),
     N("brake_friction", 0.85, 0.01), N("lateral_friction", 0.55, 0.05), N("steer_rate", 1.1, 0.1),
-    N("steer_fade", 1.2, 0.1), N("climb_height", 1.05, 0.05), B("retractable", true)] },
+    N("steer_fade", 1.2, 0.1), N("climb_height", 1.05, 0.05), B("retractable", true),
+    O("landing_speed", 0.05)] },
   { k: "flaps", when: "aircraft", f: [
     RI("cycle_ticks", 30), R("drag_penalty", 0.25, 0.05), N("lift_bonus", 0.3, 0.05)] },
   { k: "signature", when: "aircraft", f: [
@@ -4533,16 +4742,31 @@ const GROUPS = [
     R("max_speed", 0.6, 0.05), N("reverse_speed", 0.15, 0.05), R("acceleration", 0.02, 0.001),
     N("braking", 0.05, 0.01), N("rolling_resistance", 0.004, 0.0005), N("steer_rate", 1.6, 0.1),
     N("pivot_rate", 1.1, 0.1), N("grade_resistance", 0.8, 0.05)] },
+  { k: "powertrain.fuel", when: "ground",
+    note: "Left blank the mod's own tank is used: about forty minutes at full throttle, far longer idling.", f: [
+    N("capacity", 1000.0, 50), N("burn_rate", 0.021, 0.001), N("idle_fraction", 0.1, 0.01),
+    N("refuel_rate", 250.0, 25)] },
   { k: "suspension", when: "ground", f: [
     N("climb_height", 1.0, 0.05), N("slope_limit", 45.0, 1), N("settle_rate", 0.2, 0.05),
     N("grip", 0.85, 0.05), N("wheel_radius", 0.4, 0.05), N("contact_length", 4.0, 0.1),
-    N("contact_width", 2.5, 0.1)] },
+    N("contact_width", 2.5, 0.1), N("travel", 0.22, 0.02), N("stiffness", 0.22, 0.02),
+    N("damping", 0.32, 0.02), N("dive", 2.2, 0.1), N("lean", 3.0, 0.1)] },
   { k: "armament", when: "ground", f: [I("recoil_ticks", 14), N("kick", 0.06, 0.01)] },
   { k: "launcher", when: "ground", optional: true, showIf: () => state.specOn.launcher, f: [
     ID("missile", "ashvehicles:9m311"), V("rail", [0, 0, 0])] },
+  { k: "coaxial", when: "ground", optional: true, showIf: () => state.specOn.coaxial,
+    note: "The machine gun beside the main one, fired on its own key. Left out there is none.", f: [
+    ID("gun", "ashvehicles:mg3"), V("muzzle", [0, 0, 0])] },
   { k: "hull", when: "ground", f: [
     N("health", 300.0, 25), N("explosion_power", 4.0, 0.5), I("salvage", 0),
     N("armour", 0.0, 0.5)] },
+  { k: "buoyancy", when: "ground",
+    note: "What holds a ship up. Nothing here means anything to a machine that drives.", f: [
+    N("draught", 1.0, 0.05), N("buoyancy", 0.08, 0.005), N("damping", 0.35, 0.05),
+    N("trim_rate", 0.1, 0.01)] },
+  { k: "crush", when: "ground",
+    note: "What it drives through rather than round. Higher resistance leaves more standing.", f: [
+    N("resistance", 3.0, 0.5), B("drops", false)] },
 
   { k: "sound", when: "both", f: [
     ID("engine", "ashvehicles:jet_engine"), ID("gear", "ashvehicles:gear"),
@@ -4552,7 +4776,9 @@ const GROUPS = [
     note: "Left out, a machine that drives has no radar at all and one that flies has the mod's own.", f: [
     N("range", 3000.0, 100), N("arc", 55.0, 5), I("sweep_ticks", 10),
     N("warning_range", 4000.0, 100)] },
-  { k: "model", when: "both", f: [BONES("steered_wheels"), N("steer_lock", 0.0, 1)] },
+  { k: "model", when: "both", f: [
+    BONES("steered_wheels"), N("steer_lock", 0.0, 1), BONES("slaved_turrets"), BONES("propellers"),
+    E("propeller_axis", "z", ["z", "y"]), N("nozzle_rest", 0.0, 5)] },
   { k: "model.track", when: "ground", showIf: () => !!state.track.link,
     note: "Which link the run is built from is picked under Bones, and until it is there is no track.", f: [
     BONES("wheels"), N("pitch", 0.0, 0.01), N("spacing", 1.0, 0.05), O("outset", 0.005),
@@ -4586,7 +4812,8 @@ function resetSpec() {
     state.spec[g.k] = {};
     for (const f of g.f) state.spec[g.k][f.k] = Array.isArray(f.d) ? f.d.slice() : f.d;
   }
-  state.specOn = { afterburner: false, launcher: false, radar: false };
+  state.specOn = { afterburner: false, launcher: false, radar: false, sweep: false,
+    ejection: false, coaxial: false };
   state.lift = "none";
 }
 
@@ -4613,6 +4840,11 @@ function specField(g, f) {
   if (f.kind === "id" || f.kind === "bones") {
     return `<div style="grid-column:1/-1">${label}<input ${at} value="${escapeHtml(value)}"
       placeholder="${escapeHtml(f.hint || "")}"></div>`;
+  }
+  if (f.kind === "enum") {
+    return `<div${f.opts.length > 3 ? ' style="grid-column:1/-1"' : ""}>${label}<select ${at}>`
+      + f.opts.map(o => `<option value="${o}"${value === o ? " selected" : ""}>${escapeHtml(armsWord(o))}</option>`).join("")
+      + `</select></div>`;
   }
   if (f.kind === "vec3") {
     return `<div style="grid-column:1/-1">${label}<div class="triple">`
@@ -4653,7 +4885,9 @@ function renderSpec() {
   });
   el.querySelectorAll("[data-on]").forEach(b => b.onclick = () => {
     snapshot();
-    const key = b.dataset.on === "engine.afterburner" ? "afterburner" : b.dataset.on;
+    // A block's switch is kept under its own last word: "engine.afterburner" is the afterburner,
+    // "wing.sweep" is the sweep. One rule, so a block added to the table needs nothing added here.
+    const key = b.dataset.on.split(".").pop();
     state.specOn[key] = !state.specOn[key];
     renderSpec();
   });
@@ -4666,6 +4900,7 @@ function renderSpec() {
 
       if (f.kind === "bool") held[f.k] = inp.checked;
       else if (f.kind === "id" || f.kind === "bones") held[f.k] = inp.value.trim();
+      else if (f.kind === "enum") held[f.k] = inp.value;
       else if (f.kind === "vec3") {
         const n = parseFloat(inp.value);
         if (!Number.isNaN(n)) held[f.k][+inp.dataset.j] = n;
@@ -4709,7 +4944,7 @@ function specJson(doc) {
         ? JSON.stringify(value) === JSON.stringify(f.d) : value === f.d;
       if (!f.req && was[f.k] === undefined && same) { delete out[f.k]; continue; }
 
-      if (f.kind === "id") { if (value) out[f.k] = value; else delete out[f.k]; }
+      if (f.kind === "id" || f.kind === "enum") { if (value) out[f.k] = value; else delete out[f.k]; }
       else if (f.kind === "bones") {
         const names = String(value).split(/[,\s]+/).filter(Boolean);
         if (names.length) out[f.k] = names; else delete out[f.k];
@@ -4729,8 +4964,18 @@ function specJson(doc) {
   }
 }
 
-/** Whatever of it a file has to say, taken off it. Anything it leaves out keeps its default. */
+/**
+ * Whatever of it a file has to say, taken off it. Anything it leaves out keeps its default.
+ *
+ * <p><b>Onto a clean sheet.</b> Everything goes back to the codec's own first, because "the file
+ * does not say" has to mean the same thing on the second machine opened as on the first. Without
+ * that, opening a bomber and then a helicopter left the helicopter carrying the bomber's fuel tank,
+ * its heat signature and its slaved turret — figures no file on screen had ever mentioned, written
+ * into the helicopter's file the moment it was saved.
+ */
 function takeSpec(doc) {
+  resetSpec();
+
   for (const g of GROUPS) {
     const src = atPath(doc, g.k);
     if (!src || typeof src !== "object" || Array.isArray(src)) continue;
@@ -4743,7 +4988,7 @@ function takeSpec(doc) {
         f.kind === "vec3" ? vec(value, f.d.slice())
         : f.kind === "vec3list" ? (Array.isArray(value) ? value.map(p => vec(p, [0, 0, 0])) : [])
         : f.kind === "bool" ? !!value
-        : f.kind === "id" ? String(value)
+        : f.kind === "id" || f.kind === "enum" ? String(value)
         : f.kind === "bones" ? (Array.isArray(value) ? value.join(", ") : String(value))
         : Number(value);
     }
@@ -4752,7 +4997,14 @@ function takeSpec(doc) {
   state.specOn.afterburner = !!(doc.engine && doc.engine.afterburner);
   state.specOn.launcher = !!doc.launcher;
   state.specOn.radar = !!doc.radar;
+  state.specOn.sweep = !!(doc.wing && doc.wing.sweep);
+  state.specOn.ejection = !!(doc.airframe && doc.airframe.ejection);
+  state.specOn.coaxial = !!doc.coaxial;
   state.lift = doc.rotor ? "rotor" : doc.vtol ? "vtol" : "none";
+  // What the machine calls itself. A helicopter and a ship are not spelt by any of the blocks
+  // above -- an aeroplane with a rotor is still filed as an aeroplane unless its file says
+  // otherwise -- so the word is read and written on its own. See {@link machineType}.
+  state.vtype = typeof doc.type === "string" ? doc.type : "";
 }
 
 /**
@@ -4770,13 +5022,14 @@ function ordered(obj, keys) {
 }
 
 const FILE_ORDER = {
-  aircraft: ["hitbox", "model", "engine", "wing", "handling", "airframe", "vtol", "rotor",
+  aircraft: ["type", "hitbox", "model", "engine", "wing", "handling", "airframe", "vtol", "rotor",
     "landing_gear", "flaps", "camera", "sound", "radar", "signature", "countermeasures",
-    "hardpoints", "sync"],
-  ground: ["hitbox", "model", "powertrain", "suspension", "turret", "armament", "launcher",
-    "hull", "camera", "sound", "radar"],
+    "hardpoints", "stations", "sync"],
+  ground: ["type", "hitbox", "model", "powertrain", "suspension", "turret", "armament", "coaxial",
+    "launcher", "hull", "buoyancy", "crush", "camera", "sound", "radar"],
 };
-const MODEL_ORDER = ["scale", "bones", "road_wheels", "steered_wheels", "steer_lock", "track"];
+const MODEL_ORDER = ["scale", "bones", "road_wheels", "steered_wheels", "steer_lock", "track",
+  "slaved_turrets", "propellers", "propeller_axis", "nozzle_rest"];
 
 /* ---- bones ---- */
 
@@ -7236,6 +7489,7 @@ function exportMachine() {
       recoil: round3(c.recoil),
     });
     if (c.main) doc.armament.main = c.main; else delete doc.armament.main;
+    writeBarrels(doc);
   } else {
     doc.airframe = Object.assign({}, doc.airframe);
     if (seats.length) doc.airframe.seats = seats;
@@ -7249,7 +7503,12 @@ function exportMachine() {
       if (!p.fixed) o.kind = p.station === "special" ? "special" : "weapon";
       return o;
     });
+    writeStations(doc);
   }
+
+  // The word the file calls itself by, written only where it is not the one the mod assumes.
+  const said = machineType();
+  if (said) doc.type = said; else delete doc.type;
 
   doc.camera = Object.assign({}, doc.camera, {
     pos: point("chase").pos.map(round3),
@@ -7528,7 +7787,10 @@ const ARMS = {
         WE("type", "gun", WEAPON_TYPES),
         WB("item", true),
         WRI("ammo", 1),
-        WOE("ammo_item", ["cannon", "autocannon", "rocket"]),
+        WI("mass", 0),
+        WN("drag", 0.0, 0.000001),
+        WOE("ammo_item", ["cannon", "autocannon", "rocket", "anti_air_missile",
+          "anti_ground_missile", "missile"]),
         WOE("requires", ["targeting_pod", "jammer", "decoy"]),
       ] },
       { k: "firing", f: [
@@ -7539,7 +7801,8 @@ const ARMS = {
         WR("damage", 2.0, 1), WR("speed", 20.0, 0.5), WN("thrust", 0.0, 0.01),
         WI("burn_ticks", 0), WI("spool_ticks", 0), WN("top_speed", 0.0, 1),
         WN("gravity", 0.02, 0.001), WN("range", 300.0, 50), WN("explosion", 0.0, 0.5),
-        WC("tracer", "FFC864"), WN("ricochet", 0.0, 5), WOB("chunk_loading"),
+        WC("tracer", "FFC864"), WN("ricochet", 0.0, 5), WN("drag", 0.00006, 0.00001),
+        WN("turn_drag", 0.12, 0.01),
       ] },
       { k: "projectile.trail", on: "trail", f: [
         WC("colour", "D8D5CD"), WC("exhaust", "9A958B"),
@@ -7548,10 +7811,16 @@ const ARMS = {
       { k: "guidance", on: "guidance", f: [
         WN("turn_rate", 6.0, 0.5), WN("lock_angle", 15.0, 1), WN("lock_range", 220.0, 50),
         WI("lock_ticks", 20), WN("track_angle", 75.0, 5), WN("proximity", 2.5, 0.5),
-        WN("nav_gain", 3.5, 0.5), WE("seeker", "heat", ["heat", "radar", "laser"]),
+        WN("nav_gain", 3.5, 0.5), WI("arm_ticks", 8), WI("reacquire_ticks", 40),
+        WN("seduction", 0.2, 0.05),
+        WE("seeker", "heat", ["heat", "radar", "laser", "point", "beam"]),
       ] },
       { k: "sound", f: [
         WID("fire", "ashvehicles:cannon_fire"), WN("volume", 2.0, 0.1), WN("pitch", 1.0, 0.05),
+      ] },
+      { k: "cluster", on: "cluster", f: [
+        WID("submunition", "ashvehicles:bomblet"), WI("count", 12),
+        WN("spread", 0.3, 0.05), WN("inherit", 0.25, 0.05),
       ] },
     ],
   },
@@ -7560,7 +7829,8 @@ const ARMS = {
     name: "Rack",
     note: "The carriage between a station and its stores. What it decides is how many a station carries and where each one hangs — and nothing else.",
     groups: [
-      { k: "", f: [WB("item", true), WVL("stations"), WEL("accepts", WEAPON_TYPES)] },
+      { k: "", f: [WB("item", true), WI("mass", 0), WVL("stations"),
+        WEL("accepts", WEAPON_TYPES)] },
     ],
   },
 
@@ -7572,8 +7842,8 @@ const ARMS = {
         WE("type", "targeting_pod", ["targeting_pod", "jammer", "decoy"]),
         WB("item", true),
         WN("seeker_range", 1.0, 0.05), WN("lock_rate", 1.0, 0.05),
-        WN("radar_gain", 1.0, 0.05), WN("heat_gain", 1.0, 0.05),
-        WV("camera"),
+        WN("radar_gain", 1.0, 0.05), WN("heat_gain", 1.0, 0.05), WN("lock_delay", 1.0, 0.05),
+        WI("mass", 0), WV("camera"),
       ] },
     ],
   },
@@ -7581,10 +7851,11 @@ const ARMS = {
 
 /** The keys of an armament file in the order the mod reads them, as {@link FILE_ORDER} is. */
 const ARMS_ORDER = {
-  weapon: ["type", "item", "ammo", "ammo_item", "requires", "firing", "projectile", "guidance",
-    "sound"],
-  rack: ["item", "stations", "accepts"],
-  equipment: ["type", "item", "seeker_range", "lock_rate", "radar_gain", "heat_gain", "camera"],
+  weapon: ["type", "item", "ammo", "mass", "drag", "ammo_item", "requires", "firing", "projectile",
+    "guidance", "sound", "cluster"],
+  rack: ["item", "mass", "stations", "accepts"],
+  equipment: ["type", "item", "seeker_range", "lock_rate", "radar_gain", "heat_gain", "lock_delay",
+    "mass", "camera"],
 };
 
 /** And the same again inside each block. Deepest first, so that a block is tidied before it is put. */
@@ -7592,10 +7863,11 @@ const ARMS_INNER = {
   "projectile.trail": ["colour", "exhaust", "density", "size"],
   firing: ["rounds_per_second", "spread", "salvo", "salvo_spread", "automatic"],
   projectile: ["damage", "speed", "thrust", "burn_ticks", "spool_ticks", "top_speed", "gravity",
-    "range", "explosion", "tracer", "ricochet", "trail", "chunk_loading"],
+    "range", "explosion", "tracer", "ricochet", "drag", "turn_drag", "trail"],
   guidance: ["turn_rate", "lock_angle", "lock_range", "lock_ticks", "track_angle", "proximity",
-    "nav_gain", "seeker"],
+    "nav_gain", "arm_ticks", "reacquire_ticks", "seduction", "seeker"],
   sound: ["fire", "volume", "pitch"],
+  cluster: ["submunition", "count", "spread", "inherit"],
 };
 
 /**
@@ -7613,7 +7885,7 @@ function resetArms() {
     arms.val[g.k] = {};
     for (const f of g.f) arms.val[g.k][f.k] = Array.isArray(f.d) ? f.d.slice() : f.d;
   }
-  arms.on = { trail: false, guidance: false };
+  arms.on = { trail: false, guidance: false, cluster: false };
 }
 
 /* ---- the panel ---- */
@@ -7854,6 +8126,7 @@ function takeArms(doc, kind, id) {
   // in the table already are — so it comes up switched on with those figures in it.
   arms.on.trail = !!(doc.projectile && doc.projectile.trail);
   arms.on.guidance = !!doc.guidance;
+  arms.on.cluster = !!doc.cluster;
 
   $("w-kind").value = kind;
   $("w-id").value = arms.id;
@@ -8158,6 +8431,7 @@ function takeJson(doc, name) {
     if (typeof doc.turret.elevation === "number") c.elevation = doc.turret.elevation;
     point("ring").pos = vec(doc.turret.ring, point("ring").pos);
   }
+  takeGuns(doc);
   if (doc.armament) {
     point("trunnion").pos = vec(doc.armament.trunnion, point("trunnion").pos);
     if (typeof doc.armament.barrel_length === "number") c.barrel = doc.armament.barrel_length;
@@ -9125,6 +9399,770 @@ $("grip").addEventListener("pointerdown", e => {
 
 $("grip").addEventListener("dblclick", () => setSideWidth(SIDE_DEFAULT, true));
 
+
+/* ================================================================== *
+ * The two lists that are neither a figure nor a place
+ *
+ * A crew gun station and an extra barrel are both *records* — several
+ * fields that only mean anything together — so neither fits the panel of
+ * figures, and neither is a single point that could be dragged. They are
+ * given rows of their own here.
+ *
+ * An aeroplane's `stations` are who swings which pylon: the pylons are
+ * already placed and named on the machine, so a station picks them off a
+ * row of buttons rather than having them spelt. A ground vehicle's
+ * `armament.barrels` are the second and third guns of a ship, each with
+ * its own trunnion and its own ring.
+ * ================================================================== */
+
+/** A station at the codec's own figures, named after whatever pylon is going on it. */
+const newStation = (name) => ({
+  name: name || "", pylons: [], seat: 1, bearing: 0, traverse: 15,
+  elevation: 5, depression: 60, traverse_rate: 3, elevation_rate: 3,
+  // What the file this came off actually spelt out, so that it can be written back saying the same.
+  said: {},
+});
+
+/** A barrel at the mount's own length and the vehicle's own ring, which is what "not said" means. */
+const newBarrel = () => ({ trunnion: [0, 1, 0], length: "", ring: null });
+
+/** Every figure of a station but the seat: the key, what it is called, its step, and its default. */
+const STATION_FIELDS = [
+  ["bearing", "bearing (deg)", 5, 0],
+  ["traverse", "traverse (deg)", 5, 15],
+  ["elevation", "elevation (deg)", 1, 5],
+  ["depression", "depression (deg)", 1, 60],
+  ["traverse_rate", "traverse (deg/tick)", 0.5, 3],
+  ["elevation_rate", "elevation (deg/tick)", 0.5, 3],
+];
+
+function renderGuns() {
+  const el = $("guns");
+  if (!el) return;
+  const air = state.kind === "aircraft";
+  $("gunsbox").querySelector("summary").textContent = tr(air ? "Crew guns" : "Extra barrels");
+
+  el.innerHTML = air ? gunsAircraftHtml() : gunsGroundHtml();
+  wireGuns(el, air);
+}
+
+function gunsAircraftHtml() {
+  const pylons = ofKind("pylon").map(p => p.name || "pylon");
+  const note = `<div class="muted" style="margin-bottom:8px">${tr("A gun somebody who is not "
+    + "flying swings and fires: the gunner looks, the gun follows. It names pylons that are already "
+    + "on the machine, so place the pylon first and pick it here. An aeroplane with none of these "
+    + "fires everything straight ahead, which is every fighter.")}</div>`;
+
+  if (!pylons.length) {
+    return note + `<div class="muted">${tr("No station on this machine yet. Add a pylon under Parts first.")}</div>`;
+  }
+
+  return note + state.stations.map((s, i) => `
+    <div class="card" data-gi="${i}">
+      <div class="row">
+        <div class="grow"><label>${tr("name|a station")}</label>
+          <input data-gk="name" value="${escapeHtml(s.name)}" placeholder="${escapeHtml(s.pylons[0] || "gun")}"></div>
+        <div style="width:84px"><label>${tr("seat")}</label>
+          <input data-gk="seat" type="number" step="1" min="0" value="${s.seat}"></div>
+        <button data-gdel="${i}" title="${escapeHtml(tr("take this station off"))}">&times;</button>
+      </div>
+      <label>${tr("the pylons it swings")}</label>
+      <div class="row" style="flex-wrap:wrap">${pylons.map(n =>
+        `<button data-gp="${escapeHtml(n)}"${s.pylons.includes(n) ? ' class="on"' : ""}>${escapeHtml(n)}</button>`).join("")}</div>
+      <div class="sp"></div>
+      <div class="pair">${STATION_FIELDS.map(([k, label, step]) =>
+        `<div><label>${tr(label)}</label><input data-gk="${k}" type="number" step="${step}" value="${s[k]}"></div>`).join("")}</div>
+    </div>`).join("")
+    + `<div class="sp"></div><button id="g-add" style="width:100%">${tr("Add a crew gun")}</button>`;
+}
+
+function gunsGroundHtml() {
+  const note = `<div class="muted" style="margin-bottom:8px">${tr("The second and third guns of a "
+    + "ship, each swinging on a trunnion of its own. The main gun is not one of these — it is the "
+    + "trunnion you drag under Parts. Left empty, a vehicle has the one gun, which is every tank.")}</div>`;
+
+  return note + state.barrels.map((b, i) => `
+    <div class="card" data-gi="${i}">
+      <div class="row">
+        <span class="grow" style="color:var(--accent)">${tr("barrel %s", i + 2)}</span>
+        <button data-gdel="${i}" title="${escapeHtml(tr("take this barrel off"))}">&times;</button>
+      </div>
+      <label>${tr("trunnion &mdash; where it pivots")}</label>
+      <div class="triple">${[0, 1, 2].map(j =>
+        `<input data-gk="trunnion" data-gj="${j}" type="number" step="0.05" value="${round3(b.trunnion[j])}">`).join("")}</div>
+      <div class="sp"></div>
+      <div class="row">
+        <div class="grow"><label>${tr("length &mdash; blank for the mount's own")}</label>
+          <input data-gk="length" type="number" step="0.1" value="${b.length}" placeholder="&mdash;"></div>
+        <button data-gring="${i}"${b.ring ? ' class="on"' : ""}>${tr("own ring")}</button>
+      </div>
+      ${b.ring ? `<div class="sp"></div><label>${tr("ring &mdash; what it turns about")}</label>
+      <div class="triple">${[0, 1, 2].map(j =>
+        `<input data-gk="ring" data-gj="${j}" type="number" step="0.05" value="${round3(b.ring[j])}">`).join("")}</div>` : ""}
+    </div>`).join("")
+    + `<div class="sp"></div><button id="g-add" style="width:100%">${tr("Add a barrel")}</button>`;
+}
+
+function wireGuns(el, air) {
+  const list = () => (air ? state.stations : state.barrels);
+
+  const add = el.querySelector("#g-add");
+  if (add) {
+    add.onclick = () => {
+      snapshot();
+      list().push(air ? newStation("") : newBarrel());
+      renderGuns();
+    };
+  }
+
+  el.querySelectorAll("[data-gdel]").forEach(b => b.onclick = () => {
+    snapshot();
+    list().splice(+b.dataset.gdel, 1);
+    renderGuns();
+  });
+
+  el.querySelectorAll("[data-gring]").forEach(b => b.onclick = () => {
+    snapshot();
+    const barrel = state.barrels[+b.dataset.gring];
+    barrel.ring = barrel.ring ? null : point("ring").pos.slice();
+    renderGuns();
+  });
+
+  el.querySelectorAll("[data-gp]").forEach(b => b.onclick = () => {
+    snapshot();
+    const station = state.stations[+b.closest("[data-gi]").dataset.gi];
+    const name = b.dataset.gp;
+    station.pylons = station.pylons.includes(name)
+      ? station.pylons.filter(p => p !== name) : [...station.pylons, name];
+    renderGuns();
+  });
+
+  el.querySelectorAll("[data-gk]").forEach(inp => {
+    inp.onfocus = () => snapshot();
+    inp.oninput = () => {
+      const held = list()[+inp.closest("[data-gi]").dataset.gi];
+      const key = inp.dataset.gk;
+      if (key === "name") { held.name = inp.value; return; }
+      if (key === "length") { held.length = inp.value.trim() === "" ? "" : parseFloat(inp.value); return; }
+      const n = parseFloat(inp.value);
+      if (Number.isNaN(n)) return;
+      if (inp.dataset.gj !== undefined) held[key][+inp.dataset.gj] = n;
+      else held[key] = key === "seat" ? Math.round(n) : n;
+    };
+  });
+}
+
+/* ---- into the file, and back out of it ---- */
+
+/** Every figure of a station, the seat included, with the default it is left out at. */
+const STATION_ALL = STATION_FIELDS.concat([["seat", "seat", 1, 0]]);
+
+/**
+ * The crew guns, written only where there are any: an aeroplane with none says nothing.
+ *
+ * <p>A figure goes in when it is not the codec's own, or when the file this station was read from
+ * said it anyway. That second half is the same courtesy every other block is written with: a file
+ * that spelt out {@code "depression": 60} keeps saying it after a round trip through here, rather
+ * than being quietly tidied into the shorter spelling of the same thing.
+ */
+function writeStations(doc) {
+  const out = state.stations.filter(s => s.pylons.length).map(s => {
+    const o = {};
+    if (s.name) o.name = s.name;
+    o.pylons = s.pylons.slice();
+    for (const [k, , , d] of STATION_ALL) {
+      if (s[k] !== d || s.said[k] !== undefined) o[k] = k === "seat" ? Math.round(s[k]) : exact(s[k]);
+    }
+    return ordered(o, ["name", "pylons", "seat", "bearing", "traverse", "elevation", "depression",
+      "traverse_rate", "elevation_rate"]);
+  });
+  if (out.length) doc.stations = out; else delete doc.stations;
+}
+
+/** The extra barrels, in the armament block beside the one barrel every vehicle has. */
+function writeBarrels(doc) {
+  const out = state.barrels.map(b => {
+    const o = { trunnion: b.trunnion.map(round3) };
+    if (b.length !== "" && !Number.isNaN(Number(b.length))) o.barrel_length = exact(Number(b.length));
+    if (b.ring) o.ring = b.ring.map(round3);
+    return o;
+  });
+  doc.armament = Object.assign({}, doc.armament);
+  if (out.length) doc.armament.barrels = out; else delete doc.armament.barrels;
+}
+
+/** Whatever the file has of either. Anything it leaves out is the codec's own. */
+function takeGuns(doc) {
+  state.stations = Array.isArray(doc.stations) ? doc.stations.map(s => {
+    const station = newStation(typeof s.name === "string" ? s.name : "");
+    station.pylons = Array.isArray(s.pylons) ? s.pylons.map(String) : [];
+    for (const key of ["seat", "bearing", "traverse", "elevation", "depression",
+      "traverse_rate", "elevation_rate"]) {
+      if (typeof s[key] === "number") { station[key] = s[key]; station.said[key] = true; }
+    }
+    return station;
+  }) : [];
+
+  const barrels = doc.armament && doc.armament.barrels;
+  state.barrels = Array.isArray(barrels) ? barrels.map(b => ({
+    trunnion: vec(b.trunnion, [0, 1, 0]),
+    length: typeof b.barrel_length === "number" ? b.barrel_length : "",
+    ring: Array.isArray(b.ring) ? vec(b.ring, [0, 0, 0]) : null,
+  })) : [];
+}
+
+/* ---- what the file calls itself ---- */
+
+/** The words a machine of this sort may be filed under, the first being what it is without saying. */
+const TYPES = { aircraft: ["aircraft", "helicopter"], ground: ["ground_vehicle", "ship"] };
+
+const TYPE_NOTES = {
+  aircraft: "A wing holds it up. Written into the file only when it says something else.",
+  helicopter: "A rotor holds it up, and the rotor block says how. Switch the lift over under Performance as well.",
+  ground_vehicle: "Wheels or tracks on the ground. Written into the file only when it says something else.",
+  ship: "A hull in the water: it settles on the surface rather than the ground, and the buoyancy block says how deep.",
+};
+
+/** The word to write, or "" for the one the mod would have assumed anyway. */
+function machineType() {
+  const allowed = TYPES[state.kind];
+  return allowed.includes(state.vtype) && state.vtype !== allowed[0] ? state.vtype : "";
+}
+
+function renderTypes() {
+  const sel = $("f-type");
+  if (!sel) return;
+  const allowed = TYPES[state.kind];
+  if (!allowed.includes(state.vtype)) state.vtype = allowed[0];
+  sel.innerHTML = allowed.map(v =>
+    `<option value="${v}"${state.vtype === v ? " selected" : ""}>${escapeHtml(armsWord(v))}</option>`).join("");
+  $("typenote").innerHTML = tr(TYPE_NOTES[state.vtype] || "");
+}
+
+$("f-type").onchange = e => {
+  snapshot();
+  state.vtype = e.target.value;
+  renderTypes();
+};
+
+
+/* ================================================================== *
+ * A pack, whole
+ *
+ * Everything above makes one file at a time. A pack is not one file: an
+ * aeroplane that somebody can actually build and fly is a definition, a
+ * model, a skin, a name in two languages and a recipe at the workbench,
+ * and three of those five live nowhere near the definition.
+ *
+ * So this keeps a list. Whatever is open — the machine, or the weapon —
+ * is put on it with one button, along with the model and the skin that
+ * were loaded with it, and the names and the recipe are typed here beside
+ * it. When the list is right, the whole thing comes out as one .zip laid
+ * out the way ashvehiclespack/ wants it, which is the same layout the mod
+ * itself is written in.
+ *
+ * Nothing here is compressed: a zip may store its files whole, every
+ * program that opens one reads that, and it saves the tool an outside
+ * library it has managed to do without everywhere else.
+ * ================================================================== */
+
+const PACK_KEEP = "ashvehicles.pack";
+
+const pack = {
+  ns: "mypack",
+  title: "My Pack",
+  files: [],   // see packEntry
+  pick: "",    // "<kind>:<id>" of the row being edited
+};
+
+/** What goes under data/<ns>/ for a thing of this sort. */
+const PACK_DIR = {
+  aircraft: "aircraft", ground: "vehicle",
+  weapon: "weapon", rack: "rack", equipment: "equipment",
+};
+
+/** Which of them the mod draws an inventory icon for by itself. The rest need an item model. */
+const PACK_DRAWN = { aircraft: true, ground: true };
+
+/** Where a thing of this sort keeps its model, when it has one. */
+const PACK_GEO = { aircraft: "entity", ground: "entity", weapon: "weapon", rack: "weapon",
+  equipment: "weapon" };
+
+const WORKBENCH_TABS = ["vehicle", "weapon", "equipment", "ammo"];
+
+/** The tab a thing of this sort lands on at the workbench unless it is told otherwise. */
+const PACK_TAB = { aircraft: "vehicle", ground: "vehicle", weapon: "weapon", rack: "equipment",
+  equipment: "equipment" };
+
+const packEntry = (kind, id) => ({
+  kind, id,
+  json: "",          // the definition file, as text
+  en: "", ja: "",    // what it is called, in both
+  geo: "",           // the .geo.json it was drawn from, when one was open
+  tex: "",           // the skin, as a data URL, when one was open
+  recipe: null,      // { tab, group, materials: [{item, count}], count } or none
+});
+
+const packKey = e => e.kind + ":" + e.id;
+const packFind = key => pack.files.find(e => packKey(e) === key) || null;
+const packPicked = () => packFind(pack.pick);
+
+/* ---- putting what is open onto the list ---- */
+
+/**
+ * The machine on screen, its model and its skin along with it.
+ *
+ * <p>The definition is built the same way the Export box builds it, by calling the same function:
+ * there is one description of what a machine's file looks like and this is not a second one.
+ */
+function packAddMachine() {
+  exportMachine();
+  const entry = packTake(state.kind, state.id);
+  entry.json = out().value;
+  if (state.geoText) entry.geo = state.geoText;
+  if (state.texture && /^data:/.test(state.texture.src)) entry.tex = state.texture.src;
+  if (!entry.recipe) entry.recipe = packRecipeFor(entry);
+  pack.pick = packKey(entry);
+  packSave();
+  renderPack();
+  say(tr("%s is on the pack", entry.id));
+}
+
+/** The armament file on screen. A weapon has no model of its own here; the mod has a default one. */
+function packAddArms() {
+  exportArms();
+  const entry = packTake(arms.kind, arms.id);
+  entry.json = out().value;
+  if (!entry.recipe) entry.recipe = packRecipeFor(entry);
+  pack.pick = packKey(entry);
+  packSave();
+  renderPack();
+  say(tr("%s is on the pack", entry.id));
+}
+
+/** The row for this thing, made if it is not there yet. Adding twice replaces rather than doubles. */
+function packTake(kind, id) {
+  const key = kind + ":" + id;
+  let entry = packFind(key);
+  if (!entry) { entry = packEntry(kind, id); pack.files.push(entry); }
+  return entry;
+}
+
+/** A recipe to start from: four plates and the mod's own parts, on the right tab. */
+function packRecipeFor(entry) {
+  const heavy = entry.kind === "aircraft" || entry.kind === "ground";
+  return {
+    tab: PACK_TAB[entry.kind],
+    group: "",
+    count: 1,
+    materials: heavy
+      ? [{ item: "ashvehicles:steel_plate", count: 7 },
+         { item: "ashvehicles:circuit_board", count: 1 },
+         { item: "ashvehicles:jet_engine", count: 1 }]
+      : [{ item: "ashvehicles:steel_plate", count: 4 },
+         { item: "minecraft:gunpowder", count: 1 }],
+  };
+}
+
+/* ---- the panel ---- */
+
+function renderPack() {
+  const el = $("packpanel");
+  if (!el) return;
+  const picked = packPicked();
+
+  el.innerHTML = `
+    <div class="muted" style="margin-bottom:8px">${tr("A pack is a folder of files under one "
+      + "namespace, dropped in the game's <code>ashvehiclespack/</code>. Put what is open onto the "
+      + "list, give it a name and a recipe, and the whole thing comes out as one zip.")}</div>
+    <div class="row">
+      <div class="grow"><label>${tr("namespace &mdash; the folder, and the first half of every name")}</label>
+        <input id="p-ns" value="${escapeHtml(pack.ns)}"></div>
+      <div class="grow"><label>${tr("what the pack is called")}</label>
+        <input id="p-title" value="${escapeHtml(pack.title)}"></div>
+    </div>
+    <div class="sp"></div>
+    <div class="row">
+      <button id="p-add-machine" class="grow">${tr("Put the machine on")}</button>
+      <button id="p-add-arms" class="grow">${tr("Put the armament on")}</button>
+    </div>
+    <div class="sp"></div>
+    <div class="list" id="packlist">${packListHtml()}</div>
+    <div class="sp"></div>
+    ${picked ? packEditorHtml(picked) : `<div class="muted">${tr("Nothing picked. Put something on the list, or click a row to give it its name and its recipe.")}</div>`}
+    <div class="sp"></div>
+    <div class="row">
+      <button id="p-build" class="grow">${tr("Build the pack")}</button>
+      <button id="p-clear">${tr("Empty it")}</button>
+    </div>
+    <div class="muted" id="p-report" style="margin-top:6px">${escapeHtml(packReport())}</div>`;
+
+  wirePack();
+}
+
+function packListHtml() {
+  if (!pack.files.length) return `<div class="empty">${tr("Nothing on the pack yet.")}</div>`;
+  return pack.files.map(e => {
+    const missing = packMissing(e);
+    return `<div class="item${packKey(e) === pack.pick ? " sel" : ""}" data-pk="${escapeHtml(packKey(e))}">
+      <span class="grow">${escapeHtml(e.id)}</span>
+      <span class="muted">${escapeHtml(tr(e.kind + "|a kind of file"))}</span>
+      ${missing ? `<span style="color:var(--warn)" title="${escapeHtml(missing)}">!</span>` : ""}
+      <button data-pdel="${escapeHtml(packKey(e))}" title="${escapeHtml(tr("take it off the pack"))}">&times;</button>
+    </div>`;
+  }).join("");
+}
+
+/** What this row still wants before it is a thing somebody could build and use. Empty when it is. */
+function packMissing(e) {
+  const wants = [];
+  if (!e.json.trim()) wants.push(tr("its file"));
+  if (!e.en.trim()) wants.push(tr("a name"));
+  if (PACK_DRAWN[e.kind] && !e.geo) wants.push(tr("its model"));
+  if (!PACK_DRAWN[e.kind]) wants.push(tr("an item texture, which has to be drawn by hand"));
+  return wants.join(", ");
+}
+
+function packEditorHtml(e) {
+  const r = e.recipe;
+  return `<div class="card">
+    <div class="row">
+      <span class="grow" style="color:var(--accent)">${escapeHtml(pack.ns + ":" + e.id)}</span>
+      <button id="p-refresh" title="${escapeHtml(tr("take the file on screen again"))}">${tr("Re-take")}</button>
+    </div>
+    <div class="pair">
+      <div><label>${tr("name (English)")}</label>
+        <input data-pe="en" value="${escapeHtml(e.en)}" placeholder="Example Fighter"></div>
+      <div><label>${tr("name (日本語)")}</label>
+        <input data-pe="ja" value="${escapeHtml(e.ja)}" placeholder="試作戦闘機"></div>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <span class="grow muted">${tr("built at the vehicle workbench")}</span>
+      <button id="p-recipe-on"${r ? ' class="on"' : ""}>${r ? tr("on") : tr("off|a block of the file")}</button>
+    </div>
+    ${r ? `
+    <div class="pair">
+      <div><label>${tr("tab")}</label><select data-pr="tab">${WORKBENCH_TABS.map(v =>
+        `<option value="${v}"${r.tab === v ? " selected" : ""}>${escapeHtml(armsWord(v))}</option>`).join("")}</select></div>
+      <div><label>${tr("how many it makes")}</label>
+        <input data-pr="count" type="number" step="1" min="1" value="${r.count}"></div>
+    </div>
+    <label>${tr("group &mdash; rows of one group sit together in the list. Blank for none")}</label>
+    <input data-pr="group" value="${escapeHtml(r.group)}" placeholder="ashvehicles_vehicle">
+    <div class="sp"></div>
+    <label>${tr("what it is built out of")}</label>
+    ${r.materials.map((m, i) => `<div class="row" style="margin-bottom:4px">
+      <input data-pm="item" data-pi="${i}" class="grow" value="${escapeHtml(m.item)}" placeholder="minecraft:iron_ingot">
+      <input data-pm="count" data-pi="${i}" type="number" step="1" min="1" style="width:64px" value="${m.count}">
+      <button data-pmdel="${i}">&times;</button>
+    </div>`).join("")}
+    <button id="p-mat-add" style="width:100%">${tr("Another material")}</button>` : ""}
+  </div>`;
+}
+
+function packReport() {
+  if (!pack.files.length) return tr("Nothing on the pack yet.");
+  const short = pack.files.filter(e => packMissing(e)).length;
+  return tr("%s on the pack, %s of them still wanting something.", pack.files.length, short);
+}
+
+function wirePack() {
+  const el = $("packpanel");
+
+  $("p-ns").oninput = e => { pack.ns = (e.target.value || "").trim().toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, "_") || "mypack"; packSave(); };
+  $("p-ns").onblur = () => renderPack();
+  $("p-title").oninput = e => { pack.title = e.target.value; packSave(); };
+
+  $("p-add-machine").onclick = () => packAddMachine();
+  $("p-add-arms").onclick = () => packAddArms();
+  $("p-build").onclick = () => packBuild();
+  $("p-clear").onclick = () => {
+    pack.files = []; pack.pick = ""; packSave(); renderPack();
+  };
+
+  el.querySelectorAll("[data-pk]").forEach(row => row.onclick = ev => {
+    if (ev.target.dataset.pdel !== undefined) return;
+    pack.pick = row.dataset.pk;
+    renderPack();
+  });
+  el.querySelectorAll("[data-pdel]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    pack.files = pack.files.filter(e => packKey(e) !== b.dataset.pdel);
+    if (pack.pick === b.dataset.pdel) pack.pick = "";
+    packSave(); renderPack();
+  });
+
+  const picked = packPicked();
+  if (!picked) return;
+
+  const refresh = $("p-refresh");
+  if (refresh) {
+    refresh.onclick = () => {
+      if (picked.kind === "aircraft" || picked.kind === "ground") packAddMachine();
+      else { arms.kind = picked.kind; arms.id = picked.id; packAddArms(); }
+    };
+  }
+
+  el.querySelectorAll("[data-pe]").forEach(inp => inp.oninput = () => {
+    picked[inp.dataset.pe] = inp.value;
+    packSave();
+  });
+
+  const on = $("p-recipe-on");
+  if (on) {
+    on.onclick = () => {
+      picked.recipe = picked.recipe ? null : packRecipeFor(picked);
+      packSave(); renderPack();
+    };
+  }
+
+  el.querySelectorAll("[data-pr]").forEach(inp => {
+    const write = () => {
+      const key = inp.dataset.pr;
+      picked.recipe[key] = key === "count" ? Math.max(1, Math.round(+inp.value || 1)) : inp.value;
+      packSave();
+    };
+    inp.oninput = write;
+    inp.onchange = write;
+  });
+
+  el.querySelectorAll("[data-pm]").forEach(inp => inp.oninput = () => {
+    const row = picked.recipe.materials[+inp.dataset.pi];
+    if (inp.dataset.pm === "item") row.item = inp.value.trim();
+    else row.count = Math.max(1, Math.round(+inp.value || 1));
+    packSave();
+  });
+  el.querySelectorAll("[data-pmdel]").forEach(b => b.onclick = () => {
+    picked.recipe.materials.splice(+b.dataset.pmdel, 1);
+    packSave(); renderPack();
+  });
+  const matAdd = $("p-mat-add");
+  if (matAdd) {
+    matAdd.onclick = () => {
+      picked.recipe.materials.push({ item: "minecraft:iron_ingot", count: 1 });
+      packSave(); renderPack();
+    };
+  }
+}
+
+/* ---- what the list is worth when the tab is closed ---- */
+
+function packSave() {
+  try {
+    // The skins and the models are left out on purpose: a pack of four aeroplanes is several
+    // megabytes of them, and browser storage is not the place. What is kept is the typing.
+    localStorage.setItem(PACK_KEEP, JSON.stringify({
+      ns: pack.ns, title: pack.title, pick: pack.pick,
+      files: pack.files.map(e => Object.assign({}, e, { geo: "", tex: "" })),
+    }));
+  } catch (err) { /* nothing to be done */ }
+}
+
+function packLoad() {
+  try {
+    const kept = JSON.parse(localStorage.getItem(PACK_KEEP) || "null");
+    if (!kept || !Array.isArray(kept.files)) return;
+    pack.ns = kept.ns || pack.ns;
+    pack.title = kept.title || pack.title;
+    pack.pick = kept.pick || "";
+    pack.files = kept.files.map(e => Object.assign(packEntry(e.kind, e.id), e));
+  } catch (err) { /* nothing to be done */ }
+}
+
+/* ---- out of the tool as one zip ---- */
+
+/** The bytes of a string, which for everything here is UTF-8. */
+const utf8 = s => new TextEncoder().encode(s);
+
+/** The bytes behind a data: URL, which is how a skin got here. */
+function dataUrlBytes(url) {
+  const comma = url.indexOf(",");
+  const raw = atob(url.slice(comma + 1));
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+/**
+ * A zip, stored rather than deflated.
+ *
+ * <p>Every entry goes in whole, with the same three records a zip has always had: a local header in
+ * front of each file, a central directory listing them all, and the end record that says where the
+ * directory starts. Nothing here needs Zip64 — a pack is models and JSON, not video.
+ *
+ * @param files {@code [{ path, bytes }]}
+ */
+function zipOf(files) {
+  const chunks = [];
+  const central = [];
+  let at = 0;
+
+  const put = (...parts) => { for (const p of parts) { chunks.push(p); at += p.length; } };
+  const short = n => new Uint8Array([n & 0xFF, (n >>> 8) & 0xFF]);
+  const long = n => new Uint8Array([n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF]);
+
+  const now = new Date();
+  const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+
+  for (const file of files) {
+    const name = utf8(file.path);
+    const sum = crc32(file.bytes);
+    const offset = at;
+
+    // 0x0800 says the name is UTF-8, which matters the moment anybody names a pack in kana.
+    put(long(0x04034B50), short(20), short(0x0800), short(0), short(time), short(date),
+        long(sum), long(file.bytes.length), long(file.bytes.length),
+        short(name.length), short(0), name, file.bytes);
+
+    central.push({ name, sum, size: file.bytes.length, offset });
+  }
+
+  const dirAt = at;
+  for (const e of central) {
+    put(long(0x02014B50), short(20), short(20), short(0x0800), short(0), short(time), short(date),
+        long(e.sum), long(e.size), long(e.size), short(e.name.length), short(0), short(0),
+        short(0), short(0), long(0), long(e.offset), e.name);
+  }
+
+  put(long(0x06054B50), short(0), short(0), short(central.length), short(central.length),
+      long(at - dirAt), long(dirAt), short(0));
+
+  return new Blob(chunks, { type: "application/zip" });
+}
+
+/** Every file the pack is made of, laid out the way ashvehiclespack/ reads them. */
+function packFiles() {
+  const ns = pack.ns;
+  const files = [];
+  const en = {};
+  const ja = {};
+  const sounds = {};
+
+  const soundsIn = (text) => {
+    // Anything in the pack's own namespace that is named where a sound is named. Declared here so
+    // that a pack which brings its own engine note is not a pack with a silent aeroplane in it.
+    const seen = String(text).match(new RegExp('"' + ns + ':[a-z0-9_./-]+"', "g")) || [];
+    for (const quoted of seen) {
+      const id = quoted.slice(1, -1).slice(ns.length + 1);
+      if (/^(engine|weapon|gear)\./.test(id)) {
+        sounds[id] = { category: "neutral", sounds: [ns + ":" + id.replace(/\./g, "/")] };
+      }
+    }
+  };
+
+  for (const e of pack.files) {
+    if (!e.json.trim()) continue;
+    const dir = PACK_DIR[e.kind];
+    files.push({ path: `data/${ns}/${dir}/${e.id}.json`, bytes: utf8(e.json) });
+    soundsIn(e.json);
+
+    if (e.en.trim()) {
+      if (PACK_DRAWN[e.kind]) en[`entity.${ns}.${e.id}`] = e.en.trim();
+      en[`item.${ns}.${e.id}`] = e.en.trim();
+    }
+    if (e.ja.trim()) {
+      if (PACK_DRAWN[e.kind]) ja[`entity.${ns}.${e.id}`] = e.ja.trim();
+      ja[`item.${ns}.${e.id}`] = e.ja.trim();
+    }
+
+    if (e.geo) files.push({ path: `assets/${ns}/geo/${PACK_GEO[e.kind]}/${e.id}.geo.json`, bytes: utf8(e.geo) });
+    if (e.tex) files.push({ path: `assets/${ns}/textures/entity/${e.id}.png`, bytes: dataUrlBytes(e.tex) });
+
+    // A machine's inventory icon is drawn by the mod off the model it already ships. Everything
+    // else is an ordinary item and needs the ordinary two files; this is the one of them that can
+    // be written rather than drawn.
+    if (!PACK_DRAWN[e.kind]) {
+      files.push({
+        path: `assets/${ns}/models/item/${e.id}.json`,
+        bytes: utf8(jsonText({ parent: "minecraft:item/generated",
+          textures: { layer0: `${ns}:item/${e.id}` } }) + "\n"),
+      });
+    }
+
+    if (e.recipe) {
+      const recipe = { type: "ashvehicles:vehicle_crafting" };
+      if (e.recipe.group.trim()) recipe.group = e.recipe.group.trim();
+      if (e.recipe.tab !== "vehicle") recipe.tab = e.recipe.tab;
+      recipe.materials = e.recipe.materials.filter(m => m.item.trim())
+        .map(m => ({ item: m.item.trim(), count: Math.max(1, Math.round(m.count)) }));
+      recipe.result = { count: Math.max(1, Math.round(e.recipe.count)), id: `${ns}:${e.id}` };
+      files.push({ path: `data/${ns}/recipe/${e.id}.json`, bytes: utf8(jsonText(recipe) + "\n") });
+    }
+  }
+
+  if (Object.keys(en).length) {
+    files.push({ path: `assets/${ns}/lang/en_us.json`, bytes: utf8(jsonText(en) + "\n") });
+  }
+  if (Object.keys(ja).length) {
+    files.push({ path: `assets/${ns}/lang/ja_jp.json`, bytes: utf8(jsonText(ja) + "\n") });
+  }
+  if (Object.keys(sounds).length) {
+    files.push({ path: `assets/${ns}/sounds.json`, bytes: utf8(jsonText(sounds) + "\n") });
+  }
+
+  files.push({ path: "README.txt", bytes: utf8(packReadme(files)) });
+  return files;
+}
+
+/** A note in the zip saying what is in it and what is still missing from it. */
+function packReadme(files) {
+  const lines = [
+    pack.title,
+    "=".repeat(Math.max(3, pack.title.length)),
+    "",
+    "Drop this zip in the game folder's ashvehiclespack/ . There is nothing to enable:",
+    "what is there when the game starts is loaded.",
+    "",
+    "Namespace: " + pack.ns,
+    "",
+    "In it",
+    "-----",
+  ];
+  for (const f of files) lines.push("  " + f.path);
+
+  const wanting = pack.files.filter(e => packMissing(e));
+  if (wanting.length) {
+    lines.push("", "Still wanting", "-------------");
+    for (const e of wanting) lines.push("  " + e.id + ": " + packMissing(e));
+    lines.push("",
+      "An item texture is a 16x16 png at assets/" + pack.ns + "/textures/item/<id>.png .",
+      "A sound is an .ogg at assets/" + pack.ns + "/sounds/<the path in sounds.json>.ogg .");
+  }
+  lines.push("", "Made with tool/vehicle-editor.html out of the AshVehicles repository.", "");
+  return lines.join("\n");
+}
+
+function packBuild() {
+  const files = packFiles();
+  if (files.length <= 1) return say(tr("Nothing on the pack yet."));
+
+  const blob = zipOf(files);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = pack.ns + ".zip";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  say(tr("%s files, %s kB", files.length, Math.max(1, Math.round(blob.size / 1024))));
+}
+
 resetSpec();
 resetArms();
 resetPoints();
@@ -9134,6 +10172,8 @@ readTheme();
 renderChassis();
 renderSpec();
 renderArms();
+packLoad();
+renderPack();
 renderBones();
 renderLegend();
 renderViewbar();

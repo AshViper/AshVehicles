@@ -1,4 +1,5 @@
 {
+  "mass": 200,
   "type": "targeting_pod",
   "seeker_range": 1.6,
   "lock_rate": 1.4,

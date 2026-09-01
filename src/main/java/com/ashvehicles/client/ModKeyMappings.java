@@ -141,15 +141,6 @@ public final class ModKeyMappings {
     public static final KeyMapping DISMOUNT = create("dismount", GLFW.GLFW_KEY_LEFT_ALT);
 
     /**
-     * 乗員が搭乗している機体の弾庫を開く。機外からはスニーク＋機体本体の右クリックで開く。
-     *
-     * <p>手が伸びるであろうインベントリキーには置かない。あれはプレイヤー自身のインベントリを開くし、各プレイヤーが
-     * 好きに割り当てているし、ここが見る前にゲームが読んでしまう。パイロットからそれを奪うのは、全プレイヤーが開ける
-     * と期待している唯一の画面を奪うことだ。{@code I} は隣のキーで空いている。
-     */
-    public static final KeyMapping OPEN_HOLD = create("open_hold", GLFW.GLFW_KEY_I);
-
-    /**
      * 乗員を、搭乗中の機体の次の座席へ移す——運転席も含むので、1人でも全座席を順に渡り歩ける。MOD 内すべての全座席
      * で共通の1キーで、搭乗中のみ有効。次がどの座席かはサーバーが決める。
      * {@link com.ashvehicles.network.SwitchSeatPayload} 参照。{@code K} はバニラのゲーム内キーと衝突せず、既に移動
@@ -174,7 +165,7 @@ public final class ModKeyMappings {
             RELEASE_FLARE, RELEASE_CHAFF,
             RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,
-            DISMOUNT, OPEN_HOLD, SWITCH_SEAT, SENSOR_POLARITY};
+            DISMOUNT, SWITCH_SEAT, SENSOR_POLARITY};
 
     private static KeyMapping create(String name, int key) {
         return create(name, InputConstants.Type.KEYSYM, key);

@@ -54,7 +54,7 @@ final class PlanView {
     /** 左下隅に描く。 */
     static void draw(GuiGraphics graphics, GroundVehicleEntity vehicle, float partialTick) {
         int left = INSET;
-        int top = graphics.guiHeight() - INSET - SIZE;
+        int top = HudScale.height(graphics) - INSET - SIZE;
 
         panel(graphics, left, top);
 
@@ -62,7 +62,7 @@ final class PlanView {
 
         // 枠で切り取る。スケールは当たり判定の箱から取るが実際に描くのはモデルであり、後者が前者より大きく
         // ないという保証はどこにも無い。
-        graphics.enableScissor(left + 1, top + 1, left + SIZE - 1, top + SIZE - 1);
+        HudScale.scissor(graphics, left + 1, top + 1, left + SIZE - 1, top + SIZE - 1);
         model(graphics, vehicle, scale, left + SIZE / 2, top + SIZE / 2, partialTick);
         graphics.disableScissor();
     }

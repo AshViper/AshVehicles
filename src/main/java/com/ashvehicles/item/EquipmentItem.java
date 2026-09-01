@@ -61,6 +61,11 @@ public class EquipmentItem extends Item {
         // 唯一、相手側の数値。長い方がこのポッドを吊った者にとって良いので more は true。
         effect(lines, "lock_delay", definition.lockDelay(), true);
 
+        if (definition.mass() > 0.0F) {
+            lines.add(Component.translatable("tooltip.ashvehicles.mass", Math.round(definition.mass()))
+                    .withStyle(ChatFormatting.GRAY));
+        }
+
         lines.add(Component.translatable("tooltip.ashvehicles.equipment").withStyle(ChatFormatting.DARK_GRAY));
     }
 

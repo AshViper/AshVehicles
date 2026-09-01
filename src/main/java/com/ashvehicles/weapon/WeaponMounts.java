@@ -17,9 +17,7 @@ import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.RackItem;
 import com.ashvehicles.item.WeaponItem;
-import com.ashvehicles.entity.VehicleHold;
 import com.ashvehicles.registry.ModEntities;
-import com.ashvehicles.registry.ModItems;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -42,8 +40,8 @@ import net.minecraft.world.phys.Vec3;
  * ハードポイントの種別で決まる。{@link AircraftDefinition.Hardpoint.Kind} 参照。
  *
  * <ul>
- * <li><b>fixed</b> は機体に内蔵された兵装。搭載枠1つで、常にファイルが指定した物が満載され、誰も変えら
- *     れない。
+ * <li><b>fixed</b> は機体に内蔵された兵装。搭載枠1つで、載る物はファイルが決めていて誰も変えられない。
+ *     弾倉は空で出てくる——満たすのは弾薬箱を持った誰かだ（{@link #loadAmmo} 参照）。
  * <li><b>weapon</b> パイロンは {@link RackDefinition ラック} を1つ載せ、その上に兵装を載せる。パイロン
  *     自体は何も受けない。裸のパイロンは翼の取付点でしかなく、レールや投下ラックは先に付ける別の金具。
  *     何発積めるか、各発がどこに吊られるか、どの種類を受けるかは全部ラックが決める。
@@ -58,8 +56,6 @@ import net.minecraft.world.phys.Vec3;
  * 描画のために写しを持ち、エンティティの同期データで更新される。
  */
 public final class WeaponMounts {
-    /** 駐機中の機体が空の兵装を満たすのにかかる tick 数。地上要員を抽象化した値。 */
-    private static final int REARM_TICKS = 200;
     /** 兵装名から音イベントを引く時の接頭辞。{@code weapon.<name>} の形。 */
     public static final String SOUND_PREFIX = "weapon.";
 
@@ -660,6 +656,76 @@ public final class WeaponMounts {
         return drag;
     }
 
+    /**
+     * 今この機体が吊っている物の合計重量（kg）。ラックも、その上の兵装も、専用ステーションのポッドも。
+     *
+     * <p><b>内蔵兵装は数えない。</b> fixed ステーションの機関砲は機体構造の一部で、その重さは機体ファイル
+     * の {@code airframe.mass} に既に入っている。ここが答えるのは「今日この出撃のために誰かが吊った物」で
+     * あり、それだけが搭載可能重量を食い、それだけが降ろせる。
+     *
+     * <p>残弾では減らない。{@link WeaponDefinition#mass()} 参照——重いのはケースであって中身ではない、
+     * というのがこの MOD の立場だ。撃ち尽くした兵装はレールから消えるので、そちらは消えた時点で軽くなる。
+     */
+    public float storeMass() {
+        float mass = 0.0F;
+
+        for (int slot = 0; slot < this.mounts().size(); slot++) {
+            AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
+
+            if (hardpoint == null || hardpoint.isFixed()) {
+                continue;
+            }
+
+            mass += this.massAt(slot);
+        }
+
+        return mass;
+    }
+
+    /** 1ステーションが吊っている物の重量（kg）。ラック・兵装・ポッドの合計。 */
+    private float massAt(int slot) {
+        Mount mount = this.mounts[slot];
+        float mass = 0.0F;
+
+        if (mount.rack != null) {
+            mass += Definitions.rack(mount.rack).mass();
+        }
+
+        if (mount.equipment != null) {
+            mass += Definitions.equipment(mount.equipment).mass();
+        }
+
+        for (Load load : mount.loads()) {
+            if (load.weapon != null) {
+                mass += Definitions.weapon(load.weapon).mass();
+            }
+        }
+
+        return mass;
+    }
+
+    /** この機体がパイロンに吊れる合計重量（kg）。0なら無制限。 */
+    public float payloadCapacity() {
+        return this.aircraft.getStats().airframe().payload();
+    }
+
+    /** あと何 kg 吊れるか。無制限の機体では {@link Float#MAX_VALUE}。 */
+    public float payloadFree() {
+        float capacity = this.payloadCapacity();
+
+        return capacity > 0.0F ? Math.max(0.0F, capacity - this.storeMass()) : Float.MAX_VALUE;
+    }
+
+    /**
+     * その重さの物をあと1つ吊れるか。
+     *
+     * <p>搭載可能重量を書いていない機体では常に真。{@code payload} を書く前の全機体がそうであり、その
+     * ままの挙動が残る。
+     */
+    private boolean fits(float mass) {
+        return mass <= this.payloadFree();
+    }
+
     // ------------------------------------------------------------------
     // ポッドの効果
     // ------------------------------------------------------------------
@@ -753,18 +819,21 @@ public final class WeaponMounts {
     // 搭載と取り外し
     // ------------------------------------------------------------------
 
-    /** 今このステーションにラックを付けられるか。weapon パイロンであり、かつ裸であること。 */
-    public boolean canFitRackAt(int slot) {
+    /**
+     * 今このステーションにそのラックを付けられるか。weapon パイロンであり、裸であり、金具の分の重さが
+     * まだ残っていること。
+     */
+    public boolean canFitRackAt(int slot, ResourceLocation rack) {
         this.ensureLayout();
         AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
 
         return hardpoint != null && hardpoint.isWeaponPylon() && slot < this.mounts.length
-                && !this.mounts[slot].hasRack();
+                && !this.mounts[slot].hasRack() && this.fits(Definitions.rack(rack).mass());
     }
 
     /** 指定したステーションにラックを付ける。 */
     public boolean fitRackAt(int slot, ResourceLocation rack) {
-        if (!this.canFitRackAt(slot)) {
+        if (!this.canFitRackAt(slot, rack)) {
             return false;
         }
 
@@ -790,18 +859,22 @@ public final class WeaponMounts {
         return false;
     }
 
-    /** 今このステーションにポッドを付けられるか。special ステーションであり、かつ裸であること。 */
-    public boolean canFitEquipmentAt(int slot) {
+    /**
+     * 今このステーションにそのポッドを付けられるか。special ステーションであり、裸であり、ポッドの分の
+     * 重さがまだ残っていること。
+     */
+    public boolean canFitEquipmentAt(int slot, ResourceLocation equipment) {
         this.ensureLayout();
         AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
 
         return hardpoint != null && hardpoint.isSpecialPylon() && slot < this.mounts.length
-                && !this.mounts[slot].hasEquipment();
+                && !this.mounts[slot].hasEquipment()
+                && this.fits(Definitions.equipment(equipment).mass());
     }
 
     /** 指定した special ステーションにポッドを付ける。 */
     public boolean fitEquipmentAt(int slot, ResourceLocation equipment) {
-        if (!this.canFitEquipmentAt(slot)) {
+        if (!this.canFitEquipmentAt(slot, equipment)) {
             return false;
         }
 
@@ -827,7 +900,7 @@ public final class WeaponMounts {
 
     /**
      * このステーションがその兵装を受けるか。ラックが付いており、空き位置があり、そのラックがその種類を
-     * そもそも積めること。
+     * そもそも積めて、機体にまだその重さの余地があること。
      */
     public boolean canMountAt(int slot, ResourceLocation weapon) {
         this.ensureLayout();
@@ -838,9 +911,10 @@ public final class WeaponMounts {
         }
 
         Mount mount = this.mounts[slot];
+        WeaponDefinition fitted = Definitions.weapon(weapon);
 
-        return mount.hasRack() && mount.freePlace() >= 0
-                && this.rackOf(mount).takes(Definitions.weapon(weapon));
+        return mount.hasRack() && mount.freePlace() >= 0 && this.rackOf(mount).takes(fitted)
+                && this.fits(fitted.mass());
     }
 
     /**
@@ -906,12 +980,12 @@ public final class WeaponMounts {
         return false;
     }
 
-    /** 裸でラックを受けられる weapon パイロンがあるか。 */
-    public boolean hasBarePylon() {
+    /** そのラックを受けられる裸の weapon パイロンがあるか。 */
+    public boolean hasBarePylon(ResourceLocation rack) {
         this.ensureLayout();
 
         for (int slot = 0; slot < this.mounts.length; slot++) {
-            if (this.canFitRackAt(slot)) {
+            if (this.canFitRackAt(slot, rack)) {
                 return true;
             }
         }
@@ -919,12 +993,12 @@ public final class WeaponMounts {
         return false;
     }
 
-    /** 裸でポッドを受けられる special ステーションがあるか。 */
-    public boolean hasBareSpecial() {
+    /** そのポッドを受けられる裸の special ステーションがあるか。 */
+    public boolean hasBareSpecial(ResourceLocation equipment) {
         this.ensureLayout();
 
         for (int slot = 0; slot < this.mounts.length; slot++) {
-            if (this.canFitEquipmentAt(slot)) {
+            if (this.canFitEquipmentAt(slot, equipment)) {
                 return true;
             }
         }
@@ -1081,8 +1155,11 @@ public final class WeaponMounts {
                     this.dirty = true;
                 }
 
+                // 砲は付くが弾倉は空。翼下のパイロンが空で出てくるのと同じで、機体が撃てるのは誰かが
+                // 積んだ分だけだ（{@link #loadAmmo} 参照）。ここで満載にしていた頃は、機体を畳んで置き
+                // 直すだけで機関砲が満ちた。
                 if (!weapon.equals(mount.loads[0].weapon)) {
-                    mount.loads[0].set(weapon, Definitions.weapon(weapon).ammo());
+                    mount.loads[0].set(weapon, 0);
                     this.dirty = true;
                 }
 
@@ -1118,7 +1195,7 @@ public final class WeaponMounts {
     // ------------------------------------------------------------------
 
     /**
-     * サーバー側の1tick分。引き金が引かれていれば撃ち、発射間隔を数え、駐機中なら再武装する。
+     * サーバー側の1tick分。引き金が引かれていれば撃ち、発射間隔を数える。
      *
      * @param trigger この tick にパイロットが引き金を引いているか
      * @param wantsLock この tick にパイロットがシーカー用のキーを押しているか。押していれば、まだ追尾して
@@ -1149,7 +1226,7 @@ public final class WeaponMounts {
         // パイロットが砲座を選んでいる間、パイロンの兵装は引き金に繋がっていない。引き金は1つで、選択も
         // 1つだからだ。GunStations.cycle 参照。
         boolean armed = trigger && selectedWeapon != null && equipped && !this.aircraft.isCrashing()
-                && this.aircraft.getControllingPassenger() instanceof Player
+                && this.aircraft.getAviator() instanceof Player
                 && !this.aircraft.getStations().pilotHoldsStation();
 
         // 自動兵装は引き金を引いている間撃ち続ける。それ以外は1押し1発なので、押しっぱなしでミサイル
@@ -1244,10 +1321,6 @@ public final class WeaponMounts {
         if (fired) {
             this.playFireSound(selectedWeapon, this.selected);
         }
-
-        if (this.isParked()) {
-            this.rearm();
-        }
     }
 
     /**
@@ -1311,7 +1384,7 @@ public final class WeaponMounts {
         Vec3 right = laid != null
                 ? laid.cross(up).normalize()
                 : Attitude.right(this.aircraft.getAttitude());
-        LivingEntity pilot = this.aircraft.getControllingPassenger();
+        LivingEntity pilot = this.aircraft.getAviator();
 
         // 盲撃ちせず拒否する。以下は全部が機首ベクトルの上に組まれており、長さゼロの機首ベクトルは、ここ
         // で唯一「大声ではなく静かに」壊れる入力だ。Vec3 の normalize は1万分の1より短い物に対して例外では
@@ -1437,7 +1510,15 @@ public final class WeaponMounts {
      * @param hanging 付けるなら true、外すなら false
      */
     private void playLoadSound(boolean hanging) {
-        this.aircraft.level().playSound(null, this.aircraft.getX(), this.aircraft.getY(), this.aircraft.getZ(),
+        playLoadSound(this.aircraft, hanging);
+    }
+
+    /**
+     * 同じ音を、パイロンを持たない機械のために。戦車の弾倉も発射筒も、手で装填されるという点では翼下の
+     * ラックと同じ作業であり、同じ音がする。
+     */
+    public static void playLoadSound(Entity vehicle, boolean hanging) {
+        vehicle.level().playSound(null, vehicle.getX(), vehicle.getY(), vehicle.getZ(),
                 SoundEvent.createVariableRangeEvent(LOAD_SOUND), SoundSource.NEUTRAL,
                 LOAD_VOLUME, hanging ? LOAD_PITCH : UNLOAD_PITCH);
     }
@@ -1470,147 +1551,130 @@ public final class WeaponMounts {
     }
 
     /**
-     * 駐機中の機体で働く地上要員。既に付いているラックへ兵装を吊り、既に吊ってある物へ弾を戻す。すべて弾庫
-     * から。
+     * 差し出された弾薬箱を内蔵砲の弾倉へ押し込む。機体の機関砲が弾を得る唯一の道。
      *
-     * <p><b>弾庫から、それ以外からは決して。</b> 以前は機体が10秒静止するたびに満載を空中から生み出して
-     * おり、それでは翼下の全部が無料になりパイロンは形式になる。今や機体が撃てるのは誰かが積んだ分だけ
-     * （{@link VehicleHold} 参照）で、空で出撃した機体は空で帰る。
+     * <p>ここは長らく「駐機中に地上要員が空の内蔵砲を勝手に満たす」処理だった。理屈は「機関砲は誰も持ち
+     * 運べず、手渡せる箱も存在しないので帳簿外で補給する」——だが弾薬箱は既に存在する。戦車の主砲も同軸
+     * 機銃もその箱で装填される（{@code BuiltInGun.load} 参照）のに、機体の機関砲だけが撃ち尽くしても駐機
+     * するだけで満ちていた。つまり機体の機関砲は事実上無限で、弾薬を作る理由も、弾を数えて撃つ理由も無か
+     * った。翼下の全部が「誰かが積んだ分だけ」であることと真っ向から食い違う。
      *
-     * <p><b>ラックとポッドはプレイヤーだけの物。</b> 要員は兵装を吊り、弾を詰めるが、ラックをボルト留めは
-     * しないしポッドも付けない。弾庫に何個転がっていようと。どの装備を積むかは「どんな出撃をするか」の判断
-     * であり、出撃の合間に勝手に決められては選ぶ意味が消える。
+     * <p>今は戦車と同じ規則になる。<b>1回のクリックで、入るだけ入る。丸ごとか、無しか。</b>弾倉は発で、
+     * 箱はアイテム個数で数えるので、1個分に満たない空きしか無い弾倉はもう満載扱い。
      *
-     * <p>速度は従来通り、大きさに関わらず {@link #REARM_TICKS} で満載1回分。これは両方向から言う必要が
-     * ある。機関砲は数百発持つので毎tick数発乗るが、レールはミサイル1発なので tick 側が待つ。
-     * {@code capacity / REARM_TICKS} を足すだけでは前者は正しく後者は0に切り捨てられ、「毎tick最低1発」を
-     * 下限にすればミサイルが0.05秒で装填される。それは誰の作業速度よりずっと速い。
+     * <p><b>満たすのは内蔵砲だけ。</b>翼下の物はそれ自身がアイテムで、装填とはそのアイテムを押し込むこと
+     * だ——{@link #reload} を参照。ガンポッドの弾をベルトで補給できてしまえば、ポッドを作る意味が「1回目
+     * だけ」になる。
+     *
+     * <p><b>満たすのは1門だけ。</b>同じ種類を受ける砲を複数積む機体——AC-130 のような——では、先に並んだ
+     * ステーションから満ちる。1回のクリックが1門なのは戦車と同じ理由で、「何が装填されたか」を1行で言え
+     * るようにするためだ。
+     *
+     * @param kind 差し出された箱の種類
+     * @param offered 手にある個数
+     * @return 入った砲と発数。どの砲にも入らなければ null
      */
-    private void rearm() {
-        boolean hung = false;
+    @Nullable
+    public Resupply loadAmmo(AmmoKind kind, int offered) {
+        this.ensureLayout();
+
+        if (offered <= 0) {
+            return null;
+        }
 
         for (int slot = 0; slot < this.mounts.length; slot++) {
-            Mount mount = this.mounts[slot];
+            AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
 
-            for (int place = 0; place < mount.loads.length; place++) {
-                Load load = mount.loads[place];
-
-                if (load.isEmpty()) {
-                    // 付いているラックの空き位置。発射した兵装がレールから外れるようになった今、出撃末期
-                    // にはその大半がこれになる。1発ずつ処理するので、4つの空き位置は同時にではなく書かれた
-                    // 順に埋まる——そして4回分の装填音が同じ tick に重ならない。
-                    if (!hung && this.aircraft.tickCount % REARM_TICKS == 0) {
-                        hung = this.hangFromHold(slot);
-                    }
-
-                    continue;
-                }
-
-                WeaponDefinition carried = Definitions.weapon(load.weapon);
-
-                // 増槽はここでは補給しない。弾庫から引けるのは増槽そのもの1本であって燃料ではないので、
-                // 素直に通せば「1本の増槽を溶かして数単位の燃料にする」処理になる。増槽を満たすのは燃料缶
-                // で、空にした物を投棄して新しい1本を吊るのも変わらず正しい。
-                if (carried.type() == WeaponDefinition.Type.TANK) {
-                    continue;
-                }
-
-                int capacity = carried.ammo();
-
-                if (load.ammo >= capacity) {
-                    continue;
-                }
-
-                int perTick = capacity / REARM_TICKS;
-                int wanted;
-
-                if (perTick > 0) {
-                    wanted = Math.min(perTick, capacity - load.ammo);
-                } else if (this.aircraft.tickCount % Math.max(1, REARM_TICKS / capacity) == 0) {
-                    wanted = 1;
-                } else {
-                    continue;
-                }
-
-                int loaded = this.draw(load.weapon, wanted);
-
-                if (loaded > 0) {
-                    load.ammo += loaded;
-                    this.dirty = true;
-                }
-            }
-        }
-    }
-
-    /**
-     * 空きのあるステーションへ、弾庫から兵装を1つ吊る。選ぶのは弾庫の並び順で最初に見つかる、そのラックが
-     * 積める物。だからどれがどこへ載るかは積んだ者が決めることになる。
-     *
-     * @return 何か吊れたか
-     */
-    private boolean hangFromHold(int slot) {
-        VehicleHold hold = this.aircraft.getHold();
-
-        for (int at = 0; at < hold.getContainerSize(); at++) {
-            ItemStack stack = hold.getItem(at);
-
-            // 空のポッドは持ち帰る価値はあるが、吊り直す価値は無い。
-            if (!(stack.getItem() instanceof WeaponItem store) || WeaponItem.ammoOf(stack) == 0) {
+            if (hardpoint == null || !hardpoint.isFixed()) {
                 continue;
             }
 
-            if (this.mountAt(slot, store.getWeaponId(), WeaponItem.ammoOf(stack))) {
-                hold.removeItem(at, 1);
+            for (Load load : this.mounts[slot].loads) {
+                if (load.isEmpty()) {
+                    continue;
+                }
 
-                return true;
+                WeaponDefinition gun = Definitions.weapon(load.weapon);
+
+                if (gun.ammoKind() != kind) {
+                    continue;
+                }
+
+                int perItem = kind.roundsPerItem();
+                int taken = Math.min(offered, (gun.ammo() - load.ammo) / perItem);
+
+                if (taken <= 0) {
+                    continue;
+                }
+
+                load.ammo += taken * perItem;
+                this.dirty = true;
+
+                return new Resupply(load.weapon, taken, load.ammo, gun.ammo());
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
-     * 指定兵装の弾を弾庫から取り、取れた発数を返す。
+     * 1回の装填の結果。何門目かではなく何が装填されたかで言う——機体の砲に「主砲」「同軸」のような決まった
+     * 呼び名は無く、そこに載っている砲の名前だけが乗員にとっての名前だから。
      *
-     * <p>通貨は「発」で、アイテムは財布。60発残ったガンポッドが弾庫にあれば、それは60発分の補給になる。
-     * 要員が使った後の残りは、中身の残ったポッドとして元のスロットへ戻り、最後の1発を取られた兵装は消える。
-     *
-     * <p>自前のアイテムを持たない兵装だけは、これで課金できない。機体に内蔵された機関砲は誰も持ち運べず
-     * 弾庫に入れられず尽きもしないので、従来通りの補給を受ける——帳簿外の、地上要員の手持ちから。弾庫に
-     * <em>入れられる</em>物はすべて弾庫から出る。
+     * @param weapon 受け取った砲
+     * @param taken 弾倉が取ったアイテム個数
+     * @param rounds 装填後の残弾
+     * @param capacity その砲の満載時の発数
      */
-    private int draw(ResourceLocation weapon, int rounds) {
-        if (!ModItems.weapons().containsKey(weapon)) {
-            return rounds;
+    public record Resupply(ResourceLocation weapon, int taken, int rounds, int capacity) {
+    }
+
+    /**
+     * 手持ちの兵装アイテム1個を、既に吊ってある同じ兵装へ注ぎ込む。半分撃ったガンポッドを翼から降ろさずに
+     * 満たす手段であり、弾庫が担っていた仕事のうち唯一「補給」だった部分。
+     *
+     * <p>通貨は「発」で、アイテムは財布。60発残ったポッドを差し出せば、それは60発分の補給になる。入りきら
+     * なかった分は呼び出し側が中身の残ったポッドとして返す（{@code AircraftEntity.reloadWith} 参照）ので、
+     * 満載間際の兵装へ新品を差し出しても残りは失われない。
+     *
+     * <p>吊っていない兵装は受け取らない。空のレールへミサイルを差し出す操作は「装填」ではなく「搭載」で
+     * あり、それは {@link #mount} の仕事だ。
+     *
+     * @param slot 補給先を1ステーションに限るならその番号。負なら機体上のどこでも
+     * @param offered このアイテム1個が持っている発数
+     * @return 実際に入った発数。0 なら注ぎ込む先が無い
+     */
+    public int reload(int slot, ResourceLocation weapon, int offered) {
+        this.ensureLayout();
+
+        if (offered <= 0 || slot >= this.mounts.length) {
+            return 0;
         }
 
         int capacity = Definitions.weapon(weapon).ammo();
-        VehicleHold hold = this.aircraft.getHold();
+        int from = slot < 0 ? 0 : slot;
+        int until = slot < 0 ? this.mounts.length : slot + 1;
         int taken = 0;
 
-        for (int at = 0; at < hold.getContainerSize() && taken < rounds; at++) {
-            ItemStack stack = hold.getItem(at);
+        for (int at = from; at < until && taken < offered; at++) {
+            for (Load load : this.mounts[at].loads) {
+                if (!weapon.equals(load.weapon) || load.ammo >= capacity) {
+                    continue;
+                }
 
-            if (!(stack.getItem() instanceof WeaponItem store) || !store.getWeaponId().equals(weapon)) {
-                continue;
+                int room = Math.min(capacity - load.ammo, offered - taken);
+                load.ammo += room;
+                taken += room;
+
+                if (taken >= offered) {
+                    break;
+                }
             }
+        }
 
-            // 残弾の記載が無ければ満載。そこから1発も撃たれていないということ。
-            int held = WeaponItem.ammoOf(stack);
-            int available = held < 0 ? capacity : held;
-            int want = Math.min(rounds - taken, available);
-
-            if (want <= 0) {
-                continue;
-            }
-
-            taken += want;
-
-            if (want >= available) {
-                hold.removeItem(at, 1);
-            } else {
-                hold.setItem(at, WeaponItem.stackOf(weapon, available - want));
-            }
+        if (taken > 0) {
+            this.dirty = true;
+            this.playLoadSound(true);
         }
 
         return taken;

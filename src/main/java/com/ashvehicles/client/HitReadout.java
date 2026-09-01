@@ -166,13 +166,19 @@ public final class HitReadout {
         }
 
         float alpha = age > LINGER - FADE ? (float) (LINGER - age) / FADE : 1.0F;
-        int left = graphics.guiWidth() - INSET - WIDTH;
+        // 計器なので1段小さく。{@link HudScale} 参照。ここで包むのは、この表示が機体からも車両からも
+        // 砲手席からも呼ばれるからで、呼ぶ側に覚えさせれば、いつか1箇所だけ忘れられる。
+        HudScale.push(graphics);
+
+        int left = HudScale.width(graphics) - INSET - WIDTH;
         int top = INSET;
 
         panel(graphics, left, top, alpha);
         name(graphics, font, id, left, top, alpha);
         tally(graphics, font, left, top, alpha);
         picture(graphics, id, left, top, alpha);
+
+        HudScale.pop(graphics);
     }
 
     private static void panel(GuiGraphics graphics, int left, int top, float alpha) {
@@ -258,7 +264,7 @@ public final class HitReadout {
 
         // ここから先は全てパネルで切り取る。砲身はパネルの外へはみ出すし、車体後方へ流れていく長い連射は、下の数値
         // 表示の途中ではなく枠で止まるべきだ。
-        graphics.enableScissor(left + 1, top + HEADER, left + WIDTH - 1, top + HEADER + height);
+        HudScale.scissor(graphics, left + 1, top + HEADER, left + WIDTH - 1, top + HEADER + height);
 
         PoseStack pose = graphics.pose();
 

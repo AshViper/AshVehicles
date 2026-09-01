@@ -12,7 +12,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 /**
  * 乗員が、乗っている機体の次の席へ移りたいという要求。
  *
- * <p>{@link OpenVehicleHoldPayload} と同じく何も名指ししない。機体は送信者が乗っている物なので、要求が
+ * <p>何も名指ししない。機体は送信者が乗っている物なので、要求が
  * マップの向こうの他人の機体に届くことはない。次がどの席かはサーバーが決める——席割りはサーバーの持ち物
  * で、クライアントは知らされるまで誰がどこにいるかを正しく把握できない。移動処理自体は
  * {@link VehicleEntityBase#switchToNextSeat}。

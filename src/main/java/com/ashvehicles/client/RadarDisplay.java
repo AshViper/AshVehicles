@@ -39,6 +39,8 @@ public final class RadarDisplay {
     private static final int SCOPE_HEIGHT = 68;
     /** 計器を寄せる画面端からの余白。 */
     private static final int EDGE = 8;
+    /** スコープの右端。目盛りを置く側が、どこまで内側へ寄れるかを測るのに要る。 */
+    static final int SCOPE_RIGHT = EDGE + SCOPE_WIDTH;
     /** スコープ上の距離環。レーダー到達距離に対する割合で指定する。 */
     private static final float[] RINGS = {0.05F, 0.25F, 0.5F};
 
@@ -56,6 +58,13 @@ public final class RadarDisplay {
     public static void draw(GuiGraphics graphics, Font font, VehicleEntityBase vehicle) {
         VehicleChassis.Radar radar = vehicle.radar();
 
+        if (!radar.fitted() && radar.warningRange() <= 0.0F) {
+            return;
+        }
+
+        // 計器なので1段小さく。{@link HudScale} 参照。
+        HudScale.push(graphics);
+
         // 枠は1つではなく2つ。レーダーを持たない機体でも他人のレーダーは聞こえるし、それを最も必要とするのは
         // まさにそういう機体だ。
         if (radar.fitted()) {
@@ -65,6 +74,8 @@ public final class RadarDisplay {
         if (radar.warningRange() > 0.0F) {
             drawReceiver(graphics, font);
         }
+
+        HudScale.pop(graphics);
     }
 
     /** 横軸が方位、縦軸が距離。アンテナが機体前方で見つけた物。 */
@@ -73,7 +84,7 @@ public final class RadarDisplay {
         int right = left + SCOPE_WIDTH;
         // 左辺の中ほど。スコープはボアサイトから横目で読む物であって、隅を覗き込む物ではない。この辺の下部は
         // ステータス列が専有している。
-        int top = (graphics.guiHeight() - SCOPE_HEIGHT) / 2;
+        int top = (HudScale.height(graphics) - SCOPE_HEIGHT) / 2;
         int bottom = top + SCOPE_HEIGHT;
         int middle = (left + right) / 2;
 
@@ -149,8 +160,8 @@ public final class RadarDisplay {
     private static void drawReceiver(GuiGraphics graphics, Font font) {
         // スコープの反対、右辺の中ほど。空に他に何がいるかを伝える2つの計器は、同じ高さでボアサイトを挟んで
         // 左右に置く。
-        int centreX = graphics.guiWidth() - EDGE - RWR_RADIUS;
-        int centreY = graphics.guiHeight() / 2;
+        int centreX = HudScale.width(graphics) - EDGE - RWR_RADIUS;
+        int centreY = HudScale.height(graphics) / 2;
 
         AircraftHud.circle(graphics, centreX, centreY, RWR_RADIUS, AircraftHud.DIM);
         AircraftHud.circle(graphics, centreX, centreY, Math.round(RWR_RADIUS * LOCK_RING), AircraftHud.DIM);

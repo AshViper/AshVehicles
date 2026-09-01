@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "group": "ashvehicles_material",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "G": {
+      "item": "minecraft:gunpowder"
+    },
+    "B": {
+      "item": "minecraft:blaze_powder"
+    }
+  },
+  "pattern": [
+    "SGS",
+    "SBS",
+    "SGS"
+  ],
+  "result": {
+    "count": 4,
+    "id": "ashvehicles:rocket_motor"
+  }
+}

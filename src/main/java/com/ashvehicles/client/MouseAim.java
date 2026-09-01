@@ -131,7 +131,7 @@ public final class MouseAim {
      */
     public static void follow(AircraftEntity riding) {
         AircraftEntity flying = riding != null
-                && riding.getControllingPassenger() == Minecraft.getInstance().player ? riding : null;
+                && riding.getAviator() == Minecraft.getInstance().player ? riding : null;
 
         if (flying != aircraft) {
             aircraft = flying;

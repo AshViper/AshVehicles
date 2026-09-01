@@ -24,8 +24,6 @@ public final class ModNetwork {
         registrar.playToServer(AircraftInputPayload.TYPE, AircraftInputPayload.STREAM_CODEC, AircraftInputPayload::handle);
         registrar.playToServer(GroundVehicleInputPayload.TYPE, GroundVehicleInputPayload.STREAM_CODEC,
                 GroundVehicleInputPayload::handle);
-        registrar.playToServer(OpenVehicleHoldPayload.TYPE, OpenVehicleHoldPayload.STREAM_CODEC,
-                OpenVehicleHoldPayload::handle);
         registrar.playToServer(SwitchSeatPayload.TYPE, SwitchSeatPayload.STREAM_CODEC,
                 SwitchSeatPayload::handle);
         registrar.playToServer(DesignatePayload.TYPE, DesignatePayload.STREAM_CODEC,
@@ -33,6 +31,11 @@ public final class ModNetwork {
         registrar.playToServer(GunTriggerPayload.TYPE, GunTriggerPayload.STREAM_CODEC,
                 GunTriggerPayload::handle);
         registrar.playToServer(EjectPayload.TYPE, EjectPayload.STREAM_CODEC, EjectPayload::handle);
+        // 無人機。繋ぐ・切る と、繋いでいる間の操縦桿。
+        registrar.playToServer(DroneLinkPayload.TYPE, DroneLinkPayload.STREAM_CODEC,
+                DroneLinkPayload::handle);
+        registrar.playToServer(DroneInputPayload.TYPE, DroneInputPayload.STREAM_CODEC,
+                DroneInputPayload::handle);
         registrar.playToServer(BlastPowerPayload.TYPE, BlastPowerPayload.STREAM_CODEC,
                 BlastPowerPayload::handle);
         registrar.playToClient(DefinitionSyncPayload.TYPE, DefinitionSyncPayload.STREAM_CODEC,

@@ -104,7 +104,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 20.0F, 0.02F, 0.15F, 0.28F, 6.0F, 0.0F,
                     Optional.empty()),
             new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F),
-            new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0,
+            new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0, 0.0F, 0.0F,
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0))), Optional.empty()),
             new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true, Optional.empty()),
             new Surface(20, 0.5F, 0.4F),
@@ -484,12 +484,22 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * @param maxG 機体構造が自重の何倍まで耐えるか。これより強く引くと壊れ始める。0以下なら決して壊れない
      * @param salvage 撃破後、レンチを持った者が回収できる金属量（鉄インゴット換算）。省略すれば耐久から
      *                計算する
+     * @param mass 何も吊っていないこの機体が量る重さ（kg）。実機の「装備重量」——燃料と乗員を積み、
+     *             翼下は空——をそのまま書く。F-16 なら 12000。<b>ファイルに書かれた飛行性能はすべてこの
+     *             重さでの値だ。</b>翼下に吊った物の重さはこれに足され、推力・揚力・抗力はその比で割られる
+     *             ので、満載の機体は加速も上昇も旋回も鈍り、失速速度が上がる。0にすれば重さは何も
+     *             しない——これを書く前の全機体がそうだった
+     * @param payload パイロンに吊れる合計重量（kg）。実機の「最大兵装搭載量」をそのまま書く。ラック・
+     *                兵装・ポッドの重さの合計がこれを超える搭載はそもそも受け付けられず、地上要員は次の
+     *                1発を吊らない。0なら無制限。{@link com.ashvehicles.weapon.WeaponMounts#storeMass()}
+     *                参照
      * @param seats 座席1つにつき1項目。機体自身の軸で x が右、y が上、z が機首方向。項目数が搭乗可能人数。
      *              各要素は裸の点か、その乗員がどこから外を見るかも書いたブロック。複座機が欲しいのは後者。
      *              {@link VehicleChassis.Seat} 参照
      */
     public record Airframe(float health, float crashSpeed, float explosionPower, float maxG,
-            int salvage, List<VehicleChassis.Seat> seats, Optional<Ejection> ejection) {
+            int salvage, float mass, float payload, List<VehicleChassis.Seat> seats,
+            Optional<Ejection> ejection) {
 
         /** ファイルに書かれていない場合の機体の耐久値。 */
         public static final float DEFAULT_HEALTH = 300.0F;
@@ -500,9 +510,25 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.FLOAT.fieldOf("explosion_power").forGetter(Airframe::explosionPower),
                 Codec.FLOAT.optionalFieldOf("max_g", 0.0F).forGetter(Airframe::maxG),
                 Codec.INT.optionalFieldOf("salvage", 0).forGetter(Airframe::salvage),
+                Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(Airframe::mass),
+                Codec.FLOAT.optionalFieldOf("payload", 0.0F).forGetter(Airframe::payload),
                 VehicleChassis.Seat.CODEC.listOf().fieldOf("seats").forGetter(Airframe::seats),
                 Ejection.CODEC.optionalFieldOf("ejection").forGetter(Airframe::ejection)
         ).apply(instance, Airframe::new));
+
+        /**
+         * 吊り物の重さを与えたときの、機体が持ち上げている物の総重量に対する空虚時の比。1で「ファイル
+         * に書かれた通りの機体」、2で「その2倍の重さの機体」。
+         *
+         * <p>推力も揚力も抗力も、この値で割られて加速度になる。力は重さを知らないが、加速度は知っている
+         * ——同じ主翼が2倍の質量を引き回せば、旋回半径は2倍になる。重力だけは割らない。重力は力ではなく
+         * 加速度としてこの MOD に入っているので、重い機体も軽い機体も同じ速さで落ちる。実際そうだ。
+         *
+         * <p>重さを書いていない機体は常に1を返す。書く前の全機体が、書いた後もまったく同じに飛ぶ。
+         */
+        public double burden(float carried) {
+            return this.mass > 0.0F ? (this.mass + Math.max(carried, 0.0F)) / this.mass : 1.0;
+        }
     }
 
     /**

@@ -8,15 +8,15 @@
       "count": 2
     },
     {
-      "item": "ashvehicles:circuit_board",
+      "item": "ashvehicles:seeker",
       "count": 1
     },
     {
-      "item": "minecraft:ender_eye",
+      "item": "ashvehicles:rocket_motor",
       "count": 1
     },
     {
-      "item": "minecraft:gunpowder",
+      "item": "ashvehicles:high_explosive",
       "count": 1
     }
   ],

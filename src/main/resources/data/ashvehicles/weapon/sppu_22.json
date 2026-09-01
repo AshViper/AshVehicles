@@ -2,6 +2,7 @@
   "type": "gun",
   "item": true,
   "ammo": 260,
+  "mass": 290,
   "firing": {
     "rounds_per_second": 33.0,
     "spread": 1.2

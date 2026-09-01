@@ -155,6 +155,43 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
         });
     }
 
+    /**
+     * {@link #spinZ} と同じ処理を、ボーン自身の Y 軸周りに。
+     *
+     * <p>回転面が水平に作られたプロペラのため。ティルトローター機のナセルは<em>ホバー姿勢</em>で作られること
+     * があり、そのとき円板は水平に寝ている——その法線はボーンの Z ではなく Y だ。どちらの軸で回すかは模型の
+     * 作られ方の話なので、機体ファイルが {@code model.propeller_axis} で言う。
+     *
+     * <p>ナセルが傾けば円板も一緒に傾き、この回転はナセルの<em>内側</em>で起きるので、両方の姿勢で正しく
+     * 回り続ける。円板の法線がボーンの固定された1軸である限り、それは姿勢に依らない。
+     */
+    protected static void spinY(GeoModel<?> model, String bone, float degrees) {
+        pose(model, bone, found -> {
+            BoneSnapshot rest = BakedGeometry.rest(found);
+            float radians = degrees * DEG_TO_RAD;
+
+            found.setRotY(rest.getRotY() + radians);
+
+            Vector3f centre = BakedGeometry.centreOf(found);
+            Vector3f pivot = BakedGeometry.pivotOf(found);
+            float dz = centre.z() - pivot.z();
+            float dx = centre.x() - pivot.x();
+
+            if (dx * dx + dz * dz < 1.0E-8F) {
+                return;
+            }
+
+            float cos = Mth.cos(radians);
+            float sin = Mth.sin(radians);
+            // Y 軸周りでは (z, x) が回る組になる。順序が (x, z) でないのは右手系の向きに合わせるため。
+            float offsetZ = dz - (dz * cos - dx * sin);
+            float offsetX = dx - (dz * sin + dx * cos);
+
+            found.setPosZ(rest.getOffsetZ() + offsetZ * BakedGeometry.UNITS);
+            found.setPosX(rest.getOffsetX() - offsetX * BakedGeometry.UNITS);
+        });
+    }
+
     /** ボーンを、ジオメトリファイルが置いた位置から自身の Z 方向へ動かす。 */
     protected static void slideZ(GeoModel<?> model, String bone, float units) {
         pose(model, bone, found -> found.setPosZ(found.getInitialSnapshot().getOffsetZ() + units));

@@ -73,6 +73,13 @@ public class WeaponItem extends Item {
                         ammo < 0 ? definition.ammo() : ammo, definition.ammo())
                 .withStyle(ChatFormatting.GRAY));
 
+        // 機体の搭載可能重量から引かれる分。重さを書いていない兵装（機体に内蔵される砲がそうだ）では
+        // 出さない——0kg と書かれるより、その行が無い方が正直だ。
+        if (definition.mass() > 0.0F) {
+            lines.add(Component.translatable("tooltip.ashvehicles.mass", Math.round(definition.mass()))
+                    .withStyle(ChatFormatting.GRAY));
+        }
+
         // 対で使う兵装向けに、これを撃つ前に機体へ積んでおく必要がある物。
         definition.requires().ifPresent(kind -> lines.add(
                 Component.translatable("tooltip.ashvehicles.requires",

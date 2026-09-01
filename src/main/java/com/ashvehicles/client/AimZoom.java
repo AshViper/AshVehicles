@@ -68,7 +68,7 @@ public final class AimZoom {
         }
 
         boolean atControls = player.getVehicle() instanceof VehicleEntityBase vehicle
-                && vehicle.getControllingPassenger() == player;
+                && vehicle.getAviator() == player;
         // 砲手も同じキーで同じことをする。砲座の映像は窓ではなく装置越しの視界であり、AC-130 の砲手が撃つ
         // 距離では、通常の視野角に映る目標は数ピクセルしかない。据えるべき物が据えられる大きさで映って
         // いないなら、砲を振れることに意味が無い。{@link GunnerDisplay} 参照。

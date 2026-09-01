@@ -341,8 +341,7 @@ public final class GunnerDisplay {
 
         for (String key : new String[]{
                 ModKeyMappings.SENSOR_POLARITY.getTranslatedKeyMessage().getString(),
-                ModKeyMappings.SWITCH_SEAT.getTranslatedKeyMessage().getString(),
-                ModKeyMappings.OPEN_HOLD.getTranslatedKeyMessage().getString()}) {
+                ModKeyMappings.SWITCH_SEAT.getTranslatedKeyMessage().getString()}) {
             right(graphics, font, key, right, y, DIM);
             y += 14;
         }

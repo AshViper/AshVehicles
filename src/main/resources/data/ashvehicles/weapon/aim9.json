@@ -2,6 +2,7 @@
   "type": "missile",
   "item": true,
   "ammo": 1,
+  "mass": 85,
   "firing": {
     "rounds_per_second": 1.0,
     "spread": 0.0,

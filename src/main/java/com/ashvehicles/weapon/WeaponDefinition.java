@@ -32,7 +32,7 @@ import net.minecraft.util.StringRepresentable;
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
         Firing firing, Projectile projectile, Optional<Guidance> guidance,
-        Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag,
+        Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag, float mass,
         Optional<Cluster> cluster) {
 
     /** {@code RRGGBB}。先頭の # は有っても無くてもよい。この種のファイルでの色表記はすべてこれ。 */
@@ -63,6 +63,19 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             // 増槽1本で1割、つまり 0.000003 あたりが妥当な出発点だ。桁を1つ間違えると機体は飛ばなくなる
             // ——見慣れない大きさなので、書く前に対象機体の wing.drag を必ず見ること。
             Codec.FLOAT.optionalFieldOf("drag", 0.0F).forGetter(WeaponDefinition::drag),
+            // 満載のこれ1つが量る重さ（kg）。実物の重量をそのまま書く——AIM-9 は 85、FAB-500 は 500、
+            // 20連装のロケットポッドはポッド自体と中身を足した 380。省略すれば0で、これを書く前の全兵装が
+            // そうだった。
+            //
+            // 抗力と違い、これは実在の単位だ。機体側の {@code airframe.mass} と {@code airframe.payload}
+            // が同じ kg で書かれており、この値はそちらへ直接足される。だから桁を間違えても「飛ばなくなる」
+            // のではなく「吊れなくなる」——それは見れば分かる間違いだ。
+            //
+            // <b>残弾では減らない。</b>吊っているのはケースの方で、20発撃ったロケットポッドも空の筒として
+            // 同じ場所にぶら下がっている。撃ち尽くしたミサイルや爆弾はレールから消える（{@code expend} 参照）
+            // ので、そちらは投下した瞬間に軽くなる。空になった増槽が軽くならないのは正しく、だからこそ
+            // 落とすことに意味がある。
+            Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(WeaponDefinition::mass),
             Cluster.CODEC.optionalFieldOf("cluster").forGetter(WeaponDefinition::cluster)
     ).apply(instance, WeaponDefinition::new));
 
@@ -100,7 +113,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      */
     public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
             new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(),
-            Optional.empty(), SoundSetup.DEFAULT, 0.0F, Optional.empty());
+            Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty());
 
     /**
      * 引き金を押し続けている間撃ち続けるか、それとも1押し1発か。
@@ -119,11 +132,13 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     /**
      * この砲がどの弾薬アイテムから補給されるか。
      *
-     * <p>書きたいファイルは明示でき、無ければ兵装の種類と発射方式から判定する。gun でない物は筒へ1本ずつ。
-     * 押しっぱなしにする gun はベルト給弾、押す gun は手装填で、それは {@link #isAutomatic()} が既に引いて
-     * いる区別と同じ。この2つで MOD 内の全兵装が、どのファイルにも1行足さずに正しく分類される。覆したければ
-     * {@code ammo_item} を書く——ドラムから1発ずつ装填するリボルバーカノンはそうしたいだろうし、誘導ミサ
-     * イルに無誘導ロケットとは別のコストを課したい人も同じ。
+     * <p>書きたいファイルは明示でき、無ければ兵装の種類と発射方式から判定する。押しっぱなしにする gun は
+     * ベルト給弾、押す gun は手装填で、それは {@link #isAutomatic()} が既に引いている区別と同じ。missile は
+     * シーカーが見ている物で分かれる——空の物を追うヘッド（熱・レーダー）は対空ミサイル、地の物を狙うヘッド
+     * （レーザー・視線）は対地ミサイル、座標へ飛ぶ物はただのミサイル。それ以外の筒物はロケット。これで MOD
+     * 内の全兵装が、どのファイルにも1行足さずに正しく分類される。覆したければ {@code ammo_item} を書く——
+     * ドラムから1発ずつ装填するリボルバーカノンはそうしたいだろうし、レーダーで地を狙う変わり種のミサイルも
+     * 同じ。
      *
      * <p>これは機体の<em>内蔵</em>兵装の補給元。機体のパイロンに吊った物は兵装自体（既にアイテム）から補給
      * される。{@code WeaponMounts.draw} 参照。
@@ -131,6 +146,11 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     public AmmoKind ammoKind() {
         return this.ammoItem.orElseGet(() -> switch (this.type) {
             case GUN -> this.isAutomatic() ? AmmoKind.AUTOCANNON : AmmoKind.CANNON;
+            case MISSILE -> this.guidance.map(seek -> switch (seek.seeker()) {
+                case HEAT, RADAR -> AmmoKind.ANTI_AIR_MISSILE;
+                case LASER, BEAM -> AmmoKind.ANTI_GROUND_MISSILE;
+                case POINT -> AmmoKind.MISSILE;
+            }).orElse(AmmoKind.MISSILE);
             default -> AmmoKind.ROCKET;
         });
     }
@@ -175,27 +195,6 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      */
     public boolean isDropped() {
         return this.type == Type.BOMB;
-    }
-
-    /**
-     * この兵装が撃つ物が、飛んでいく先の地面を開いたまま保持するか。
-     *
-     * <p>誰かが保持しなければ、ロード済み範囲の外を狙った兵装は何も無い所へ着弾する。chunk はプレイヤーの
-     * 周りにしか存在せず、機体は自分が飛ぶ回廊だけを開いており、900m 上空から投下された爆弾は着弾時には
-     * そのどちらからも遠い。その外側のブロックには一切問い合わせない——問い合わせればその場でメインスレッド
-     * が地形を生成する——ので、自前の確保が無ければ弾は狙った斜面を通り抜け、その裏の空中で見捨てられる。
-     * {@link com.ashvehicles.entity.WeaponChunkLoader} 参照。
-     *
-     * <p>省略すれば全部が地面を確保する。全部が何かを狙っているから。以前は<em>投下</em>物だけだったが、
-     * それは兵装についての判断ではなく仕組みの限界だった。確保は1発1チケットで毎tick移動させる方式で、爆弾
-     * は同じ2 chunk を10秒かけて降りるのに対し、砲は30発同時に毎秒20回 chunk 境界を跨ぐ。それを現実的に
-     * したのは、砲の射程を縮めることではなく、確保を共有・非tick・配給制にしたこと。詳細はローダー側に。
-     *
-     * <p>どちら向きにも {@code chunk_loading} で明示できる——機体しか狙わない物には {@code false}。機体は
-     * どこにいてもロードされているし、それを追うミサイルの下の地面は誰の関心事でもない。
-     */
-    public boolean loadsChunks() {
-        return this.projectile.chunkLoading().orElse(true);
     }
 
     /**
@@ -312,14 +311,12 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      *                 の意味で、成形炸薬や、貫通ではなく接触で炸裂する物には正しい。
      *                 {@link com.ashvehicles.weapon.Ricochet} 参照
      * @param trail 後ろに残す煙。残すなら
-     * @param chunkLoading 下の地面を開いたまま保持するか。空なら既定（保持する）。
-     *                     {@link WeaponDefinition#loadsChunks()} 参照
      */
     public record Projectile(float damage, float speed, float thrust, int burnTicks,
             int spoolTicks, float topSpeed,
             float gravity, float range, float explosion, int tracer, float ricochet,
             float drag, float turnDrag,
-            Optional<Trail> trail, Optional<Boolean> chunkLoading) {
+            Optional<Trail> trail) {
 
         /**
          * モーターが切れた後に空気が奪う速さの係数。失う量は {@code drag × 速さ²}（1tickあたり）。
@@ -350,7 +347,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
 
         public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0,
                 0.0F, 0.02F, 200.0F, 0.0F, 0xFFC864, 0.0F, DEFAULT_DRAG, DEFAULT_TURN_DRAG,
-                Optional.empty(), Optional.empty());
+                Optional.empty());
 
         /**
          * 煙の完全な記述と、かつてはそれが全部だった素の {@code true} の両方を読む。だから古い兵装ファイル
@@ -378,8 +375,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 Codec.FLOAT.optionalFieldOf("ricochet", 0.0F).forGetter(Projectile::ricochet),
                 Codec.FLOAT.optionalFieldOf("drag", DEFAULT_DRAG).forGetter(Projectile::drag),
                 Codec.FLOAT.optionalFieldOf("turn_drag", DEFAULT_TURN_DRAG).forGetter(Projectile::turnDrag),
-                TRAIL.optionalFieldOf("trail", Optional.empty()).forGetter(Projectile::trail),
-                Codec.BOOL.optionalFieldOf("chunk_loading").forGetter(Projectile::chunkLoading)
+                TRAIL.optionalFieldOf("trail", Optional.empty()).forGetter(Projectile::trail)
         ).apply(instance, Projectile::new));
 
         /** この弾がそもそも装甲に弾かれ得るか、それとも常に食い込むか。 */
@@ -505,7 +501,20 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
              * 追われている側の警戒受信機が鳴ることも無い。乗員がすることは目標を1つ選ぶことだけで、そこは
              * 物である必要すら無い——丘でも、交差点でも、まだ誰も居ない座標でもよい。
              */
-            POINT("point");
+            POINT("point"),
+            /**
+             * 射手が照準を向けている線へ向かう。視線誘導。
+             *
+             * <p>捕捉という手順が無いのは {@link #POINT} と同じだが、行き先が固定されないところが違う。狙って
+             * いる線は毎tick更新されるので、飛んでいる弾は照準が動けば付いてくる——だから射手は着弾まで照準を
+             * 目標に置き続けなければならないし、逆に飛行中に別の物へ振り向けることもできる。有線誘導の対戦車
+             * ミサイルがまさにそれで、当たるかどうかは撃った後の射手の手にかかっている。
+             *
+             * <p><b>近接信管を持たせないこと。</b>弾が追っているのは照準線上の遠い一点であって目標ではないので、
+             * 距離で炸裂させる意味が無い。{@code proximity} は 0 にして、触れた物で炸裂させる——成形炸薬弾頭の
+             * 実際の信管であり、線に乗った弾が目標へ行き着けば当たる。
+             */
+            BEAM("beam");
 
             public static final Codec<Seeker> CODEC = StringRepresentable.fromEnum(Seeker::values);
 
@@ -528,7 +537,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 return switch (this) {
                     case HEAT -> flare;
                     case RADAR -> !flare;
-                    case LASER, POINT -> false;
+                    case LASER, POINT, BEAM -> false;
                 };
             }
 
@@ -540,7 +549,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
              * 片方だけを足した箇所が静かに間違う。
              */
             public boolean laid() {
-                return this == LASER || this == POINT;
+                return this == LASER || this == POINT || this == BEAM;
             }
         }
 

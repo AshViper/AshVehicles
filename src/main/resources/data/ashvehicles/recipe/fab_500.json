@@ -8,8 +8,12 @@
       "count": 5
     },
     {
-      "item": "minecraft:tnt",
-      "count": 2
+      "item": "ashvehicles:high_explosive",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:fuze",
+      "count": 1
     }
   ],
   "result": {

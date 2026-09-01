@@ -1,0 +1,31 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_ammo",
+  "tab": "ammo",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:seeker",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:rocket_motor",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:high_explosive",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:fuze",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:anti_air_missile"
+  }
+}
