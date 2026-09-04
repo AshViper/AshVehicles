@@ -1,0 +1,178 @@
+{
+	"format_version": "1.8.0",
+	"animations": {
+		"gear_down": {
+			"loop": "hold_on_last_frame",
+			"animation_length": 1.0,
+			"bones": {
+				"LeftTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 120]
+						},
+						"0.3": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"RightTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, -120]
+						},
+						"0.3": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"BackLeftTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 102.5]
+						},
+						"0.3": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"BackRightTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, -102.5]
+						},
+						"0.3": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"BackTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [90, 0, 0]
+						},
+						"0.3": {
+							"vector": [90, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"LeftTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 90]
+						},
+						"0.3": {
+							"vector": [0, 0, 90]
+						},
+						"1.0": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"RightTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, -90]
+						},
+						"0.3": {
+							"vector": [0, 0, -90]
+						},
+						"1.0": {
+							"vector": [0, 0, 0]
+						}
+					}
+				}
+			}
+		},
+		"gear_up": {
+			"loop": "hold_on_last_frame",
+			"animation_length": 1.0,
+			"bones": {
+				"BackTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [90, 0, 0]
+						}
+					}
+				},
+				"LeftTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, 90]
+						}
+					}
+				},
+				"RightTyre": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, -90]
+						}
+					}
+				},
+				"LeftTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, 120]
+						}
+					}
+				},
+				"RightTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, -120]
+						}
+					}
+				},
+				"BackLeftTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, 102.5]
+						}
+					}
+				},
+				"BackRightTyreHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, -102.5]
+						}
+					}
+				}
+			}
+		}
+	}
+}

@@ -801,6 +801,7 @@ const JA = {
   "mass|rack": "重量(kg)",
   "stations|rack": "搭載位置（パイロンからの相対）",
   "accepts|rack": "積めるもの",
+  "wingtip|rack": "翼端専用",
 
   /* and a pod's */
   "type|equipment": "種別",
@@ -1163,6 +1164,7 @@ const JA = {
     "ラックを付けるまで何も吊れません。何発積めるかはラック側が決めます。",
   "the lens of a pod fitted here": "ここにポッドを付けたときのレンズ位置",
   "internal &mdash; carried inside, nothing drawn": "内装 — 機内に積み、何も描かない",
+  "wingtip &mdash; the tip rail, and nothing else": "翼端 — 翼端レール専用",
 
   /* ---- what is drawn and what is not ---- */
   "Boxes|drawn or not": "ボックス",
@@ -2334,6 +2336,7 @@ function ensureStoreFacts() {
         type: typeof doc.type === "string" ? doc.type : "",
         stations: Array.isArray(doc.stations) ? doc.stations.map(p => vec(p, [0, 0, 0])) : [],
         accepts: Array.isArray(doc.accepts) ? doc.accepts.slice() : [],
+        wingtip: doc.wingtip === true,
         camera: Array.isArray(doc.camera) ? vec(doc.camera, POD_LENS) : null,
       });
     } catch (err) { /* a file that will not read is one this has nothing to say about */ }
@@ -2351,6 +2354,12 @@ const storeType = id => (storeFacts.get("weapon/" + id) || {}).type || "";
 
 /** Which kinds a rack takes. Empty means every kind, exactly as an empty {@code accepts} does. */
 const rackTakes = id => (storeFacts.get("rack/" + id) || {}).accepts || [];
+
+/**
+ * Whether a rack is a wingtip rail, which is the one thing that decides <em>where</em> a rack goes
+ * rather than what it carries. A tip takes nothing else and a rail goes nowhere else.
+ */
+const rackIsWingtip = id => !!(storeFacts.get("rack/" + id) || {}).wingtip;
 
 /**
  * Where each store on a rack hangs, as offsets from the station, in the machine's own frame.
@@ -2587,7 +2596,7 @@ const newBox = (name, offset, size) => ({
  * — it is built into the airframe — and the game ignores the kind on one.
  */
 const newPylon = (name, pos) => ({ id: uid(), kind: "pylon", name, pos, fixed: "",
-  internal: false, station: "weapon", twin: 0 });
+  internal: false, wingtip: false, station: "weapon", twin: 0 });
 const newSeat = pos => ({ id: uid(), kind: "seat", name: "seat", pos, twin: 0 });
 
 /**
@@ -4242,7 +4251,10 @@ function storePanel(it) {
       + `</div>` + tail;
   }
 
-  let html = head + storePick(`id="f-rack"`, load.rack, storeChoices("rack"), "no rack");
+  // Only the racks that go where this station is: a tip takes the tip rail and nothing else, and
+  // the tip rail hangs on nothing else. The same rule the mod fits by.
+  const racks = storeChoices("rack").filter(r => rackIsWingtip(r.id) === !!it.wingtip);
+  let html = head + storePick(`id="f-rack"`, load.rack, racks, "no rack");
   if (!load.rack) return html + tail;
 
   // A place a line, in the order the rack loads them, and each offered only what the rack will
@@ -4405,7 +4417,9 @@ function renderEditor() {
       <input id="f-fixed" list="weaponids" value="${escapeHtml(it.fixed || "")}" placeholder="ashvehicles:gsh_30_2">
       <div class="sp"></div>
       <label class="row"><input id="f-internal" type="checkbox" style="width:auto"${it.internal ? " checked" : ""}>
-        <span>${tr("internal &mdash; carried inside, nothing drawn")}</span></label>`
+        <span>${tr("internal &mdash; carried inside, nothing drawn")}</span></label>
+      <label class="row"><input id="f-wingtip" type="checkbox" style="width:auto"${it.wingtip ? " checked" : ""}>
+        <span>${tr("wingtip &mdash; the tip rail, and nothing else")}</span></label>`
       + storePanel(it);
   } else if (it.kind === "eye") {
     html += `<label>${tr("pos")}</label>
@@ -4446,6 +4460,18 @@ function renderEditor() {
   if (station) station.onchange = () => { snapshot(); it.station = station.value; refreshLive(); renderEditor(); };
   const inter = document.getElementById("f-internal");
   if (inter) inter.onchange = () => { it.internal = inter.checked; };
+  // Redrawn as well as noted: what may hang here changes with it, and so does what is hanging.
+  const tip = document.getElementById("f-wingtip");
+  if (tip) tip.onchange = () => {
+    snapshot();
+    it.wingtip = tip.checked;
+    const load = loadOf(it);
+    if (load && load.rack && rackIsWingtip(load.rack) !== it.wingtip) {
+      setLoad(it, at => { at.rack = ""; at.weapons = []; });
+    }
+    refreshLive();
+    renderEditor();
+  };
   const mount = document.getElementById("f-mount");
   if (mount) mount.onchange = () => { snapshot(); it.mount = mount.value; refreshLive(); renderEditor(); };
   const eyeMount = document.getElementById("f-eyemount");
@@ -7498,6 +7524,7 @@ function exportMachine() {
       const o = { name: p.name || "pylon", pos: p.pos.map(round3) };
       if (p.fixed) o.fixed = p.fixed;
       if (p.internal) o.internal = true;
+      if (p.wingtip) o.wingtip = true;
       // Written on every station a player loads, and never on one with a weapon built into it: the
       // game ignores it there, and a file that says it anyway reads as though it meant something.
       if (!p.fixed) o.kind = p.station === "special" ? "special" : "weapon";
@@ -7830,7 +7857,7 @@ const ARMS = {
     note: "The carriage between a station and its stores. What it decides is how many a station carries and where each one hangs — and nothing else.",
     groups: [
       { k: "", f: [WB("item", true), WI("mass", 0), WVL("stations"),
-        WEL("accepts", WEAPON_TYPES)] },
+        WEL("accepts", WEAPON_TYPES), WB("wingtip", false)] },
     ],
   },
 
@@ -7853,7 +7880,7 @@ const ARMS = {
 const ARMS_ORDER = {
   weapon: ["type", "item", "ammo", "mass", "drag", "ammo_item", "requires", "firing", "projectile",
     "guidance", "sound", "cluster"],
-  rack: ["item", "mass", "stations", "accepts"],
+  rack: ["item", "mass", "stations", "accepts", "wingtip"],
   equipment: ["type", "item", "seeker_range", "lock_rate", "radar_gain", "heat_gain", "lock_delay",
     "mass", "camera"],
 };
@@ -8471,6 +8498,7 @@ function takeJson(doc, name) {
       const py = newPylon(p.name || "pylon" + (i + 1), vec(p.pos, [0,1,0]));
       py.fixed = p.fixed || "";
       py.internal = !!p.internal;
+      py.wingtip = !!p.wingtip;
       py.station = p.kind === "special" ? "special" : "weapon";
       state.items.push(py);
     });

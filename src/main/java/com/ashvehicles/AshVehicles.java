@@ -97,6 +97,7 @@ public class AshVehicles {
                                 ModItems.weapons().values().forEach(item -> output.accept(item.get()));
                                 ModItems.equipment().values().forEach(item -> output.accept(item.get()));
                                 ModItems.ammo().values().forEach(item -> output.accept(item.get()));
+                                ModItems.ammunition().values().forEach(item -> output.accept(item.get()));
                             }).build());
 
     /**

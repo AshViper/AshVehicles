@@ -2,15 +2,16 @@
   "type": "gun",
   "item": false,
   "ammo": 500,
+  "gun_class": "autocannon",
   "firing": {
-    "rounds_per_second": 60.0,
+    "rounds_per_second": 100.0,
     "spread": 0.55
   },
   "projectile": {
     "damage": 5.0,
-    "speed": 26.0,
-    "gravity": 0.00125,
-    "range": 1000.0,
+    "speed": 51.5,
+    "gravity": 0.0245,
+    "range": 1500.0,
     "ricochet": 45.0,
     "tracer": "FFE29A"
   },

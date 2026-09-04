@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "ashvehicles:item/cannon_shell"
+    "layer0": "ashvehicles:item/autocannon_he"
   }
 }

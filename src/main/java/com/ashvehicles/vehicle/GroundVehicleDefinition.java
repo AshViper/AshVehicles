@@ -295,19 +295,34 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * @param barrelLength from the trunnion to the muzzle, in blocks, along the bore
      * @param recoil how far the barrel slides back when it fires, in blocks. Drawing only
      * @param recoilTicks how long it takes to run back out again
-     * @param kick how hard firing shoves the vehicle backwards, in blocks per tick. A hundred and
-     *             twenty millimetres against sixty tonnes is not much, but it is not nothing, and a
-     *             tank that fires and does not move at all reads as a tank that fired a blank
+     * @param rock how far the hull rocks on its springs when the gun fires, in degrees. Drawing only:
+     *             the vehicle does not go anywhere. Sixty tonnes on tracks does not measurably move when
+     *             the gun goes off, and a hull that slid backwards every shot read as a bug rather than
+     *             as weight — but it does sit back on its torsion bars, and that is what this is. The
+     *             rock goes into the same suspension displacement the ground gives, so the hull tips
+     *             while the running gear stays where it was. Left out, it is worked out from how far the
+     *             barrel slides, which already says how big the gun is
      * @param barrels every barrel this mount fires out of, for anything with more than the one.
      *                Left out, the mount is the single barrel the {@code trunnion} and
      *                {@code barrel_length} above describe, which is what every file said before
      *                there was a second one
+     * @param ammunition every kind of round this mount can be loaded with, in the order the gunner
+     *                   cycles through them. Left out, the mount fires the weapon file's own round
+     *                   and is loaded from the generic ammunition boxes, which is what every file
+     *                   said before there were named rounds. Listed, the mount takes <em>only</em>
+     *                   these, it carries a separate count of each within the weapon's total
+     *                   stowage, and the weapon-select key steps through them before it moves on to
+     *                   the next mount. Each name is a file under
+     *                   {@code data/<namespace>/ammunition/}: see
+     *                   {@link com.ashvehicles.weapon.AmmunitionDefinition}
      */
     public record Armament(Optional<ResourceLocation> main, Vec3 trunnion, float barrelLength,
-            float recoil, int recoilTicks, float kick, List<Barrel> barrels) {
+            float recoil, int recoilTicks, Optional<Float> rock, List<Barrel> barrels,
+            List<ResourceLocation> ammunition) {
         /** A vehicle with nothing to fire. */
         public static final Armament NONE =
-                new Armament(Optional.empty(), Vec3.ZERO, 0.0F, 0.0F, 1, 0.0F, List.of());
+                new Armament(Optional.empty(), Vec3.ZERO, 0.0F, 0.0F, 1, Optional.empty(), List.of(),
+                        List.of());
 
         public static final Codec<Armament> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("main").forGetter(Armament::main),
@@ -315,9 +330,21 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
                 Codec.FLOAT.optionalFieldOf("barrel_length", 0.0F).forGetter(Armament::barrelLength),
                 Codec.FLOAT.optionalFieldOf("recoil", 0.35F).forGetter(Armament::recoil),
                 Codec.INT.optionalFieldOf("recoil_ticks", 14).forGetter(Armament::recoilTicks),
-                Codec.FLOAT.optionalFieldOf("kick", 0.06F).forGetter(Armament::kick),
-                Barrel.CODEC.listOf().optionalFieldOf("barrels", List.of()).forGetter(Armament::barrels)
+                Codec.FLOAT.optionalFieldOf("rock").forGetter(Armament::rock),
+                Barrel.CODEC.listOf().optionalFieldOf("barrels", List.of()).forGetter(Armament::barrels),
+                ResourceLocation.CODEC.listOf().optionalFieldOf("ammunition", List.of())
+                        .forGetter(Armament::ammunition)
         ).apply(instance, Armament::new));
+
+        /**
+         * 発砲が車体を揺らす角度（度）。書いていなければ砲身の後座量から求める。
+         *
+         * <p>後座量は既に「どれだけ大きな砲か」を言っている。125mm の 0.62 ブロックと 25mm 機関砲の 0.12
+         * ブロックは、そのまま揺れの大小でもある。だから既定値のためにもう1つ数値を書かせる理由が無い。
+         */
+        public float rockDegrees() {
+            return this.rock.orElse(this.recoil * ROCK_PER_BLOCK);
+        }
 
         /** Whether there is anything to fire at all. */
         public boolean exists() {
@@ -366,6 +393,9 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * @param length from that trunnion to the muzzle, in blocks. Left out, the mount's own
      * @param ring the ring this barrel traverses about. Left out, the vehicle's turret ring
      */
+    /** 砲身の後座1ブロックあたり、車体が揺れる角度（度）。{@link Armament#rockDegrees} 参照。 */
+    private static final float ROCK_PER_BLOCK = 4.0F;
+
     public record Barrel(Vec3 trunnion, Optional<Float> length, Optional<Vec3> ring) {
         public static final Codec<Barrel> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Vec3.CODEC.fieldOf("trunnion").forGetter(Barrel::trunnion),
@@ -409,14 +439,26 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * @param muzzle where the rounds leave, in the vehicle's own axes, with the turret at dead ahead
      *               and the gun level. Carried round the ring with the turret and rocked about the
      *               trunnion with the gun, since that is what it is bolted to
+     * @param ammunition every kind of round this mount can be loaded with, in the order the gunner
+     *                   cycles through them. Left out, the mount fires the weapon file's own round
+     *                   and is loaded from the generic ammunition boxes, which is what every file
+     *                   said before there were named rounds. Listed, the mount takes <em>only</em>
+     *                   these, it carries a separate count of each within the weapon's total
+     *                   stowage, and the weapon-select key steps through them before it moves on to
+     *                   the next mount. Each name is a file under
+     *                   {@code data/<namespace>/ammunition/}: see
+     *                   {@link com.ashvehicles.weapon.AmmunitionDefinition}
      */
-    public record Coaxial(Optional<ResourceLocation> gun, Vec3 muzzle) {
+    public record Coaxial(Optional<ResourceLocation> gun, Vec3 muzzle,
+            List<ResourceLocation> ammunition) {
         /** A vehicle with no machine gun, which is what a file saying nothing gets. */
-        public static final Coaxial NONE = new Coaxial(Optional.empty(), Vec3.ZERO);
+        public static final Coaxial NONE = new Coaxial(Optional.empty(), Vec3.ZERO, List.of());
 
         public static final Codec<Coaxial> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("gun").forGetter(Coaxial::gun),
-                Vec3.CODEC.optionalFieldOf("muzzle", Vec3.ZERO).forGetter(Coaxial::muzzle)
+                Vec3.CODEC.optionalFieldOf("muzzle", Vec3.ZERO).forGetter(Coaxial::muzzle),
+                ResourceLocation.CODEC.listOf().optionalFieldOf("ammunition", List.of())
+                        .forGetter(Coaxial::ammunition)
         ).apply(instance, Coaxial::new));
 
         /** Whether there is a machine gun aboard at all. */
@@ -444,14 +486,26 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      *             Carried round the ring with the turret and elevated with the gun, since on
      *             anything that carries both the tubes are bolted to the same mounting the barrels
      *             are — which is what makes laying the gun on a target also lay the tubes on it
+     * @param ammunition every kind of round this mount can be loaded with, in the order the gunner
+     *                   cycles through them. Left out, the mount fires the weapon file's own round
+     *                   and is loaded from the generic ammunition boxes, which is what every file
+     *                   said before there were named rounds. Listed, the mount takes <em>only</em>
+     *                   these, it carries a separate count of each within the weapon's total
+     *                   stowage, and the weapon-select key steps through them before it moves on to
+     *                   the next mount. Each name is a file under
+     *                   {@code data/<namespace>/ammunition/}: see
+     *                   {@link com.ashvehicles.weapon.AmmunitionDefinition}
      */
-    public record Launcher(Optional<ResourceLocation> missile, Vec3 rail) {
+    public record Launcher(Optional<ResourceLocation> missile, Vec3 rail,
+            List<ResourceLocation> ammunition) {
         /** A vehicle with no missiles. */
-        public static final Launcher NONE = new Launcher(Optional.empty(), Vec3.ZERO);
+        public static final Launcher NONE = new Launcher(Optional.empty(), Vec3.ZERO, List.of());
 
         public static final Codec<Launcher> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("missile").forGetter(Launcher::missile),
-                Vec3.CODEC.optionalFieldOf("rail", Vec3.ZERO).forGetter(Launcher::rail)
+                Vec3.CODEC.optionalFieldOf("rail", Vec3.ZERO).forGetter(Launcher::rail),
+                ResourceLocation.CODEC.listOf().optionalFieldOf("ammunition", List.of())
+                        .forGetter(Launcher::ammunition)
         ).apply(instance, Launcher::new));
 
         /** Whether there are any tubes at all. */

@@ -191,11 +191,15 @@
   },
   "armament": {
     "main": "ashvehicles:bofors_40",
+    "ammunition": [
+      "ashvehicles:autocannon_apfsds",
+      "ashvehicles:autocannon_he",
+      "ashvehicles:autocannon_heat"
+    ],
     "trunnion": [-0.09, 2.51, 0.01],
     "barrel_length": 3.74,
     "recoil": 0.18,
-    "recoil_ticks": 4,
-    "kick": 0.03
+    "recoil_ticks": 4
   },
   "hull": {
     "health": 300,
@@ -220,6 +224,10 @@
   },
   "coaxial": {
     "gun": "ashvehicles:mg3",
+    "ammunition": [
+      "ashvehicles:machine_gun_ap",
+      "ashvehicles:machine_gun_ball"
+    ],
     "muzzle": [-0.32, 3.05, 0.33]
   }
 }

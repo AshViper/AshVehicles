@@ -1,6 +1,7 @@
 package com.ashvehicles.client;
 
 import java.util.List;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 
@@ -9,6 +10,7 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.vehicle.Attitude;
+import com.ashvehicles.weapon.Magazine;
 import com.ashvehicles.weapon.WeaponDefinition;
 
 import net.minecraft.client.DeltaTracker;
@@ -16,6 +18,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -63,6 +66,14 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
     /** 表示が琥珀色に変わる、車体残存率の閾値。 */
     private static final float LOW_HEALTH = 0.3F;
+
+    /**
+     * 燃料計が琥珀になる残量。
+     *
+     * <p>0.2 は機体側の BINGO と同じ値。戦車には帰投という決断こそ無いが、「補給に戻るか、この一戦を
+     * 受けるか」は同じ問いだ。
+     */
+    private static final float LOW_FUEL = 0.2F;
     /** 残弾表示が琥珀色に変わる閾値。交戦2回分。 */
     private static final int LOW_ROUNDS = 6;
 
@@ -456,21 +467,45 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         panel.pair("SPD", AircraftHud.DIM, kmh + " km/h" + (speed < -0.001F ? " R" : ""), AircraftHud.GREEN);
 
+        // 燃料。地上車両は書かなくても既定で積んでいる（{@code VehicleChassis.Fuel.GROUND}——容量1000、
+        // 全開でおよそ40分）ので、燃料計が無いことは「燃料が無い」ことではなかった。運転手には減っている
+        // ものが見えないまま、いつか止まる車両に見えていたはずだ。
+        //
+        // 割合で出すのは機体側と同じ理由。「あと何単位か」は車種ごとに意味が変わるが、「あと何割か」は
+        // どの車両でも同じことを意味する。低残量で琥珀になり、尽きれば赤で言い切る——エンジンが止まった
+        // 理由が運転手に分かる必要があるのはその瞬間だけだ。
+        //
+        // 燃料を積まない車両——容量0の据置マウント——では1行も割かない。動かない数字は読まれなくなり、
+        // その時に隣の数字も一緒に読まれなくなる。
+        if (vehicle.fuelSetup().fitted()) {
+            float fuel = vehicle.getFuelFraction();
+
+            panel.bar("FUEL", fuel, vehicle.isOutOfFuel() ? "DRY" : Math.round(fuel * 100.0F) + "%",
+                    fuel <= LOW_FUEL ? AircraftHud.WARNING : AircraftHud.GREEN);
+        }
+
         return panel;
     }
 
     /** 右下。引き金が何を撃つか、あと何発あるか、いつ撃てるか、そして車体があと何発受けられるか。 */
     private static HudPanel arms(GroundVehicleEntity vehicle, float partialTick) {
         HudPanel panel = new HudPanel();
-        boolean missiles = vehicle.isMissileMode();
+        GroundVehicleEntity.Armament selected = vehicle.selected();
+        boolean missiles = selected == GroundVehicleEntity.Armament.MISSILE;
         boolean gun = vehicle.getStats().armament().exists();
+        // 選べる物が2つ以上あって初めて、選択に意味がある。
+        int carried = (gun ? 1 : 0) + (vehicle.hasCoaxial() ? 1 : 0) + (vehicle.hasMissiles() ? 1 : 0);
 
         panel.title("WEAPONS / STATUS");
 
-        // 両方積む車両では、トリガーがどちらを撃つか。1種しか積まない車両では何も出さない。答えが疑わしくなることは
-        // 無いからだ。
-        if (vehicle.hasMissiles() && gun) {
-            panel.pair("SEL", AircraftHud.DIM, missiles ? "MSL" : "GUN", AircraftHud.GREEN);
+        // 2種以上積む車両では、トリガーが何を撃つか。1種しか積まない車両では何も出さない。答えが疑わしく
+        // なることは無いからだ。
+        if (carried > 1) {
+            panel.pair("SEL", AircraftHud.DIM, switch (selected) {
+                case MISSILE -> "MSL";
+                case COAX -> "MG";
+                case MAIN -> "GUN";
+            }, AircraftHud.GREEN);
         }
 
         if (missiles) {
@@ -479,7 +514,12 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             gun(panel, vehicle);
         }
 
-        if (missiles || gun) {
+        // 選択中の架台が弾種を積んでいるなら、その内訳。残弾の1行だけでは足りない——上の行が示すのは
+        // 選択中の弾種だけなので、他に何がどれだけ残っているかはここにしか出ない。そして「あと1発で
+        // 徹甲弾が尽きる」は、砲手が次の1発を撃つ前に知るべきことだ。
+        rounds(panel, vehicle, selected);
+
+        if (missiles || gun || vehicle.hasCoaxial()) {
             // 砲塔内で砲身がどうなっているか。ワールド上のマークでは示せない情報だ。斜面のマークは仰角10度でも2度でも
             // 同じに見えるし、頭上の機体に対しては「砲架がストッパーに当たるまであとどれだけか」が、掃射できるか1秒を
             // 無駄にするかの違いになる。
@@ -487,13 +527,17 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
                     String.format("%+d°", Math.round(vehicle.getGunPitch(partialTick))), AircraftHud.GREEN);
         }
 
-        // 機関銃。上の行のどちらにも属さない。決して選択されない——ただそこにある——ので、トリガーが何を向いていても
-        // 表示する。ベルトが尽きたら琥珀にする。二度見に値するのはそれだけだ。
+        // 機関銃。選択されていてもいなくても常に表示する——専用の引き金を持ち続けているので、トリガーが
+        // 何を向いていようと撃てるからだ。ベルトが尽きたら琥珀にする。二度見に値するのはそれだけだ。
         if (vehicle.hasCoaxial()) {
             int belt = vehicle.getCoaxRounds();
 
             panel.pair("MG", AircraftHud.DIM, String.format("%d / %d", belt, vehicle.getCoaxCapacity()),
                     belt > 0 ? AircraftHud.GREEN : AircraftHud.WARNING);
+
+            if (belt <= 0) {
+                need(panel, vehicle, GroundVehicleEntity.Armament.COAX);
+            }
         }
 
         float health = vehicle.getHealth();
@@ -506,6 +550,61 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         return panel;
     }
 
+    /**
+     * 空になった砲を満たすアイテムの名前。
+     *
+     * <p>「弾が無い」だけでは半分しか言っていない。乗員が次にすることは弾を取りに行くことで、そのために
+     * 要るのは「何を」だ。答えは車両ファイルと兵装ファイルから求まる物であって、覚えている物ではない。
+     * {@link AmmoHint} 参照。
+     */
+    private static void need(HudPanel panel, GroundVehicleEntity vehicle,
+            GroundVehicleEntity.Armament station) {
+        Component item = AmmoHint.forStation(vehicle, station);
+
+        if (item != null) {
+            panel.pair("NEED", AircraftHud.DIM, item.getString(), AircraftHud.WARNING);
+        }
+    }
+
+    /**
+     * 積んでいる弾種を1行ずつ。選択中の物が緑、残りは沈める。
+     *
+     * <p>弾種を並べていない車両では1行も出ない。MOD 内の大半がそれで、そこでは何も変わらない。
+     */
+    private static void rounds(HudPanel panel, GroundVehicleEntity vehicle,
+            GroundVehicleEntity.Armament station) {
+        List<ResourceLocation> types = Magazine.types(vehicle, station);
+
+        if (types.isEmpty()) {
+            return;
+        }
+
+        ResourceLocation loaded = Magazine.selected(vehicle, station);
+
+        for (ResourceLocation type : types) {
+            int left = Magazine.rounds(vehicle, station, type);
+            boolean chambered = type.equals(loaded);
+
+            panel.pair(roundName(type), chambered ? AircraftHud.GREEN : AircraftHud.DIM,
+                    String.valueOf(left),
+                    left > 0 ? (chambered ? AircraftHud.GREEN : AircraftHud.DIM) : AircraftHud.WARNING);
+        }
+    }
+
+    /**
+     * 弾種の短い名前。計器に収まる幅で、翻訳を通す。
+     *
+     * <p>翻訳が無ければ ID のパスをそのまま大文字で出す。パックが足した弾種は言語ファイルを持たない
+     * ことがあり、そこで空欄が並ぶより「125MM_APFSDS」と出る方がはるかに役に立つ。
+     */
+    private static String roundName(ResourceLocation type) {
+        String key = "hud.ashvehicles.round." + type.getNamespace() + "." + type.getPath();
+        Component name = Component.translatable(key);
+        String text = name.getString();
+
+        return key.equals(text) ? type.getPath().toUpperCase(Locale.ROOT) : text;
+    }
+
     /** 砲。残弾と装填の進行。 */
     private static void gun(HudPanel panel, GroundVehicleEntity vehicle) {
         int rounds = vehicle.getRounds();
@@ -515,6 +614,7 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         if (rounds <= 0) {
             panel.line("NO ROUNDS", AircraftHud.WARNING);
+            need(panel, vehicle, GroundVehicleEntity.Armament.MAIN);
 
             return;
         }
@@ -538,6 +638,7 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         if (tubes <= 0) {
             panel.line("TUBES EMPTY", AircraftHud.WARNING);
+            need(panel, vehicle, GroundVehicleEntity.Armament.MISSILE);
 
             return;
         }

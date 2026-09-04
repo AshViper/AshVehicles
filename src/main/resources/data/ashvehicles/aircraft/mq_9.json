@@ -89,7 +89,7 @@
     }
   },
   "wing": {
-    "max_speed": 6.7,
+    "max_speed": 6.74,
     "stall_speed": 1.3,
     "lift": 0.0075,
     "lift_slope": 5.6,

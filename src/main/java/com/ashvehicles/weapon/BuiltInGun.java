@@ -102,6 +102,11 @@ public final class BuiltInGun {
             String tag() {
                 return "";
             }
+
+            @Override
+            public GroundVehicleEntity.Armament station() {
+                return GroundVehicleEntity.Armament.MAIN;
+            }
         },
         /**
          * 主砲に固定された機銃。主砲が指向された方向へ指向され、独立した引き金で撃つ。砲口は「砲身に
@@ -144,6 +149,11 @@ public final class BuiltInGun {
             String tag() {
                 return "Coax";
             }
+
+            @Override
+            public GroundVehicleEntity.Armament station() {
+                return GroundVehicleEntity.Armament.COAX;
+            }
         };
 
         /** この砲がどの兵装ファイルか。積んでいない車両では空。 */
@@ -173,6 +183,12 @@ public final class BuiltInGun {
          * 書かれた物で、そのまま残してある。古いワールドで保存された戦車が砲弾を持って戻ってくるように。
          */
         abstract String tag();
+
+        /**
+         * この砲が車両のどの架台か。弾種と選択はそちらの言葉で数えられている——弾倉が種類ごとに分かれる
+         * のも、切り替えが順に回るのも、砲ではなく架台の性質だ。{@link Magazine} 参照。
+         */
+        public abstract GroundVehicleEntity.Armament station();
     }
 
     /**
@@ -208,10 +224,15 @@ public final class BuiltInGun {
      * クリックで起きる。{@link #load} 参照。
      */
     public void tick(boolean trigger) {
+        // 引き金を見るのは、減らした<em>後</em>の待ち時間。減らす前の値で判定すると、待ち1tickの砲——
+        // {@link #ticksFor} が1を返す毎秒20発以上は全部そうだ——が「撃つ、休む、撃つ」になり、ファイルに
+        // 書いた発射速度がちょうど半分で出る。M61 の毎分6000発が3000発になっていたのはこれで、待ちの長い
+        // 砲も一律に1tickずつ遅かった。
         int reload = this.mount.reload(this.vehicle);
 
         if (reload > 0) {
-            this.mount.reload(this.vehicle, reload - 1);
+            reload--;
+            this.mount.reload(this.vehicle, reload);
         }
 
         boolean wasDown = this.triggerWasDown;
@@ -240,13 +261,26 @@ public final class BuiltInGun {
     }
 
     /**
+     * 今この砲の薬室にある弾種。弾種を並べていない架台では null で、そのときは兵装ファイル自身が書いた
+     * 弾が出る——MOD 内の大半の砲がそれだ。
+     */
+    @Nullable
+    private ResourceLocation ammunition() {
+        return Magazine.selected(this.vehicle, this.mount.station());
+    }
+
+    /**
      * この砲に入る弾薬の種類。砲を積んでいなければ null。手に持った物がこの砲のための物かを、車両が
      * クリックの意味を決めるときに訊く。
      */
     @Nullable
     public AmmoKind ammoKind() {
+        if (Magazine.typed(this.vehicle, this.mount.station())) {
+            return null;
+        }
+
         return this.mount.weapon(this.vehicle)
-                .map(id -> Definitions.weapon(id).ammoKind())
+                .flatMap(id -> Definitions.weapon(id).ammoKind())
                 .orElse(null);
     }
 
@@ -265,7 +299,11 @@ public final class BuiltInGun {
     public int load(AmmoKind kind, int offered) {
         WeaponDefinition weapon = this.mount.weapon(this.vehicle).map(Definitions::weapon).orElse(null);
 
-        if (weapon == null || weapon.ammoKind() != kind || offered <= 0) {
+        // 弾種を並べた架台は、並べた物しか受け取らない。徹甲弾と榴弾を積み分ける戦車の弾庫へ「砲弾」と
+        // だけ書かれた箱を押し込めば、それがどちらとして入ったのか誰にも言えなくなる。そこは
+        // Magazine.load が名指しで受け取る道になっている。
+        if (weapon == null || weapon.ammoKind().orElse(null) != kind || offered <= 0
+                || Magazine.typed(this.vehicle, this.mount.station())) {
             return 0;
         }
 
@@ -319,16 +357,25 @@ public final class BuiltInGun {
      * 真上に向けた砲も水平の砲と同じように散る。
      */
     private void fire(ServerLevel level, ResourceLocation weaponId, WeaponDefinition weapon) {
+        // 砲口を出た後の全部は弾種が決める。弾種の無い砲では兵装ファイル自身の値で、そこは以前と1つも
+        // 変わらない。Definitions.round 参照。
+        ResourceLocation ammunition = this.ammunition();
+        WeaponDefinition.Projectile round = Definitions.round(weapon, ammunition);
         // 砲身を順繰りに、1本1発ずつ。架台のどの砲身も同じ方向へ指向され、同じ弾倉から同じ速度で装填
         // される——連装架台は2門の砲ではなく弾が出る穴が2つあるだけ——ので、砲身であることの全部は
-        // 「この弾がどの砲口から出るか」に尽きる。一度に2発撃ちたいファイルが使うのは兵装自身の salvo
-        // で、それは数行下。
+        // 「この弾がどの砲口から出るか」に尽きる。
         int barrels = Math.max(this.mount.barrels(this.vehicle), 1);
-        int firing = this.barrel % barrels;
+        // 待ち時間は1tick未満にできないので、毎秒20発を超える砲はその分を1tickの中で撃つ。ガトリングは
+        // それに当たる——M61 の毎分6000発は毎tick5発だ。書いてある発射速度が届かないまま黙って毎秒20発に
+        // 頭打ちになるより、tickの粒度で撃つ方が近い。撃てるのは弾倉に残っている分まで。
+        int perTick = Math.min(roundsPerTick(weapon.firing().roundsPerSecond()),
+                this.mount.rounds(this.vehicle));
+        // 1発の引き金で複数発を同時に放つのは salvo。1tickに複数発なのは発射速度で、別の話だ——
+        // 前者は同じ瞬間に散らばって出る弾、後者は順に出る弾。
+        int salvo = Math.max(1, weapon.firing().salvo());
 
-        this.barrel = (firing + 1) % barrels;
-
-        Vec3 muzzle = this.mount.muzzle(this.vehicle, firing);
+        // 発射炎と音はこのtickの1発目の砲口から。5発ぶんの炎を重ねても明るくなるだけで、5つには見えない。
+        Vec3 muzzle = this.mount.muzzle(this.vehicle, this.barrel % barrels);
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
         Vec3 right = across(bore);
         Vec3 up = right.cross(bore).normalize();
@@ -338,40 +385,68 @@ public final class BuiltInGun {
         double scatter = Math.tan(Math.toRadians(weapon.firing().spread())) * 0.5;
         double spread = Math.tan(Math.toRadians(weapon.firing().salvoSpread())) * 0.5;
 
-        for (int i = 0; i < Math.max(1, weapon.firing().salvo()); i++) {
-            Vec3 direction = bore
-                    .add(right.scale(random.nextGaussian() * (scatter + spread)))
-                    .add(up.scale(random.nextGaussian() * (scatter + spread)))
-                    .normalize();
+        for (int fired = 0; fired < perTick; fired++) {
+            int firing = this.barrel % barrels;
 
-            // 砲が与える速度に、車両が既にその方向へ持っていた速度を足す。足すのは砲身方向の成分だけで
-            // 速度全体ではない。斜面を横滑りしている車体だと、滑っている角度の分だけ全弾が砲身から曲がって
-            // しまうから。パイロンが従う規則と同じ（WeaponMounts.fireRound 参照）で、GunSight が弾道を
-            // 飛ばす時の規則とも同じ。それが画面上の照準を真実にしている。
-            Vec3 carried = direction.scale(Math.max(0.0, this.vehicle.getVelocity().dot(direction)));
+            this.barrel = (firing + 1) % barrels;
 
-            VehicleProjectile shot = weapon.type() == WeaponDefinition.Type.GUN
-                    ? new BulletEntity(ModEntities.BULLET.get(), level)
-                    : new RocketEntity(ModEntities.ROCKET.get(), level);
+            Vec3 from = this.mount.muzzle(this.vehicle, firing);
 
-            shot.setup(weaponId, this.vehicle, crew);
-            shot.setPos(muzzle);
-            // setDeltaMovement ではなく launch。速度がクライアントへ届く必要があり、通常それを運ぶ
-            // パケットには速すぎるから。VehicleProjectile 参照。
-            shot.launch(direction.scale(weapon.projectile().speed()).add(carried));
-
-            level.addFreshEntity(shot);
+            for (int i = 0; i < salvo; i++) {
+                this.launch(level, weaponId, ammunition, weapon, round, from, bore, right, up, crew,
+                        random, scatter, spread);
+            }
         }
 
         if (--this.untilFlash <= 0) {
-            WeaponEffects.muzzleBlast(level, muzzle, bore, blastPower(weapon), weapon.projectile().tracer());
+            WeaponEffects.muzzleBlast(level, muzzle, bore, blastPower(round), round.tracer());
             this.untilFlash = weapon.isAutomatic() ? FLASH_EVERY : 1;
         }
 
         this.playFireSound(weapon, weaponId);
 
-        this.mount.rounds(this.vehicle, this.mount.rounds(this.vehicle) - 1);
+        // 減るのは撃った弾種の分。弾種を持たない架台では残弾カウンタそのもので、そこも以前と同じ。
+        Magazine.spend(this.vehicle, this.mount.station(), perTick);
         this.mount.reload(this.vehicle, ticksFor(weapon.firing().roundsPerSecond()));
+    }
+
+    /** 弾1発。散布は砲身を軸にした円錐なので、真上に向けた砲も水平の砲と同じように散る。 */
+    private void launch(ServerLevel level, ResourceLocation weaponId, @Nullable ResourceLocation ammunition,
+            WeaponDefinition weapon, WeaponDefinition.Projectile round, Vec3 muzzle,
+            Vec3 bore, Vec3 right, Vec3 up, LivingEntity crew, RandomSource random, double scatter,
+            double spread) {
+        Vec3 direction = bore
+                .add(right.scale(random.nextGaussian() * (scatter + spread)))
+                .add(up.scale(random.nextGaussian() * (scatter + spread)))
+                .normalize();
+
+        // 砲が与える速度に、車両が既にその方向へ持っていた速度を足す。足すのは砲身方向の成分だけで
+        // 速度全体ではない。斜面を横滑りしている車体だと、滑っている角度の分だけ全弾が砲身から曲がって
+        // しまうから。パイロンが従う規則と同じ（WeaponMounts.fireRound 参照）で、GunSight が弾道を
+        // 飛ばす時の規則とも同じ。それが画面上の照準を真実にしている。
+        Vec3 carried = direction.scale(Math.max(0.0, this.vehicle.getVelocity().dot(direction)));
+
+        VehicleProjectile shot = weapon.type() == WeaponDefinition.Type.GUN
+                ? new BulletEntity(ModEntities.BULLET.get(), level)
+                : new RocketEntity(ModEntities.ROCKET.get(), level);
+
+        shot.setup(weaponId, ammunition, this.vehicle, crew);
+        shot.setPos(muzzle);
+        // setDeltaMovement ではなく launch。速度がクライアントへ届く必要があり、通常それを運ぶ
+        // パケットには速すぎるから。VehicleProjectile 参照。
+        shot.launch(direction.scale(round.speed()).add(carried));
+
+        level.addFreshEntity(shot);
+    }
+
+    /**
+     * その発射速度で1tickに出る発数。1発未満にはならない。
+     *
+     * <p>{@link #ticksFor} と対になっている。あちらは毎秒20発までの砲が何tick待つかを答え、こちらはそれを
+     * 超える砲が1tickで何発出すかを答える。どちらか片方だけでは、書いてある発射速度の半分が消える。
+     */
+    private static int roundsPerTick(float roundsPerSecond) {
+        return Math.max(1, Math.round(roundsPerSecond / 20.0F));
     }
 
     /**
@@ -390,8 +465,8 @@ public final class BuiltInGun {
     }
 
     /** 発射炎の大きさ。弾が持つ炸薬から決める。0にはならない。どの砲にも砲口はある。 */
-    private static float blastPower(WeaponDefinition weapon) {
-        return Mth.clamp(weapon.projectile().explosion(), 1.5F, 6.0F);
+    private static float blastPower(WeaponDefinition.Projectile round) {
+        return Mth.clamp(round.explosion(), 1.5F, 6.0F);
     }
 
     /**

@@ -31,12 +31,17 @@ import net.neoforged.neoforge.event.tick.LevelTickEvent;
  * いたのは二度と誰も見ない地形だった。だから確保も先読みも捨てた。ここが運ぶのは tick だけで、chunk は1つ
  * も要求しない。
  *
- * <p><b>当たるのはロード済みの地面の上だけになった。</b> 誰かが既に開いている chunk——プレイヤーの周り、
- * 機体の回廊、ドローンの輪——の上では、弾は今まで通りブロックへ問い合わせて当たる。その外では地形へ一切
- * 問い合わせない（{@link VehicleProjectile#tick} と {@code spanIsLoaded} 参照。問い合わせること自体が
- * tick スレッド上でのワールド生成だ）ので、そこにあるかもしれない斜面はすり抜け、弾は寿命まで飛んでから
- * 消える。エンティティはどちらでも当たる。長距離射撃が狙っている機体は、下の地面がどうであろうとロード
- * されているから。
+ * <p><b>ここが買うのは飛行だけで、当たり判定は買わない。</b> 誰かが既に開いている chunk——プレイヤーの
+ * 周り、機体の回廊、ドローンの輪——の上では、弾は今まで通りブロックにもエンティティにも当たる。その外では
+ * 世界に一切問い合わせず、ただ飛ぶ（{@code VehicleProjectile.simulated} 参照）。判定に使うのはここと同じ
+ * {@code inEntityTickingRange} なので、境界は1本しかない——バニラが tick を運んでいる場所では当たり、
+ * ここが運んでいる場所では当たらない。
+ *
+ * <p>それで長距離射撃が壊れないのは、<b>当たる価値のある物が全部自分の周りを開けている</b>からだ。
+ * プレイヤーはシミュレーション距離で、無人機は自分の回廊で。400ブロック先の機体へ向かった弾は、相手が
+ * 開けている chunk へ入った時点で目を開ける。目を閉じているのは、どちらの端でもない途中の空だけであり、
+ * そこには当たる物も、問い合わせてよい地形も無い。誰も開けていない空にいる相手に対しては、触れて起爆する
+ * 経路の代わりに近接信管が残る（{@code VehicleProjectile.simulated} 参照）。
  *
  * <p>バニラのループの<em>後</em>に、そこが飛ばさなかった分だけを拾う。判定に使うのはバニラと同じ
  * {@code inEntityTickingRange} なので、二重に tick される弾は無い。
@@ -92,6 +97,10 @@ public final class WeaponTicker {
         if (!(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
+
+        // 一時的。飛翔体がこの tick をどれだけ使ったかを数える。WeaponProfile 参照。ここに置くのは、
+        // ワールドの tick が終わった後に確実に1度だけ通る場所だから。
+        WeaponProfile.report(level);
 
         Set<VehicleProjectile> flying = FLYING.get(level);
 

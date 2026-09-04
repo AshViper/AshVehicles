@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.AshVehicles;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.particle.Effects;
 import com.ashvehicles.sensor.Sensors;
@@ -23,6 +24,8 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
@@ -30,6 +33,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.EntityType;
@@ -70,6 +74,10 @@ import org.joml.Quaternionf;
  * その名前で見つかる。
  */
 public abstract class VehicleEntityBase extends VehicleEntity implements PartHost {
+    /** 轢かれた打撃の種別。{@link #runOverSource} 参照。 */
+    public static final ResourceKey<DamageType> RUN_OVER = ResourceKey.create(
+            Registries.DAMAGE_TYPE, ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "run_over"));
+
     /** この機体の残り耐久（ヒットポイント）。0 なら煙を上げる穴。 */
     private static final EntityDataAccessor<Float> DATA_HEALTH =
             SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.FLOAT);
@@ -135,6 +143,16 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * の上に立っている者はその場に留まる。
      */
     private static final double CARRY_LIMIT = 32.0;
+
+    /**
+     * 残骸が乗員を抱えたまま落ち続けてよい上限（tick）。
+     *
+     * <p>20秒。{@link #holdsCrewToTheGround} を返す機体で、地面が最後まで来なかった場合の逃げ道だ。奈落へ
+     * 落ちる残骸、地形の無い場所で凍った残骸、接地を報告できないまま操縦者が回線を失った残骸——どれも本来
+     * 起こるはずの「着地」が来ないので、待つ側は永遠に待つことになる。それは撃墜の演出ではなく、脱出でき
+     * ないバグとして体験される。
+     */
+    private static final int WRECK_HOLD = 400;
 
     protected VehiclePart[] parts = new VehiclePart[0];
     /** 前回配置した時点で全ての箱がどこにあったか。{@link #placedBounds} 参照。 */
@@ -302,6 +320,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         }
 
         this.wasFalling = falling;
+
+        // 落ちるところまで一緒に落ちた乗員を、着いた場所で降ろす。抱えないと言った機体はここに用が無い
+        // ——あちらは全損したその tick に既に全員を降ろしている。holdsCrewToTheGround 参照。
+        if (this.holdsCrewToTheGround() && this.isVehicle()
+                && (this.wreckAge > WRECK_HOLD || this.wreckHasComeToRest())) {
+            this.ejectPassengers();
+        }
 
         WreckEffects.burn(level, this.position(), this.getAttitude(), this.wreckAge, velocity, reach);
     }
@@ -801,7 +826,12 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         }
 
         this.setWrecked(true);
-        this.ejectPassengers();
+
+        // 降ろす機体はここで降ろす。抱えたままにする機体は、残骸が地面に着くまで tick() 側が待つ。
+        if (!this.holdsCrewToTheGround()) {
+            this.ejectPassengers();
+        }
+
         this.onWrecked();
 
         // 車輪や履帯にある原点から少しずらす。爆発するのは機体であって、その下の地面ではない。
@@ -821,6 +851,34 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * いた物——のために。
      */
     protected void onWrecked() {
+    }
+
+    /**
+     * 全損した瞬間に乗員を投げ出すか、落ちきるまで座らせたままにするか。
+     *
+     * <p>既定は投げ出す方。地上車両が撃破されるのは既に地面の上であり、そこには「落ちきる」という続きが
+     * 無い。乗員を車体に括り付けたまま燃えている残骸の中で待たせる理由が存在しない。
+     *
+     * <p>航空機だけが逆を返す。高度8000で被弾したパイロットが次の瞬間に空中へ現れるのは、撃墜という出来事
+     * の中で唯一起きなかったことだ。落ちる機体には落ちる時間があり、その数秒がハンドルを引く時間になる
+     * ——{@link EjectionSeat} が用意しているのはまさにその数秒であって、座席の無い機体ではそのまま機体と
+     * 一緒に落ちていく。どちらも撃墜されたという事実の一部だ。
+     *
+     * <p>抱えている間に乗員が傷つくことは無い。{@link CrewSafety} は「乗っているか」しか見ておらず、機体が
+     * 全損しているかどうかを条件にしていない——爆風も、地面も、その後の落下も、降りるまでは機体の問題で
+     * ある。
+     */
+    protected boolean holdsCrewToTheGround() {
+        return false;
+    }
+
+    /**
+     * 乗員を抱えた残骸が、もう落ちていないか。{@link #holdsCrewToTheGround} を返す機体だけが問われる。
+     *
+     * <p>既定は即座に true。抱えないと言った機体がここへ来ることは無いので、答えは何であれ使われない。
+     */
+    protected boolean wreckHasComeToRest() {
+        return true;
     }
 
     // ------------------------------------------------------------------
@@ -1333,6 +1391,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         Vec3 shift = now.subtract(before);
         float turn = Mth.wrapDegrees(heading - pointed);
 
+        // 轢く方は上限に掛けない。CARRY_LIMIT は「運ぶ」ための物で、1tickにそれ以上進んだ機体は
+        // テレポートしたと見なして誰も連れて行かない。だが轢くのは速い機体こそが轢くのであって、
+        // 速すぎるから無害になる道理は無い。
+        if (!this.level().isClientSide) {
+            Hitboxes.runOver(this, shift);
+        }
+
         if (shift.lengthSqr() > CARRY_LIMIT * CARRY_LIMIT) {
             return;
         }
@@ -1340,6 +1405,19 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         if (shift.lengthSqr() > 1.0E-12 || Math.abs(turn) > 1.0E-4F) {
             Hitboxes.carry(this, before, shift, turn);
         }
+    }
+
+    /**
+     * 轢かれた者に届く打撃の出所。
+     *
+     * <p>与えたのは機体で、そうさせたのは操縦していた者。無人で転がっている機体には後者がいないので、
+     * 出所は機体だけになる——それでも打撃は届く。
+     */
+    DamageSource runOverSource() {
+        return new DamageSource(
+                this.level().registryAccess().registryOrThrow(Registries.DAMAGE_TYPE)
+                        .getHolderOrThrow(RUN_OVER),
+                this, this.getAviator());
     }
 
     /**

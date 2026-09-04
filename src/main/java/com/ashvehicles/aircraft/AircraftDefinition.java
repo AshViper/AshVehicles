@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.mojang.datafixers.util.Pair;
+import com.mojang.datafixers.util.Either;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -77,7 +78,10 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             Surface.CODEC.fieldOf("flaps").forGetter(AircraftDefinition::flaps),
             VehicleChassis.CameraMount.CODEC.optionalFieldOf("camera", VehicleChassis.CameraMount.DEFAULT).forGetter(AircraftDefinition::camera),
             VehicleChassis.Sound.CODEC.optionalFieldOf("sound", VehicleChassis.Sound.DEFAULT).forGetter(AircraftDefinition::sound),
-            VehicleChassis.Radar.CODEC.optionalFieldOf("radar", VehicleChassis.Radar.DEFAULT)
+            // 書いていない機体はレーダーを持たない。地上車両と同じ既定であり、同じ理由だ——「黙っている」
+            // は「積んでいる」より「積んでいない」に近い。以前はここが Radar.DEFAULT で、レーダーの
+            // 節を書き忘れた機体に3kmの索敵レーダーと4kmの警戒受信機が黙って付いていた。
+            VehicleChassis.Radar.CODEC.optionalFieldOf("radar", VehicleChassis.Radar.NONE)
                     .forGetter(AircraftDefinition::radar),
             Signature.CODEC.optionalFieldOf("signature", Signature.DEFAULT).forGetter(AircraftDefinition::signature),
             Countermeasures.CODEC.optionalFieldOf("countermeasures", Countermeasures.DEFAULT)
@@ -110,7 +114,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             new Surface(20, 0.5F, 0.4F),
             VehicleChassis.CameraMount.DEFAULT,
             VehicleChassis.Sound.DEFAULT,
-            VehicleChassis.Radar.DEFAULT,
+            VehicleChassis.Radar.NONE,
             Signature.DEFAULT,
             Countermeasures.DEFAULT,
             VehicleType.AIRCRAFT,
@@ -814,18 +818,31 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * @param name ログ用およびステーションを見分けるためのラベル。プレイヤーには表示しない
      * @param pos 機体自身の軸での位置。x が右、y が上、z が機首方向。砲なら砲口に置く
      * @param fixed ここに内蔵された兵装。プレイヤーが積むステーションでは空
+     * @param wingtip 翼の先端のステーションか。{@link #wingtip()} 参照
      * @param kind このステーションが兵装を積むかポッドを積むか。fixed ステーションではどちらでもないので
      *             無視される
      */
     public record Hardpoint(String name, Vec3 pos, Optional<ResourceLocation> fixed, boolean internal,
-            Kind kind) {
+            boolean wingtip, Kind kind, List<ResourceLocation> ammunition) {
 
         public static final Codec<Hardpoint> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.optionalFieldOf("name", "").forGetter(Hardpoint::name),
                 Vec3.CODEC.fieldOf("pos").forGetter(Hardpoint::pos),
                 ResourceLocation.CODEC.optionalFieldOf("fixed").forGetter(Hardpoint::fixed),
                 Codec.BOOL.optionalFieldOf("internal", false).forGetter(Hardpoint::internal),
-                Kind.CODEC.optionalFieldOf("kind", Kind.WEAPON).forGetter(Hardpoint::kind)
+                Codec.BOOL.optionalFieldOf("wingtip", false).forGetter(Hardpoint::wingtip),
+                Kind.CODEC.optionalFieldOf("kind", Kind.WEAPON).forGetter(Hardpoint::kind),
+                // 内蔵砲に積める弾種。地上車両の架台が並べる物とまったく同じで、同じファイルを指す。
+                //
+                // 機体の砲は弾倉を1本しか持たない。地上の砲塔は砲弾を種類ごとに棚へ積み分け、装填手が
+                // 車長の呼んだ1発を薬室へ送る——だから切り替えられる。機体の機関砲にあるのはベルト1本で、
+                // 積むのは地上作業だ。飛びながら弾種を替えられないのはそのためで、この一覧が言うのは
+                // 「地上で何を積めるか」になる。{@code WeaponMounts.loadRound} 参照。
+                //
+                // 吊り物のパイロンでは意味を持たない。あちらに載るのは兵装そのもので、兵装は自分の弾を
+                // 持っている。
+                ResourceLocation.CODEC.listOf().optionalFieldOf("ammunition", List.of())
+                        .forGetter(Hardpoint::ammunition)
         ).apply(instance, Hardpoint::new));
 
         public boolean isFixed() {
@@ -856,6 +873,20 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
          */
         public boolean internal() {
             return this.internal;
+        }
+
+        /**
+         * ここが翼の先端か。F-16 の翼端レールのように、翼の下ではなく翼が終わる場所そのものに付く
+         * ステーション。
+         *
+         * <p>気にするのは何が付くかだけ。翼端には{@link com.ashvehicles.weapon.RackDefinition#wingtip()
+         * 翼端レール}しか付かず、その翼端レールは翼端にしか付かない
+         * （{@link com.ashvehicles.weapon.WeaponMounts#canFitRackAt} 参照）。翼端は下面を持たないので
+         * 投下ラックを吊る場所が無く、逆に翼端レールは翼桁の先端へボルト留めする金具であって、パイロンの
+         * 下に吊れる物ではない。どちらの向きの禁止も同じ1つの事実から来ている。
+         */
+        public boolean wingtip() {
+            return this.wingtip;
         }
 
         /**
@@ -925,8 +956,24 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * @param traverseRate 旋回速度（1tickあたり度）
      * @param elevationRate 俯仰速度（1tickあたり度）
      */
+    /**
+     * @param bone 振れる部品のボーン名。空なら模型は動かない
+     * @param barrel 俯仰だけを受け持つボーンの名前。空なら {@code bone} が方位と俯仰の両方を受ける
+     */
     public record Station(String name, List<String> pylons, int seat, float bearing, float traverse,
-            float elevation, float depression, float traverseRate, float elevationRate) {
+            float elevation, float depression, float traverseRate, float elevationRate,
+            List<String> bone, List<String> barrel) {
+
+        /**
+         * ボーン名を1つでも一覧でも読む。
+         *
+         * <p>ほとんどの砲座は動く部品を1つしか持たない——砲塔の輪と、その上の砲身だ。だが翼下の1組の
+         * パイロンを一緒に振る砲座もある（AH-64 のロケットポッドがそれで、左右2本が同じ照準に従う）。
+         * 1つで済むファイルに角括弧を書かせないために、両方受ける。
+         */
+        private static final Codec<List<String>> BONES = Codec.either(Codec.STRING, Codec.STRING.listOf())
+                .xmap(either -> either.map(one -> one.isEmpty() ? List.<String>of() : List.of(one), many -> many),
+                        many -> many.size() == 1 ? Either.left(many.get(0)) : Either.right(many));
 
         public static final Codec<Station> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.optionalFieldOf("name", "").forGetter(Station::name),
@@ -937,8 +984,20 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.FLOAT.optionalFieldOf("elevation", 5.0F).forGetter(Station::elevation),
                 Codec.FLOAT.optionalFieldOf("depression", 60.0F).forGetter(Station::depression),
                 Codec.FLOAT.optionalFieldOf("traverse_rate", 3.0F).forGetter(Station::traverseRate),
-                Codec.FLOAT.optionalFieldOf("elevation_rate", 3.0F).forGetter(Station::elevationRate)
+                Codec.FLOAT.optionalFieldOf("elevation_rate", 3.0F).forGetter(Station::elevationRate),
+                BONES.optionalFieldOf("bone", List.of()).forGetter(Station::bone),
+                BONES.optionalFieldOf("barrel", List.of()).forGetter(Station::barrel)
         ).apply(instance, Station::new));
+
+        /** 俯仰を受け持つボーン。専用の物が無ければ振れる部品そのもの。 */
+        public List<String> elevates() {
+            return this.barrel.isEmpty() ? this.bone : this.barrel;
+        }
+
+        /** 模型に動く部品があるか。無い機体では砲は据え付けのまま描かれる。 */
+        public boolean animated() {
+            return !this.bone.isEmpty() || !this.barrel.isEmpty();
+        }
 
         /** 計器に出す名前。ファイルが黙っていれば最初のパイロン名。 */
         public String label() {

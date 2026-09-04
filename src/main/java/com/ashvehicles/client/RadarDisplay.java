@@ -38,7 +38,7 @@ public final class RadarDisplay {
     private static final int SCOPE_WIDTH = 104;
     private static final int SCOPE_HEIGHT = 68;
     /** 計器を寄せる画面端からの余白。 */
-    private static final int EDGE = 8;
+    static final int EDGE = 8;
     /** スコープの右端。目盛りを置く側が、どこまで内側へ寄れるかを測るのに要る。 */
     static final int SCOPE_RIGHT = EDGE + SCOPE_WIDTH;
     /** スコープ上の距離環。レーダー到達距離に対する割合で指定する。 */
@@ -57,21 +57,31 @@ public final class RadarDisplay {
 
     public static void draw(GuiGraphics graphics, Font font, VehicleEntityBase vehicle) {
         VehicleChassis.Radar radar = vehicle.radar();
+        boolean scope = radar.fitted();
 
-        if (!radar.fitted() && radar.warningRange() <= 0.0F) {
+        // 枠は1つではなく2つ。レーダーを持たない機体でも他人のレーダーは聞こえるし、それを最も必要と
+        // するのはまさにそういう機体だ。
+        //
+        // <p>ただしレーダーを持たない機体では、受信機の環は<em>言うことがあるときだけ</em>出す。
+        // 積んでいない機械の画面の端に、常時ぽつんと空の環が居座るのは「レーダーの表示」にしか見えず、
+        // そこに何も映らないことこそがその環の伝えている内容だからだ。撃たれれば環はその瞬間に出る
+        // ——警告としては、静かなときに消えている方が強い。レーダーを持つ機体では今まで通り常に出す。
+        // あちらではスコープと対になっていて、対の片方だけが点滅するのは読みにくい。
+        boolean receiver = radar.warningRange() > 0.0F
+                && (scope || !RadarReadout.threats().isEmpty());
+
+        if (!scope && !receiver) {
             return;
         }
 
         // 計器なので1段小さく。{@link HudScale} 参照。
         HudScale.push(graphics);
 
-        // 枠は1つではなく2つ。レーダーを持たない機体でも他人のレーダーは聞こえるし、それを最も必要とするのは
-        // まさにそういう機体だ。
-        if (radar.fitted()) {
+        if (scope) {
             drawScope(graphics, font, radar);
         }
 
-        if (radar.warningRange() > 0.0F) {
+        if (receiver) {
             drawReceiver(graphics, font);
         }
 

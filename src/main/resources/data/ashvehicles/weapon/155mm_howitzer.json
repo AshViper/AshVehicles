@@ -2,16 +2,17 @@
   "type": "gun",
   "item": false,
   "ammo": 60,
+  "gun_class": "howitzer",
   "firing": {
-    "rounds_per_second": 0.16,
+    "rounds_per_second": 0.17,
     "automatic": false,
     "spread": 0.3
   },
   "projectile": {
     "damage": 160.0,
-    "speed": 24.0,
-    "gravity": 0.0045,
-    "range": 1500.0,
+    "speed": 47.25,
+    "gravity": 0.0245,
+    "range": 8000.0,
     "explosion": 5.5,
     "ricochet": 0.0,
     "tracer": "FFD9A0"

@@ -5023,7 +5023,7 @@
 					"name": "m249",
 					"parent": "mashingun",
 					"pivot": [28.3, 29.2, -43.9],
-					"rotation": [90, -87.5, 0]
+					"rotation": [0, -87.5, 0]
 				},
 				{
 					"name": "zatvor",
@@ -5633,7 +5633,7 @@
 					"name": "m2",
 					"parent": "mashingun2",
 					"pivot": [-28.3, 29.2, -43.9],
-					"rotation": [92.5, 87.5, 0]
+					"rotation": [0, 87.5, 0]
 				},
 				{
 					"name": "zatvor2",

@@ -1,5 +1,6 @@
 package com.ashvehicles.client.model;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -7,6 +8,7 @@ import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.weapon.GunStations;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -44,6 +46,17 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
     private static final float GEAR_RETRACT_TRAVEL = 90.0F;
     private static final float GEAR_DOOR_TRAVEL = 85.0F;
 
+    /**
+     * <em>機体</em>座標系での砲座の回転方向。地上車両の砲塔・砲と同じ値であり、理由も同じだ。
+     *
+     * <p>モデルは自身の −Z を向き、+X は機体の<em>左</em>になる。よって砲を右へ振るとは銃口を −Z から
+     * −X へ回すことで、Y 軸周りの正の回転——だからここでは負。銃口を上げると −Z から +Y へ上がるので、
+     * X 軸周りの正の回転になる。個々のボーンでどちら向きになるかは
+     * {@link VehicleGeoModel#turnAboutX} がジオメトリから判断する。
+     */
+    private static final float TRAVERSE_SIGN = -1.0F;
+    private static final float ELEVATION_SIGN = 1.0F;
+
     @Override
     protected ResourceLocation idOf(AircraftEntity animatable) {
         return animatable.getAircraftId();
@@ -61,6 +74,51 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
 
         float partialTick = animationState.getPartialTick();
         applyPose(this, animatable.getStats().model(), Pose.of(animatable, partialTick));
+        aimStations(this, animatable);
+    }
+
+    /**
+     * 砲座の砲を、その砲座が今向いている方へ振る。
+     *
+     * <p><b>なぜ他の可動部と別扱いなのか。</b>これは機体の状態ではなく<em>乗員の視線</em>で決まる唯一の
+     * 部品だ。舵面は機体の角速度から出るし、脚もフラップもレバーの位置から出る。砲座が向いている先は
+     * {@link GunStations} が射手の視線から追従させている値で、機体ごとに数も違えば可動範囲も違う。だから
+     * 全機共通の {@link Pose} には入らない。
+     *
+     * <p><b>静止ポーズからの差分だけ回す。</b>ジオメトリは砲座の据え付け方位を向いて作られている——ドア
+     * ガンは横を向いた状態で模型になっている——ので、回すべきなのは方位そのものではなく、そこからどれだけ
+     * 振れたかだ。{@code bearing} がその据え付け方位で、可動範囲もそこを中心に測られている。
+     *
+     * <p>ボーン名を書いていない砲座は何もしない。据え付けのまま描かれるので、今まで通りに見える。
+     */
+    private static void aimStations(GeoModel<?> model, AircraftEntity aircraft) {
+        List<AircraftDefinition.Station> stations = aircraft.getStats().stations();
+
+        if (stations.isEmpty()) {
+            return;
+        }
+
+        GunStations aimed = aircraft.getStations();
+
+        for (int index = 0; index < stations.size(); index++) {
+            AircraftDefinition.Station station = stations.get(index);
+
+            if (!station.animated()) {
+                continue;
+            }
+
+            // 据え付け方位からの振れ。折り返しを跨ぐ砲座——真後ろを向いて据えられた物——でも近い側の
+            // 差を取る。
+            float swing = Mth.degreesDifference(station.bearing(), aimed.yawOf(index));
+
+            for (String bone : station.bone()) {
+                turnAboutY(model, bone, TRAVERSE_SIGN * swing);
+            }
+
+            for (String bone : station.elevates()) {
+                turnAboutX(model, bone, ELEVATION_SIGN * aimed.pitchOf(index));
+            }
+        }
     }
 
     /**
@@ -80,10 +138,11 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
      * @param tailRotorRate テールローターの同じ値。こちらはさらに数倍速く回る
      * @param wingSweep 可変翼の後退角（度）。他の可動部と違って0〜1の作動量ではなく角度そのものを運ぶ。
      *        全開後退が何度かは機体ごとに違い、ここの定数ではなく機体ファイルの数値だからだ
+     * @param bay 兵装倉の扉の開き量。0が閉、1が全開
      * @param sweepGear ここで脚を振るか。アニメーションファイルに脚サイクルを持たない機体用
      */
     public record Pose(float elevator, float aileron, float rudder, float gear, float flaps, float nozzle,
-            float rotor, float tailRotor, float rotorRate, float tailRotorRate, float wingSweep,
+            float bay, float rotor, float tailRotor, float rotorRate, float tailRotorRate, float wingSweep,
             boolean sweepGear) {
         /** 機体の舵面が今どうなっているか。 */
         public static Pose of(AircraftEntity aircraft, float partialTick) {
@@ -95,6 +154,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     aircraft.getGearProgress(partialTick),
                     aircraft.getFlapsProgress(partialTick),
                     aircraft.getVtolProgress(partialTick),
+                    aircraft.getBayProgress(partialTick),
                     aircraft.getRotorAngle(partialTick),
                     aircraft.getTailRotorAngle(partialTick),
                     aircraft.getRotorAngle(1.0F) - aircraft.getRotorAngle(0.0F),
@@ -124,6 +184,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     Mth.lerp(partialTick, previous.gear(), now.gear()),
                     Mth.lerp(partialTick, previous.flaps(), now.flaps()),
                     Mth.lerp(partialTick, previous.nozzle(), now.nozzle()),
+                    Mth.lerp(partialTick, previous.bay(), now.bay()),
                     now.rotor() + now.rotorRate() * wind,
                     now.tailRotor() + now.tailRotorRate() * wind,
                     now.rotorRate(), now.tailRotorRate(),
@@ -160,6 +221,21 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
 
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_LEFT, pose.flaps() * FLAP_TRAVEL);
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_RIGHT, pose.flaps() * FLAP_TRAVEL);
+
+        // 兵装倉の扉。腹の下で前後軸周りに振り下ろすので、脚の扉とまったく同じ軸だ。左右で逆へ開く。
+        //
+        // アニメーションファイルではなくここで振る理由は脚と逆になる。脚は手順で——扉が先に開き、脚が
+        // それに続く——順序こそが見どころだった。倉の扉には従う相手がいない。開くのは扉だけで、中の物は
+        // 動かずにそこにある。1つの角度で足りるなら1つの角度で書く。
+        // 模型が既にどの姿勢で作られているかを引く。0で閉じた姿勢——爆弾倉の扉は普通そう作られている
+        // ——だが、開いた姿勢で作られた扉もある。そのままでは閉じるべき時に開き、開くべき時に閉じる。
+        // ノズルが同じ引き算をしているのと同じ話で、同じ理由だ。
+        float bay = pose.bay() * setup.bayTravel() - setup.bayRest();
+
+        for (int pair = 1; pair <= VehicleChassis.BAY_PAIRS; pair++) {
+            rotateZ(model, setup, VehicleChassis.bayDoor(false, pair), bay);
+            rotateZ(model, setup, VehicleChassis.bayDoor(true, pair), -bay);
+        }
 
         // 可変翼。翼根で機体の鉛直軸周りに回し、両翼端を尾部へ運ぶ。どちら回りが「後ろ」かは左右で逆になる
         // が、その左右をロール名で決めない——駆動方向はボーン自身の立ち位置（ピボットの X）と機体後方の向き

@@ -44,6 +44,13 @@ public final class ModKeyMappings {
     public static final KeyMapping TOGGLE_GEAR = create("toggle_gear", GLFW.GLFW_KEY_G);
     public static final KeyMapping TOGGLE_FLAPS = create("toggle_flaps", GLFW.GLFW_KEY_F);
     /** 揚力系を持つ機体のノズルを下げ、また上げる。それ以外の機体では何もしない。 */
+    /**
+     * 兵装倉の扉。持たない機体では何も起きない。
+     *
+     * <p>脚とフラップの隣に置いた。どれも「機体の外形を変えるレバー」であり、押した結果が飛び方に返って
+     * くる物だからだ——扉の場合は抗力ではなくレーダーに映る大きさとして返る。
+     */
+    public static final KeyMapping TOGGLE_BAY = create("toggle_bay", GLFW.GLFW_KEY_O);
     public static final KeyMapping TOGGLE_VTOL = create("toggle_vtol", GLFW.GLFW_KEY_R);
     /** パイロン上の物を順送りする。トリガー自体はバニラの攻撃ボタン。 */
     public static final KeyMapping CYCLE_WEAPON = create("cycle_weapon", GLFW.GLFW_KEY_X);
@@ -161,7 +168,7 @@ public final class ModKeyMappings {
 
     public static final KeyMapping[] ALL = {PITCH_UP, PITCH_DOWN, ROLL_LEFT, ROLL_RIGHT,
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
-            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_VTOL, CYCLE_WEAPON, JETTISON,
+            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_BAY, TOGGLE_VTOL, CYCLE_WEAPON, JETTISON,
             RELEASE_FLARE, RELEASE_CHAFF,
             RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,

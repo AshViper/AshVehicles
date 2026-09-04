@@ -1,0 +1,12 @@
+{
+  "gun_class": "machine_gun",
+  "rounds_per_item": 30,
+  "projectile": {
+    "damage": 8.0,
+    "speed": 46.0,
+    "gravity": 0.0235,
+    "range": 1500.0,
+    "ricochet": 22.0,
+    "tracer": "FFEFC0"
+  }
+}

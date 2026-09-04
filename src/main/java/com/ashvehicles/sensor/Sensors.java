@@ -13,6 +13,7 @@ import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.network.SensorPayload;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.weapon.TargetLock;
+import com.ashvehicles.weapon.WeaponDefinition;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -213,16 +214,36 @@ public final class Sensors {
      *
      * <p>相手のシーカーはレーダーより重い。スコープに載っているのは今日の午後の話だが、シーカーに入って
      * いるのは次の数秒の話。
+     *
+     * <p><b>ただし熱源シーカーは聞こえない。</b> 警戒受信機は「見る」のではなく「聞く」装置であり、聞ける
+     * のは相手が出している物だけだ。レーダーシーカーは電波を出して返りを待つので、照射された側にはそれが
+     * 届く。赤外線ヘッドは受動素子で、何も出さずにこちらの排気を眺めているだけなので、出ていない物を聞き
+     * 取る方法は無い。実機の警戒受信機が IR ミサイルのロックを教えないのはこれが理由であり、赤外線誘導弾
+     * が怖いのもこれが理由だ。
+     *
+     * <p><b>飛んできた物は別。</b> 発射されたミサイルは {@link #sweep} が直接見つけており、こちらの経路を
+     * 通らない。撃たれたことは撃たれた瞬間に分かる——分からないのは撃たれる前の数秒だけだ。フレアを撒く
+     * 判断はそこから始まる。
      */
     @Nullable
     private Threat.Kind attentionFrom(VehicleEntityBase other) {
         TargetLock lock = other.lock();
 
-        if (lock != null && lock.target() == this.vehicle) {
+        if (lock != null && lock.target() == this.vehicle && audible(lock.seeker())) {
             return lock.isLocked() ? Threat.Kind.LOCK : Threat.Kind.SEARCH;
         }
 
         return other.getSensors().paints(this.vehicle) ? Threat.Kind.SEARCH : null;
+    }
+
+    /**
+     * そのシーカーが、捉えている相手に自分の存在を知らせてしまうか。
+     *
+     * <p>電波を出す物だけ。熱を見る物は何も出さない。人が据える3つ——光点・座標・視線——はそもそもここへ
+     * 来ない（{@code WeaponMounts.seekerOf} がシーカーとして扱わない）が、来たとしても答えは同じだ。
+     */
+    private static boolean audible(@Nullable WeaponDefinition.Guidance.Seeker seeker) {
+        return seeker == WeaponDefinition.Guidance.Seeker.RADAR;
     }
 
     /**

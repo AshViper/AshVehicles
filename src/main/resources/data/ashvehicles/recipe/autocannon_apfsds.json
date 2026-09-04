@@ -1,0 +1,27 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_ammo",
+  "tab": "ammo",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 1
+    },
+    {
+      "tag": "c:ingots/copper",
+      "count": 1
+    },
+    {
+      "item": "minecraft:gunpowder",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 3,
+    "id": "ashvehicles:autocannon_apfsds"
+  }
+}

@@ -9,6 +9,7 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.item.AmmoItem;
+import com.ashvehicles.item.AmmunitionItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
@@ -16,6 +17,7 @@ import com.ashvehicles.vehicle.Ride;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.weapon.AmmoKind;
 import com.ashvehicles.weapon.BuiltInGun;
+import com.ashvehicles.weapon.Magazine;
 import com.ashvehicles.weapon.TargetLock;
 import com.ashvehicles.weapon.TurretLauncher;
 import com.ashvehicles.weapon.WeaponDefinition;
@@ -126,13 +128,25 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final EntityDataAccessor<Integer> DATA_MISSILE_RELOAD =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     /**
+     * 架台ごとの弾種別の残弾と、今どの弾種を選んでいるか。
+     *
+     * <p>弾種を並べた車両でだけ中身を持つ。並べていない車両——MOD 内の大半——では空のまま一度も書かれず、
+     * 上の残弾カウンタが従来通り唯一の値になる。{@link com.ashvehicles.weapon.Magazine} 参照。
+     *
+     * <p>数値ではなくタグで送るのは、数える対象が車両ファイル次第で1個から任意個になるから。同期データの
+     * 枠は宣言時に固定なので、可変長の物はタグ1つに畳むしかない。中身は架台ごとに小さな整数が数個で、
+     * 書き込みは装填・切り替え・発砲のときだけだ。
+     */
+    private static final EntityDataAccessor<CompoundTag> DATA_MAGAZINE =
+            SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.COMPOUND_TAG);
+    /**
      * トリガーがどちらの兵装を撃つか。
      *
      * <p>計器がこれを元に描かれ、決めるのがサーバーなので同期する。キー入力はパケットで届き、他の全クライアント
      * は乗員が見ているのと同じ照準を描かねばならない。
      */
-    private static final EntityDataAccessor<Boolean> DATA_MISSILE_MODE =
-            SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Integer> DATA_ARMAMENT =
+            SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.INT);
     /**
      * シーカーが捉えている対象のエンティティ番号と、ロックの進行度。
      *
@@ -279,7 +293,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 届く手段になる——クライアントが運転中の車両にサーバーが反動を加えても、直後のクライアント報告が速度を
      * 上書きしてしまうため。
      */
-    private int reloadWas;
 
     /** 運転手が操る方位。Minecraft 流の度数で、0 が +Z 方向。 */
     private float heading;
@@ -323,8 +336,25 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 車両の総走行距離（ブロック）。転輪の回転はこれから求める。長距離走行で精度を失わないよう1回転内に
      * 丸め込んである。
      */
-    private float trackDistance;
-    private float trackDistanceO;
+    /**
+     * 左右の履帯が送った距離。別々に持つ。
+     *
+     * <p>1つで足りていたのは、車体が真っ直ぐ走る間だけ両側が同じだけ回るからだ。超信地旋回では車体は1
+     * ブロックも進まないまま両履帯が逆向きに回っており、そこが装軌車両の見どころでもある。1つの距離では
+     * その場面が「履帯の止まった戦車がその場で回る」になる。
+     */
+    private float trackLeft;
+    private float trackLeftO;
+    private float trackRight;
+    private float trackRightO;
+    /**
+     * この tick に操舵が車体を回した角度（度）。右回りが正。
+     *
+     * <p>履帯の送りを求めるのに要る。旋回中の外側履帯は車体より速く、内側は遅く——超信地旋回では逆向きに
+     * ——回る。{@link #steer} が求めた値をそのまま使う。方位の差分から取り直すと、地面が与える向きの変化
+     * まで拾ってしまう。
+     */
+    private float turned;
 
     /** 操舵輪の切れ角（度）と、その前tick値。 */
     private float steerAngle;
@@ -399,7 +429,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         builder.define(DATA_COAX_RELOAD, 0);
         builder.define(DATA_MISSILES, 0);
         builder.define(DATA_MISSILE_RELOAD, 0);
-        builder.define(DATA_MISSILE_MODE, false);
+        builder.define(DATA_MAGAZINE, new CompoundTag());
+        builder.define(DATA_ARMAMENT, Armament.MAIN.ordinal());
         builder.define(DATA_LOCK_TARGET, -1);
         builder.define(DATA_LOCK_PROGRESS, 0.0F);
         builder.define(DATA_DESIGNATED, -1);
@@ -437,6 +468,53 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     /** 満載時の主砲弾数。 */
     public int getRoundCapacity() {
         return this.gun.capacity();
+    }
+
+    /**
+     * トリガーが向けられる兵装。切り替えはこの順に回る。
+     *
+     * <p>並び順が切り替えの順序そのものになる。砲、機関銃、ミサイル——砲手が実際に手を伸ばす順で、
+     * 積んでいない物は飛ばされる。
+     *
+     * <p><b>機関銃がここに居るのは新しい。</b> 以前は選択の対象ではなく、専用の引き金だけを持っていた
+     * ——「主兵装が何をしていようとそこにある」のが同軸機銃だという理由で。その引き金は今も残っている。
+     * ここへ加えたのは選択肢としての機関銃で、専用の引き金を置き換えた訳ではない。
+     */
+    public enum Armament {
+        /** 主砲。 */
+        MAIN,
+        /** 機関銃。専用の引き金も別に持つ。 */
+        COAX,
+        /** 発射筒のミサイル。 */
+        MISSILE;
+
+        /** 添字で引くための不変の配列。{@code values()} は呼ぶたびに複製を作る。 */
+        public static final Armament[] VALUES = values();
+
+        /** この車両がその兵装を積んでいるか。 */
+        boolean exists(GroundVehicleEntity vehicle) {
+            return switch (this) {
+                case MAIN -> vehicle.getStats().armament().exists();
+                case COAX -> vehicle.hasCoaxial();
+                case MISSILE -> vehicle.hasMissiles();
+            };
+        }
+
+        /** 同期用の添字から。範囲外なら主砲。 */
+        static Armament byIndex(int index) {
+            return index >= 0 && index < VALUES.length ? VALUES[index] : MAIN;
+        }
+
+        /** セーブされた名前から。読めなければ主砲。 */
+        static Armament byName(String name) {
+            for (Armament armament : VALUES) {
+                if (armament.name().equals(name)) {
+                    return armament;
+                }
+            }
+
+            return MAIN;
+        }
     }
 
     /** この車両が機関銃を積んでいるか。 */
@@ -512,21 +590,113 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 切り替える物を持ち、そこでだけフラグに意味がある。
      */
     public boolean isMissileMode() {
-        if (!this.hasMissiles()) {
-            return false;
-        }
-
-        if (!this.getStats().armament().exists()) {
-            return true;
-        }
-
-        return this.entityData.get(DATA_MISSILE_MODE);
+        return this.selected() == Armament.MISSILE;
     }
 
-    /** 2種積む車両で兵装を切り替える。1種しか無い車両では何もしない。 */
+    /** トリガーが機関銃を撃つか。同軸機銃はこれとは別に専用の引き金も持ち続ける。 */
+    public boolean isCoaxMode() {
+        return this.selected() == Armament.COAX;
+    }
+
+    /**
+     * 弾種別の残弾を持つタグ。書き換えるのは {@link com.ashvehicles.weapon.Magazine} だけで、それ以外は
+     * 読むだけ。
+     */
+    public CompoundTag getMagazineTag() {
+        return this.entityData.get(DATA_MAGAZINE);
+    }
+
+    public void setMagazineTag(CompoundTag tag) {
+        this.entityData.set(DATA_MAGAZINE, tag);
+    }
+
+    /**
+     * どれか1つの架台の残弾。3組ある同じ形のカウンタを、架台を引数に取る1組にまとめた物。
+     *
+     * <p>弾倉が弾種を持つ車両では、この値は「選択中の弾種の残弾」であって積んでいる全部ではない。
+     * 弾種を知らずに残弾だけを読む側——計器も、装填完了の判定も、発砲の可否も——がそのまま正しくいられる
+     * のはそのためだ。{@link com.ashvehicles.weapon.Magazine} 参照。
+     */
+    public int getRounds(Armament station) {
+        return switch (station) {
+            case MAIN -> this.getRounds();
+            case COAX -> this.getCoaxRounds();
+            case MISSILE -> this.getMissiles();
+        };
+    }
+
+    public void setRounds(Armament station, int rounds) {
+        switch (station) {
+            case MAIN -> this.setRounds(rounds);
+            case COAX -> this.setCoaxRounds(rounds);
+            case MISSILE -> this.setMissiles(rounds);
+        }
+    }
+
+    /**
+     * 今トリガーが向いている架台に装填されている弾種。弾種を持たない架台では null で、そのときは兵装
+     * ファイル自身が書いた弾が出る。
+     *
+     * <p>撃つ側と照準器と計器が同じ物を必要とするので、問い合わせ先は1つ。
+     */
+    @Nullable
+    public ResourceLocation getSelectedAmmunition() {
+        return Magazine.selected(this, this.selected());
+    }
+
+    /**
+     * 今トリガーが向いている兵装。
+     *
+     * <p>保存された値をそのまま信じない。車両が積んでいない物が選ばれていることがあるからだ——別の車両で
+     * 使った番号がそのまま入ってきた時、パックが兵装を書き換えた時、そして「1種しか積まないので選択に
+     * 意味が無い」時。積んでいなければ、積んでいる最初の物へ落とす。だから片方しか持たない車両に
+     * 「どちらを選択中か」を教える必要がない。
+     */
+    public Armament selected() {
+        Armament stored = Armament.byIndex(this.entityData.get(DATA_ARMAMENT));
+
+        if (stored.exists(this)) {
+            return stored;
+        }
+
+        for (Armament armament : Armament.VALUES) {
+            if (armament.exists(this)) {
+                return armament;
+            }
+        }
+
+        return Armament.MAIN;
+    }
+
+    /**
+     * 積んでいる兵装を順に切り替える。積んでいない物は飛ばす。
+     *
+     * <p>1種しか積まない車両では1周して同じ物に戻るので、何も起きない。
+     */
     public void cycleWeapon() {
-        if (this.hasMissiles() && this.getStats().armament().exists()) {
-            this.entityData.set(DATA_MISSILE_MODE, !this.entityData.get(DATA_MISSILE_MODE));
+        Armament now = this.selected();
+        // 同じ架台にまだ次の弾種があるなら、切り替えはそこへ行く。実際の砲手が最も頻繁に行う切り替えは
+        // 「主砲から機銃へ」ではなく「徹甲弾から榴弾へ」であり、どちらも同じ1つのキーで済むべきだ。
+        // 弾種を並べていない車両では next が常に null になり、以下は以前とまったく同じ処理になる。
+        ResourceLocation nextRound = Magazine.next(this, now);
+
+        if (nextRound != null) {
+            Magazine.select(this, now, nextRound);
+
+            return;
+        }
+
+        for (int step = 1; step <= Armament.VALUES.length; step++) {
+            Armament next = Armament.VALUES[(now.ordinal() + step) % Armament.VALUES.length];
+
+            if (next.exists(this)) {
+                this.entityData.set(DATA_ARMAMENT, next.ordinal());
+                // 架台へ入り直したら先頭の弾種から。そうしないと、一度末尾まで送った架台は二度と先頭を
+                // 通らず、切り替えが一巡しても戻ってこない弾種が残る。
+                Magazine.rewind(this, next);
+
+                return;
+            }
         }
     }
 
@@ -812,7 +982,44 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         //
         // 起き上がる分だけ滑らかに止める。据えた瞬間に固まるのではなく、架台が立つのに合わせて車体が落ち着く
         // ——ジャッキが降りていく絵として読める。
-        return planted <= 0.0F ? ride : Ride.between(ride, Ride.LEVEL, planted);
+        return this.rock(planted <= 0.0F ? ride : Ride.between(ride, Ride.LEVEL, planted), partialTick);
+    }
+
+    /**
+     * 発砲の反動で車体をバネの上に沈める。
+     *
+     * <p><b>車両は動かない。</b> 60トンの装軌車体は砲を撃っても目に見えて動かないし、撃つたび後ろへ滑る
+     * 車体は重量感ではなく不具合に見える。だが車体はトーションバーの上で確かに<em>座る</em>——それがこれだ。
+     *
+     * <p>地面が与える揺れと同じ変位に足す。だから走行装置は {@code GroundVehicleModel.plant} と
+     * {@link com.ashvehicles.client.model.TrackBelt} が地面へ戻す分だけ元の位置に留まり、その上で車体だけが
+     * 傾く。段差を越えるときの動きと同じ経路を通っており、実物の反動もまさに同じバネが受ける。
+     *
+     * <p>砲の向いている方へ倒れる。前を向いた砲は車首を上げ、真横を向いた砲は車体を反対側へ傾ける。
+     * 斜め向きの砲はその両方を、成分の分だけ。
+     *
+     * <p>状態を持たない。装填カウンタが発砲した瞬間を既に知っており（{@link #getRecoil} 参照）、砲身の
+     * 後座を描いているのと同じ値だ。だから揺れは後座と正確に同じ時間だけ続き、同時に収まる。
+     */
+    private Ride rock(Ride ride, float partialTick) {
+        float recoil = this.getRecoil(partialTick);
+        float rock = this.getStats().armament().rockDegrees();
+
+        if (recoil <= 0.0F || rock <= 0.0F) {
+            return ride;
+        }
+
+        Vec3 aim = this.getAimDirection(partialTick);
+        Vec3 nose = this.headingVector();
+        // 車体の右手。方位を4分の1回した向きで、砲が真横を向いているかを測るのに要る。
+        Vec3 right = new Vec3(-nose.z, 0.0, nose.x);
+        float swing = rock * recoil;
+
+        // 車首を上げるのは正のピッチ。右へ撃った車体は左へ傾き、それは負のリーンだ。どちらの符号も
+        // GroundVehicleRenderer.applyBodyMotion が読む向きに合わせてある。
+        return new Ride(ride.heave(),
+                ride.pitch() + swing * (float) aim.dot(nose),
+                ride.lean() - swing * (float) aim.dot(right));
     }
 
     /**
@@ -1066,9 +1273,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 1パケット使うのは無駄だからだ。補間は2つの角度のブレンドではなく距離を進めて行う。全速の戦車の転輪は
      * 1tickでほぼ1回転するうえ、角度は折り返されるためだ。
      */
-    public float getWheelAngle(float partialTick) {
+    public float getWheelAngle(float partialTick, boolean right) {
         float radius = Math.max(this.getStats().suspension().wheelRadius(), 0.05F);
-        float distance = Mth.lerp(partialTick, this.trackDistanceO, this.trackDistance);
+        float distance = right
+                ? Mth.lerp(partialTick, this.trackRightO, this.trackRight)
+                : Mth.lerp(partialTick, this.trackLeftO, this.trackLeft);
 
         return distance / (float) (2.0 * Math.PI * radius) * 360.0F;
     }
@@ -1282,7 +1491,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.attitudeO = new Quaternionf(this.attitude);
         this.turretYawO = this.turretYaw;
         this.gunPitchO = this.gunPitch;
-        this.trackDistanceO = this.trackDistance;
+        this.trackLeftO = this.trackLeft;
+        this.trackRightO = this.trackRight;
 
         if (this.isControlledByLocalInstance()) {
             // 座席が空: ブレーキが掛かり惰性で停止する。運転手が降りた時点の動きを引き継ぎ、足元で急停止
@@ -1325,13 +1535,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 // トリガーは乗員が選択中の兵装だけに届く。もう一方も tick は回り続ける。砲は選択の有無に
                 // かかわらず装填を進めるし、シーカーは発射筒が選択されていなくても捜索を続ける——それが
                 // 航空機へ「追尾されている」と警告する仕組みだ。TurretLauncher 参照。
-                boolean missiles = this.isMissileMode();
+                Armament selected = this.selected();
 
-                this.gun.tick(this.input.fire() && !missiles);
-                this.launcher.tick(this.input.fire() && missiles, this.input.lock());
+                this.gun.tick(this.input.fire() && selected == Armament.MAIN);
+                this.launcher.tick(this.input.fire() && selected == Armament.MISSILE, this.input.lock());
                 // 同軸機銃は2択のどちらでもない。独自のトリガーを持ち同じ砲架で据えられるので、既に目標へ
                 // 照準している砲手は主兵装を仕舞わずに掃射できる——同軸機銃の存在理由そのものだ。
-                this.coax.tick(this.input.coax());
+                // 選択されていれば主トリガーでも撃つ。専用の引き金は残したままなので、機関銃を選んで
+                // いない砲手も今まで通り掃射できる——同軸機銃の存在理由はそのままにして、切り替えでも
+                // 選べるようにした形。
+                this.coax.tick(this.input.coax()
+                        || (this.input.fire() && selected == Armament.COAX));
                 this.reportSeeker();
                 this.tickDesignation();
                 this.getSensors().tick();
@@ -1366,7 +1580,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         this.steer(definition.powertrain());
         this.accelerate(definition.powertrain(), definition.suspension());
-        this.absorbRecoil(definition.armament());
         this.travel();
 
         // 船が戦車と異なるのは車体の支えられ方だけで、違いはそれが全てだ。戦車は履帯下の地面に沿って寝、
@@ -1403,6 +1616,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 無いし、右へ倒したレバーは右へ回すべきだ。速度を参照するのは進行方向が存在してからでよい。
      */
     private void steer(GroundVehicleDefinition.Powertrain powertrain) {
+        this.turned = 0.0F;
+
         // 水から出た船は走れないのと同様に曲がれない。船体の下に舵もスクリューも噛む物が無い。
         if (this.getStats().isShip() && !this.afloat) {
             return;
@@ -1420,6 +1635,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         float astern = this.speed < -STANDSTILL ? -1.0F : 1.0F;
         float turn = this.input.steer() * rate * astern;
 
+        this.turned = turn;
         this.heading = Mth.wrapDegrees(this.heading + turn);
         this.setYRot(this.heading);
         // 砲塔が照準するのは車体ではなくワールドなので、車体が今行った回転を——どちら向きであれ——巻き戻す。
@@ -1514,28 +1730,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return (float) Math.toDegrees(Math.atan2(rise + 1.0, span));
     }
 
-    /**
-     * 発砲の反動。運転している側が処理する。
-     *
-     * <p>効くのは車体軸方向成分だけ。車首方向へ据えた砲は戦車を真後ろへ押すが、真横へ据えた砲が60トンの装軌
-     * 車体を横滑りさせることはない——揺れるだけで、この車体は揺れをモデル化していないので真横では何も起きない。
-     *
-     * <p>通知ではなく装填カウンタから読む。カウンタが跳ね上がったtickが発砲したtickだからだ。クライアントが
-     * 運転中の車両にサーバーが直接適用することはできない。クライアントの次の報告が自身の速度を運んできて、
-     * そのtick内で上書きしてしまう。
-     */
-    private void absorbRecoil(GroundVehicleDefinition.Armament armament) {
-        int reload = this.getReload();
-        boolean fired = reload > this.reloadWas;
-        this.reloadWas = reload;
-
-        if (!fired || armament.kick() <= 0.0F) {
-            return;
-        }
-
-        double along = this.getAimDirection(1.0F).dot(this.headingVector());
-        this.speed -= (float) (along * armament.kick());
-    }
 
     /**
      * 車両を地図上で動かす。車首方向へは駆動系が決めた速度で、横方向へはまだ止まりきっていない滑り分だけ。
@@ -2138,15 +2332,30 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.steerAngle = approach(this.steerAngle, this.getSteerInput() * lock, lock * STEER_SWING);
     }
 
-    /** 1tick分の走行距離だけ転輪を回す。1回転内に収める。 */
+    /**
+     * 1tick分の走行距離だけ転輪を回す。1回転内に収める。
+     *
+     * <p><b>左右で違う距離を送る。</b> 旋回中、外側の履帯は車体の中心より長い弧を、内側は短い弧を描く。
+     * 速度0でその場で回る超信地旋回では、車体は1ブロックも進まないまま両履帯が逆向きに同じだけ回っており
+     * ——装軌車両がその場で向きを変えられる理由がそれだ——車体の速度だけを見ていると履帯が止まって見える。
+     */
     private void windTrack(float travelled) {
         float circumference = (float) (2.0 * Math.PI * Math.max(this.getStats().suspension().wheelRadius(), 0.05F));
+        // 片側が中心から離れている距離は車体半幅とした。実際の輪距はそれより少し狭いが、この値が決めるのは
+        // 「旋回中に履帯がどれだけ速く流れるか」だけで、当たり判定にも走行にも一切影響しない。
+        float swing = (float) Math.toRadians(this.turned) * this.getStats().hitbox().width() * 0.5F;
 
-        this.trackDistance = (this.trackDistance + travelled) % circumference;
+        this.trackLeft = (this.trackLeft + travelled + swing) % circumference;
+        this.trackRight = (this.trackRight + travelled - swing) % circumference;
+
         // 継ぎ目の両側で折り返す。0をまたいで後進したとき、前回距離が丸1回転ぶん離れてしまい、1フレームだけ
         // 車輪が逆回転するのを防ぐ。
-        if (Math.abs(this.trackDistance - this.trackDistanceO) > circumference * 0.5F) {
-            this.trackDistanceO = this.trackDistance;
+        if (Math.abs(this.trackLeft - this.trackLeftO) > circumference * 0.5F) {
+            this.trackLeftO = this.trackLeft;
+        }
+
+        if (Math.abs(this.trackRight - this.trackRightO) > circumference * 0.5F) {
+            this.trackRightO = this.trackRight;
         }
     }
 
@@ -2363,6 +2572,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 弾薬箱は搭乗より先に見る。砲弾を抱えて戦車へ歩み寄る者は装填したいのであって、乗り込みたいので
         // はない。入る場所が無ければクリックは素通りして通常どおり乗車になる——満載の車両を撫でて弾薬を
         // 1個失うことは起きない。
+        // 名前の付いた1弾種は、汎用の弾薬箱より先に見る。徹甲弾を抱えて歩み寄る者は、その弾を積みたい
+        // のであって「砲弾なら何でも」ではない。
+        if (held.getItem() instanceof AmmunitionItem round) {
+            InteractionResult loaded = this.loadRound(player, held, round.getAmmunitionId());
+
+            if (loaded.consumesAction()) {
+                return loaded;
+            }
+        }
+
         if (held.getItem() instanceof AmmoItem ammo) {
             InteractionResult loaded = this.loadAmmo(player, held, ammo.getKind());
 
@@ -2390,6 +2609,51 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // しようと降りた乗員はすぐ乗り直したいのだ。force が飛ばす2つの検査は上で行っている——スニーク中は
         // 乗らない、満員の車両にも乗らない。
         return player.startRiding(this, true) ? InteractionResult.CONSUME : InteractionResult.PASS;
+    }
+
+    /**
+     * 手にある1弾種を、それを受け付ける架台へ積み込む。
+     *
+     * <p>汎用の弾薬箱（{@link #loadAmmo}）と対になる道。あちらは「砲弾なら入る」で、こちらは
+     * 「この弾種を並べている架台にだけ入る」。だから 120mm 徹甲弾を 125mm の戦車へ差し出しても何も
+     * 起きず、クリックは素通りして乗車になる。
+     *
+     * <p>探す順は主砲・同軸機銃・発射筒で、そこも汎用の箱と同じ。同じ弾種を2箇所が並べている車両では
+     * 主砲が先に満ちる。
+     *
+     * @return 何か入ったなら CONSUME。入らなければ PASS
+     */
+    private InteractionResult loadRound(Player player, ItemStack held, ResourceLocation round) {
+        if (this.isWrecked() || Math.abs(this.speed) > STANDSTILL) {
+            return InteractionResult.PASS;
+        }
+
+        int offered = held.getCount();
+
+        for (Armament station : Armament.VALUES) {
+            int capacity = switch (station) {
+                case MAIN -> this.gun.capacity();
+                case COAX -> this.coax.capacity();
+                case MISSILE -> this.launcher.capacity();
+            };
+            int taken = Magazine.load(this, station, round, capacity, offered);
+
+            if (taken == 0) {
+                continue;
+            }
+
+            held.consume(taken, player);
+            WeaponMounts.playLoadSound(this, true);
+            // 何がどこへ入ったかを言う。弾種を積む車両では「どの架台か」だけでは足りない——同じ架台が
+            // 3種類を持っているので、入ったのがどれかこそ知りたいことだ。
+            player.displayClientMessage(Component.translatable("message.ashvehicles.loaded_round",
+                    Component.translatable("item." + round.getNamespace() + "." + round.getPath()),
+                    Magazine.rounds(this, station, round), Magazine.total(this, station), capacity), true);
+
+            return InteractionResult.CONSUME;
+        }
+
+        return InteractionResult.PASS;
     }
 
     /**
@@ -2506,8 +2770,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.gun.load(tag);
         this.coax.load(tag);
         this.launcher.load(tag);
-        this.entityData.set(DATA_MISSILE_MODE, tag.getBoolean("MissileMode"));
-        this.reloadWas = this.getReload();
+        // 弾種の内訳は、上の3つが残弾カウンタを埋めた後で。弾種を持つ車両では内訳の方が正しく、
+        // カウンタはそこから改めて書き直される。内訳を持たない古いセーブの分もここで振り分ける。
+        Magazine.restore(this, tag);
+        // 古いセーブは真偽値1つしか持っていない。その頃の「真」はミサイル、「偽」は主砲だった。
+        this.entityData.set(DATA_ARMAMENT, tag.contains("Armament")
+                ? Armament.byName(tag.getString("Armament")).ordinal()
+                : (tag.getBoolean("MissileMode") ? Armament.MISSILE : Armament.MAIN).ordinal());
     }
 
     @Override
@@ -2522,7 +2791,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.gun.save(tag);
         this.coax.save(tag);
         this.launcher.save(tag);
-        tag.putBoolean("MissileMode", this.isMissileMode());
+        Magazine.save(this, tag);
+        tag.putString("Armament", this.selected().name());
     }
 
     /**

@@ -30,9 +30,10 @@ import net.minecraft.world.phys.Vec3;
  * @param mass 金具そのものの重さ（kg）。実物の重量をそのまま書く——単装レールが40、多連装ラックが100
  *             あたり。機体の搭載可能重量から、その上に載る兵装と一緒に引かれる。爆弾4発を吊るために
  *             ラックを付けたパイロンは、ラックの分だけ先に重くなっている
+ * @param wingtip 翼端専用か。{@link #wingtip()} 参照
  */
 public record RackDefinition(boolean item, List<Vec3> stations, List<WeaponDefinition.Type> accepts,
-        float mass) {
+        float mass, boolean wingtip) {
     /** 自前の搭載位置を持たないラック。パイロン位置に1発だけ。 */
     private static final List<Vec3> SINGLE = List.of(Vec3.ZERO);
 
@@ -41,14 +42,17 @@ public record RackDefinition(boolean item, List<Vec3> stations, List<WeaponDefin
             Vec3.CODEC.listOf().optionalFieldOf("stations", List.of()).forGetter(RackDefinition::stations),
             WeaponDefinition.Type.CODEC.listOf().optionalFieldOf("accepts", List.of())
                     .forGetter(RackDefinition::accepts),
-            Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(RackDefinition::mass)
+            Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(RackDefinition::mass),
+            Codec.BOOL.optionalFieldOf("wingtip", false).forGetter(RackDefinition::wingtip)
     ).apply(instance, RackDefinition::new));
 
     /**
      * ゲームが読めるファイルが1つも無いラックに使う値。何でも受ける単装レールにして、正体不明のラックが
-     * 付いたステーションでも0発ではなく1発は積めるようにする。
+     * 付いたステーションでも0発ではなく1発は積めるようにする。翼端専用にはしない——正体が分からない物を
+     * 付く場所の少ない方へ倒す理由が無いからだ。
      */
-    public static final RackDefinition FALLBACK = new RackDefinition(true, List.of(), List.of(), 0.0F);
+    public static final RackDefinition FALLBACK = new RackDefinition(true, List.of(), List.of(), 0.0F,
+            false);
 
     /** このラック上の全搭載位置。パイロンからのオフセットで。空にはならない。 */
     public List<Vec3> places() {
@@ -75,5 +79,18 @@ public record RackDefinition(boolean item, List<Vec3> stations, List<WeaponDefin
     /** このラックがその兵装を積めるか。何も指定していないラックは何でも積める。 */
     public boolean takes(WeaponDefinition weapon) {
         return this.accepts.isEmpty() || this.accepts.contains(weapon.type());
+    }
+
+    /**
+     * これが翼端レールか。翼が終わる場所そのものへ、翼桁の先端に留めて前後へ伸びる金具——F-16 や F-2 が
+     * サイドワインダーを提げている、あのランチャーだ。
+     *
+     * <p>付く場所が普通のラックと排他になる唯一の値でもある。翼端レールは
+     * {@link com.ashvehicles.aircraft.AircraftDefinition.Hardpoint#wingtip() 翼端ステーション} にしか
+     * 付かず、翼端ステーションは翼端レールしか受けない。翼端に下面は無いので投下ラックの吊りようが無く、
+     * 翼端レールの側も翼桁の先端へボルト留めする物であって、パイロンの下に吊れる形をしていない。
+     */
+    public boolean wingtip() {
+        return this.wingtip;
     }
 }

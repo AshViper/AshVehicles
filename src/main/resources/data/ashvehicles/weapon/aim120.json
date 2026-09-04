@@ -14,7 +14,7 @@
     "thrust": 0.21,
     "burn_ticks": 480,
     "spool_ticks": 80,
-    "top_speed": 68.1,
+    "top_speed": 68.0,
     "gravity": 0.000188,
     "range": 0,
     "explosion": 5.0,

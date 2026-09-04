@@ -191,12 +191,12 @@
     }
   },
   "wing": {
-    "max_speed": 14,
+    "max_speed": 9.76,
     "stall_speed": 1.9,
     "lift": 0.0055,
     "lift_slope": 5,
     "stall_angle": 13,
-    "drag": 0.000045,
+    "drag": 0.000111,
     "induced_drag": 0.00022,
     "lateral_drag": 0.15,
     "ground_effect": 0.26,

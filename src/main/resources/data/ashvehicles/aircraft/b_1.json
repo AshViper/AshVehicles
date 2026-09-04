@@ -259,6 +259,8 @@
   },
   "model": {
     "scale": 1,
+    "bay_travel": 95,
+    "bay_cycle_ticks": 40,
     "bones": {
       "wing_left": "LWing",
       "wing_right": "RWing",
@@ -272,7 +274,13 @@
       "nose_gear": "FGear",
       "left_gear": "LGear",
       "right_gear": "RGear",
-      "nose_gear_door": "FGearHatch"
+      "nose_gear_door": "FGearHatch",
+      "bay_left": "LFHatch",
+      "bay_right": "RFHatch",
+      "bay_left_2": "LHatch",
+      "bay_right_2": "RHatch",
+      "bay_left_3": "LBHatch",
+      "bay_right_3": "RBHatch"
     }
   },
   "engine": {
@@ -300,20 +308,20 @@
     }
   },
   "wing": {
-    "max_speed": 20.8,
+    "max_speed": 12,
     "stall_speed": 1.9,
     "lift": 0.0052,
     "lift_slope": 5.4,
     "stall_angle": 15,
-    "drag": 0.00004,
+    "drag": 0.000212,
     "induced_drag": 0.0003,
     "lateral_drag": 0.15,
     "ground_effect": 0.28,
     "span": 40,
     "sweep": {
       "travel": 52,
-      "spread_speed": 5.5,
-      "swept_speed": 11,
+      "spread_speed": 3.31,
+      "swept_speed": 5.47,
       "cycle_ticks": 100,
       "lift": 0.72,
       "drag": 0.62

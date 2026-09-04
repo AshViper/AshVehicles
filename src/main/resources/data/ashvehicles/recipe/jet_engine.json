@@ -13,7 +13,7 @@
       "item": "ashvehicles:engine"
     },
     "B": {
-      "item": "minecraft:blaze_powder"
+      "tag": "c:gems/quartz"
     }
   },
   "pattern": [

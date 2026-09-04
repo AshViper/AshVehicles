@@ -327,6 +327,17 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
         return sign(intoMachine(bone, new Vector3f(0.0F, 0.0F, 1.0F)).z());
     }
 
+    /**
+     * そのボーンが車体のどちら側に立っているか。+1 が右、-1 が左。
+     *
+     * <p>ロール名からは決して読まない。L と名の付いたボーンが右側にあるのはこの MOD では実績のある事故だし、
+     * ミラーで作った模型は名前ごと写る。読むのはピボットの X の符号と、その親の連鎖が模型の X 軸を機体の
+     * どちら向きへ運ぶかの積だ。半回転したルートの下では両方が同時に裏返るので、積は正しい側へ戻る。
+     */
+    protected static float machineSideX(GeoBone bone) {
+        return sign(bone.getPivotX()) * sign(intoMachine(bone, new Vector3f(1.0F, 0.0F, 0.0F)).x());
+    }
+
     /** ボーンの親の軸で表された方向を、親の連鎖を辿って機体の軸へ運ぶ。 */
     private static Vector3f intoMachine(GeoBone bone, Vector3f axis) {
         for (GeoBone up = bone.getParent(); up != null; up = up.getParent()) {

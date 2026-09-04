@@ -14,7 +14,7 @@
     "thrust": 0.22,
     "burn_ticks": 360,
     "spool_ticks": 120,
-    "top_speed": 48.6,
+    "top_speed": 43.0,
     "gravity": 0.0005,
     "range": 0,
     "explosion": 6.0,
@@ -29,7 +29,7 @@
   "guidance": {
     "turn_rate": 3.5,
     "lock_angle": 12.0,
-    "lock_range": 320.0,
+    "lock_range": 3000.0,
     "lock_ticks": 8,
     "track_angle": 60.0,
     "proximity": 2.0,

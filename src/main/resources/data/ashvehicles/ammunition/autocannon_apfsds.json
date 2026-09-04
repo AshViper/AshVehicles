@@ -1,0 +1,12 @@
+{
+  "gun_class": "autocannon",
+  "rounds_per_item": 30,
+  "projectile": {
+    "damage": 22.0,
+    "speed": 58.0,
+    "gravity": 0.0235,
+    "range": 2000.0,
+    "ricochet": 45.0,
+    "tracer": "FFEFC0"
+  }
+}

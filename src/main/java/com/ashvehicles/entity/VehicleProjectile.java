@@ -8,6 +8,7 @@ import com.ashvehicles.network.HitReportPayload;
 import com.ashvehicles.particle.TintedParticleOption;
 import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.vehicle.Hitbox;
+import com.ashvehicles.weapon.AmmunitionDefinition;
 import com.ashvehicles.weapon.Impact;
 import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponDefinition;
@@ -15,6 +16,7 @@ import com.ashvehicles.weapon.WeaponEffects;
 import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -35,8 +37,12 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -66,6 +72,18 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
     /** 自分を撃った兵装。クライアントが何を描き、どう振る舞うかを知るため。 */
     private static final EntityDataAccessor<String> DATA_WEAPON =
+            SynchedEntityData.defineId(VehicleProjectile.class, EntityDataSerializers.STRING);
+
+    /**
+     * その兵装がこの1発を撃ったときに薬室にあった弾種。無ければ空文字で、そのときは兵装ファイル自身が
+     * 書いた弾。
+     *
+     * <p><b>兵装名と並べて送る理由。</b> この弾の威力も落ち方も抗力も色も、両側が名前から引き直している
+     * ——サーバーは当たり判定のために、クライアントは曳光を描くために。名前だけ送って弾種を送らなければ、
+     * 同じ砲から出た徹甲弾と榴弾がクライアント上で同じ物になる。撃った瞬間に確定し以後変わらないので、
+     * 生成パケットが運ぶこの1つで足りる。
+     */
+    private static final EntityDataAccessor<String> DATA_AMMUNITION =
             SynchedEntityData.defineId(VehicleProjectile.class, EntityDataSerializers.STRING);
 
     /**
@@ -193,7 +211,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     private static final double RENDER_RANGE = 768.0;
 
     /**
-     * 1歩が跨ぐ chunk を何個まで歩くか。{@link #spanIsLoaded} の打ち切り。
+     * 1歩が跨ぐ chunk を何個まで歩くか。{@link #groundUnder} の打ち切り。
      *
      * <p>最も速い物でも1tickに40ブロック少々——斜めでも 4 chunk——なので、これは判定ではなく保険。
      */
@@ -221,6 +239,14 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     /** ただし限度はある。近距離で発射した直後の物が視界を埋めないための下限と上限。 */
     private static final double TRAIL_SPREAD_LEAST = 1.0;
     private static final double TRAIL_SPREAD_MOST = 6.0;
+    /**
+     * 一時的。上のトレースを出すかどうか。
+     *
+     * <p>普段は切ってある。あれが書くのは1発につき両側で毎tick 1行——20発の斉射なら320行——で、書くのは
+     * サーバースレッドだ。調査中だけ真にすること。定数なので、偽の間 {@link #trace} の中身はそもそも
+     * コンパイルされた経路に残らない。
+     */
+    private static final boolean TRACE = false;
     /** 一時的。上のトレースが兵装の飛行の何 tick 分を対象にするか。 */
     private static final int TRACE_TICKS = 8;
     /** モーター燃焼中、1tickあたりの噴煙の粒数。 */
@@ -286,7 +312,20 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * @param crew 引き金を引いた者。いれば
      */
     public void setup(ResourceLocation weapon, Entity vehicle, @Nullable Entity crew) {
+        this.setup(weapon, null, vehicle, crew);
+    }
+
+    /**
+     * @param weapon これが出てきた兵装
+     * @param ammunition その薬室にあった弾種。弾種を持たない兵装——MOD 内の大半——では null で、そのときは
+     *                   兵装ファイル自身が書いた弾になる
+     * @param vehicle 発射元。つまり当ててはいけない相手
+     * @param crew 引き金を引いた者。いれば
+     */
+    public void setup(ResourceLocation weapon, @Nullable ResourceLocation ammunition, Entity vehicle,
+            @Nullable Entity crew) {
         this.entityData.set(DATA_WEAPON, weapon.toString());
+        this.entityData.set(DATA_AMMUNITION, ammunition == null ? "" : ammunition.toString());
         this.firedFrom = vehicle;
         this.firedFromId = vehicle.getId();
         this.firedFromAt = vehicle.position();
@@ -310,6 +349,20 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     private WeaponDefinition weapon;
     private String weaponIdFrom = "";
     private int weaponVersion = -1;
+    /** 弾種についても同じ。同じ理由で、同じ頻度で訊かれる。 */
+    @Nullable
+    private ResourceLocation ammunitionId;
+    @Nullable
+    private AmmunitionDefinition ammunition;
+    private String ammunitionIdFrom = "";
+    private int ammunitionVersion = -1;
+    /**
+     * この tick、この弾のいる場所が演算されているか。{@link #tick} の頭で1度だけ求める。
+     *
+     * <p>1tickの間に何度も同じことを訊く箇所——衝突、シーカーの掃引、デコイの判定——が同じ答えを使うため。
+     * {@link #simulated()} 参照。
+     */
+    private boolean simulated = true;
 
     public ResourceLocation getWeaponId() {
         String raw = this.entityData.get(DATA_WEAPON);
@@ -345,13 +398,59 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         return current;
     }
 
+    /**
+     * 弾種の名前。撃たれたときに薬室にあった物で、無ければ null。
+     *
+     * <p>兵装名と同じく、届く文字列は1度だけ解析して持っておく。両側がこれを毎tick・毎フレーム訊く。
+     */
+    @Nullable
+    public ResourceLocation getAmmunitionId() {
+        String raw = this.entityData.get(DATA_AMMUNITION);
+
+        if (raw.isEmpty()) {
+            return null;
+        }
+
+        if (this.ammunitionIdFrom.equals(raw)) {
+            return this.ammunitionId;
+        }
+
+        this.ammunitionId = ResourceLocation.tryParse(raw);
+        this.ammunitionIdFrom = raw;
+        this.ammunition = null;
+
+        return this.ammunitionId;
+    }
+
+    /**
+     * この弾が飛んで当たるまでに何をするか。
+     *
+     * <p>弾種があればその弾のもので、無ければ兵装ファイル自身のもの。ここ1箇所を通るので、威力も落ち方
+     * も抗力も曳光の色も跳弾角も、他のどこも書き換えずに弾種で替わる。両側が同じ答えを得るのは、
+     * 弾種の名前が兵装名と一緒に届いているからだ。
+     */
     public WeaponDefinition.Projectile getRound() {
-        return this.getWeapon().projectile();
+        ResourceLocation id = this.getAmmunitionId();
+
+        if (id == null) {
+            return this.getWeapon().projectile();
+        }
+
+        AmmunitionDefinition current = this.ammunition;
+
+        if (current == null || this.ammunitionVersion != Definitions.version()) {
+            current = Definitions.ammunition(id);
+            this.ammunition = current;
+            this.ammunitionVersion = Definitions.version();
+        }
+
+        return current.projectile();
     }
 
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         builder.define(DATA_WEAPON, "");
+        builder.define(DATA_AMMUNITION, "");
         builder.define(DATA_LAUNCH, new Vector3f());
     }
 
@@ -610,20 +709,94 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         return true;
     }
 
+    /**
+     * 飛んでいる弾はディスクに書かない。
+     *
+     * <p><b>保存されない物は、消されもしない。</b> それがここの主目的だ。今まで弾は普通のエンティティ
+     * として chunk に属しており、その chunk がアンロードされる時に
+     * {@code PersistentEntitySectionManager.processChunkUnload} が弾を NBT へ書き出し、
+     * {@code RemovalReason.UNLOADED_TO_CHUNK} で世界から外していた。つまり<em>飛行中に消えていた</em>。
+     * {@link WeaponTicker} がロード済みの世界の外まで tick を運んでいるのは、まさにそれを起こさないため
+     * だったのに、機体の後ろで回廊が chunk を手放すたびに弾はそこで終わっていた。
+     *
+     * <p>そしてセーブのたびに、弾のいる chunk は1つ残らず訪問される
+     * （{@code getAllChunksWithExistingSections} は誰もロードしていない chunk も返す）。中身が空でない
+     * FRESH な section は {@code requestChunkLoad} を呼ぶので、誰も訪れたことのない土地のエンティティ
+     * 領域ファイルを読みに行く。{@code saveAll} に至っては、その1件ごとにサーバースレッドで
+     * {@code IOWorker.synchronize().join()} を回す。
+     *
+     * <p>戻ってくる価値も無い。弾の寿命は最長でも
+     * {@link WeaponDefinition.Projectile#UNBOUNDED_LIFETIME} の6000tick——5分——で、しかも
+     * {@code FiredFrom} も {@code Target} もネットワークIDで保存されている。IDは再起動で振り直されるので、
+     * 復元された弾が指す「撃った機体」は別人か存在しない何かだ。
+     *
+     * <p>同じ判断を {@link DesignationEntity} と {@link CountermeasureEntity} が既にしている。
+     *
+     * <p><b>{@code EntityType.Builder.noSave()} ではない。</b> あちらが消すのは NBT の中身だけで、
+     * ここが見ている {@code shouldBeSaved} は真のまま——section は弾を数え続け、上の
+     * {@code requestChunkLoad} も削除もそのまま起きる。効くのはこちらだけ。
+     */
+    @Override
+    public boolean shouldBeSaved() {
+        return false;
+    }
+
+    /**
+     * この弾がバニラのエンティティ tick を必要とするか。
+     *
+     * <p>{@code Entity.baseTick} がやっているのはポータル、流体、火、そして水しぶきで、そのどれもが弾の
+     * 箱が覆うブロックへの問い合わせから始まる。ロケットや爆弾——水に落ちれば跳ねるべきで、寿命も長い——
+     * には残す価値があるが、機関砲弾には1つも無い。0.2ブロックの曳光が水面に立てる波紋を見た者はいない。
+     *
+     * <p>{@code tickCount} と {@code xOld/yOld/zOld} はここが決めているのではなく、レベルのループが
+     * {@code tick()} を呼ぶ前に進めている（{@code ServerLevel.tickNonPassenger} と
+     * {@code ClientLevel.tickNonPassenger}）。だからこれを切っても描画の補間も、通過音が初弾を黙らせる
+     * 判定も、今まで通り動く。
+     */
+    protected boolean usesVanillaTick() {
+        return true;
+    }
+
+    /**
+     * 一時的。飛翔体1発分の tick を計測で挟む。中身は {@link #flightTick}。{@link WeaponProfile} 参照。
+     * 調査が終わったらこの包みを外し、下の中身をそのまま {@code tick()} に戻すこと。
+     */
     @Override
     public void tick() {
+        long started = WeaponProfile.open(this);
+
+        try {
+            this.flightTick();
+        } finally {
+            WeaponProfile.close(started, this.simulated);
+        }
+    }
+
+    private void flightTick() {
         // この tick の飛行の下にロード済みの地面があるかどうかが、以下のほぼ全部を決める。その外には当たる
         // 物も訊く価値のある物も無く、それでも訊くのが高くつく間違いだ。サーバーではその外のブロックや流体
         // を1回引くごとにその場・メインスレッドで chunk が生成されるので、空を横切るミサイル1発が1tickに
         // 30ブロック幅で新しい地形の回廊を刻んでいくことになる。訊くのは「チケットが在るか」ではなく
-        // 「chunk が在るか」。両者は同じ物ではない。spanIsLoaded 参照。
-        boolean overTheWorld = this.chunkIsThere(this.getX(), this.getZ());
+        // 「chunk が在るか」。両者は同じ物ではない。groundUnder 参照。
+        //
+        // その手前に、もっと大きい門が1枚ある。演算されていない場所にいる弾は世界にも、そこにいる物にも
+        // 一切問い合わせない——飛ぶだけ。simulated() 参照。
+        this.simulated = this.simulated();
+
+        // バニラの tick を必要としない弾は、その手前の問い合わせも要らない。boxIsOverTheWorld が在るのは
+        // super.tick() を安全にするためだけなので、super.tick() を呼ばないなら1発あたり毎tick 1〜4回の
+        // chunk 参照ごと消える。usesVanillaTick 参照。
+        boolean overTheWorld = this.usesVanillaTick() && this.simulated && this.boxIsOverTheWorld();
+
+        WeaponProfile.lap(WeaponProfile.GATE);
 
         if (overTheWorld) {
             super.tick();
         } else {
             this.tickBeyondTheWorld();
         }
+
+        WeaponProfile.lap(WeaponProfile.BASE);
 
         WeaponDefinition.Projectile round = this.getRound();
 
@@ -645,8 +818,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         // なる。パケットの間も両者は一致し、弾は描かれている方向へ進む。
         this.steer();
 
+        WeaponProfile.lap(WeaponProfile.STEER);
+
         if (!this.level().isClientSide) {
             Vec3 fuse = this.earlyDetonation();
+
+            WeaponProfile.lap(WeaponProfile.FUSE);
 
             if (fuse != null) {
                 this.detonate(fuse);
@@ -654,7 +831,9 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
                 return;
             }
 
-            HitResult hit = this.strike();
+            // 近接信管（上）は演算の外でも働く。あれが測るのは追っている相手までの距離だけで、世界にも
+            // 周囲にも問い合わせないからだ。当たり判定はここで止まる。
+            HitResult hit = this.simulated ? this.strike() : null;
             this.trace(hit);
 
             if (hit != null && hit.getType() != HitResult.Type.MISS && !EventHooks.onProjectileImpact(this, hit)) {
@@ -664,6 +843,8 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
                     return;
                 }
             }
+
+            WeaponProfile.lap(WeaponProfile.HIT);
         } else {
             this.trace(null);
             this.spawnTrail();
@@ -683,6 +864,8 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         if (!this.level().isClientSide) {
             WeaponTicker.flying(this);
         }
+
+        WeaponProfile.lap(WeaponProfile.MOVE);
     }
 
     /**
@@ -692,7 +875,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * たら削除すること。
      */
     private void trace(@Nullable HitResult hit) {
-        if (this.age > TRACE_TICKS || this.getWeapon().type() == WeaponDefinition.Type.GUN) {
+        if (!TRACE || this.age > TRACE_TICKS || this.getWeapon().type() == WeaponDefinition.Type.GUN) {
             return;
         }
 
@@ -770,18 +953,143 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     private HitResult strike() {
         Vec3 from = this.position();
         Vec3 to = from.add(this.getDeltaMovement());
+        BlockHitResult wall = null;
 
-        if (this.spanIsLoaded(from, to)) {
-            return ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        if (this.groundUnder(from, to) == Ground.IN_REACH) {
+            BlockHitResult inside = this.insideBlock(from);
+
+            if (inside != null) {
+                return inside;
+            }
+
+            wall = this.level().clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE, this));
+
+            // 壁に当たったなら、この歩はそこで終わっている。その先を探しても、当たれない物しか出てこない。
+            if (wall.getType() != HitResult.Type.MISS) {
+                to = wall.getLocation();
+            }
         }
 
-        return ProjectileUtil.getEntityHitResult(this.level(), this, from, to,
-                this.getBoundingBox().expandTowards(this.getDeltaMovement()).inflate(1.0),
+        // <b>箱も一緒に縮める。</b> バニラの {@code ProjectileUtil.getHitResult} は壁で終点を縮めるのに
+        // 箱は縮めない——1tickに50ブロック進む弾は、2ブロック先の壁に当たった tick でも 53ブロックの箱で
+        // エンティティセクションを歩き、その中の候補を1つずつ述語に掛ける。同じ斉射の前の一群がそこに
+        // いるので、候補はいつも数発ある。線分と同じ長さの箱に揃えれば、その全部が最初から入ってこない。
+        //
+        // {@code ProjectileUtil.getEntityHitResult} を自前のループに置き換えないこと。この MOD の当たり
+        // 判定は {@code HitScanMixin} があの呼び出しの戻り際に {@code Hitboxes.pick} を挿すことで成立
+        // している。傾いた箱に当てているのはそちらで、ここを通らなければ機体には一切当たらなくなる。
+        EntityHitResult struck = ProjectileUtil.getEntityHitResult(this.level(), this, from, to,
+                this.getBoundingBox().expandTowards(to.subtract(from)).inflate(1.0),
                 this::canHitEntity);
+
+        return struck != null ? struck : wall;
     }
 
     /**
-     * その1歩の下のブロックが、今そこに在って待たずに読めるか。
+     * 弾が今ブロックの中にいるなら、その場での命中。いなければ null。
+     *
+     * <p><b>掃引だけでは足りない。</b>線分の判定が捉えるのは「入った瞬間」だけで、始点が既に中にある線分
+     * には答えが無い——{@code AABB.clip} は箱の外から入る点を探す処理なので、中から始まった線は素通しに
+     * なる。つまり一度でも中へ入ってしまった弾は、その後どれだけ地形を通り抜けても永久に MISS を返し続け、
+     * 岩盤まで落ちていく。ログに残っていたのはまさにそれだ——地中 y=−47 を毎tick MISS で沈んでいく500kg爆弾。
+     *
+     * <p>どうやって中へ入ったかは、入ってしまえばもう関係ない。1tickだけ長い歩を踏んだか、壁の中で撃たれた
+     * か、地面が1tick遅れて届いたか。どれであっても、次のtickで「中にいる」と答えられれば弾はそこで炸裂
+     * する。掃引が入口を取り逃した時に、貫通を1tickで終わらせるための網だ。
+     *
+     * <p>訊くのは呼び出し側が地面の在ることを確かめた後だけ（{@link #strike} 参照）。ここで
+     * {@code getBlockState} を引くのは、その確認の外では chunk の生成をtickスレッドで走らせることになる。
+     */
+    @Nullable
+    private BlockHitResult insideBlock(Vec3 at) {
+        BlockPos pos = BlockPos.containing(at);
+        BlockState state = this.level().getBlockState(pos);
+        VoxelShape shape = state.getCollisionShape(this.level(), pos);
+
+        if (shape.isEmpty()) {
+            return null;
+        }
+
+        for (AABB box : shape.toAabbs()) {
+            if (box.move(pos).contains(at)) {
+                // 面は上向きと答える。中から出てきた命中に外向きの面は無く、これを読む物は
+                // {@code getLocation} と {@code getBlockPos} だけだ。
+                return new BlockHitResult(at, Direction.UP, pos, true);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * この弾が、世界に問い合わせてよい場所にいるか。この tick に自分で払ってよいコストの門。
+     *
+     * <p><b>判定はバニラのそれと同じ物。</b> {@code inEntityTickingRange} は「そこにいるエンティティを
+     * この tick に動かす価値があるか」に答える一行で、サーバーはそれで全エンティティを門前払いしている。
+     * この MOD の弾がその門を通れるのは {@link WeaponTicker} が別途 tick を運んでいるからで、あちらが
+     * 買っているのは<em>飛び続けること</em>だけだ。当たり判定まで一緒に買った覚えは無い。だからここで
+     * 同じ判定をもう一度引き、飛行と衝突を切り分ける。門の中では今まで通り全部やる。外では飛ぶだけ。
+     *
+     * <p><b>狙う価値のある相手の周りは、たいていその内側だ。</b> プレイヤーは自分を中心にシミュレーション
+     * 距離ぶん——既定で12 chunk、192ブロック——を entity ticking で開けており、この MOD の機体は乗員が
+     * プレイヤーである以上そこに含まれる。無人機は自分の回廊を {@code forceChunk(..., ticking = true)} で
+     * 開けている（{@link AircraftChunkLoader}）。だから400ブロック先の機体へ向かった弾は、相手の周りへ
+     * 入った時点で目を開け、そこから着弾までは今まで通りに判定する。閉じているのは、どちらの端でもない
+     * 途中の空だけだ。
+     *
+     * <p><b>近接信管はこの門の外側に置いてある。</b> {@link #earlyDetonation} が測るのは追っている相手
+     * までの距離だけで、世界にも周囲にも問い合わせない。だから誘導弾は、範囲の内外に関わらず追っている
+     * 相手の脇で炸裂する。これが効くのは、周りを誰も開けていない目標——{@link TargetDroneChunkLoader} は
+     * 意図的に ticking を立てないので標的ドローンがそれに当たる——に対してで、そこでは触れて起爆する
+     * 経路が閉じても信管が残る。逆に言えば、信管を持たない弾（{@code proximity} が0の物）は、誰も
+     * 開けていない空にいる相手には当たらなくなる。
+     *
+     * <p>クライアントでは常に真。あちらは元から何にも当たらず、何も壊さない。
+     */
+    private boolean simulated() {
+        if (!(this.level() instanceof ServerLevel level)) {
+            return true;
+        }
+
+        return level.getChunkSource().chunkMap.getDistanceManager()
+                .inEntityTickingRange(this.chunkPosition().toLong());
+    }
+
+    /**
+     * この tick、この弾のいる場所が演算されているか。周囲へ問い合わせる処理を持つ弾（シーカーの掃引、
+     * デコイの判定）が、飛行の途中で同じ答えを引くための入口。{@link #simulated()} 参照。
+     */
+    protected boolean isSimulated() {
+        return this.simulated;
+    }
+
+    /**
+     * その1歩の下に、この弾が当たり得るブロックがあるか。3つの答えがあり、当たり判定を行うのは1つ目
+     * だけ。
+     */
+    private enum Ground {
+        /** 地形がそこにあり、歩がその高さを通る。ブロックへ問い合わせる。 */
+        IN_REACH,
+        /** 地形はあるが、歩は最も高いブロックより上を通る。当たり得る物が無いので問い合わせない。 */
+        OVERHEAD,
+        /** この側がまだ持っていない chunk を跨ぐ。問い合わせること自体がワールド生成になる。 */
+        ABSENT
+    }
+
+    /**
+     * その1歩の下のブロックが、今そこに在って待たずに読めるか。そして歩がその高さを通るか。
+     *
+     * <p><b>高さで抜けるのがここの主目的だ。</b> {@code Level.clip} はブロック境界を跨ぐたびに1回ずつ
+     * ブロックと流体を引く——1tickに50ブロック進む機関砲弾なら1発につき毎tick 50〜90回で、100発/秒の砲は
+     * 常時150発近くを空に置く。その大半は高度数千を飛んでおり、読んでいるのは全部空気だ。跨ぐ chunk の
+     * 一番上の非空セクションより上を通る歩は、何にも当たり得ない。{@code getHighestFilledSectionIndex} は
+     * セクション配列を上から数えるだけ（各セクションは「空気だけか」を数値として持っている）なので、
+     * 数十回のブロック読みと引き換えに払うのは chunk あたり数回の配列参照になる。
+     *
+     * <p>判定は保守的に。返すのはその chunk の最上位の非空セクションの<em>天井</em>で、実際の地表では
+     * なく「そこから上には何も置けない線」だ。浮遊島も、雲の高さに置かれた足場も、そのセクションが空で
+     * なくなった時点で線が上がるので、抜けるのは本当に何も無い空だけになる。
      *
      * <p>「歩を囲む箱の chunk が全部ロード済みか」ではない。2か所で違う。
      *
@@ -800,8 +1108,10 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * 待つことになる。{@code getChunkNow} はロード済みの chunk か null しか返さないので、答えは「待たずに
      * 読めるか」になる。読めない chunk の下は、地形がまだ無いのと同じに扱う。
      */
-    private boolean spanIsLoaded(Vec3 from, Vec3 to) {
+    private Ground groundUnder(Vec3 from, Vec3 to) {
         ChunkSource chunks = this.level().getChunkSource();
+        // 歩の最も低い点。弾の箱は位置から上へ伸びるので、下端はそのまま位置の y になる。
+        double lowest = Math.min(from.y, to.y);
         int x = SectionPos.blockToSectionCoord(Mth.floor(from.x));
         int z = SectionPos.blockToSectionCoord(Mth.floor(from.z));
         int lastX = SectionPos.blockToSectionCoord(Mth.floor(to.x));
@@ -820,12 +1130,27 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         // 上限は保険。最も速い物でも1歩は 3 chunk 程度で、終端に着けば下で抜ける。浮動小数の縁で終端を
         // 踏み損ねた歩に、tick スレッドを回させないためだけの数値。
         for (int walked = 0; walked < SPAN_CHUNKS; walked++) {
-            if (chunks.getChunkNow(x, z) == null) {
-                return false;
+            ChunkAccess chunk = chunks.getChunkNow(x, z);
+
+            if (chunk == null) {
+                return Ground.ABSENT;
+            }
+
+            // 1つでも届く chunk があれば、この歩は地形の高さを通る。残りを数える意味は無い——どのみち
+            // 線分全体に対して1回 clip するので、答えはもう変わらない。
+            //
+            // 天井はその chunk の最上位の非空セクションの上面。空気しか入っていないセクションは
+            // hasOnlyAir が数値として持っている答えなので、ここはブロックを1つも引かない。
+            int filled = chunk.getHighestFilledSectionIndex();
+            int ceiling = filled < 0 ? chunk.getMinBuildHeight()
+                    : SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(filled) + 1);
+
+            if (lowest <= ceiling) {
+                return Ground.IN_REACH;
             }
 
             if (x == lastX && z == lastZ) {
-                return true;
+                return Ground.OVERHEAD;
             }
 
             if (edgeX < edgeZ) {
@@ -837,7 +1162,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
             }
         }
 
-        return false;
+        return Ground.ABSENT;
     }
 
     /**
@@ -856,12 +1181,51 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     }
 
     /**
-     * その位置の chunk が今そこに在るか。チケットが在るかではない。{@link #spanIsLoaded} の後半参照。
+     * その位置の chunk が今そこに在るか。チケットが在るかではない。{@link #groundUnder} の後半参照。
      */
     private boolean chunkIsThere(double x, double z) {
         return this.level().getChunkSource().getChunkNow(
                 SectionPos.blockToSectionCoord(Mth.floor(x)),
                 SectionPos.blockToSectionCoord(Mth.floor(z))) != null;
+    }
+
+    /**
+     * 弾が<em>丸ごと</em>ロード済みの地面の上にいるか。中心ではなく箱で訊く。
+     *
+     * <p>中心で訊くのでは足りない。{@code overTheWorld} が真なら {@code super.tick()} が走り、その中の
+     * {@code updateFluidHeightAndDoFluidPushing} は弾の<em>箱</em>が覆うブロックの流体を読む。バニラはその
+     * 手前に {@code touchingUnloadedChunk} を置いているが、あれが訊くのは {@code hasChunksAt}——つまり
+     * chunk の<em>チケット水準</em>であって、chunk が在るかではない（{@link #groundUnder} の後半と同じ
+     * 区別）。チケットだけ立って地形がまだ無い chunk はその判定を通り、続く {@code getFluidState} が
+     * 「無ければその場で生成して待つ」経路に入る。tick スレッドの上で、ワールド生成1回分。
+     *
+     * <p>そういう chunk はこの MOD ではむしろありふれている。機体は自分の前方の地面をチケットで先に頼み、
+     * 地形はその後から生成器のスレッドで届く（{@code AircraftChunkLoader}）。弾が飛ぶのはまさにその前方だ。
+     *
+     * <p>普通は 1 chunk しか訊かない。箱が境界に跨っている時だけ 2〜4 になる。
+     */
+    private boolean boxIsOverTheWorld() {
+        AABB box = this.getBoundingBox();
+        int minX = SectionPos.blockToSectionCoord(Mth.floor(box.minX));
+        int maxX = SectionPos.blockToSectionCoord(Mth.floor(box.maxX));
+        int minZ = SectionPos.blockToSectionCoord(Mth.floor(box.minZ));
+        int maxZ = SectionPos.blockToSectionCoord(Mth.floor(box.maxZ));
+
+        if (minX == maxX && minZ == maxZ) {
+            return this.level().getChunkSource().getChunkNow(minX, minZ) != null;
+        }
+
+        ChunkSource chunks = this.level().getChunkSource();
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (chunks.getChunkNow(x, z) == null) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -1160,11 +1524,16 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         this.burst(hit.getLocation(), this.level().getBlockState(hit.getBlockPos()));
     }
 
+    /** 既に炸裂の処理へ入っているか。連鎖爆発が同じ弾へ戻ってこないための印。{@link #burst} 参照。 */
+    private boolean bursting;
+
     /**
      * 着弾点で何をするか。炎と煙と削れた破片、そして炸薬があれば爆発。
      *
-     * <p>2つを分けているのは意図的だ。ロード済みの世界の外では爆発自体を起こさない——それは誰も頼んでいない
-     * 爆発で、まだ生成されていない地面を掘り返し、そのためにサーバースレッドで生成することになる。ただし
+     * <p>2つを分けているのは意図的だ。ロード済みの世界の外では地面を掘り返さない——まだ生成されていない
+     * 地形に穴を開けるには、そのためのワールド生成をサーバースレッドで走らせることになる。爆風そのものは
+     * 起きる（{@link com.ashvehicles.particle.Effects#blast} 参照。地面を1回も引かずにダメージと
+     * ノックバックだけを出す道がある）。そして
      * 見えることは見える。演出は下に世界があろうと無かろうと範囲内の全員へ送られる。400ブロック先の何かへ
      * ミサイルを当てたパイロットには、それが炸裂するのを見る権利が完全にあるし、見せる物の無い爆発音は
      * 外れと同じだから。
@@ -1184,12 +1553,30 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * @param into 入った相手。地面に着いた弾や信管切れの弾では null
      */
     protected void burst(Vec3 where, @Nullable BlockState struck, @Nullable Entity into) {
+        // 1発は1度しか炸裂しない。
+        //
+        // <p>{@link #discard} だけでは足りなかった。あれが走るのはこの処理の<em>最後</em>で、その手前の
+        // 爆風は既に走り終えている。だから隣り合った2発は互いを終わらせられない——A の爆風が B を撃ち、
+        // B の爆風が A を撃ち、その A はまだ生きているのでもう一度炸裂し、その爆風がまた B を撃つ。
+        // {@code Explosion.explode} は同じスタックの上で {@code hurt} を呼ぶので、これは往復ではなく
+        // 再帰であり、深さに上限が無い。ロケットポッドを1斉射すると StackOverflowError でサーバーが
+        // 落ちていた。
+        //
+        // <p>爆発が自分自身を撃つことは無い（{@code Level.getEntities} が発生源を除く）ので、必要なのは
+        // 「他の誰かに起こされた炸裂が、まだ炸裂の最中である弾へ戻ってきた時」を断ることだけだ。連鎖爆発は
+        // これまで通り起きる——1発が1度ずつ炸裂して、深さは巻き込まれた発数で止まる。
+        if (this.bursting || this.isRemoved()) {
+            return;
+        }
+
+        this.bursting = true;
+
         WeaponDefinition.Projectile round = this.getRound();
 
         if (this.level() instanceof ServerLevel level) {
             WeaponEffects.detonation(level, where, this.getDeltaMovement(), round, struck, isMachine(into));
 
-            if (round.explosion() > 0.0F && level.hasChunkAt(BlockPos.containing(where))) {
+            if (round.explosion() > 0.0F) {
                 WeaponEffects.blast(level, this, where, round);
             }
         }

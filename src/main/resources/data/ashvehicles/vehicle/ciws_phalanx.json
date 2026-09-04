@@ -1,0 +1,133 @@
+{
+  "hitbox": {
+    "width": 2.4,
+    "height": 4.7,
+    "tracking_range": 8,
+    "boxes": [
+      {
+        "name": "deck",
+        "offset": [0.0, 0.088, 0.0],
+        "size": [2.975, 0.175, 2.975]
+      },
+      {
+        "name": "mount_left",
+        "offset": [1.011, 1.33, 0.0],
+        "size": [0.621, 2.415, 1.925],
+        "mount": "turret"
+      },
+      {
+        "name": "mount_right",
+        "offset": [-1.011, 1.33, 0.0],
+        "size": [0.621, 2.415, 1.925],
+        "mount": "turret"
+      },
+      {
+        "name": "magazine",
+        "offset": [0.0, 1.837, 0.35],
+        "size": [1.4, 1.4, 2.625],
+        "mount": "gun"
+      },
+      {
+        "name": "mast",
+        "offset": [-0.175, 3.412, 0.0],
+        "size": [1.75, 1.75, 0.93],
+        "mount": "gun"
+      },
+      {
+        "name": "array",
+        "offset": [0.0, 4.43, 0.0],
+        "size": [1.25, 0.5, 2.75],
+        "mount": "gun"
+      },
+      {
+        "name": "barrels",
+        "offset": [0.0, 2.188, 2.712],
+        "size": [0.394, 0.394, 2.275],
+        "mount": "gun"
+      }
+    ]
+  },
+  "model": {
+    "scale": 1.4,
+    "bones": {
+      "turret": "turret",
+      "gun": "burrel"
+    }
+  },
+  "powertrain": {
+    "max_speed": 0.0,
+    "reverse_speed": 0.0,
+    "acceleration": 0.0,
+    "braking": 1.0,
+    "rolling_resistance": 1.0,
+    "steer_rate": 0.0,
+    "pivot_rate": 0.0,
+    "grade_resistance": 1.0,
+    "fuel": {
+      "capacity": 0.0,
+      "burn_rate": 0.0
+    }
+  },
+  "suspension": {
+    "climb_height": 0.0,
+    "slope_limit": 90,
+    "settle_rate": 0.4,
+    "grip": 1.0,
+    "wheel_radius": 0.1,
+    "contact_length": 2.975,
+    "contact_width": 2.975,
+    "travel": 0.0,
+    "stiffness": 1.0,
+    "damping": 1.0,
+    "dive": 0.0,
+    "lean": 0.0
+  },
+  "turret": {
+    "traverse_rate": 5.5,
+    "elevation_rate": 4.5,
+    "depression": 25,
+    "elevation": 85,
+    "ring": [0.0, 0.0, 0.0]
+  },
+  "armament": {
+    "main": "ashvehicles:m61",
+    "ammunition": [
+      "ashvehicles:autocannon_apfsds",
+      "ashvehicles:autocannon_he",
+      "ashvehicles:autocannon_heat"
+    ],
+    "trunnion": [0.0, 2.275, 0.0],
+    "barrel_length": 3.85,
+    "recoil": 0.04,
+    "recoil_ticks": 1
+  },
+  "hull": {
+    "health": 200,
+    "explosion_power": 3.0,
+    "salvage": 8,
+    "armour": 0,
+    "seats": [
+      [0.0, 0.2, -1.4]
+    ]
+  },
+  "camera": {
+    "pos": [0.0, 3.6, -9.0],
+    "tilt": 8,
+    "cockpit": [0.0, 1.45, -1.45]
+  },
+  "sound": {
+    "engine": "ashvehicles:engine.tank",
+    "volume": 0.25,
+    "idle_volume": 0.25,
+    "pitch_min": 1.6,
+    "pitch_max": 1.7,
+    "range": 40
+  },
+  "radar": {
+    "range": 1600,
+    "arc": 180,
+    "sweep_ticks": 4,
+    "warning_range": 2000
+  },
+  "type": "ground_vehicle"
+}

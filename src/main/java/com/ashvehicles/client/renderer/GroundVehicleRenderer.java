@@ -87,7 +87,8 @@ public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> 
 
         if (model != null && TrackBelt.isLink(animatable.getStats().model(), bone)
                 && TrackBelt.draw(model, animatable.getStats().model(), bone,
-                        animatable.getWheelAngle(partialTick), animatable.getRide(partialTick),
+                        animatable.getWheelAngle(partialTick, false),
+                        animatable.getWheelAngle(partialTick, true), animatable.getRide(partialTick),
                         animatable.getStats().suspension().travel(),
                         link -> super.renderRecursively(poseStack, animatable, link, renderType, bufferSource,
                                 buffer, isReRender, partialTick, packedLight, packedOverlay, colour))) {

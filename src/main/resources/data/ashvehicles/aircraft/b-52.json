@@ -200,11 +200,15 @@
   },
   "model": {
     "scale": 1,
+    "bay_travel": 95,
+    "bay_cycle_ticks": 45,
     "bones": {
       "aileron_left": "LFlap2",
       "aileron_right": "RFlap2",
       "flap_left": "LFlap",
-      "flap_right": "RFlap"
+      "flap_right": "RFlap",
+      "bay_left": "LHatch",
+      "bay_right": "RHatch"
     }
   },
   "engine": {
@@ -220,12 +224,12 @@
     }
   },
   "wing": {
-    "max_speed": 14.5,
+    "max_speed": 9.58,
     "stall_speed": 2.05,
     "lift": 0.005,
     "lift_slope": 5.2,
     "stall_angle": 14,
-    "drag": 0.00005,
+    "drag": 0.000116,
     "induced_drag": 0.00025,
     "lateral_drag": 0.15,
     "ground_effect": 0.25,

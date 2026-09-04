@@ -6,15 +6,21 @@ import com.ashvehicles.network.BlastSoundPayload;
 import com.ashvehicles.registry.ModParticles;
 
 import net.minecraft.core.Holder;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.util.Mth;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.ChunkSource;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -108,6 +114,23 @@ public final class Effects {
     private static final boolean NO_FIRE = false;
 
     /**
+     * これ未満の炸薬はバニラの爆発を通さない。穴を開ける力が無いのに、開けようとする代金だけを払うから。
+     *
+     * <p><b>{@code Explosion.explode} の代金は半径に依存しない。</b> 光線は常に 16×16×16 の殻——1352本
+     * ——で、半径が決めるのは1本あたりの歩数だけだ。半径 0.35 の機関砲弾は1本あたり2〜3歩なので約2000回
+     * ブロックと流体を引き、その結果として石は1つも壊れない（石の爆発耐性は1歩で光線を使い切る）。毎秒
+     * 40発の機関砲で地面を舐めれば、それが毎tick 2発ぶん積み上がる。
+     *
+     * <p>代わりに使う {@link #shockwave} は世界を1回も引かずにダメージとノックバックを出す。この規模で
+     * 失うのは「土なら1ブロック削れたかもしれない」だけで、着弾の見た目と音は
+     * {@code WeaponEffects.detonation} が別に出しているので何も変わらない。
+     *
+     * <p>1.0 は、バニラの爆発が最も柔らかいブロックにようやく届き始める境界。榴弾も爆弾もこれより上に
+     * あり、下にいるのは機関砲の炸裂弾だけ。
+     */
+    private static final float CRATERLESS = 1.0F;
+
+    /**
      * エンジンが再生せず、再生できないと文句も言わない唯一の音。
      *
      * <p>バニラは爆発音・煙・ノックバックを1パケットに入れて64ブロック以内の全員へ送る。ノックバックは
@@ -196,12 +219,109 @@ public final class Effects {
      *              最大級の弾頭が画面を埋めないようにするが、地面に対して何をするかは弾頭の自由
      */
     public static void blast(ServerLevel level, @Nullable Entity source, Vec3 at, float power, int colour) {
+        // 掘り返す地面がそこに無いなら、掘り返しに行かせない。下の groundIsThere 参照。掘り返す力が
+        // そもそも無いなら、行かせる理由が無い。CRATERLESS 参照。爆風そのものはどちらの道でも起きる。
+        if (power < CRATERLESS || !groundIsThere(level, at, power)) {
+            shockwave(level, source, at, power);
+
+            return;
+        }
+
         float drawn = Mth.clamp(power, 1.0F, BIGGEST);
         ParticleOptions fireball = ModParticles.BLAST.get().of(colour, drawn * 0.3F);
 
         level.explode(source, Explosion.getDefaultDamageSource(level, source), null,
                 at.x, at.y, at.z, power, NO_FIRE, Level.ExplosionInteraction.MOB,
                 fireball, fireball, SILENCE);
+    }
+
+    /**
+     * 爆発が触りに行く範囲の地面が、待たずに読める形で全部そこに在るか。
+     *
+     * <p><b>これを訊かないと、爆発1回がワールド生成1回になる。</b> {@code Explosion.explode} はロード済み
+     * かどうかを一切確かめない。半径の1.7倍ほどまで光線を伸ばして道中の全ブロックを {@code
+     * Level.getBlockState} で引き、続いて半径の2倍の箱の中の全員について {@code Level.clip} で遮蔽を測る。
+     * そして {@code Level.getBlockState} は「在れば返す」処理ではない——無ければ<em>その場で生成させ、
+     * 完成するまで tick スレッドを止める</em>。高高度で分解した機体、ロード済み範囲の縁に落ちた爆弾、
+     * 描画範囲の外へ抜けていった弾。どれも、誰も開いていない地面の上で起きる。1回につき数 chunk 分の
+     * ワールド生成がサーバースレッドに乗り、それが「撃った物が遠くへ行くと TPS が落ちる」の正体だった。
+     *
+     * <p><b>チケットではなく chunk を訊く。</b> {@code hasChunkAt} が答えるのはチケット水準で、
+     * {@code getBlockState} が要求するのは完成した chunk だ。機体は自分の前方の地面をチケットで先に頼み、
+     * 地形はその後から届く（{@code AircraftChunkLoader}）ので、この2つが食い違う場所はこの MOD では
+     * ありふれている。{@code getChunkNow} は「待たずに読めるか」に答える。
+     *
+     * <p>誰かが普通に遊んでいる場所では常に真になる。プレイヤーの周りは全方向へ128ブロック以上ロード
+     * されているから。
+     */
+    private static boolean groundIsThere(ServerLevel level, Vec3 at, float power) {
+        // Explosion が触る2つの範囲のうち大きい方。ブロックを削る光線は半径の約1.73倍、巻き込む相手を
+        // 探す箱は半径の2倍まで伸びる。
+        double reach = power * 2.0 + 1.0;
+        ChunkSource chunks = level.getChunkSource();
+        int minX = SectionPos.blockToSectionCoord(Mth.floor(at.x - reach));
+        int maxX = SectionPos.blockToSectionCoord(Mth.floor(at.x + reach));
+        int minZ = SectionPos.blockToSectionCoord(Mth.floor(at.z - reach));
+        int maxZ = SectionPos.blockToSectionCoord(Mth.floor(at.z + reach));
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (chunks.getChunkNow(x, z) == null) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * 世界を1回も引かずに起こす爆風。ダメージもノックバックもそのままで、穴だけが開かない。
+     *
+     * <p>ロード済みの地面の外で使う。バニラの爆発をそのまま持ち込めない理由は上の {@link #groundIsThere}
+     * にある通りだが、だからといって「外では爆発が何もしない」にはしない。BVR で撃ち落とした機体の爆発が
+     * 僚機を巻き込まないのは、ロードの都合であってゲームの都合ではないからだ。
+     *
+     * <p>計算はバニラと同じ式で、違うのは遮蔽率を測らないことだけ——測るには光線の通り道のブロックが要り、
+     * それこそがここで引けない物だ。1.0 として扱う。そこに隠れられる地形は、無い。
+     *
+     * <p>ダメージ源は全員で1個を使い回す。機体は1発の打撃が複数の箱を経由して届いても1度しか効かないよう
+     * に、直前に受けた打撃を「その {@code DamageSource} で」覚えている。バニラの爆発も1個で回すので、
+     * ここで作り直すと同じ爆発が機体を箱の数だけ殴ることになる。
+     */
+    private static void shockwave(ServerLevel level, @Nullable Entity source, Vec3 at, float power) {
+        double reach = power * 2.0;
+        AABB caught = new AABB(at.x - reach - 1.0, at.y - reach - 1.0, at.z - reach - 1.0,
+                at.x + reach + 1.0, at.y + reach + 1.0, at.z + reach + 1.0);
+        DamageSource damage = Explosion.getDefaultDamageSource(level, source);
+
+        for (Entity entity : level.getEntities(source, caught)) {
+            double falloff = Math.sqrt(entity.distanceToSqr(at)) / reach;
+
+            if (falloff > 1.0) {
+                continue;
+            }
+
+            double dx = entity.getX() - at.x;
+            double dy = entity.getEyeY() - at.y;
+            double dz = entity.getZ() - at.z;
+            double gap = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (gap == 0.0) {
+                continue;
+            }
+
+            double strength = 1.0 - falloff;
+
+            entity.hurt(damage, (float) ((strength * strength + strength) / 2.0 * 7.0 * reach + 1.0));
+
+            double push = entity instanceof LivingEntity living
+                    ? strength * (1.0 - living.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE))
+                    : strength;
+
+            entity.setDeltaMovement(entity.getDeltaMovement()
+                    .add(dx / gap * push, dy / gap * push, dz / gap * push));
+        }
     }
 
     /**

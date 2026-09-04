@@ -155,9 +155,10 @@ public final class TrackBelt {
      * が地面から浮く。よって周回の各点も、転輪と同様、車体の動きが持ち上げた分だけちょうど戻す。すると帯は長さ方向に
      * たわむが、それはトーションバー上を動く車輪の上で実物の履帯がやることそのものだ。
      *
-     * @param wheelAngle 転輪の回転角（度）。周回はその車輪が転がった距離だけスクロールするので、リンクが車輪上で滑って
-     *                   見えることはない。1回転ごとに0へ戻るが、周回がそれに耐えられるのは {@link #rollRadius} の丸め
-     *                   のおかげだ
+     * @param wheelLeft 左側の転輪の回転角（度）。周回はその車輪が転がった距離だけスクロールするので、リンクが車輪上で
+     *                  滑って見えることはない。1回転ごとに0へ戻るが、周回がそれに耐えられるのは {@link #rollRadius} の
+     *                  丸めのおかげだ
+     * @param wheelRight 右側の同じ値
      * @param ride バネ上の車体の変位
      * @param wheelTravel 転輪が動いてよい距離（ブロック）。周回を戻す量の上限であり、それを超えると車輪と一緒にストッパー
      *                    に当たる
@@ -165,7 +166,7 @@ public final class TrackBelt {
      *         正直な答えだ
      */
     public static boolean draw(BakedGeoModel model, VehicleChassis.Model setup, GeoBone link,
-            float wheelAngle, Ride ride, float wheelTravel, LinkDrawer drawer) {
+            float wheelLeft, float wheelRight, Ride ride, float wheelTravel, LinkDrawer drawer) {
         Shape shape = shapeOf(model, setup, link);
 
         if (shape.belts().isEmpty()) {
@@ -180,6 +181,9 @@ public final class TrackBelt {
         boolean sprung = !ride.isLevel() && wheelTravel > 0.0F;
 
         for (Belt belt : shape.belts()) {
+            // 帯は自分の側の履帯として流れる。旋回中の左右は違う距離を送り、超信地旋回では逆向きに流れる。
+            // どちら側かは帯自身の横位置と、模型の X 軸が車体のどちらを向いているかの積で決まる。
+            float wheelAngle = shape.travelSign() * belt.x() > 0.0F ? wheelRight : wheelLeft;
             float travel = TRAVEL_SIGN * shape.travelSign() * wheelAngle * DEG_TO_RAD * belt.rollRadius();
 
             for (int i = 0; i < belt.links(); i++) {

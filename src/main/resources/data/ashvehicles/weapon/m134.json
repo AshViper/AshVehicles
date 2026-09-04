@@ -2,15 +2,16 @@
   "type": "gun",
   "item": false,
   "ammo": 3000,
+  "gun_class": "machine_gun",
   "firing": {
-    "rounds_per_second": 50,
+    "rounds_per_second": 50.0,
     "spread": 0.9
   },
   "projectile": {
     "damage": 3.5,
-    "speed": 40,
-    "gravity": 0.0016,
-    "range": 600,
+    "speed": 41.9,
+    "gravity": 0.0245,
+    "range": 800.0,
     "ricochet": 8,
     "tracer": "FFE4A8"
   },

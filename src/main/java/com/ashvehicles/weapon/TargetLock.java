@@ -71,6 +71,16 @@ public final class TargetLock {
     /** 目標を最後に見てからの tick 数。一瞬のぶれでロックを捨てないため。 */
     private int missing;
     private boolean locked;
+    /**
+     * 今このシーカーを動かしている兵装の種類。選択中の兵装がロックを使わなければ null。
+     *
+     * <p>持っているのは、追われている側がこれを知る必要があるからだ。捉えられていること自体が相手に伝わる
+     * かどうかは、シーカーが何を出しているかで決まる——電波を出して返りを聞く物は相手の受信機にも聞こえる
+     * が、熱を見ているだけの物は何も出していないので聞こえようが無い。
+     * {@code Sensors.attentionFrom} 参照。
+     */
+    @Nullable
+    private WeaponDefinition.Guidance.Seeker seeker;
     /** 前tickにロックキーが押されていたか。押しっぱなしから1押しを切り出すための記憶。 */
     private boolean wasWanted;
     /**
@@ -89,6 +99,16 @@ public final class TargetLock {
     @Nullable
     public Entity target() {
         return this.target;
+    }
+
+    /**
+     * 今このシーカーを動かしている兵装の種類。ロックを使う兵装を選んでいなければ null。
+     *
+     * <p>訊いてくるのは追われている側の警戒受信機。{@link com.ashvehicles.sensor.Sensors} 参照。
+     */
+    @Nullable
+    public WeaponDefinition.Guidance.Seeker seeker() {
+        return this.seeker;
     }
 
     /** ミサイルが受け取れるだけの時間、シーカーが目標を保持したか。 */
@@ -189,6 +209,7 @@ public final class TargetLock {
         boolean pressed = wantsLock && !this.wasWanted;
 
         this.wasWanted = wantsLock;
+        this.seeker = guidance == null ? null : guidance.seeker();
 
         if (guidance == null) {
             this.clear();

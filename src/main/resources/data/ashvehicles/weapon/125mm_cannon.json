@@ -2,6 +2,7 @@
   "type": "gun",
   "item": false,
   "ammo": 38,
+  "gun_class": "tank_gun",
   "firing": {
     "rounds_per_second": 0.13,
     "automatic": false,
@@ -9,9 +10,9 @@
   },
   "projectile": {
     "damage": 180.0,
-    "speed": 43.0,
-    "gravity": 0.00075,
-    "range": 1400.0,
+    "speed": 85.0,
+    "gravity": 0.0245,
+    "range": 4000.0,
     "ricochet": 62.0,
     "tracer": "FFE9B0"
   },

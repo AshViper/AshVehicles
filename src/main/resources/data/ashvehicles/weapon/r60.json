@@ -9,15 +9,15 @@
     "salvo": 1
   },
   "projectile": {
-    "damage": 150.0,
+    "damage": 85.0,
     "speed": 2.0,
     "thrust": 0.29,
-    "burn_ticks": 240,
-    "spool_ticks": 88,
-    "top_speed": 41.7,
+    "burn_ticks": 130,
+    "spool_ticks": 60,
+    "top_speed": 46.0,
     "gravity": 0.00025,
     "range": 0,
-    "explosion": 3.0,
+    "explosion": 1.8,
     "tracer": "FFDD66",
     "trail": {
       "colour": "E7E4DD",
@@ -27,9 +27,9 @@
     }
   },
   "guidance": {
-    "turn_rate": 7.0,
+    "turn_rate": 8.0,
     "lock_angle": 20.0,
-    "lock_range": 4500.0,
+    "lock_range": 2600.0,
     "lock_ticks": 5,
     "track_angle": 80.0,
     "proximity": 3.0

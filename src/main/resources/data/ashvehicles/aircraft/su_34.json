@@ -242,12 +242,12 @@
     }
   },
   "wing": {
-    "max_speed": 29.6,
+    "max_speed": 11.8,
     "stall_speed": 1.95,
     "lift": 0.0052,
     "lift_slope": 5.5,
     "stall_angle": 15,
-    "drag": 0.0000406,
+    "drag": 0.000204,
     "induced_drag": 0.0004,
     "lateral_drag": 0.15,
     "ground_effect": 0.28,
@@ -377,7 +377,12 @@
     {
       "name": "gun",
       "pos": [1.6, 2.9, 3.4],
-      "fixed": "ashvehicles:gsh_30_1"
+      "fixed": "ashvehicles:gsh_30_1",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     }
   ]
 }

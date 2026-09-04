@@ -236,12 +236,12 @@
     }
   },
   "wing": {
-    "max_speed": 34,
+    "max_speed": 12.8,
     "stall_speed": 1.5,
     "lift": 0.0064,
     "lift_slope": 5.5,
     "stall_angle": 16,
-    "drag": 0.000031,
+    "drag": 0.000211,
     "induced_drag": 0.00038,
     "lateral_drag": 0.15,
     "ground_effect": 0.28,
@@ -309,47 +309,49 @@
   "hardpoints": [
     {
       "name": "wingtip_left",
-      "pos": [-5.3, 1.72, -2.65],
+      "pos": [-5.37, 1.585, -2.74],
+      "wingtip": true,
       "kind": "weapon"
     },
     {
       "name": "wingtip_right",
-      "pos": [5.3, 1.72, -2.65],
+      "pos": [5.37, 1.585, -2.74],
+      "wingtip": true,
       "kind": "weapon"
     },
     {
       "name": "pylon1_left",
-      "pos": [-4.0, 1.65, -2.6],
+      "pos": [-4.0, 1.3, -2.6],
       "kind": "weapon"
     },
     {
       "name": "pylon1_right",
-      "pos": [4.0, 1.65, -2.6],
+      "pos": [4.0, 1.3, -2.6],
       "kind": "weapon"
     },
     {
       "name": "pylon2_left",
-      "pos": [-3.05, 1.65, -2.6],
+      "pos": [-3.05, 1.3, -2.6],
       "kind": "weapon"
     },
     {
       "name": "pylon2_right",
-      "pos": [3.05, 1.65, -2.6],
+      "pos": [3.05, 1.3, -2.6],
       "kind": "weapon"
     },
     {
       "name": "pylon3_left",
-      "pos": [-2.1, 1.65, -2.55],
+      "pos": [-2.1, 1.3, -2.55],
       "kind": "weapon"
     },
     {
       "name": "pylon3_right",
-      "pos": [2.1, 1.65, -2.55],
+      "pos": [2.1, 1.3, -2.55],
       "kind": "weapon"
     },
     {
       "name": "centreline",
-      "pos": [0.0, 1.1, -2.3],
+      "pos": [-0.05, 0.5, -2.3],
       "kind": "weapon"
     },
     {
@@ -365,7 +367,12 @@
     {
       "name": "gun",
       "pos": [-1.0, 2.55, 1.1],
-      "fixed": "ashvehicles:m61"
+      "fixed": "ashvehicles:m61",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     }
   ]
 }

@@ -1,0 +1,19 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_rack",
+  "tab": "equipment",
+  "materials": [
+    {
+      "item": "ashvehicles:single_rail",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 2
+    }
+  ],
+  "result": {
+    "count": 2,
+    "id": "ashvehicles:wingtip_rail"
+  }
+}

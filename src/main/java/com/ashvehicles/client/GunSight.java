@@ -2,6 +2,7 @@ package com.ashvehicles.client;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import javax.annotation.Nullable;
 
@@ -164,6 +165,15 @@ public final class GunSight {
     private static long cachedAt = Long.MIN_VALUE;
     @Nullable
     private static ResourceLocation cachedWeapon;
+    /**
+     * 最後に解いた弾種。
+     *
+     * <p>兵装名と<em>別に</em>覚える必要がある。弾種を替えても砲は同じ砲なので名前は動かず、動くのは
+     * 初速と落ち方だけ——つまり弾道の全部だ。ここを鍵に含めていなければ、榴弾へ切り替えた砲手は徹甲弾の
+     * 印を見続けることになる。
+     */
+    @Nullable
+    private static ResourceLocation cachedAmmunition;
     @Nullable
     private static Solution cached;
 
@@ -213,7 +223,8 @@ public final class GunSight {
             }
         };
 
-        return solve(aircraft, selected, weapon, bore);
+        // 印は弾倉に入っているベルトで解く。同じ機関砲でも、徹甲弾は速く平らに飛び、榴弾は遅く落ちる。
+        return solve(aircraft, selected, weapons.selectedAmmunition(), weapon, bore);
     }
 
     /**
@@ -262,7 +273,7 @@ public final class GunSight {
             }
         };
 
-        return solve(aircraft, selected, weapon, bore);
+        return solve(aircraft, selected, null, weapon, bore);
     }
 
     /**
@@ -273,7 +284,12 @@ public final class GunSight {
      */
     @Nullable
     public static Solution solve(GroundVehicleEntity vehicle) {
-        ResourceLocation selected = vehicle.getStats().armament().main().orElse(null);
+        // 選択中の兵装の弾道で解く。機関銃と主砲では初速も落ち方も違うので、砲の値で機関銃の印を描けば
+        // 遠距離ほど外れる。同軸機銃は同じ砲腔方向を向いているが、銃口の位置は自分の物を使う。
+        boolean coax = vehicle.isCoaxMode();
+        ResourceLocation selected = (coax
+                ? vehicle.getStats().coaxial().gun()
+                : vehicle.getStats().armament().main()).orElse(null);
 
         if (selected == null || vehicle.isMissileMode()) {
             forget();
@@ -292,7 +308,9 @@ public final class GunSight {
         Bore bore = new Bore() {
             @Override
             public Vec3 muzzle(float partialTick) {
-                return vehicle.getMuzzle(partialTick);
+                return coax
+                        ? vehicle.gunToWorld(vehicle.getStats().coaxial().muzzle(), partialTick)
+                        : vehicle.getMuzzle(partialTick);
             }
 
             @Override
@@ -301,16 +319,19 @@ public final class GunSight {
             }
         };
 
-        return solve(vehicle, selected, weapon, bore);
+        // 印は薬室にある弾で解く。同じ砲でも、徹甲弾は速く平らに飛び、榴弾は遅く大きく落ちる——遠距離
+        // ほどその差が印の位置そのものになる。
+        return solve(vehicle, selected, vehicle.getSelectedAmmunition(), weapon, bore);
     }
 
     /** どの機体から要求されても、毎tick 1回求めてその間は記憶する。 */
     @Nullable
     private static Solution solve(VehicleEntityBase vehicle, ResourceLocation selected,
-            WeaponDefinition weapon, Bore bore) {
+            @Nullable ResourceLocation ammunition, WeaponDefinition weapon, Bore bore) {
         long now = vehicle.level().getGameTime();
 
-        if (vehicle != cachedFor || now != cachedAt || !selected.equals(cachedWeapon)) {
+        if (vehicle != cachedFor || now != cachedAt || !selected.equals(cachedWeapon)
+                || !Objects.equals(ammunition, cachedAmmunition)) {
             if (vehicle != cachedFor) {
                 forget();
             }
@@ -318,7 +339,8 @@ public final class GunSight {
             cachedFor = vehicle;
             cachedAt = now;
             cachedWeapon = selected;
-            cached = work(vehicle, weapon, bore);
+            cachedAmmunition = ammunition;
+            cached = work(vehicle, Definitions.round(weapon, ammunition), bore);
         }
 
         return cached;
@@ -332,7 +354,7 @@ public final class GunSight {
     }
 
     @Nullable
-    private static Solution work(VehicleEntityBase vehicle, WeaponDefinition weapon, Bore bore) {
+    private static Solution work(VehicleEntityBase vehicle, WeaponDefinition.Projectile round, Bore bore) {
         Vec3 nose = bore.direction(1.0F);
 
         // 狙う線が無い。同じ場合、砲架も同じ理由で発砲を拒否する。
@@ -344,8 +366,8 @@ public final class GunSight {
         // 砲架が実際に行う発射。砲腔方向への兵装自身の速度に、その方向へ機体が既に持っている速度を足した物だ。レール
         // が持ち出すのはそれだけだからである。WeaponMounts.fireRound 参照。停止中の車両は何も足さず、高速の車両は
         // 相応の分を足す。同じ規則を逆から読んだだけだ。
-        Vec3 launch = nose.scale(weapon.projectile().speed() + Math.max(0.0, vehicle.getVelocity().dot(nose)));
-        Flight flight = fly(vehicle, weapon.projectile(), muzzle, nose, launch);
+        Vec3 launch = nose.scale(round.speed() + Math.max(0.0, vehicle.getVelocity().dot(nose)));
+        Flight flight = fly(vehicle, round, muzzle, nose, launch);
 
         double flown = flight.last().distanceTo(muzzle);
 
