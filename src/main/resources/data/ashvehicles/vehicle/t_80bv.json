@@ -178,11 +178,15 @@
   },
   "armament": {
     "main": "ashvehicles:125mm_cannon",
+    "ammunition": [
+      "ashvehicles:tank_gun_apfsds",
+      "ashvehicles:tank_gun_he",
+      "ashvehicles:tank_gun_heat"
+    ],
     "trunnion": [-0.03, 1.98, -0.39],
     "barrel_length": 6.71,
     "recoil": 0.62,
-    "recoil_ticks": 18,
-    "kick": 0.08
+    "recoil_ticks": 18
   },
   "hull": {
     "health": 490,
@@ -207,6 +211,10 @@
   },
   "coaxial": {
     "gun": "ashvehicles:kord",
+    "ammunition": [
+      "ashvehicles:machine_gun_ap",
+      "ashvehicles:machine_gun_ball"
+    ],
     "muzzle": [1.18, 2.77, -0.58]
   }
 }

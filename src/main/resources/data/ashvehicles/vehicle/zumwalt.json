@@ -169,11 +169,15 @@
   },
   "armament": {
     "main": "ashvehicles:125mm_cannon",
+    "ammunition": [
+      "ashvehicles:tank_gun_apfsds",
+      "ashvehicles:tank_gun_he",
+      "ashvehicles:tank_gun_heat"
+    ],
     "trunnion": [0.0, 8.3, 41.58],
     "barrel_length": 5.8,
     "recoil": 0,
     "recoil_ticks": 12,
-    "kick": 0,
     "barrels": [
       {
         "trunnion": [0.0, 8.3, 41.58]

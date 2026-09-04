@@ -306,8 +306,8 @@
     "range": 512
   },
   "radar": {
-    "range": 1500,
-    "arc": 90,
+    "range": 0,
+    "arc": 0,
     "sweep_ticks": 12,
     "warning_range": 2500
   },
@@ -366,7 +366,12 @@
     {
       "name": "gun",
       "pos": [0.0, 0.7, 4.0],
-      "fixed": "ashvehicles:m230"
+      "fixed": "ashvehicles:m230",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     }
   ],
   "stations": [
@@ -379,10 +384,12 @@
       "elevation": 11,
       "depression": 60,
       "traverse_rate": 6,
-      "elevation_rate": 6
+      "elevation_rate": 6,
+      "bone": "bone"
     },
     {
       "name": "pods",
+      "bone": ["bone10", "bone7"],
       "pylons": ["inner_left", "inner_right"],
       "seat": 0,
       "bearing": 0,

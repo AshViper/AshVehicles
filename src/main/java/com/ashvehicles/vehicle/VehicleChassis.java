@@ -89,10 +89,11 @@ public final class VehicleChassis {
      */
     public record Model(float scale, Map<String, String> bones, List<String> roadWheels,
             List<String> steeredWheels, float steerLock, Optional<Track> track, List<String> slavedTurrets,
-            List<String> propellers, String propellerAxis, float nozzleRest) {
+            List<String> propellers, String propellerAxis, float nozzleRest,
+            float bayTravel, float bayRest, int bayCycleTicks) {
         public static final Model DEFAULT =
                 new Model(1.0F, Map.of(), List.of(), List.of(), 0.0F, Optional.empty(), List.of(),
-                        List.of(), "z", 0.0F);
+                        List.of(), "z", 0.0F, DEFAULT_BAY_TRAVEL, 0.0F, DEFAULT_BAY_CYCLE);
 
         public static final Codec<Model> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("scale", 1.0F).forGetter(Model::scale),
@@ -115,8 +116,41 @@ public final class VehicleChassis {
                 // 巡航中に立ってホバーで前を向く、まるごと逆の絵になる。90 と書けばそのぶん差し引かれる。
                 //
                 // 向きが逆に見えたら符号を反転する。振れる向きは模型の作り方次第で、ここがその1機分の答えだ。
-                Codec.FLOAT.optionalFieldOf("nozzle_rest", 0.0F).forGetter(Model::nozzleRest)
+                Codec.FLOAT.optionalFieldOf("nozzle_rest", 0.0F).forGetter(Model::nozzleRest),
+                // 兵装倉の扉が開ききったときの角度（度）。左側の扉がこの角度、右側が同じだけ逆へ振れる。
+                //
+                // 符号は模型の作られ方で決まる。扉が機体の中へめり込むなら反転すること——振れる向きは
+                // ボーンの親の連なり次第で、ここがその1機分の答えだ。既に開いた姿勢で作られている扉
+                // （RAH-66 の兵装倉がそう）では、閉じる向きの角度を負で書くことになる。
+                Codec.FLOAT.optionalFieldOf("bay_travel", DEFAULT_BAY_TRAVEL).forGetter(Model::bayTravel),
+                // 模型が既に振られている扉の角度（度）。0で閉じた姿勢——爆弾倉の扉は普通そう作られている。
+                // 開いた姿勢で作られている扉（RAH-66 の兵装倉がそうで、武装ごと外へ振り出した形になって
+                // いる）では、その角度をここに書く。ノズルの nozzle_rest とまったく同じ仕組みで、同じ
+                // 理由だ——模型がどの姿勢で作られているかは模型ごとの話であり、模型ごとにここで言う。
+                //
+                // 開いた姿勢で作られた扉では bay_travel と同じ値になる。0（閉）でちょうど作られた姿勢の
+                // 逆へ振り、1（開）で作られた姿勢そのものに戻るからだ。
+                Codec.FLOAT.optionalFieldOf("bay_rest", 0.0F).forGetter(Model::bayRest),
+                // 扉が開ききる（あるいは閉じきる）までの時間。降着装置の cycle_ticks と同じ単位で、
+                // 同じ役目を果たす。
+                Codec.INT.optionalFieldOf("bay_cycle_ticks", DEFAULT_BAY_CYCLE).forGetter(Model::bayCycleTicks)
         ).apply(instance, Model::new));
+
+        /**
+         * 兵装倉の扉を持つか。左右どちらかに1枚でも名指しされていればそう。
+         *
+         * <p>持たない機体では倉の開閉そのものが存在せず、キーを押しても何も起きない。翼下に吊る機体の
+         * 大半がそれだ。
+         */
+        public boolean hasBay() {
+            for (int pair = 1; pair <= BAY_PAIRS; pair++) {
+                if (!this.bone(bayDoor(false, pair)).isEmpty() || !this.bone(bayDoor(true, pair)).isEmpty()) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         /** この機体に操舵で向きが変わる車輪があるか。 */
         public boolean isSteered() {
@@ -127,6 +161,28 @@ public final class VehicleChassis {
         public String bone(String role) {
             return this.bones.getOrDefault(role, "");
         }
+    }
+
+    /** 兵装倉の扉が開ききる角度の既定値（度）。腹の下へ振り下ろす、ごく普通の扉。 */
+    public static final float DEFAULT_BAY_TRAVEL = 95.0F;
+
+    /** 扉が開ききるまでの既定の時間（tick）。1.5秒。実物の爆弾倉扉はおおむねその程度で開く。 */
+    public static final int DEFAULT_BAY_CYCLE = 30;
+
+    /**
+     * 名指しできる扉の対の数。
+     *
+     * <p>3対まで。B-1 が3つの倉にそれぞれ左右1枚ずつ持っており、MOD 内でそれが最も多い。倉の数が増えれば
+     * ここを増やすだけで、他はどこも触らずに済む。
+     */
+    public static final int BAY_PAIRS = 3;
+
+    /**
+     * 兵装倉の扉の役割名。1対目は添字なし——{@code bay_left} と {@code bay_right}——で、倉が1つしかない
+     * 機体のファイルに数字が現れないようにしてある。2対目以降が {@code bay_left_2} のようになる。
+     */
+    public static String bayDoor(boolean right, int pair) {
+        return (right ? "bay_right" : "bay_left") + (pair <= 1 ? "" : "_" + pair);
     }
 
     /**
@@ -326,8 +382,15 @@ public final class VehicleChassis {
      *                     自分に見える距離より遠くから照射されている状況こそ、知らせる価値がある
      */
     public record Radar(float range, float arc, int sweepTicks, float warningRange) {
+        /**
+         * レーダーの節を<em>書いた</em>機体が、書かなかった項目に受け取る値。
+         *
+         * <p>節ごと書かなかった機体が受け取る値ではない。そちらは {@link #NONE} だ——機体でも車両でも、
+         * 黙っている機械はレーダーを積んでいない。ここに残っているのは「レーダーはあるが射程しか書いて
+         * いない」ファイルのためで、そういう物に走査角や受信機の射程を書かせる理由は無い。
+         */
         public static final Radar DEFAULT = new Radar(3000.0F, 55.0F, 10, 4000.0F);
-        /** レーダーも受信機も持たない機体。地上を走る物の大半がこれ。 */
+        /** レーダーも受信機も持たない機械。書いていない物は全部これになる。 */
         public static final Radar NONE = new Radar(0.0F, 0.0F, 10, 0.0F);
 
         public static final Codec<Radar> CODEC = RecordCodecBuilder.create(instance -> instance.group(

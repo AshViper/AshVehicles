@@ -4,9 +4,17 @@
   "package": "com.ashvehicles.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "ChunkStallMixin",
+    "CorridorTicketMixin",
     "EntityCollisionMixin",
     "EntityTrackingMixin",
+    "FlightChunkCentreMixin",
+    "FlightChunkSendMixin",
     "HitScanMixin",
+    "LateWorldMixin",
+    "LateWorldTickMixin",
+    "RoundChunkLoadMixin",
+    "SurfaceParallelMixin",
     "VehicleMoveCheckMixin"
   ],
   "client": [
@@ -14,7 +22,8 @@
     "HitboxMixin",
     "MountHintMixin",
     "MouseLookMixin",
-    "PilotChunkGateMixin"
+    "PilotChunkGateMixin",
+    "SectionCompileOrderMixin"
   ],
   "injectors": {
     "defaultRequire": 1

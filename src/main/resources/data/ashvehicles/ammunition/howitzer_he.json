@@ -1,0 +1,13 @@
+{
+  "gun_class": "howitzer",
+  "rounds_per_item": 1,
+  "projectile": {
+    "damage": 110.0,
+    "speed": 28.0,
+    "gravity": 0.055,
+    "range": 4000.0,
+    "explosion": 4.2,
+    "ricochet": 0.0,
+    "tracer": "FFC062"
+  }
+}

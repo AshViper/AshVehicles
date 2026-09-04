@@ -4,20 +4,24 @@
   "tab": "ammo",
   "materials": [
     {
+      "item": "ashvehicles:steel_plate",
+      "count": 1
+    },
+    {
       "tag": "c:ingots/copper",
-      "count": 3
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:high_explosive",
+      "count": 1
     },
     {
       "item": "minecraft:gunpowder",
-      "count": 3
-    },
-    {
-      "item": "ashvehicles:steel_plate",
       "count": 1
     }
   ],
   "result": {
     "count": 4,
-    "id": "ashvehicles:autocannon_belt"
+    "id": "ashvehicles:autocannon_he"
   }
 }

@@ -82,6 +82,15 @@ public final class WeaponMounts {
         @Nullable
         private ResourceLocation weapon;
         private int ammo;
+        /**
+         * この弾倉に今入っている弾種。内蔵砲だけが持ち、弾種を並べていない砲では null。
+         *
+         * <p><b>1本しか入らない。</b> 地上の砲塔は種類ごとに棚を持ち装填手が呼ばれた1発を送るが、機体の
+         * 機関砲にあるのはベルト1本だ。だから別の弾種を積むには、まず今のベルトを撃ち尽くすことになる
+         * ——実際に地上でやることと同じで、飛びながらは替えられない。
+         */
+        @Nullable
+        private ResourceLocation ammunition;
         /** この兵装が次に撃てるまでの tick。端数で保持するので半端な発射速度も正しく出る。 */
         private float cooldown;
 
@@ -98,10 +107,35 @@ public final class WeaponMounts {
             return this.ammo;
         }
 
+        /** 今入っている弾種。並べていない砲と、空になった弾倉では null。 */
+        @Nullable
+        public ResourceLocation ammunition() {
+            return this.ammunition;
+        }
+
         private void set(@Nullable ResourceLocation weapon, int ammo) {
+            this.set(weapon, ammo, null);
+        }
+
+        private void set(@Nullable ResourceLocation weapon, int ammo, @Nullable ResourceLocation round) {
             this.weapon = weapon;
             this.ammo = weapon == null ? 0 : ammo;
+            this.ammunition = this.ammo <= 0 ? null : round;
             this.cooldown = 0.0F;
+        }
+
+        /**
+         * 撃った分を減らす。最後の1発が出たら弾種を手放す。
+         *
+         * <p>空になった弾倉に前のベルトの名前が残っていると、次に別の弾種を積もうとした者が「まだ入って
+         * いる」と断られる。空とは、何も入っていないという意味だ。
+         */
+        private void spend(int rounds) {
+            this.ammo = Math.max(this.ammo - rounds, 0);
+
+            if (this.ammo <= 0) {
+                this.ammunition = null;
+            }
         }
     }
 
@@ -374,7 +408,10 @@ public final class WeaponMounts {
         for (int slot = 0; slot < this.mounts.length; slot++) {
             AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
 
-            if (hardpoint == null || hardpoint.isFixed() || hardpoint.internal()) {
+            // 倉が開いている間は、中身も外から見える。ステルス機が兵装を機内に積む理由がそれなので、
+            // 扉を開けた瞬間にその利点は消える。
+            if (hardpoint == null || hardpoint.isFixed()
+                    || (hardpoint.internal() && !this.aircraft.isBayOpen())) {
                 continue;
             }
 
@@ -820,15 +857,26 @@ public final class WeaponMounts {
     // ------------------------------------------------------------------
 
     /**
-     * 今このステーションにそのラックを付けられるか。weapon パイロンであり、裸であり、金具の分の重さが
-     * まだ残っていること。
+     * 今このステーションにそのラックを付けられるか。weapon パイロンであり、裸であり、翼端かそうでないか
+     * が一致し、金具の分の重さがまだ残っていること。
      */
     public boolean canFitRackAt(int slot, ResourceLocation rack) {
         this.ensureLayout();
         AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
 
         return hardpoint != null && hardpoint.isWeaponPylon() && slot < this.mounts.length
-                && !this.mounts[slot].hasRack() && this.fits(Definitions.rack(rack).mass());
+                && !this.mounts[slot].hasRack() && takesRack(hardpoint, Definitions.rack(rack))
+                && this.fits(Definitions.rack(rack).mass());
+    }
+
+    /**
+     * そのステーションとそのラックが組になるか。翼端かそうでないかが両側で一致していること。
+     *
+     * <p>禁止は両向きだ。翼端に投下ラックは付かず、翼端レールは翼下のパイロンに付かない。
+     * {@link RackDefinition#wingtip()} 参照。
+     */
+    private static boolean takesRack(AircraftDefinition.Hardpoint hardpoint, RackDefinition rack) {
+        return hardpoint.wingtip() == rack.wingtip();
     }
 
     /** 指定したステーションにラックを付ける。 */
@@ -1181,6 +1229,14 @@ public final class WeaponMounts {
                 this.dirty = true;
             }
 
+            // リロードで翼端になった（あるいは翼端でなくなった）ステーションからは、組にならなくなった
+            // ラックを外す。種別が変わった場合と同じ扱いだ——今のファイルが「そこには付かない」と言って
+            // いる物を、既に付いていたという理由だけで載せ続けるわけにはいかない。
+            if (mount.rack != null && !takesRack(hardpoint, Definitions.rack(mount.rack))) {
+                mount.rack = null;
+                this.dirty = true;
+            }
+
             int places = mount.rack == null ? 0 : Definitions.rack(mount.rack).capacity();
 
             if (mount.loads.length != places) {
@@ -1265,6 +1321,14 @@ public final class WeaponMounts {
                         ? pressed && (weapon.isAutomatic() || !mount.held)
                         : armed && load.weapon.equals(this.selected);
 
+                // 閉じた扉を弾は通らない。倉の中の物は、扉が開ききるまで撃てない。乗員には計器の BAY 行と
+                // 兵装一覧の SHUT が理由を言う——引き金が黙る理由が画面のどこにも無いのは不具合に見える。
+                if (pull && this.shutIn(slot)) {
+                    load.cooldown = Math.max(0.0F, load.cooldown - 1.0F);
+
+                    continue;
+                }
+
                 if (!pull) {
                     load.cooldown = Math.max(0.0F, load.cooldown - 1.0F);
 
@@ -1277,8 +1341,9 @@ public final class WeaponMounts {
                 boolean single = false;
 
                 while (load.cooldown <= 0.0F && load.ammo > 0) {
-                    this.fireRound(slot, place, load.weapon, weapon, laid ? laidAim : null);
-                    load.ammo--;
+                    this.fireRound(slot, place, load.weapon, load.ammunition, weapon,
+                            laid ? laidAim : null);
+                    load.spend(1);
                     load.cooldown += weapon.firing().ticksPerRound();
                     this.dirty = true;
 
@@ -1370,11 +1435,15 @@ public final class WeaponMounts {
     /**
      * 兵装1つから1発を送り出す。ロケットポッドのように一度に複数を放つ兵装なら一斉射分まとめて。
      */
-    private void fireRound(int slot, int place, ResourceLocation weaponId, WeaponDefinition weapon,
-            @Nullable Vec3 laid) {
+    private void fireRound(int slot, int place, ResourceLocation weaponId,
+            @Nullable ResourceLocation ammunition, WeaponDefinition weapon, @Nullable Vec3 laid) {
         if (!(this.aircraft.level() instanceof ServerLevel level)) {
             return;
         }
+
+        // 砲口を出た後の全部は、ベルトに入っている弾種が決める。弾種を持たない兵装——吊り物はすべて
+        // そうだ——では兵装ファイル自身の値で、そこは以前と1つも変わらない。
+        WeaponDefinition.Projectile round = Definitions.round(weapon, ammunition);
 
         Vec3 muzzle = this.aircraft.toWorld(this.placeOf(slot, place), 1.0F);
         // 砲座に据えられた砲は自分の向きへ、それ以外は機首方向へ。散布の2軸も同じ線を基準に取るので、
@@ -1430,8 +1499,8 @@ public final class WeaponMounts {
             // 弾は機首の指す方向へ行く。照準が示す通りの場所へ。
             Vec3 carried = direction.scale(Math.max(0.0, this.aircraft.getVelocity().dot(direction)));
             Vec3 velocity = weapon.isDropped()
-                    ? this.aircraft.getVelocity().add(up.scale(-weapon.projectile().speed()))
-                    : direction.scale(weapon.projectile().speed()).add(carried);
+                    ? this.aircraft.getVelocity().add(up.scale(-round.speed()))
+                    : direction.scale(round.speed()).add(carried);
 
             // 一時的。速度ゼロで出る発射の調査用。解決したら削除すること。
             if (weapon.type() != WeaponDefinition.Type.GUN) {
@@ -1447,7 +1516,7 @@ public final class WeaponMounts {
                     ? new BulletEntity(ModEntities.BULLET.get(), level)
                     : new RocketEntity(ModEntities.ROCKET.get(), level);
 
-            shot.setup(weaponId, this.aircraft, pilot);
+            shot.setup(weaponId, ammunition, this.aircraft, pilot);
             shot.setPos(muzzle);
             // setDeltaMovement ではなく launch。速度がクライアントへ届く必要があり、通常それを運ぶ
             // パケットには速すぎるから。VehicleProjectile 参照。
@@ -1589,6 +1658,12 @@ public final class WeaponMounts {
                 continue;
             }
 
+            // 弾種を並べた砲は、並べた物しか受け取らない。地上車両の弾倉と同じ規則で、理由も同じ
+            // ——どちらとして入ったのか言えない弾は、入れてはいけない。loadRound が名指しで受け取る。
+            if (!rounds(hardpoint).isEmpty()) {
+                continue;
+            }
+
             for (Load load : this.mounts[slot].loads) {
                 if (load.isEmpty()) {
                     continue;
@@ -1596,7 +1671,7 @@ public final class WeaponMounts {
 
                 WeaponDefinition gun = Definitions.weapon(load.weapon);
 
-                if (gun.ammoKind() != kind) {
+                if (gun.ammoKind().orElse(null) != kind) {
                     continue;
                 }
 
@@ -1611,6 +1686,148 @@ public final class WeaponMounts {
                 this.dirty = true;
 
                 return new Resupply(load.weapon, taken, load.ammo, gun.ammo());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 名前の付いた1弾種を、それを受け付ける内蔵砲へ積む。
+     *
+     * <p><b>ベルトは1本。</b> 弾倉に別の弾種が入っていて、まだ残っているなら受け付けない。機体の機関砲に
+     * 積めるベルトは1本で、混ぜて詰める者はいない。撃ち尽くせば弾倉は弾種を手放す（{@link Load#spend}
+     * 参照）ので、そこから別のベルトを入れられる。地上の砲塔が種類ごとに積み分けられるのは棚と装填手が
+     * あるからで、機体には無い。
+     *
+     * @param round 差し出された弾種
+     * @param offered 手にある個数
+     * @return 入った砲と発数。どの砲にも入らなければ null
+     */
+    @Nullable
+    public Resupply loadRound(ResourceLocation round, int offered) {
+        this.ensureLayout();
+
+        if (offered <= 0) {
+            return null;
+        }
+
+        for (int slot = 0; slot < this.mounts.length; slot++) {
+            AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
+
+            if (hardpoint == null || !hardpoint.isFixed() || !rounds(hardpoint).contains(round)) {
+                continue;
+            }
+
+            for (Load load : this.mounts[slot].loads) {
+                if (load.isEmpty() || (load.ammunition != null && !load.ammunition.equals(round))) {
+                    continue;
+                }
+
+                WeaponDefinition gun = Definitions.weapon(load.weapon);
+                int perItem = Definitions.ammunition(round).perItem();
+                int taken = Math.min(offered, (gun.ammo() - load.ammo) / perItem);
+
+                if (taken <= 0) {
+                    continue;
+                }
+
+                load.ammo += taken * perItem;
+                load.ammunition = round;
+                this.dirty = true;
+
+                return new Resupply(load.weapon, taken, load.ammo, gun.ammo());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * その位置が、閉じた兵装倉の中にあるか。
+     *
+     * <p>扉が動いている途中も閉と数える。開ききる前に撃てば、弾は動いている扉を抜けることになる。
+     *
+     * <p><b>扉を持たない機体では常に偽。</b> 機内搭載と書かれていても、模型に扉が無ければ開ける物が無く、
+     * 開ける物が無ければ閉じてもいない。ここを見ないと、扉のボーンを持たない機体——F-117 も B-2 も
+     * Su-57 も X-47B もそうだ——が機内の兵装を永久に撃てなくなる。開く手段の無い倉に閉じ込めるのは、
+     * 扉を足す前の状態を壊すだけだ。
+     */
+    public boolean shutIn(int slot) {
+        if (!this.aircraft.hasBay()) {
+            return false;
+        }
+
+        AircraftDefinition.Hardpoint hardpoint = this.hardpoint(slot);
+
+        return hardpoint != null && hardpoint.internal()
+                && !(this.aircraft.isBayOpen() && this.aircraft.isBaySettled());
+    }
+
+    /** 選択中の兵装が、閉じた兵装倉の中にあるか。計器がそう表示するために訊く。 */
+    public boolean selectedIsShutIn() {
+        if (this.selected == null) {
+            return false;
+        }
+
+        for (int slot = 0; slot < this.mounts.length; slot++) {
+            for (Load load : this.mounts[slot].loads) {
+                if (this.selected.equals(load.weapon)) {
+                    return this.shutIn(slot);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * そのハードポイントの砲が受け付ける弾種。並べていなければ空。
+     *
+     * <p>並べてあっても、砲の種類に合わない弾はここに現れない。地上車両の {@link Magazine#types} と同じ
+     * 規則で、同じ理由だ——積めない弾を一覧に出しておく意味は無い。
+     */
+    private static List<ResourceLocation> rounds(AircraftDefinition.Hardpoint hardpoint) {
+        List<ResourceLocation> listed = hardpoint.ammunition();
+
+        if (listed.isEmpty() || hardpoint.fixed().isEmpty()) {
+            return List.of();
+        }
+
+        GunClass takes = Definitions.weapon(hardpoint.fixed().get()).takes().orElse(null);
+
+        if (takes == null) {
+            return listed;
+        }
+
+        List<ResourceLocation> fits = new ArrayList<>(listed.size());
+
+        for (ResourceLocation round : listed) {
+            if (Definitions.ammunition(round).gunClass() == takes) {
+                fits.add(round);
+            }
+        }
+
+        return fits;
+    }
+
+    /**
+     * 今選択している兵装の弾倉に入っている弾種。無ければ null。
+     *
+     * <p>照準器と計器が読む。同じ砲でも弾種で初速も落ち方も変わるので、印を描く側はどちらが入っているかを
+     * 知る必要がある。
+     */
+    @Nullable
+    public ResourceLocation selectedAmmunition() {
+        if (this.selected == null) {
+            return null;
+        }
+
+        for (Mount mount : this.mounts()) {
+            for (Load load : mount.loads) {
+                if (this.selected.equals(load.weapon) && load.ammunition != null) {
+                    return load.ammunition;
+                }
             }
         }
 
@@ -1716,6 +1933,10 @@ public final class WeaponMounts {
                 if (load.weapon != null) {
                     place.putString("Weapon", load.weapon.toString());
                     place.putInt("Ammo", load.ammo);
+
+                    if (load.ammunition != null) {
+                        place.putString("Round", load.ammunition.toString());
+                    }
                 }
 
                 loads.add(place);
@@ -1774,7 +1995,8 @@ public final class WeaponMounts {
 
                 if (load.contains("Weapon")) {
                     mount.loads[place].set(ResourceLocation.tryParse(load.getString("Weapon")),
-                            load.getInt("Ammo"));
+                            load.getInt("Ammo"),
+                            load.contains("Round") ? ResourceLocation.tryParse(load.getString("Round")) : null);
                 }
             }
         }

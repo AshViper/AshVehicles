@@ -2,15 +2,16 @@
   "type": "gun",
   "item": false,
   "ammo": 300,
+  "gun_class": "machine_gun",
   "firing": {
-    "rounds_per_second": 11.0,
+    "rounds_per_second": 10.83,
     "spread": 0.6
   },
   "projectile": {
     "damage": 6.0,
-    "speed": 44.0,
-    "gravity": 0.0013,
-    "range": 800.0,
+    "speed": 43.0,
+    "gravity": 0.0245,
+    "range": 1500.0,
     "ricochet": 14.0,
     "tracer": "FFD890"
   },

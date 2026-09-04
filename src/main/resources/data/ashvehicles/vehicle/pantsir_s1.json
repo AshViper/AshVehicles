@@ -190,11 +190,15 @@
   },
   "armament": {
     "main": "ashvehicles:2a38m",
+    "ammunition": [
+      "ashvehicles:autocannon_apfsds",
+      "ashvehicles:autocannon_he",
+      "ashvehicles:autocannon_heat"
+    ],
     "trunnion": [-0.19, 3.66, -2.52],
     "barrel_length": 3.12,
     "recoil": 0.1,
     "recoil_ticks": 1,
-    "kick": 0,
     "barrels": [
       {
         "trunnion": [-1.42, 3.75, -2.87],

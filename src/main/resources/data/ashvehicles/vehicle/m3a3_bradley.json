@@ -302,11 +302,15 @@
   },
   "armament": {
     "main": "ashvehicles:m242",
+    "ammunition": [
+      "ashvehicles:autocannon_apfsds",
+      "ashvehicles:autocannon_he",
+      "ashvehicles:autocannon_heat"
+    ],
     "trunnion": [0.1, 2.32, 0.28],
     "barrel_length": 1.85,
     "recoil": 0.12,
-    "recoil_ticks": 3,
-    "kick": 0.02
+    "recoil_ticks": 3
   },
   "launcher": {
     "missile": "ashvehicles:tow",
@@ -339,6 +343,10 @@
   },
   "coaxial": {
     "gun": "ashvehicles:mg3",
+    "ammunition": [
+      "ashvehicles:machine_gun_ap",
+      "ashvehicles:machine_gun_ball"
+    ],
     "muzzle": [0.36, 2.34, 1.4]
   }
 }

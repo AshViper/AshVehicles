@@ -241,12 +241,12 @@
     "sea_level_density": 1
   },
   "wing": {
-    "max_speed": 14.8,
+    "max_speed": 9.27,
     "stall_speed": 1.73,
     "lift": 0.005696,
     "lift_slope": 5.5,
     "stall_angle": 15,
-    "drag": 0.0000662,
+    "drag": 0.000135,
     "induced_drag": 0.000368,
     "lateral_drag": 0.15,
     "ground_effect": 0.3,
@@ -299,8 +299,8 @@
     "range": 512
   },
   "radar": {
-    "range": 2000,
-    "arc": 45,
+    "range": 0,
+    "arc": 0,
     "sweep_ticks": 12,
     "warning_range": 3000
   },
@@ -357,7 +357,12 @@
     {
       "name": "gun",
       "pos": [-0.25, 1.4, 4.4],
-      "fixed": "ashvehicles:gsh_30_2"
+      "fixed": "ashvehicles:gsh_30_2",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     }
   ]
 }

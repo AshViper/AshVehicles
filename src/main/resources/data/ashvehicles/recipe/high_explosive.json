@@ -10,7 +10,7 @@
       "item": "minecraft:tnt"
     },
     "B": {
-      "item": "minecraft:blaze_powder"
+      "tag": "minecraft:coals"
     }
   },
   "pattern": [

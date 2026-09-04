@@ -85,18 +85,21 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
      *
      * @param turretYaw 砲塔の指向。車体正面からの角度（度）
      * @param gunPitch 砲塔上面線からの砲の仰角（度）
-     * @param wheelAngle 転輪の回転角（度）
+     * @param wheelLeft 左側の転輪の回転角（度）
+     * @param wheelRight 右側の同じ値。旋回中は左右で違い、超信地旋回では符号ごと逆になる
      * @param steerAngle 操舵輪の切れ角（度）。右が正
      * @param recoil 砲身の後座量。0〜1
      * @param ride バネ上の車体の変位。走行装置はこの分だけ戻され、上で車体が動いても地面に留まる
      */
-    public record Pose(float turretYaw, float gunPitch, float wheelAngle, float steerAngle, float recoil,
+    public record Pose(float turretYaw, float gunPitch, float wheelLeft, float wheelRight, float steerAngle,
+            float recoil,
             Ride ride) {
         public static Pose of(GroundVehicleEntity vehicle, float partialTick) {
             return new Pose(
                     vehicle.getTurretYaw(partialTick),
                     vehicle.getGunPitch(partialTick),
-                    vehicle.getWheelAngle(partialTick),
+                    vehicle.getWheelAngle(partialTick, false),
+                    vehicle.getWheelAngle(partialTick, true),
                     vehicle.getSteerAngle(partialTick),
                     vehicle.getRecoil(partialTick),
                     vehicle.getRide(partialTick));
@@ -120,7 +123,8 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
             return new Pose(
                     Mth.rotLerp(partialTick, previous.turretYaw(), now.turretYaw()),
                     Mth.lerp(partialTick, previous.gunPitch(), now.gunPitch()),
-                    Mth.lerp(partialTick, previous.wheelAngle(), now.wheelAngle()),
+                    Mth.lerp(partialTick, previous.wheelLeft(), now.wheelLeft()),
+                    Mth.lerp(partialTick, previous.wheelRight(), now.wheelRight()),
                     Mth.lerp(partialTick, previous.steerAngle(), now.steerAngle()),
                     Mth.lerp(partialTick, previous.recoil(), now.recoil()),
                     Ride.between(previous.ride(), now.ride(), partialTick));
@@ -157,10 +161,15 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
             turnAboutX(model, turret, GUN_SIGN * pose.gunPitch());
         }
 
-        // 全輪を同じ角度で一斉に回す。どれがどの車輪かは問題にならない。同じ大きさで、同じ履帯に駆動されるからだ。
-        // 各輪がどちら向きに作られたかも問題にならないし、少なくとも1台では同じ側の車輪ごとにそれが違っている。
+        // 転輪は自分の側の履帯に駆動される。旋回中は左右の履帯が違う距離を送るので、どちらに立っている車輪かで
+        // 回る量が変わる——超信地旋回では回る向きまで逆になり、それが装軌車両の見どころだ。
+        //
+        // 側はロール名から読まない。L と名の付いたボーンが右側にあるのはこの MOD では実績のある事故で、
+        // 少なくとも1台では同じ側の車輪ごとに向きすら違っている。ピボットの X と親の連なりに訊く。
         for (String wheel : setup.roadWheels()) {
-            turnAboutX(model, wheel, WHEEL_SIGN * pose.wheelAngle());
+            model.getBone(wheel).ifPresent(found ->
+                    turnAboutX(found, WHEEL_SIGN * (machineSideX(found) > 0.0F
+                            ? pose.wheelRight() : pose.wheelLeft())));
             plant(model, wheel, pose.ride(), setup.scale(), figures.wheelTravel());
         }
 

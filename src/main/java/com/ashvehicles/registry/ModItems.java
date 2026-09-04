@@ -11,6 +11,7 @@ import com.ashvehicles.data.Definitions;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.item.AircraftItem;
 import com.ashvehicles.item.AmmoItem;
+import com.ashvehicles.item.AmmunitionItem;
 import com.ashvehicles.item.BlastWandItem;
 import com.ashvehicles.item.DroneTerminalItem;
 import com.ashvehicles.item.EquipmentItem;
@@ -144,6 +145,11 @@ public final class ModItems {
      * は MOD 固有の数個の定数、兵装名は誰かがデータパックに置いた任意の文字列。
      */
     private static final Map<AmmoKind, DeferredItem<AmmoItem>> AMMO = registerAmmo();
+    /**
+     * 弾種も兵装より先に。名前争いの理屈は弾薬と同じで、加えて弾種は兵装と隣り合わせの物なので、
+     * {@code tank_gun_apfsds} のような名前が砲の名前と衝突したときに負けるべきなのは砲ではない方だ。
+     */
+    private static final Map<ResourceLocation, DeferredItem<AmmunitionItem>> AMMUNITION = registerAmmunition();
     private static final Map<ResourceLocation, DeferredItem<WeaponItem>> WEAPONS = registerWeapons();
     private static final Map<ResourceLocation, DeferredItem<RackItem>> RACKS = registerRacks();
     private static final Map<ResourceLocation, DeferredItem<EquipmentItem>> EQUIPMENT = registerEquipment();
@@ -179,7 +185,7 @@ public final class ModItems {
                 return;
             }
 
-            if (isTaken(id)) {
+            if (isTaken(id) || AMMUNITION.containsKey(id)) {
                 AshVehicles.LOGGER.error("Weapon {} shares its name with a vehicle or with ammunition;"
                         + " it gets no item", id);
 
@@ -209,7 +215,7 @@ public final class ModItems {
                 return;
             }
 
-            if (isTaken(id) || WEAPONS.containsKey(id)) {
+            if (isTaken(id) || AMMUNITION.containsKey(id) || WEAPONS.containsKey(id)) {
                 AshVehicles.LOGGER.error("Rack {} shares its name with something else; it gets no item", id);
 
                 return;
@@ -231,7 +237,8 @@ public final class ModItems {
                 return;
             }
 
-            if (isTaken(id) || WEAPONS.containsKey(id) || RACKS.containsKey(id)) {
+            if (isTaken(id) || AMMUNITION.containsKey(id) || WEAPONS.containsKey(id)
+                    || RACKS.containsKey(id)) {
                 AshVehicles.LOGGER.error("Equipment {} shares its name with something else;"
                         + " it gets no item", id);
 
@@ -283,6 +290,34 @@ public final class ModItems {
         return Collections.unmodifiableMap(items);
     }
 
+    /**
+     * 弾種ファイル1つにつきアイテム1つ。機体や兵装とまったく同じ形で、ファイルを置けばアイテムが出る。
+     *
+     * <p>{@code "item": false} の弾種はアイテムを持たない。他の弾種を書くための下敷きや、何かが内部的に
+     * だけ撃つ弾のための逃げ道で、兵装ファイルの同名フィールドと同じ意味。
+     */
+    private static Map<ResourceLocation, DeferredItem<AmmunitionItem>> registerAmmunition() {
+        Map<ResourceLocation, DeferredItem<AmmunitionItem>> items = new LinkedHashMap<>();
+
+        Definitions.AMMUNITION.builtIn().forEach((id, definition) -> {
+            if (!definition.item()) {
+                return;
+            }
+
+            if (isTaken(id)) {
+                AshVehicles.LOGGER.error("Ammunition {} shares its name with a vehicle or with an"
+                        + " ammunition box; it gets no item", id);
+
+                return;
+            }
+
+            items.put(id, itemsFor(id).registerItem(id.getPath(),
+                    properties -> new AmmunitionItem(id, properties), new Item.Properties()));
+        });
+
+        return Collections.unmodifiableMap(items);
+    }
+
     private static boolean isAmmoName(ResourceLocation id) {
         for (AmmoKind kind : AmmoKind.values()) {
             if (kind.itemName().equals(id.getPath())) {
@@ -321,6 +356,11 @@ public final class ModItems {
     /** 弾薬アイテム（供給先の火砲の種類ごと）。 */
     public static Map<AmmoKind, DeferredItem<AmmoItem>> ammo() {
         return AMMO;
+    }
+
+    /** 全弾種アイテム（その弾種の ID 順）。 */
+    public static Map<ResourceLocation, DeferredItem<AmmunitionItem>> ammunition() {
+        return AMMUNITION;
     }
 
     private ModItems() {

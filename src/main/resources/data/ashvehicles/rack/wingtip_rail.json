@@ -1,0 +1,7 @@
+{
+  "mass": 40,
+  "wingtip": true,
+  "accepts": [
+    "missile"
+  ]
+}

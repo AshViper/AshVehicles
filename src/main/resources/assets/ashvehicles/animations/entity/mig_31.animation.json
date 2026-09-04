@@ -1,73 +1,73 @@
 {
 	"format_version": "1.8.0",
 	"animations": {
-		"gear_up": {
+		"gear_down": {
 			"loop": "hold_on_last_frame",
-			"animation_length": 0.75,
+			"animation_length": 1.0,
 			"bones": {
 				"FGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, 0]
+							"vector": [90, 0, 0]
 						},
-						"0.75": {
-							"vector": [92.5, 0, 0]
+						"1.0": {
+							"vector": [0, 0, 0]
 						}
 					}
 				},
 				"LGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, 0]
+							"vector": [0, 0, 127.5]
 						},
-						"0.75": {
-							"vector": [0, 0, 135]
+						"1.0": {
+							"vector": [0, 0, 0]
 						}
 					}
 				},
 				"RGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, 0]
+							"vector": [0, 0, -127.5]
 						},
-						"0.75": {
-							"vector": [0, 0, -135]
+						"1.0": {
+							"vector": [0, 0, 0]
 						}
 					}
 				}
 			}
 		},
-		"gear_down": {
+		"gear_up": {
 			"loop": "hold_on_last_frame",
-			"animation_length": 0.75,
+			"animation_length": 1.0,
 			"bones": {
 				"FGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [92.5, 0, 0]
+							"vector": [0, 0, 0]
 						},
-						"0.75": {
-							"vector": [2.5, 0, 0]
+						"1.0": {
+							"vector": [90, 0, 0]
 						}
 					}
 				},
 				"LGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, 135]
-						},
-						"0.75": {
 							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, 127.5]
 						}
 					}
 				},
 				"RGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, -135]
-						},
-						"0.75": {
 							"vector": [0, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, -127.5]
 						}
 					}
 				}

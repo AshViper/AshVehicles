@@ -12,12 +12,16 @@
       "count": 1
     },
     {
+      "item": "ashvehicles:high_explosive",
+      "count": 1
+    },
+    {
       "item": "minecraft:gunpowder",
       "count": 1
     }
   ],
   "result": {
-    "count": 2,
-    "id": "ashvehicles:cannon_shell"
+    "count": 3,
+    "id": "ashvehicles:tank_gun_he"
   }
 }

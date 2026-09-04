@@ -237,12 +237,12 @@
     }
   },
   "wing": {
-    "max_speed": 38,
+    "max_speed": 12.9,
     "stall_speed": 1.6,
     "lift": 0.006,
     "lift_slope": 5.5,
     "stall_angle": 18,
-    "drag": 0.0000335,
+    "drag": 0.000233,
     "induced_drag": 0.00036,
     "lateral_drag": 0.15,
     "ground_effect": 0.28,
@@ -277,8 +277,7 @@
     "lateral_friction": 0.5,
     "steer_rate": 1,
     "steer_fade": 1.3,
-    "climb_height": 1.05,
-    "retractable": false
+    "climb_height": 1.05
   },
   "flaps": {
     "cycle_ticks": 20,
@@ -374,7 +373,12 @@
     {
       "name": "gun",
       "pos": [1.8, 2.6, 2.6],
-      "fixed": "ashvehicles:gsh_30_1"
+      "fixed": "ashvehicles:gsh_30_1",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     }
   ]
 }

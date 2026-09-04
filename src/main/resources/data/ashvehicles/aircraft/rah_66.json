@@ -1,4 +1,5 @@
 {
+  "type": "helicopter",
   "hitbox": {
     "width": 4,
     "height": 3,
@@ -266,12 +267,17 @@
   },
   "model": {
     "scale": 0.97,
+    "bay_travel": -112.5,
+    "bay_rest": -112.5,
+    "bay_cycle_ticks": 25,
     "bones": {
       "rotor": "bone4",
       "tail_rotor": "bone5",
       "nose_gear": "BackTyre",
       "left_gear": "LeftTyre",
-      "right_gear": "RightTyre"
+      "right_gear": "RightTyre",
+      "bay_left": "LeftWeaponsbay",
+      "bay_right": "RightWeaponsbay"
     }
   },
   "engine": {
@@ -365,8 +371,8 @@
     "range": 340
   },
   "radar": {
-    "range": 2400,
-    "arc": 120,
+    "range": 0,
+    "arc": 0,
     "sweep_ticks": 10,
     "warning_range": 3600
   },
@@ -386,7 +392,12 @@
     {
       "name": "gun",
       "pos": [0.0, 0.75, 4.6],
-      "fixed": "ashvehicles:m61"
+      "fixed": "ashvehicles:m61",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     },
     {
       "name": "bay_left",
@@ -423,10 +434,11 @@
       "kind": "special"
     }
   ],
-  "type": "helicopter",
   "stations": [
     {
       "name": "20mm",
+      "bone": "bone2",
+      "barrel": "bone8",
       "pylons": ["gun"],
       "seat": 1,
       "bearing": 0,

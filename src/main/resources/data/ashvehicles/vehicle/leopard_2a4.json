@@ -179,11 +179,15 @@
   },
   "armament": {
     "main": "ashvehicles:120mm_cannon",
+    "ammunition": [
+      "ashvehicles:tank_gun_apfsds",
+      "ashvehicles:tank_gun_he",
+      "ashvehicles:tank_gun_heat"
+    ],
     "trunnion": [-0.01, 2.46, 1.7],
     "barrel_length": 5.38,
     "recoil": 0.56,
-    "recoil_ticks": 16,
-    "kick": 0.07
+    "recoil_ticks": 16
   },
   "hull": {
     "health": 500,
@@ -208,6 +212,10 @@
   },
   "coaxial": {
     "gun": "ashvehicles:mg3",
+    "ammunition": [
+      "ashvehicles:machine_gun_ap",
+      "ashvehicles:machine_gun_ball"
+    ],
     "muzzle": [-1.37, 3.36, 0.89]
   }
 }

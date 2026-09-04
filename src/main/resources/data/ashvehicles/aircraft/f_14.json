@@ -248,20 +248,20 @@
     }
   },
   "wing": {
-    "max_speed": 38.7,
+    "max_speed": 14,
     "stall_speed": 1.6,
     "lift": 0.006,
     "lift_slope": 5.5,
     "stall_angle": 16,
-    "drag": 0.000029,
+    "drag": 0.000271,
     "induced_drag": 0.00035,
     "lateral_drag": 0.15,
     "ground_effect": 0.3,
     "span": 19.3,
     "sweep": {
       "travel": 45,
-      "spread_speed": 10,
-      "swept_speed": 19,
+      "spread_speed": 4.13,
+      "swept_speed": 6.83,
       "cycle_ticks": 70,
       "lift": 0.72,
       "drag": 0.66
@@ -381,7 +381,12 @@
     {
       "name": "gun",
       "pos": [-0.7, 1.9, 4.6],
-      "fixed": "ashvehicles:m61"
+      "fixed": "ashvehicles:m61",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     }
   ]
 }

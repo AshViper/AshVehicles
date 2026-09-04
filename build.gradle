@@ -161,6 +161,42 @@ neoForge {
             // You can set various levels here.
             // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
             logLevel = org.slf4j.event.Level.DEBUG
+
+            // 開発用の JVM。既定のままだと G1 と「物理メモリの1/4」のヒープで走る。
+            //
+            // 秒単位のサーバー停止の出所を潰すために置いてある。この MOD は1秒に数百発の弾エンティティを
+            // 作っては捨て、そのそれぞれが毎tick Vec3 と AABB をいくつか作る。G1 では、その割り当ての
+            // どこかで停止が起き、止まった時間はその瞬間に走っていたコードの請求書に載る——毎tick 400ms
+            // の「弾が99%」という計測は、弾が遅いのではなく弾が割り当てているという意味だった。
+            //
+            // ZGC は停止時間がヒープの大きさに依存しない世代別の並行 GC で、Distant Horizons 自身も
+            // 起動時にこれを勧めている。ExplicitGCInvokesConcurrent は、ダイレクトバッファが枯れた時に
+            // java.nio が呼ぶ System.gc() を、フル停止ではなく並行サイクルに変える——DH は LOD の
+            // メッシュでダイレクトバッファを大量に使うので、ここが実際に踏まれる。
+            //
+            // -Xlog:gc は証拠のため。停止が GC なら、その時刻に Pause 行が出る。出なければ GC ではない
+            // ので、次はそちらを探すことになる。
+            // ReservedCodeCacheSize は開発環境でだけ効く話だ。JIT の吐いたコードを置く場所が既定
+            // （240MB）では足りず、埋まると HotSpot は「CodeCache GC Threshold」を理由にフル GC を
+            // 起こす——実測で1回 1.8 秒と 2.8 秒、ゲームの中身とは何の関係も無く止まる。この MOD は
+            // 大量のクラスと mixin を持ち込み、開発起動はさらにその上を行く。
+            //
+            // -Xlog:gc は証拠のため。確保レートも停止も、これが無ければ推測にしかならなかった。
+            jvmArguments.addAll(
+                    '-XX:+UseZGC',
+                    '-XX:+ZGenerational',
+                    '-XX:+ExplicitGCInvokesConcurrent',
+                    '-XX:ReservedCodeCacheSize=512m',
+                    '-Xmx6G',
+                    '-Xlog:gc',
+                    // 一時的。確保レートが毎秒1GBに達していることは -Xlog:gc が示したが、誰が確保して
+                    // いるかは示さない。JFR の profile 設定には jdk.ObjectAllocationSample が入っている
+                    // ので、確保をスタック付きで標本化してくれる。終了時に run/ash.jfr へ落ちるので、
+                    //   jfr summary run/ash.jfr
+                    //   jfr print --events jdk.ObjectAllocationSample run/ash.jfr
+                    // で読める。原因が分かったらこの1行を消すこと。
+                    '-XX:StartFlightRecording=name=ash,settings=profile,maxsize=256m,'
+                            + 'dumponexit=true,filename=ash.jfr')
         }
     }
 

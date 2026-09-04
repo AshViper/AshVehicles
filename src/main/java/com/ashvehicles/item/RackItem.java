@@ -63,6 +63,13 @@ public class RackItem extends Item {
                     .withStyle(ChatFormatting.GRAY));
         }
 
+        // 翼端レールは付く場所が違う。それを言わなければ、翼下のパイロンで灰色の枠しか出ない理由が
+        // どこにも書かれていないことになる。
+        if (definition.wingtip()) {
+            lines.add(Component.translatable("tooltip.ashvehicles.rack_wingtip")
+                    .withStyle(ChatFormatting.GRAY));
+        }
+
         if (definition.mass() > 0.0F) {
             lines.add(Component.translatable("tooltip.ashvehicles.mass", Math.round(definition.mass()))
                     .withStyle(ChatFormatting.GRAY));

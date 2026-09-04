@@ -256,7 +256,10 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
 
         // 失探中のシーカーは黙って弾道飛行に落ちるのではなく、まず視野内を探し直す。目標を決めてよいのは
         // サーバーだけなので、こちらだけで回す。捉え直せばこの tick からもう誘導が戻っている。
-        if (!this.level().isClientSide) {
+        // 掃引は演算範囲の中でだけ。空の箱に問い合わせても空しか返らないし、その空を歩く代金は箱の大きさ
+        // で払う。VehicleProjectile.simulated 参照。誘導そのものはここに掛からない——比例航法が読むのは
+        // 追っている相手の位置だけで、周囲には何も訊かないので、範囲の外でも弾は針路を作り続ける。
+        if (!this.level().isClientSide && this.isSimulated()) {
             this.holdMark();
 
             if (this.lost) {
@@ -544,7 +547,9 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
             return heading;
         }
 
-        if (!this.level().isClientSide) {
+        // 掃引と同じ理由で演算範囲の中だけ。フレアを撒くのは機体で、機体は自分の周りを開けているので、
+        // 騙される場面は必ずこの内側にある。
+        if (!this.level().isClientSide && this.isSimulated()) {
             this.checkDecoys(guidance);
 
             // 上の行でデコイに奪われた可能性がある。その場合は今それを追っている。

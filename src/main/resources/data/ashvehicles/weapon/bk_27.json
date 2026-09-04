@@ -2,15 +2,16 @@
   "type": "gun",
   "item": false,
   "ammo": 120,
+  "gun_class": "autocannon",
   "firing": {
-    "rounds_per_second": 28.0,
+    "rounds_per_second": 28.33,
     "spread": 0.45
   },
   "projectile": {
     "damage": 8.0,
-    "speed": 25.0,
-    "gravity": 0.0012,
-    "range": 1000.0,
+    "speed": 55.0,
+    "gravity": 0.0245,
+    "range": 1800.0,
     "ricochet": 50.0,
     "tracer": "FFE0A0"
   },

@@ -3,11 +3,14 @@ package com.ashvehicles.data;
 import java.util.ArrayList;
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.network.DefinitionSyncPayload;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 import com.ashvehicles.vehicle.VehicleShape;
+import com.ashvehicles.weapon.AmmunitionDefinition;
 import com.ashvehicles.weapon.EquipmentDefinition;
 import com.ashvehicles.weapon.RackDefinition;
 import com.ashvehicles.weapon.WeaponDefinition;
@@ -40,6 +43,14 @@ public final class Definitions {
     /** 兵装を吊るす物は {@code rack/}。レールと投下ラック。 */
     public static final DefinitionRegistry<RackDefinition> RACKS = DefinitionRegistry.of(
             "rack", RackDefinition.CODEC, RackDefinition.FALLBACK, "racks");
+    /**
+     * 砲へ入れる弾は {@code ammunition/}。同じ砲から出る、中身の違う弾。
+     *
+     * <p>兵装と分けてあるのは、砲と弾が別の物だからだ。1つの 125mm 砲に3種類の弾が入る一方、その砲が
+     * 毎秒何発出て何本の砲身を持つかは弾を替えても変わらない。{@link com.ashvehicles.weapon.AmmunitionDefinition} 参照。
+     */
+    public static final DefinitionRegistry<AmmunitionDefinition> AMMUNITION = DefinitionRegistry.of(
+            "ammunition", AmmunitionDefinition.CODEC, AmmunitionDefinition.FALLBACK, "ammunition");
     /** 撃つのではなく積む物は {@code equipment/}。ポッド類。 */
     public static final DefinitionRegistry<EquipmentDefinition> EQUIPMENT = DefinitionRegistry.of(
             "equipment", EquipmentDefinition.CODEC, EquipmentDefinition.FALLBACK, "equipment");
@@ -70,6 +81,22 @@ public final class Definitions {
 
     public static WeaponDefinition weapon(ResourceLocation id) {
         return WEAPONS.get(id);
+    }
+
+    public static AmmunitionDefinition ammunition(ResourceLocation id) {
+        return AMMUNITION.get(id);
+    }
+
+    /**
+     * その砲がその弾で撃ったときに出ていく物。
+     *
+     * <p>弾種が指定されていればその弾、されていなければ砲自身のファイルが書いた弾。弾種を持たない兵装が
+     * MOD 内の大半であり、そちらは以前と1つも変わらない値を通る。
+     *
+     * <p>撃つ側と、飛んでいる弾と、照準器の3者が同じ答えを必要とするので、判断はここ1箇所にある。
+     */
+    public static WeaponDefinition.Projectile round(WeaponDefinition weapon, @Nullable ResourceLocation ammunition) {
+        return ammunition == null ? weapon.projectile() : ammunition(ammunition).projectile();
     }
 
     public static RackDefinition rack(ResourceLocation id) {

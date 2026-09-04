@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
+import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.client.ghost.GhostRenderContext;
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
@@ -105,6 +106,18 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
                 continue;
             }
 
+            // 倉の中の搭載物は、扉が閉じきっている間は描かない。
+            //
+            // 動かして扉に追従させようとしたが、模型のどの姿勢が開でどの姿勢が閉かをファイルの数値から
+            // 読む方法が無く、向きを3度外した。描かないことには向きが無い。閉じた倉の中身は誰にも見えない
+            // ——それが倉である理由の全部だ——ので、見えない物を正しい位置へ動かす必要はそもそも無い。
+            //
+            // 開いている間は何も変えない。ハードポイントの座標は搭載物が見える状態に合わせて書かれており、
+            // そこはこの機能が入る前とまったく同じ描き方になる。
+            if (this.stowed(aircraft, hardpoint)) {
+                continue;
+            }
+
             // まずパイロン位置にラック、続いて各兵装をラック上の自分の位置へ。ラックは空になっても描き続ける。
             // 固定されている物であり、空の投下ラックを4本ぶら下げた主翼こそ、帰投中の機体の姿だ。
             this.draw(MountedStore.rack(mount.rack()), hardpoint.pos(), aircraft, partialTick,
@@ -142,6 +155,17 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
     }
 
     /**
+     * その搭載物が、閉じた兵装倉の中にしまわれているか。倉の外の物と、扉を持たない機体では常に偽。
+     *
+     * <p>扉が動いている間は描く。閉じきるまで見えていて、扉がその上に閉まる——実際にそう見えるべきだし、
+     * 開ける途中に中身が遅れて現れることも無くなる。
+     */
+    private boolean stowed(AircraftEntity aircraft, AircraftDefinition.Hardpoint hardpoint) {
+        return hardpoint.internal() && aircraft.hasBay()
+                && !aircraft.isBayOpen() && aircraft.isBaySettled();
+    }
+
+    /**
      * 同じ物を、取り付け点の周りに振って描く。
      *
      * <p>角度は機体に対する物で、正が右・正が上。この座標系は機体の姿勢と半回転を通った後なので、+X が右、
@@ -162,6 +186,7 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
             poseStack.mulPose(Axis.YP.rotationDegrees(-yawDegrees));
             poseStack.mulPose(Axis.XP.rotationDegrees(pitchDegrees));
         }
+
 
         GeoObjectRenderer<MountedStore> renderer = MountedStore.renderer();
         ResourceLocation texture = renderer.getTextureLocation(store);

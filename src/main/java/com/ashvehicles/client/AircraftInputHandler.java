@@ -47,6 +47,7 @@ public final class AircraftInputHandler {
         boolean toggleGear = ModKeyMappings.TOGGLE_GEAR.consumeClick();
         boolean toggleFlaps = ModKeyMappings.TOGGLE_FLAPS.consumeClick();
         boolean toggleVtol = ModKeyMappings.TOGGLE_VTOL.consumeClick();
+        boolean toggleBay = ModKeyMappings.TOGGLE_BAY.consumeClick();
         boolean jettison = ModKeyMappings.JETTISON.consumeClick();
         // 1つのキーが MOD 内すべての兵装を順送りするが、押下を取れるハンドラは1つだけだ——キーマッピングは
         // クリックを最初に要求した側へ渡すし、この2つは順序の定めなく毎tick走る。よってこちらはプレイヤーが地上
@@ -157,7 +158,8 @@ public final class AircraftInputHandler {
         PacketDistributor.sendToServer(new AircraftInputPayload(
                 input, aircraft.getThrottle(), aircraft.getAfterburner(),
                 aircraft.getAttitude(), aircraft.getVelocity(),
-                aircraft.isCrashing(), toggleGear, toggleFlaps, toggleVtol, cycleWeapon, jettison));
+                aircraft.isCrashing(), toggleGear, toggleFlaps, toggleVtol, toggleBay, cycleWeapon,
+                jettison));
     }
 
     /**

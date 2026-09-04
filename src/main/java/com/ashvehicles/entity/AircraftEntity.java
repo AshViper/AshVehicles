@@ -20,6 +20,7 @@ import com.ashvehicles.particle.TintedParticleOption;
 import com.ashvehicles.sensor.Sensors;
 import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.item.AmmoItem;
+import com.ashvehicles.item.AmmunitionItem;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.RackItem;
@@ -65,6 +66,8 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.common.NeoForgeMod;
 import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -126,6 +129,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private static final EntityDataAccessor<Vector3f> DATA_BODY_RATE =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.VECTOR3);
     /** 降着装置のセレクタ。脚は {@link #getGearCycleTicks()} tick かけて動く。 */
+    /**
+     * 兵装倉の扉が開いているか。
+     *
+     * <p>降着装置と同じ形——サーバーが持つ真偽値1つと、両側が自分で進める作動量。扉は角度ではなく手順
+     * だが、脚と違って途中の姿勢に意味は無い（引っ掛かる物も、抗力も無い）ので、アニメーションファイル
+     * ではなくコードで振る。{@code AircraftModel.applyPose} 参照。
+     */
+    private static final EntityDataAccessor<Boolean> DATA_BAY_OPEN =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /**
@@ -440,6 +452,22 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private static final double WRECK_FRICTION = 0.92;
 
+    /**
+     * 乗員を抱えた残骸が「着いた」と見なされる、地形までの距離（ブロック）。
+     *
+     * <p>{@link #reportCrash} が使うのと同じ余裕。素の直方体は車輪の位置にあって機体の実寸を持たないので、
+     * 端点だけを見ると翼から先に地面へ入った機体がまだ空中にいることになる。
+     */
+    private static final double WRECK_CONTACT = 0.5;
+
+    /**
+     * 着水と見なす水深（ブロック）。機体の箱の底から測る。
+     *
+     * <p>1.0 は「水を含んだブロック1つ分より深い」という意味。あれが作る水位は 0.889 なので、滑走路脇の
+     * 水を含んだ階段や1マスの水たまりでは機体は落ちない。本物の水面——川でも海でも——は必ずこれを超える。
+     */
+    private static final double DITCH_DEPTH = 1.0;
+
     private final AnimatableInstanceCache animatableCache = GeckoLibUtil.createInstanceCache(this);
     /** 機体の搭載物。サーバー側が正であり、クライアント側はタグの複製。 */
     private final WeaponMounts weapons = new WeaponMounts(this);
@@ -494,6 +522,27 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private int lateWorld;
     /**
+     * この tick、遅れて届いた地面が拒んだ移動量。拒まれなかった tick は {@link Vec3#ZERO}。
+     *
+     * <p>{@link #flyOnThroughLateWorld} が実際に走った tick にだけ入る。つまり猶予が開いていて、かつ本当に
+     * 衝突があった tick だけだ。tick の頭で必ず捨てるので、機体を止めた物が2秒前に届いていた地面なら——猶予が
+     * 切れていれば——ここは空のままになる。
+     *
+     * <p>あるのは {@link #getVelocity} のためで、理由は1つ。あちらは操縦側で「どこまで進んだか」から速度を
+     * 測るので、遅れて届いた地面に止められた tick は0を答える。すると回廊が縮む。{@code AircraftChunkLoader}
+     * の確保も先読みも、長さを速度に比例させているからだ——{@code LEAD_TICKS} も {@code PREFETCH_TICKS} も、
+     * 掛ける相手はこの値だ。速度0の機体は地面を1つも要求しない。
+     *
+     * <p>それが自分で自分を育てる。生成を追い越した機体は地面に止められ、止められたので0を申告し、0を申告
+     * したので先読みが止まり、先読みが止まったので次の地面もまた遅れる。機体は猶予に救われて速度を取り戻し
+     * ——{@link #flyOnThroughLateWorld} がそうする——同じ壁へ同じ速度で入っていく。回廊が縮んだ状態で。
+     *
+     * <p>だからここに入るのは、衝突が奪う前の速度、すなわち機体が次の tick も持って行く速度そのものだ。
+     * 進んだ距離ではなく速度を訊いている物——回廊、先読み、計器、初速——にとってはそれが正しい答えで、
+     * 進んだ距離を訊いている物（{@link #lastTravel}）はこれを読まない。
+     */
+    private Vec3 deniedByLateWorld = Vec3.ZERO;
+    /**
      * 前回の自己移動で機体が実際に進んだ距離（要求距離ではなく）。
      *
      * <p>読むのは残骸だけで、残骸が運動量を地面へ持ち込めるのはこれが全てだ。デルタ移動では代用できない。
@@ -503,6 +552,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private Vec3 lastTravel = Vec3.ZERO;
     /** 飛行中この機体が開いたまま保持しているチャンク（あれば）。 */
     private Set<ChunkPos> heldChunks = Set.of();
+    /**
+     * 先読みが今この機体のために頼んでいる chunk。{@code AircraftChunkLoader.prefetch} 参照。
+     *
+     * <p>保存しない。中身はチケットで、チケットは自分で切れる。ここが覚えているのは「前回何を頼んだか」
+     * だけで、それは次の要求との差——旋回して捨てた進路——を出すためにしか使わない。
+     */
+    private AircraftChunkLoader.Tiers prefetched = new AircraftChunkLoader.Tiers();
     /**
      * 回廊を最後に引き直した tick。{@link #claimCorridorTick} 参照。
      *
@@ -524,6 +580,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     /** 降着装置の展開度。0が上げロック、1が下げロック。 */
     private float gearProgress = 1.0F;
     private float gearProgressO = 1.0F;
+    /** 兵装倉の扉の開き量。0が閉、1が全開。 */
+    private float bayProgress;
+    private float bayProgressO;
     /** ノズルの振れ量。0が格納、1が完全下向き。 */
     private float vtolProgress;
     private float vtolProgressO;
@@ -925,6 +984,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         builder.define(DATA_VELOCITY, new Vector3f());
         builder.define(DATA_BODY_RATE, new Vector3f());
         builder.define(DATA_GEAR_DOWN, true);
+        builder.define(DATA_BAY_OPEN, false);
         builder.define(DATA_FLAPS_DOWN, false);
         builder.define(DATA_VTOL, false);
         builder.define(DATA_WEAPONS, new CompoundTag());
@@ -1364,6 +1424,48 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.entityData.set(DATA_VTOL, !this.isVtolSelected());
     }
 
+    /** この機体が兵装倉を持つか。扉のボーンを1枚でも名指ししていればそう。 */
+    public boolean hasBay() {
+        return this.getStats().model().hasBay();
+    }
+
+    /** 兵装倉の扉が開いているか。開く途中も含めて、乗員が選んでいる状態。 */
+    public boolean isBayOpen() {
+        return this.entityData.get(DATA_BAY_OPEN);
+    }
+
+    /**
+     * 兵装倉を開閉する。
+     *
+     * <p><b>扉は無料ではない。</b> 開いている間、倉の中身は外から見える——つまりレーダーに映る。ステルス
+     * 機が兵装を機内に積む理由がまさにそれで、扉を開けた瞬間にその利点は消える。だから開けっ放しにする
+     * 選択肢はあるが、代償がある。{@link #radarCrossSection()} 参照。
+     *
+     * <p>倉を持たない機体では何も起きない。翼下に吊る機体にレバーだけあっても意味が無い。
+     */
+    public void toggleBay() {
+        if (this.level().isClientSide || !this.hasBay()) {
+            return;
+        }
+
+        this.entityData.set(DATA_BAY_OPEN, !this.isBayOpen());
+    }
+
+    /** 扉が行き先まで動き終えたか。 */
+    public boolean isBaySettled() {
+        return this.bayProgress == (this.isBayOpen() ? 1.0F : 0.0F);
+    }
+
+    /** 描画用の扉の開き量。0が閉、1が全開。 */
+    public float getBayProgress(float partialTick) {
+        return Mth.lerp(partialTick, this.bayProgressO, this.bayProgress);
+    }
+
+    /** 扉が開ききるまでの時間（tick）。モデル設定から。 */
+    public int getBayCycleTicks() {
+        return Math.max(this.getStats().model().bayCycleTicks(), 1);
+    }
+
     /** この機体が主翼ではなくローターで支えられているか。 */
     public boolean isRotorcraft() {
         return this.getStats().rotor().isPresent();
@@ -1635,6 +1737,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.tickLerp();
 
         if (this.isControlledByLocalInstance()) {
+            // 前 tick の申告はもう配り終えている。ここで捨てるのは、この tick の移動より前でなければ
+            // ならないから——xOld は今 tick の直前に現在位置へ揃えられており、travelled() は移動が済むまで
+            // 必ず0を返す。飛行モデルがその0を見る、という従来の約束をここが保つ。deniedByLateWorld 参照。
+            this.deniedByLateWorld = Vec3.ZERO;
+
             // 遠隔操作中の無人機はここを通る。サーバーが飛ばしているので「操縦者不在」だが、舵は不在では
             // ない——操作者が毎tick送ってくる。DroneInputPayload 参照。
             if (!(this.getControllingPassenger() instanceof Player) && !this.isRemotelyFlown()) {
@@ -1767,6 +1874,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 移動後に測るのと同じ理由。
         this.tickSweep();
 
+        // 海に降りた機体は、そこで飛ぶことをやめる。ditching 参照。
+        if (!this.level().isClientSide && !this.isWrecked() && this.ditching()) {
+            this.crashing = true;
+        }
+
         if (this.crashing) {
             this.crash();
         }
@@ -1861,10 +1973,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * chunk を問うので、答えは<em>パイロットに見えていたか</em>と正確に一致する。見えていない地面に殺されない、
      * というのがこの猶予の全部だ。サーバーが飛ばす無人機では、サーバーがロードしている chunk を問う。
      *
-     * <p>問い合わせはどちらの側でもロードを起こさない。{@code ChunkSource.hasChunk} は {@code getChunk} を
-     * {@code requireChunk = false} で呼ぶだけで、無ければ生成もロードもせず null が返る。ここで生成を起こせば
-     * それは tick スレッド上のワールド生成——{@code AircraftChunkLoader} が回廊をわざわざ非同期にしてまで避けて
-     * いる、まさにその代償——になる。
+     * <p>問い合わせはどちらの側でもロードを起こさない。{@code ChunkSource.getChunkNow} は読める chunk か
+     * null しか返さず、無ければ生成もロードも待ちもしない。ここで生成を起こせばそれは tick スレッド上の
+     * ワールド生成——{@code AircraftChunkLoader} が回廊をわざわざ非同期にしてまで避けている、まさにその
+     * 代償——になる。
      *
      * @param step この tick の移動量
      */
@@ -1901,10 +2013,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return false;
     }
 
-    /** その座標の chunk をこの側が持っているか。持っていなければ false。ロードは決して起こさない。 */
+    /**
+     * その座標の chunk をこの側が<em>今</em>持っているか。持っていなければ false。ロードは決して起こさない。
+     *
+     * <p>{@code hasChunk} ではなく {@code getChunkNow}。前者はチケット水準しか見ないので、先読みチケットが
+     * 置かれた瞬間に「ある」と答え、その答えを信じて進んだ {@code move()} が生成の終わりを待つことになる。
+     * 後者は読める chunk か null しか返さない。{@code VehicleProjectile.groundUnder} と同じ問い方。
+     */
     private static boolean hasChunkAt(ChunkSource chunks, double x, double z) {
-        return chunks.hasChunk(SectionPos.blockToSectionCoord(Mth.floor(x)),
-                SectionPos.blockToSectionCoord(Mth.floor(z)));
+        return chunks.getChunkNow(SectionPos.blockToSectionCoord(Mth.floor(x)),
+                SectionPos.blockToSectionCoord(Mth.floor(z))) != null;
     }
 
     /**
@@ -1919,12 +2037,21 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * <p>機体は今も動けない場合がある。届いた斜面の面に押し付けられていれば {@code move} は次の tick も阻む。
      * だがそれは行き止まりではない。速度を保った機体は面に沿って滑るし、めり込んでいれば {@link #insideTerrain}
      * が外へ出す。猶予が切れる頃には地形は数秒前から見えているので、そこから先の衝突は正真正銘の墜落だ。
+     *
+     * <p><b>位置は返さない。</b>返すのは速度だけだ。{@code move} が拒んだ距離を戻せば機体は面の向こうへ出る
+     * ——それは、この猶予が開いている間ずっと有効な、地形をすり抜ける飛び方になる。猶予は旗ではなく2秒の時計
+     * で、しかも未踏の地面へ全速で入った機体では毎tick張り直される（{@link #beyondTheWorld}）ので、「たまに
+     * 数tick」ではなく「その飛行の間ずっと」開きうる。そのうえ次の tick には {@link #insideTerrain} が機体を
+     * 山の奥へ1tick分ずつ押し込む係になる。速度を返すだけなら機体は面に沿って滑り、そこから先は世界が決める。
      */
     private void flyOnThroughLateWorld(Vec3 impactVelocity) {
         if (!this.horizontalCollision && !this.verticalCollision) {
             return;
         }
 
+        // 進めなかったこと自体は残る。残さないのは「進めなかった＝この機体は止まっている」という読み方の方だ。
+        // 速度を訊く物にはここから答える。deniedByLateWorld 参照。
+        this.deniedByLateWorld = impactVelocity;
         this.setDeltaMovement(impactVelocity);
         this.horizontalCollision = false;
         this.verticalCollision = false;
@@ -1982,6 +2109,45 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         if (impactVelocity.length() > limit) {
             this.crashing = true;
         }
+    }
+
+    /**
+     * 機体が着水したか。
+     *
+     * <p><b>なぜ {@link #detectCrash} がこれを見つけられないか。</b> あちらは衝突フラグでしか動かず、水には
+     * 当たり判定が無い（{@code LiquidBlock} の衝突形状は空）。だから海面へ突っ込んだ機体は水平にも垂直にも
+     * 「何かに当たった」と報告せず、判定は2行目で戻る。この MOD の他の2つの衝突経路——{@code limitToShape}
+     * と {@code insideTerrain}——も最後は {@code getBlockCollisions} に行き着くので、同じように水を見ない。
+     * 飛行モデル自体も流体を一度も問わないので、揚力も推力も操縦権限も海面下40ブロックで変わらない。
+     * それが「海に入った機体が操作できている」の全部だ。
+     *
+     * <p><b>速度を測らない理由。</b> この機群にフロートを持つ機体は無い——{@code Undercarriage} が持つのは
+     * 車輪の摩擦と操向と段差高だけだ。だから海は、どの機体にとっても到達できる面ではない。問うべきは
+     * 「どれだけ強く当たったか」ではなく「まだ飛んでいるか」で、答えは速度に依らず否になる。
+     *
+     * <p><b>判定はサーバーで行う。ここが {@link #detectCrash} と違う唯一の点であり、違えなければ何も
+     * 起きない。</b> 飛行モデルは操縦側のクライアントでしか回らないので、あちらで {@code crashing} を立てても
+     * {@code wreck} はサーバーでなければ即座に戻る。唯一の橋である {@link #reportCrash} は報告を
+     * {@code noCollision} で検算するが、それはブロックの当たり判定しか見ない——水には無い——ので、外洋からの
+     * 報告は必ず捨てられる。しかも {@code crashing} を下ろすのはサーバー側の {@code onWrecked} だけなので、
+     * 捨てられた報告はクライアントに残り、毎tick再送され続ける。
+     *
+     * <p><b>接触ではなく深さで問う。</b> {@code isInWater()} は箱に水が1滴でも入れば真になる。機体の箱は
+     * 10ブロック四方あるので、滑走路の端の水を含んだ階段1つ、雨上がりの水たまり1つでそれが起きる。だから
+     * バニラが同じ走査で既に測っている水位を使う——{@code getFluidTypeHeight} は箱の底からの水の高さで、
+     * 追加のコストは無い。水を含んだブロック1つが作る高さ（0.889）を超える値を求めれば、それらは通らない。
+     *
+     * <p><b>雨で落ちないこと。</b> {@code isInWater()} は雨を含まない（あれは {@code isInWaterOrRain}）。
+     * 大釜も流体状態を持たないので通らない。
+     *
+     * <p>問い合わせは無料で、チャンクも開かない。{@code wasTouchingWater} も水位も
+     * {@code Entity.baseTick} が毎tick更新しており、その走査は {@code touchingUnloadedChunk()} で
+     * 門前払いされる——つまり届いていない地面の上では「水は無い」と答え、生成を起こさない。LateWorld の
+     * 窓と喧嘩しない理由がそれだ。
+     */
+    private boolean ditching() {
+        return this.isInWater()
+                && this.getFluidTypeHeight(NeoForgeMod.WATER_TYPE.value()) >= DITCH_DEPTH;
     }
 
     /**
@@ -3058,6 +3224,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // かかわらず差は完全に0になる——それが、そこから発射される全兵器の初速を黙って奪っていた。この側で正直な
         // 答えはパイロット自身の申告値だけだ。
         if (this.isControlledByLocalInstance()) {
+            // ただし、遅れて届いた地面に止められた tick は「進んだ距離」が速度ではない。機体は止まっていない
+            // ——次の tick も同じ速度を持って行く（{@link #flyOnThroughLateWorld} が返している）——のに、
+            // 進んだ距離は0になる。その0が回廊と先読みを畳み、次の地面をさらに遅らせる。
+            // deniedByLateWorld 参照。
+            if (this.deniedByLateWorld.lengthSqr() > 0.0) {
+                return this.deniedByLateWorld;
+            }
+
             return this.travelled();
         }
 
@@ -3080,6 +3254,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * ので、詰まった直後には同じ tick に数十本が着き、その1本1本がちがう位置からちがう回廊を要求する。
      * 回廊が答えるべき問いは1tick に1つなので、最初の1本に答えて残りは断る。
      */
+    /** 先読みが前回頼んだ chunk。{@code AircraftChunkLoader} 専用。 */
+    AircraftChunkLoader.Tiers getPrefetched() {
+        return this.prefetched;
+    }
+
+    /** 先読みが今回頼んだ chunk を覚える。 */
+    void setPrefetched(AircraftChunkLoader.Tiers asked) {
+        this.prefetched = asked;
+    }
+
     boolean claimCorridorTick() {
         long now = this.level().getGameTime();
 
@@ -3361,6 +3545,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.flapsProgressO = this.flapsProgress;
         this.flapsProgress = approach(this.flapsProgress, this.isFlapsDown() ? 1.0F : 0.0F,
                 1.0F / Math.max(this.getFlapsCycleTicks(), 1));
+        this.bayProgressO = this.bayProgress;
+        this.bayProgress = approach(this.bayProgress, this.isBayOpen() ? 1.0F : 0.0F,
+                1.0F / this.getBayCycleTicks());
     }
 
 
@@ -3833,6 +4020,66 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
+     * <b>飛んでいる機体は追跡から外れない。</b>
+     *
+     * <p>これは {@link com.ashvehicles.mixin.CorridorTicketMixin} と対になっており、片方だけでは入れられ
+     * ない。あちらは回廊のチケットが地形の完成を待つのをやめさせる。待たなくなると、機体は「チケットは
+     * 立っているが地形はまだ無い」chunk へ入る瞬間ができる。その瞬間に何が起きるかがここの話だ。
+     *
+     * <p>{@code Visibility} は {@code FullChunkStatus} から来て、その昇格は chunk の生成が<em>成功した後</em>
+     * にしか通知されない（{@code ChunkHolder.scheduleFullChunkPromotion}）。だから地形が届くまでその
+     * section は {@code HIDDEN} で、{@code PersistentEntitySectionManager.Callback.updateStatus} は
+     * {@code stopTracking} を呼び、{@code ServerLevel.EntityCallbacks.onTrackingEnd} が
+     * {@code onRemovedFromLevel} を呼ぶ。機体は tick を止めるのではなく<em>世界から消える</em>。
+     *
+     * <p>それを止められるのは {@code getEffectiveStatus} の1行だけだ——
+     * {@code entity.isAlwaysTicking() ? Visibility.TICKING : visibility}。真を返せば、移動を理由に追跡が
+     * 切れることが構造的に起こらなくなる。
+     *
+     * <p><b>これは「ロードされていない地面の上で物理を回す」という意味ではない。</b> 基底クラスのコメントが
+     * 恐れているのはそれだが、このフラグにその力は無い。tick そのものは
+     * {@code ServerLevel.tickEntities} の {@code inEntityTickingRange} が別に握っていて、そちらはチケット
+     * 水準だけを見る。つまりフラグが買うのは {@code entityTickList} への在籍であって tick ではない。回廊は
+     * 機体の下の chunk を entity-ticking の水準（31）で必ず押さえているので、tick は今まで通り来る。
+     * 変わるのは、地形が数tick遅れて届く窓の間に機体が消えなくなることだけだ。
+     */
+    @Override
+    public boolean isAlwaysTicking() {
+        return true;
+    }
+
+    /**
+     * <b>機体は落下距離を数えない。</b>
+     *
+     * <p>数えないのは、数えた結果が使われないからではなく、数えていること自体が飛行を止めていたからだ。
+     *
+     * <p>{@code Entity.move} は移動を確定する直前にこの一節を通る——
+     * {@code if (this.fallDistance != 0.0F && d0 >= 1.0) level().clip(...FALLDAMAGE_RESETTING...)}。
+     * 落下中の物が着地を柔らかくするブロックを掠めたかどうかを見るためのもので、歩く物には安い。機体には
+     * 安くない。あの {@code clip} は<em>この tick に申告された移動の全長</em>を1ブロックずつ歩き、
+     * その各点で {@code Level.getBlockState} を引く。そして {@code Level.getBlockState} は
+     * {@code getChunk(x, z)}——{@code ChunkStatus.FULL} を {@code requireChunk = true} で——なので、
+     * 通り道の chunk が1つでも未生成なら、その場でワールド生成が走り、tick スレッドが止まる。
+     *
+     * <p>巡航で1tick 17ブロック、F-22 で37ブロック。移動パケットは毎秒20個来る。しかも通り道は
+     * <em>着地点だけではなく途中の全部</em>で、そこは {@link AircraftChunkLoader} の回廊が押さえている
+     * 範囲より広い。未踏の空を高速で横切る機体が「引っかかる」感触の出所がこれだ。
+     *
+     * <p><b>そして一度飛べば、二度と消えない。</b> {@code fallDistance} を0に戻すのは
+     * {@code checkFallDamage} の接地分岐だけで、この MOD が {@code resetFallDistance} を呼ぶのは乗員に
+     * 対してだけ（{@link EjectionSeat}、{@link Hitboxes#carry}、{@link RemoteLink}）。機体自身は一度
+     * 降下した時点で値を持ち、以後ずっとこの光線を撃ち続ける。
+     *
+     * <p>失う物はほぼ無い。ここが他にやっていたのは {@code fallOn} と {@code HIT_GROUND} で、つまり
+     * 着陸した機体が農地を踏み荒らすことと、スライムブロックで跳ねることだ。機体が落下ダメージを受ける
+     * ことは元から無い——墜落は {@link #detectCrash} が対気速度で判定する、まったく別の仕組みで、
+     * そちらはここに一切依存していない。
+     */
+    @Override
+    protected void checkFallDamage(double distance, boolean onGround, BlockState state, BlockPos pos) {
+    }
+
+    /**
      * 機体が機体でなくなった瞬間に停止処理を行う。
      *
      * <p>3つあり、いずれも放置すれば焼けた機体で起こり続けることだ。エンジンは停止するので音量は0。主翼の下に
@@ -3859,6 +4106,45 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.clearDesignation();
         this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
         this.snapAttitude(this.attitude);
+    }
+
+    /**
+     * <b>撃墜されたパイロットは機体と一緒に落ちる。</b>
+     *
+     * <p>被弾した瞬間に空中へ放り出されるのは、その出来事の中で唯一起きなかったことだ。実際に起きるのは
+     * 「まだ座っていて、もう飛んでいない」数秒間で、その間にできることは1つしかない——ハンドルを引くか、
+     * 引ける座席が無ければ地面が来るのを見るか。{@link EjectionSeat} が用意しているのはこの数秒であり、
+     * ここが無ければ座席は「引く暇の無い装備」でしかなかった。
+     *
+     * <p>降ろす仕事は残骸が地面に着いてからで、{@link #wreckHasComeToRest} が判定する。
+     */
+    @Override
+    protected boolean holdsCrewToTheGround() {
+        return true;
+    }
+
+    /**
+     * 残骸が地面に着いたか。乗員を抱えている間だけ問われる。
+     *
+     * <p>速度からは読まない。パイロットが乗っている限り機体を動かしているのはそのクライアントで、サーバー
+     * 側の {@code deltaMovement} は位置パケットで更新されないから毎tick古い値のままだ——それを読めば、まだ
+     * 落ちている残骸が着地したことになり、抱える意味そのものが消える。位置は正直に届いているので、位置から
+     * 問う。
+     *
+     * <p>問い合わせの前に chunk を確かめる。無い chunk は空気として読まれるので、ロードの追いつかない空を
+     * 落ちている残骸が「何にも当たっていない」と答えるのは正しいが、生成を起こしてまで訊く価値は無い。
+     */
+    @Override
+    protected boolean wreckHasComeToRest() {
+        if (this.onGround() || this.verticalCollision || this.isInWater()) {
+            return true;
+        }
+
+        if (!hasChunkAt(this.level().getChunkSource(), this.getX(), this.getZ())) {
+            return false;
+        }
+
+        return !this.level().noCollision(this, this.getBoundingBox().inflate(WRECK_CONTACT));
     }
 
     /**
@@ -3932,6 +4218,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 弾薬箱も搭乗より先に見る。ベルトを抱えて機体へ歩み寄る者は内蔵砲を装填したいのであって、乗り
         // 込みたいのではない。入る砲が無ければクリックは素通りして通常の意味を持つ——満載の機体を撫でて
         // ベルトを1本失うことは起きない。戦車が弾薬箱を受ける場所と同じ位置づけ。
+        // 名前の付いた1弾種は、汎用の弾薬箱より先に見る。徹甲弾のベルトを抱えて歩み寄る者は、その弾を
+        // 積みたいのであって「機関砲弾なら何でも」ではない。地上車両が同じ順で見る。
+        if (held.getItem() instanceof AmmunitionItem round) {
+            InteractionResult loaded = this.loadRound(player, held, round.getAmmunitionId());
+
+            if (loaded.consumesAction()) {
+                return loaded;
+            }
+        }
+
         if (held.getItem() instanceof AmmoItem ammo) {
             InteractionResult loaded = this.loadAmmo(player, held, ammo.getKind());
 
@@ -4155,6 +4451,38 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      *
      * @return 何か入ったなら CONSUME。入らなければ PASS で、クリックは搭乗などの本来の意味へ流れる
      */
+    /**
+     * 手にある1弾種を、それを受け付ける内蔵砲へ積む。
+     *
+     * <p>機体の砲が持てるベルトは1本なので、別の弾種が残っている砲は受け取らない
+     * （{@code WeaponMounts.loadRound} 参照）。撃ち尽くせば入る。
+     *
+     * @return 何か入ったなら CONSUME。入らなければ PASS で、クリックは本来の意味へ流れる
+     */
+    private InteractionResult loadRound(Player player, ItemStack held, ResourceLocation round) {
+        if (this.isWrecked() || !this.isParked()) {
+            return InteractionResult.PASS;
+        }
+
+        WeaponMounts.Resupply loaded = this.weapons.loadRound(round, held.getCount());
+
+        if (loaded == null) {
+            return InteractionResult.PASS;
+        }
+
+        held.consume(loaded.taken(), player);
+        WeaponMounts.playLoadSound(this, true);
+        this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
+        // 何がどこへ入ったかを言う。砲の名前だけでは足りない——同じ砲に何種類も入るので、入ったのが
+        // どれかこそ知りたいことだ。
+        this.report(player, "message.ashvehicles.loaded_belt",
+                Component.literal(weaponLabel(loaded.weapon())),
+                Component.translatable("item." + round.getNamespace() + "." + round.getPath()),
+                loaded.rounds(), loaded.capacity());
+
+        return InteractionResult.CONSUME;
+    }
+
     private InteractionResult loadAmmo(Player player, ItemStack held, AmmoKind kind) {
         if (this.isWrecked() || !this.isParked()) {
             return InteractionResult.PASS;
@@ -4596,6 +4924,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.entityData.set(DATA_VTOL, tag.getBoolean("Vtol"));
         this.vtolProgress = this.isVtolSelected() ? 1.0F : 0.0F;
         this.vtolProgressO = this.vtolProgress;
+        this.entityData.set(DATA_BAY_OPEN, tag.getBoolean("BayOpen"));
+        this.bayProgress = this.isBayOpen() ? 1.0F : 0.0F;
+        this.bayProgressO = this.bayProgress;
         this.entityData.set(DATA_FLAPS_DOWN, tag.getBoolean("FlapsDown"));
         this.flapsProgress = this.isFlapsDown() ? 1.0F : 0.0F;
         this.flapsProgressO = this.flapsProgress;
@@ -4636,6 +4967,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         tag.putInt("Chaff", this.getCountermeasures(false));
         tag.putBoolean("GearDown", this.isGearDown());
         tag.putBoolean("FlapsDown", this.isFlapsDown());
+        tag.putBoolean("BayOpen", this.isBayOpen());
         tag.putBoolean("Vtol", this.isVtolSelected());
         tag.put("Weapons", this.weapons.save());
         tag.put("Stations", this.stations.save());

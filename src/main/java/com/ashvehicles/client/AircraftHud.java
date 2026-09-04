@@ -20,6 +20,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -834,8 +835,11 @@ public final class AircraftHud implements LayeredDraw.Layer {
         // 内側だった——速度計と高度計が水平線の両端に重なり、外を見る帯が計器で埋まっていた。
         //
         // スコープに突き当たったらそこで止める。目盛りが読めなくなるより、狭い画面で水平線に触れる方がまし。
+        // スコープを描かない機体では、その分の場所も空けない。空けておくと、何も無い帯を避けるために
+        // 目盛りが内側へ寄り、レーダーの無い機体ほど画面が狭くなる。
+        int leftEdge = aircraft.radar().fitted() ? RadarDisplay.SCOPE_RIGHT : RadarDisplay.EDGE;
         int clear = HudScale.at(HORIZON_WIDTH + TAPE_GAP) + HudTape.RIGHT_REACH;
-        int room = centreX - RadarDisplay.SCOPE_RIGHT - TAPE_GAP - HudTape.LEFT_REACH;
+        int room = centreX - leftEdge - TAPE_GAP - HudTape.LEFT_REACH;
         int offset = Math.max(Math.min(clear, room), HudTape.RIGHT_REACH + TAPE_GAP);
 
         // 1ブロック=1m、1秒=20tick。
@@ -940,6 +944,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
                     aircraft.isGearDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
             panel.pair("FLAP", DIM, aircraft.isFlapsDown() ? "DOWN" : "UP", GREEN,
                     aircraft.isFlapsDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
+        }
+
+        // 兵装倉を持つ機体のみ。開いている間だけ倉の中身がレーダーに映るので、これは形態の表示であると
+        // 同時に「今どれだけ見えているか」の表示でもある。だから開いている方を琥珀にする——閉じているのが
+        // 巡航形態で、開いているのは代償を払っている状態だ。
+        if (aircraft.hasBay()) {
+            boolean open = aircraft.isBayOpen();
+
+            panel.pair("BAY", DIM, open ? "OPEN" : "SHUT", open ? WARNING : GREEN,
+                    open ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
         }
 
         // 可変翼を持つ機体のみ。翼はパイロットが動かす物ではないが、だからこそ今どこにあるかは見えている必要が
@@ -1049,6 +1063,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
             panel.pair((own ? "> " : "  ") + name, colour, gun == null ? "--" : String.valueOf(rounds), colour);
 
+            if (gun != null && rounds <= 0) {
+                need(panel, gun);
+            }
+
             // 誰が撃つか。自分の砲では言うまでもないので、他人が持っている砲についてだけ名前を出す。
             if (crew != null && crew != minecraft.player) {
                 panel.crew(crew.getName().getString(), DIM);
@@ -1081,10 +1099,41 @@ public final class AircraftHud implements LayeredDraw.Layer {
             boolean armed = weapon.equals(selected);
             int rounds = armed ? aircraft.getWeapons().selectedAmmo() : ammoOf(aircraft, weapon);
             boolean unusable = aircraft.getWeapons().missingPod(weapon) != null;
-            int colour = unusable || rounds <= 0 ? WARNING : (armed ? GREEN : DIM);
+            // 倉の中の兵装は、扉が開くまで撃てない。引き金が黙る理由は一覧のその行に出す。
+            boolean shut = armed && aircraft.getWeapons().selectedIsShutIn();
+            int colour = unusable || shut || rounds <= 0 ? WARNING : (armed ? GREEN : DIM);
 
             panel.pair((armed ? "> " : "  ") + name(weapon), colour,
-                    unusable ? "NO POD" : String.valueOf(rounds), colour);
+                    unusable ? "NO POD" : shut ? "BAY SHUT" : String.valueOf(rounds), colour);
+
+            // 何のベルトが入っているか。同じ機関砲でも弾種で威力も弾道も変わるので、残弾の数だけでは
+            // 半分しか言っていない。空の砲では代わりに何を積めばよいかを出す。
+            ResourceLocation belt = armed ? aircraft.getWeapons().selectedAmmunition() : null;
+
+            if (belt != null && rounds > 0) {
+                panel.pair("  BELT", DIM,
+                        Component.translatable("item." + belt.getNamespace() + "." + belt.getPath())
+                                .getString(), DIM);
+            }
+
+            // 内蔵砲だけ。吊り物を満たすのは同じ物をもう1つ吊ることで、その名前はすぐ上の行に出ている。
+            if (!unusable && rounds <= 0 && !Definitions.weapon(weapon).item()) {
+                need(panel, weapon);
+            }
+        }
+    }
+
+    /**
+     * 空になった砲を満たすアイテムの名前。
+     *
+     * <p>「残弾0」だけでは半分しか言っていない。次にすることは弾を取りに行くことで、そのために要るのは
+     * 「何を」だ。地上車両の計器が同じ行を出す。{@link AmmoHint} 参照。
+     */
+    private static void need(HudPanel panel, ResourceLocation weapon) {
+        Component item = AmmoHint.forGun(weapon);
+
+        if (item != null) {
+            panel.pair("  NEED", DIM, item.getString(), WARNING);
         }
     }
 

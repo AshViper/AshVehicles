@@ -236,12 +236,12 @@
     "sea_level_density": 1
   },
   "wing": {
-    "max_speed": 16.5,
+    "max_speed": 9.85,
     "stall_speed": 1.9,
     "lift": 0.0052,
     "lift_slope": 5,
     "stall_angle": 13,
-    "drag": 0.000055,
+    "drag": 0.000141,
     "induced_drag": 0.00052,
     "lateral_drag": 0.15,
     "ground_effect": 0.26,

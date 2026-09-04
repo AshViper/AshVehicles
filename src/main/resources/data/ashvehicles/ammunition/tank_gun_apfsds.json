@@ -1,0 +1,12 @@
+{
+  "gun_class": "tank_gun",
+  "rounds_per_item": 1,
+  "projectile": {
+    "damage": 210.0,
+    "speed": 87.5,
+    "gravity": 0.019,
+    "range": 4000.0,
+    "ricochet": 75.0,
+    "tracer": "FFF3CF"
+  }
+}

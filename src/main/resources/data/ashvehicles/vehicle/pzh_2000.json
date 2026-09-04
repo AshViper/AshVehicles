@@ -258,11 +258,14 @@
   },
   "armament": {
     "main": "ashvehicles:155mm_howitzer",
+    "ammunition": [
+      "ashvehicles:howitzer_he",
+      "ashvehicles:howitzer_heat"
+    ],
     "trunnion": [0.0, 3.35, -0.4],
     "barrel_length": 9.4,
     "recoil": 0.55,
-    "recoil_ticks": 22,
-    "kick": 0.1
+    "recoil_ticks": 22
   },
   "hull": {
     "health": 330,

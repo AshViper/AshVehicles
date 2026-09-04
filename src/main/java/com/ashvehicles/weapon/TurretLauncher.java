@@ -141,9 +141,23 @@ public final class TurretLauncher {
      */
     @Nullable
     public AmmoKind ammoKind() {
+        // 弾種を並べた発射筒は、並べた物しか受け取らない。理由は BuiltInGun.load に書いた通り。
+        if (Magazine.typed(this.vehicle, GroundVehicleEntity.Armament.MISSILE)) {
+            return null;
+        }
+
         return this.vehicle.getStats().launcher().missile()
-                .map(id -> Definitions.weapon(id).ammoKind())
+                .flatMap(id -> Definitions.weapon(id).ammoKind())
                 .orElse(null);
+    }
+
+    /**
+     * 今この筒に入っている弾種。弾種を並べていない発射筒では null で、そのときはミサイル自身のファイルが
+     * 書いた弾が出る。
+     */
+    @Nullable
+    private ResourceLocation ammunition() {
+        return Magazine.selected(this.vehicle, GroundVehicleEntity.Armament.MISSILE);
     }
 
     /**
@@ -161,13 +175,14 @@ public final class TurretLauncher {
     public int load(AmmoKind kind, int offered) {
         GroundVehicleDefinition.Launcher tubes = this.vehicle.getStats().launcher();
 
-        if (!tubes.exists() || offered <= 0) {
+        if (!tubes.exists() || offered <= 0
+                || Magazine.typed(this.vehicle, GroundVehicleEntity.Armament.MISSILE)) {
             return 0;
         }
 
         WeaponDefinition missile = Definitions.weapon(tubes.missile().orElseThrow());
 
-        if (missile.ammoKind() != kind) {
+        if (missile.ammoKind().orElse(null) != kind) {
             return 0;
         }
 
@@ -405,6 +420,9 @@ public final class TurretLauncher {
      * 出ていく向きだ。
      */
     private void fire(ServerLevel level, ResourceLocation missileId, WeaponDefinition missile) {
+        // 筒を出た後の全部は弾種が決める。弾種の無い発射筒ではミサイル自身のファイルの値。
+        ResourceLocation ammunition = this.ammunition();
+        WeaponDefinition.Projectile round = Definitions.round(missile, ammunition);
         GroundVehicleDefinition.Launcher tubes = this.vehicle.getStats().launcher();
         Vec3 rail = this.vehicle.turretToWorld(tubes.rail(), 1.0F);
         Vec3 bore = this.vehicle.getAimDirection(1.0F);
@@ -432,11 +450,11 @@ public final class TurretLauncher {
                     ? new BulletEntity(ModEntities.BULLET.get(), level)
                     : new RocketEntity(ModEntities.ROCKET.get(), level);
 
-            shot.setup(missileId, this.vehicle, crew);
+            shot.setup(missileId, ammunition, this.vehicle, crew);
             shot.setPos(rail);
             // setDeltaMovement ではなく launch。速度がクライアントへ届く必要があり、通常それを運ぶ
             // パケットではこの速さを表現できないから。VehicleProjectile 参照。
-            shot.launch(direction.scale(missile.projectile().speed()));
+            shot.launch(direction.scale(round.speed()));
 
             if (shot instanceof RocketEntity rocket && locked != null) {
                 rocket.setTarget(locked);
@@ -446,10 +464,10 @@ public final class TurretLauncher {
             this.inFlight.add(shot.getId());
         }
 
-        WeaponEffects.muzzleBlast(level, rail, bore, BOOST_BLAST, missile.projectile().tracer());
+        WeaponEffects.muzzleBlast(level, rail, bore, BOOST_BLAST, round.tracer());
         this.playLaunchSound(missile, missileId);
 
-        this.vehicle.setMissiles(this.vehicle.getMissiles() - 1);
+        Magazine.spend(this.vehicle, GroundVehicleEntity.Armament.MISSILE, 1);
         this.vehicle.setMissileReload(ticksFor(missile.firing().roundsPerSecond()));
 
         // 撃ったら架台を畳む。弾はもう座標を持っているので、発射機がそこを見続ける理由は無い——実物が

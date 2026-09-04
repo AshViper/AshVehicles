@@ -31,6 +31,7 @@ import net.minecraft.util.StringRepresentable;
  * @param sound 音
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
+        Optional<GunClass> gunClass,
         Firing firing, Projectile projectile, Optional<Guidance> guidance,
         Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag, float mass,
         Optional<Cluster> cluster) {
@@ -51,6 +52,12 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             Codec.BOOL.optionalFieldOf("item", true).forGetter(WeaponDefinition::item),
             Codec.INT.fieldOf("ammo").forGetter(WeaponDefinition::ammo),
             AmmoKind.CODEC.optionalFieldOf("ammo_item").forGetter(WeaponDefinition::ammoItem),
+            // この砲が何であるか。戦車砲・榴弾砲・機関砲・機関銃のどれかで、書けば、その種類のために
+            // 書かれた弾種しか入らなくなる。省略すれば種類を持たない砲で、車両ファイルが並べた弾種を
+            // そのまま受け付ける——この欄が書かれる前の全兵装がそうであり、弾種を使わない砲には要らない。
+            //
+            // 口径の数値ではないことに理由がある。GunClass 参照。
+            GunClass.CODEC.optionalFieldOf("gun_class").forGetter(WeaponDefinition::gunClass),
             Firing.CODEC.fieldOf("firing").forGetter(WeaponDefinition::firing),
             Projectile.CODEC.fieldOf("projectile").forGetter(WeaponDefinition::projectile),
             Guidance.CODEC.optionalFieldOf("guidance").forGetter(WeaponDefinition::guidance),
@@ -112,6 +119,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      * は思わない物。
      */
     public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
+            Optional.empty(),
             new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(),
             Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty());
 
@@ -132,8 +140,10 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     /**
      * この砲がどの弾薬アイテムから補給されるか。
      *
-     * <p>書きたいファイルは明示でき、無ければ兵装の種類と発射方式から判定する。押しっぱなしにする gun は
-     * ベルト給弾、押す gun は手装填で、それは {@link #isAutomatic()} が既に引いている区別と同じ。missile は
+     * <p><b>砲では常に空。</b> 砲へ入る物は弾種ファイルが1弾種1つで書き、どれが入るかは砲の種類が決める
+     * （{@link GunClass} 参照）ので、汎用の箱で賄う道はもう無い。答えが返るのは発射筒に吊り込む物だけだ。
+     *
+     * <p>書きたいファイルは明示でき、無ければ兵装の種類から判定する。missile は
      * シーカーが見ている物で分かれる——空の物を追うヘッド（熱・レーダー）は対空ミサイル、地の物を狙うヘッド
      * （レーザー・視線）は対地ミサイル、座標へ飛ぶ物はただのミサイル。それ以外の筒物はロケット。これで MOD
      * 内の全兵装が、どのファイルにも1行足さずに正しく分類される。覆したければ {@code ammo_item} を書く——
@@ -143,16 +153,32 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      * <p>これは機体の<em>内蔵</em>兵装の補給元。機体のパイロンに吊った物は兵装自体（既にアイテム）から補給
      * される。{@code WeaponMounts.draw} 参照。
      */
-    public AmmoKind ammoKind() {
-        return this.ammoItem.orElseGet(() -> switch (this.type) {
-            case GUN -> this.isAutomatic() ? AmmoKind.AUTOCANNON : AmmoKind.CANNON;
-            case MISSILE -> this.guidance.map(seek -> switch (seek.seeker()) {
+    public Optional<AmmoKind> ammoKind() {
+        if (this.ammoItem.isPresent()) {
+            return this.ammoItem;
+        }
+
+        return switch (this.type) {
+            // 砲に汎用の弾薬箱は無い。入る物は弾種ファイルが1つずつ書き、どれが入るかは砲の種類が決める。
+            // AmmunitionDefinition と GunClass 参照。
+            case GUN -> Optional.empty();
+            case MISSILE -> Optional.of(this.guidance.map(seek -> switch (seek.seeker()) {
                 case HEAT, RADAR -> AmmoKind.ANTI_AIR_MISSILE;
                 case LASER, BEAM -> AmmoKind.ANTI_GROUND_MISSILE;
                 case POINT -> AmmoKind.MISSILE;
-            }).orElse(AmmoKind.MISSILE);
-            default -> AmmoKind.ROCKET;
-        });
+            }).orElse(AmmoKind.MISSILE));
+            default -> Optional.of(AmmoKind.ROCKET);
+        };
+    }
+
+    /**
+     * この砲が受け付ける弾種の種類。種類を名乗っていない兵装では空で、そのときは制限が無い。
+     *
+     * <p>車両ファイルが並べた弾種のうち、ここと食い違う物は弾倉に現れない。戦車砲に機関砲弾を並べた
+     * ファイルは、その1行が無かったかのように動く。{@link com.ashvehicles.weapon.Magazine} 参照。
+     */
+    public Optional<GunClass> takes() {
+        return this.gunClass;
     }
 
     /** この兵装が何かへ向かって誘導するか。つまり誘導先を必要とするか。 */
@@ -345,6 +371,14 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
          */
         public static final float DEFAULT_TURN_DRAG = 0.12F;
 
+        /**
+         * {@code range} を省略（または0）にした弾でも、これ以上は飛ばさないという上限（tick）。
+         *
+         * <p>5分。{@link #lifetime()} 参照——「無制限」が本当に無制限だと、ロード済みの世界の外へ出た1発が
+         * 永久に飛び続けてサーバーの帳簿から二度と消えない。
+         */
+        public static final int UNBOUNDED_LIFETIME = 6000;
+
         public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0,
                 0.0F, 0.02F, 200.0F, 0.0F, 0xFFC864, 0.0F, DEFAULT_DRAG, DEFAULT_TURN_DRAG,
                 Optional.empty());
@@ -401,10 +435,18 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
          * 行っており、そこへ立ち上がる途中の速度ではない。だから4秒かけてスプールするミサイルは、ファイルが
          * 約束しているように見える距離のかなり内側で見捨てられる。ここで文字通りの意味を持つ唯一の値が
          * 「無制限」。
+         *
+         * <p><b>ただし無制限には底が要る。</b> 「世界の底を抜けて落ちる」はロード済みの世界の中でしか
+         * 成り立たない前提だった。その外では弾はブロックに一切問い合わせないので何にも当たらず、
+         * {@code gravity} が 0.0002 級のミサイルが上向きに——ロックせずに——撃たれれば、落ちてくるまでに
+         * 数時間かかる。その間ずっと {@code WeaponTicker} が毎tick tick を渡し続け、撃つたびに1発ずつ
+         * 積み上がって二度と減らない。だから上限は {@link #UNBOUNDED_LIFETIME} で止める。ファイルの中で
+         * 最も長く飛ぶ物（{@code grim_2_missile}、60km を毎tick 88ブロック＝約680tick）の10倍近くあるので、
+         * 「射程無制限」の意味は何も変わらない。変わるのは、当たらなかった1発がいつか必ず終わること。
          */
         public int lifetime() {
             if (this.range <= 0.0F) {
-                return Integer.MAX_VALUE;
+                return UNBOUNDED_LIFETIME;
             }
 
             float pace = this.hasMotor() ? Math.max(this.topSpeed, this.speed) : this.speed;

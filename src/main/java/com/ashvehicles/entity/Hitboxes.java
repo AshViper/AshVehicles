@@ -13,6 +13,7 @@ import com.ashvehicles.vehicle.Hitbox;
 
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Player;
@@ -70,6 +71,33 @@ public final class Hitboxes {
      */
     private static final Map<Level, Set<VehicleEntityBase>> MACHINES =
             Collections.synchronizedMap(new WeakHashMap<>());
+
+    /**
+     * これより遅い機体は誰も轢かない（ブロック/tick）。
+     *
+     * <p>0.15 は時速11km、人が歩くよりやや速い程度。駐機した機体に歩いてぶつかった者や、微速で寄せている
+     * 車両の脇に立っている者が傷つかないための下限であり、丸め誤差で機体が「動いた」と報告する分もここで
+     * 落ちる。
+     */
+    private static final double RUN_OVER_FLOOR = 0.15;
+
+    /**
+     * 轢いた時の打撃の、速度1ブロック/tickあたりの量。
+     *
+     * <p>20。装甲車が巡航速度（0.5、時速36km）で7、対空車両の最高速（1.1、時速79km）で19——無防備な人が
+     * 一撃で倒れる量だ。機体はこれより桁が違い、最高速では轢かれた側に議論の余地が無くなる。それが正しい。
+     */
+    private static final double RUN_OVER_RATE = 20.0;
+
+    /**
+     * 機体の中にいると見なすために、被害者の足元から上げる高さ（ブロック）。
+     *
+     * <p><b>足元だけを見てはいけない。</b> 上に乗って運ばれている者を判定する {@link #resting} は足元の薄い
+     * 層を見るが、轢かれた者も同じ判定を通ってしまう——車体の箱は地面まで下りているので、真正面に立って
+     * いた者の足元は当然その箱と重なる。運ばれる者と轢かれる者を分けるのは足の位置ではなく<em>体</em>の
+     * 位置だ。甲板の上に立つ者の体は箱の外（上）にあり、轢かれた者の体は箱の中にある。
+     */
+    private static final double RUN_OVER_BODY = CONTACT * 2.0;
 
     private Hitboxes() {
     }
@@ -458,6 +486,70 @@ public final class Hitboxes {
     }
 
     /**
+     * 機体が今の1歩で体ごと押しのけた物を傷つける。
+     *
+     * <p>サーバー限定。呼ぶ側が保証すること。ここが与えるのは実ダメージで、それを決めるのはクライアントの
+     * 仕事ではない。
+     *
+     * <p><b>運ぶことと轢くことは別の判定だ。</b> {@link #carry} は甲板に足を乗せている者を探す。こちらは
+     * 体が箱の<em>中</em>に入っている者を探す。同じ物を2つの目的で読むと、車体の箱が地面まで下りている
+     * 以上、正面に立っていた者が「運ばれている」ことになって永久に無傷になる。分ける鍵は足ではなく体で、
+     * それが {@link #RUN_OVER_BODY} の意味になる。
+     *
+     * <p>翼下のパイロンは数えない。あそこにぶら下がっているのは兵装で、それが人を殺すのは投下された後だ。
+     *
+     * <p>重複して当たらないことはバニラが見ている。{@code LivingEntity.hurt} は無敵時間の内側の2度目を
+     * 落とすので、車体の下に留まった者は毎tickではなく1秒に1度傷つく。
+     *
+     * @param shift この tick に機体が進んだ距離
+     */
+    static void runOver(VehicleEntityBase machine, Vec3 shift) {
+        double speed = shift.length();
+
+        if (speed <= RUN_OVER_FLOOR) {
+            return;
+        }
+
+        AABB bounds = machine.placedBounds();
+
+        if (bounds == null) {
+            return;
+        }
+
+        float damage = (float) ((speed - RUN_OVER_FLOOR) * RUN_OVER_RATE);
+        DamageSource source = machine.runOverSource();
+
+        // 走ってきた分だけ後ろへ広げて探す。1tickに十数ブロック進む機体では、終点の箱だけを見ると
+        // 通り過ぎた相手が丸ごと網から漏れる。
+        for (Entity victim : machine.level().getEntities(machine,
+                bounds.inflate(1.0).expandTowards(shift.scale(-1.0)), Hitboxes::carriable)) {
+            if (!(victim instanceof LivingEntity) || victim.getRootVehicle() == machine) {
+                continue;
+            }
+
+            if (inside(machine, victim)) {
+                victim.hurt(source, damage);
+            }
+        }
+    }
+
+    /** その物の体が、機体のいずれかの箱の中にあるか。足元は数えない。{@link #runOver} 参照。 */
+    private static boolean inside(VehicleEntityBase machine, Entity victim) {
+        AABB box = victim.getBoundingBox();
+        AABB body = new AABB(box.minX, box.minY + RUN_OVER_BODY, box.minZ, box.maxX, box.maxY, box.maxZ);
+
+        for (VehiclePart part : machine.getParts()) {
+            Hitbox hitbox = part.hitbox();
+
+            if (hitbox != null && !part.isPylon() && hitbox.overlaps(body)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * その物がこの MOD の機体に接しているか。上に立っている、寄りかかっている、押されて動かされている。
      *
      * <p>機体がやり得たことで誰かが傷つこうとしている時に問う。機体はゲームが存在を知らない「動く壁」で
@@ -502,9 +594,24 @@ public final class Hitboxes {
         return false;
     }
 
-    /** パーツは機体そのもの、搭乗者は座席の管轄、残りが問い合わせる価値のある対象。 */
+    /**
+     * パーツは機体そのもの、搭乗者は座席の管轄、飛んでいる弾は誰の足も乗せていない。残りが問い合わせる
+     * 価値のある対象。
+     *
+     * <p><b>弾を外すのは速度のためだけではない。</b> 銃口で生まれた弾は、その瞬間まだ機体の中にいる——
+     * 主翼の下のパイロン、砲身、機首。{@link #resting} が見るのは「足元のごく薄い層がどれかの箱に重なる
+     * か」だけなので、弾はそこで甲板に立っている乗員として数えられ、{@code carry} が
+     * {@code Entity.move(MoverType.SELF, ...)} を呼んでいた。
+     *
+     * <p>弾にとってあれは害でしかない。{@code Entity.move} は自前の衝突を回し、落下距離が0でなければ
+     * 移動全長にブロック光線を撃ち（{@code Entity.java:642-648}）、{@code checkInsideBlocks} まで通る。
+     * 弾は自分の飛行と当たり判定を {@link VehicleProjectile#tick} で完結させており、そこは一歩ごとに
+     * 「その地面は待たずに読めるか」を確かめてから世界に触る。甲板の運搬はその規律の外から、同じ tick に
+     * もう一度、確かめずに世界へ触っていた。
+     */
     private static boolean carriable(Entity rider) {
-        return !(rider instanceof VehiclePart) && !rider.isPassenger() && !rider.isRemoved();
+        return !(rider instanceof VehiclePart) && !(rider instanceof VehicleProjectile)
+                && !rider.isPassenger() && !rider.isRemoved();
     }
 
     /**
@@ -596,22 +703,32 @@ public final class Hitboxes {
             return null;
         }
 
-        AABB along = new AABB(from, to).inflate(margin);
+        // 余裕は線の側に一度だけ乗せる。{@code A.inflate(m).intersects(B)} と {@code A.intersects(B.inflate(m))}
+        // は同じ判定なので、箱1つごとに膨らませた箱を作る必要は無い——1回作れば足りる。ここは1発の射撃に
+        // つき1度呼ばれる場所で、100発/秒の機関砲は1tickに5〜7発を送り出し、その全部が寿命の間ずっと毎tick
+        // ここを通る。ロード済みの地面の外ではなおさらだ。当たって消える地面がそこには無いので、外へ出た
+        // 弾は射程いっぱい——数百発が同時に——飛び続ける。
+        AABB along = new AABB(from, to).inflate(margin * 2.0);
         Entity riding = looker == null ? null : looker.getRootVehicle();
         VehiclePart nearest = null;
         Vec3 where = null;
         double closest = Double.MAX_VALUE;
 
         for (VehicleEntityBase machine : machines) {
-            if (machine == looker || machine == riding || machine.isRemoved()) {
+            // 機体ごとに1回だけ。placedBounds は自分の全ての箱の和なので、これが線に触れない機体は箱を
+            // 1つも試す必要が無い。近くを歩く物の判定（near 参照）は元からこうしている。射線から遠い機体
+            // ——普通はワールドにいるほぼ全部——が、20〜40個の箱を数えられずに1回で外れる。
+            AABB bounds = machine.placedBounds();
+
+            if (machine == looker || machine == riding || machine.isRemoved()
+                    || bounds == null || !bounds.intersects(along)) {
                 continue;
             }
 
             for (VehiclePart part : machine.getParts()) {
                 Hitbox box = part.hitbox();
 
-                if (box == null || !box.reach().inflate(margin).intersects(along)
-                        || !filter.test(part)) {
+                if (box == null || !box.reach().intersects(along) || !filter.test(part)) {
                     continue;
                 }
 

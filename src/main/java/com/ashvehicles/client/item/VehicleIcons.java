@@ -13,6 +13,7 @@ import org.joml.Matrix4fStack;
 import org.joml.Quaternionf;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.client.model.VehicleGeoModel;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.platform.Lighting;
@@ -149,7 +150,6 @@ public final class VehicleIcons {
 
     /** 機体をオフスクリーンターゲットへ描き、出来上がった物をテクスチャとして保持する。 */
     private static ResourceLocation take(ResourceLocation vehicle) {
-        Minecraft minecraft = Minecraft.getInstance();
         Quaternionf view = view();
         VehicleIconGeo.Bounds bounds = VehicleIconGeo.measure(vehicle, view);
 
@@ -157,6 +157,13 @@ public final class VehicleIcons {
             throw new IllegalStateException("There is nothing in the model to draw");
         }
 
+        return shoot(vehicle, view, bounds);
+    }
+
+    /** 撮影1回分。オフスクリーンへ描いて読み戻すまで。 */
+    private static ResourceLocation shoot(ResourceLocation vehicle, Quaternionf view,
+            VehicleIconGeo.Bounds bounds) {
+        Minecraft minecraft = Minecraft.getInstance();
         RenderTarget into = target();
         Matrix4fStack modelView = RenderSystem.getModelViewStack();
 

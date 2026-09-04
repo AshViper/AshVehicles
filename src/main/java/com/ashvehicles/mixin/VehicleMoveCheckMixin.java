@@ -1,15 +1,23 @@
 package com.ashvehicles.mixin;
 
+import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.LateWorld;
 import com.ashvehicles.entity.VehicleEntityBase;
 
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.network.protocol.game.ServerboundMoveVehiclePacket;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * 縁石に乗り上げるたびにサーバーが運転中の車両を引き戻すのを止め、機体の報告を頭から拒否するのも止める。
@@ -37,6 +45,43 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  */
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class VehicleMoveCheckMixin {
+    @Shadow
+    public ServerPlayer player;
+
+    /** 報告の処理に入る前に窓が開いていたか。閉じる時にその状態へ戻す。サーバースレッド専用。 */
+    @Unique
+    private boolean ashvehicles$skyWasOpen;
+
+    /**
+     * 操縦報告を適用している間、{@link LateWorld} の窓を開ける。
+     *
+     * <p>報告の適用は {@code absMoveTo} で機体を動かし、その位置更新が移動先の chunk をロードしようとする。
+     * 機体の tick の外なので {@link LateWorldTickMixin} の窓は閉じており、ここで開けなければ報告1本ごとに
+     * 同期生成が走る。詰まった直後には数十本が同じ tick に着くので、ここが一番効く。
+     *
+     * <p>このメソッドは netty スレッドからも呼ばれ、その時は先頭の {@code ensureRunningOnSameThread} が
+     * 投げて終わる——出口を通らない。だから旗に触るのはサーバースレッドの時だけ。入れ子も起こり得る。
+     * 別のエンティティの tick が chunk を待っている間にサーバーは溜まった仕事を処理し、その中にこの報告
+     * が入っている。そこで出口は「閉じる」ではなく「入る前の状態へ戻す」。
+     */
+    @Inject(method = "handleMoveVehicle(Lnet/minecraft/network/protocol/game/ServerboundMoveVehiclePacket;)V",
+            at = @At("HEAD"))
+    private void ashvehicles$skyOpens(ServerboundMoveVehiclePacket packet, CallbackInfo callback) {
+        if (this.player.serverLevel().getServer().isSameThread()
+                && this.player.getRootVehicle() instanceof AircraftEntity) {
+            this.ashvehicles$skyWasOpen = LateWorld.enter();
+        }
+    }
+
+    @Inject(method = "handleMoveVehicle(Lnet/minecraft/network/protocol/game/ServerboundMoveVehiclePacket;)V",
+            at = @At("RETURN"))
+    private void ashvehicles$skyCloses(ServerboundMoveVehiclePacket packet, CallbackInfo callback) {
+        if (this.player.serverLevel().getServer().isSameThread()
+                && this.player.getRootVehicle() instanceof AircraftEntity) {
+            LateWorld.restore(this.ashvehicles$skyWasOpen);
+        }
+    }
+
     /**
      * 1回の報告が覆ってよい、機体自身の移動 tick 数。
      *

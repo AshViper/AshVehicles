@@ -278,12 +278,12 @@
     }
   },
   "wing": {
-    "max_speed": 8.4,
+    "max_speed": 7.92,
     "stall_speed": 1.7,
     "lift": 0.0065,
     "lift_slope": 5.4,
     "stall_angle": 16,
-    "drag": 0.00012,
+    "drag": 0.000137,
     "induced_drag": 0.0003,
     "lateral_drag": 0.15,
     "ground_effect": 0.3,
@@ -343,8 +343,8 @@
     "range": 512
   },
   "radar": {
-    "range": 2000,
-    "arc": 60,
+    "range": 0,
+    "arc": 0,
     "sweep_ticks": 14,
     "warning_range": 4000
   },

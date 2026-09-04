@@ -1,124 +1,6 @@
 {
 	"format_version": "1.8.0",
 	"animations": {
-		"gear_up": {
-			"loop": "hold_on_last_frame",
-			"animation_length": 1.0,
-			"bones": {
-				"FLGearHatch": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.6": {
-							"vector": [0, 0, 0]
-						},
-						"1.0": {
-							"vector": [0, 0, -48]
-						}
-					}
-				},
-				"BLGearHatch": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.6": {
-							"vector": [0, 0, 0]
-						},
-						"1.0": {
-							"vector": [0, 0, -48]
-						}
-					}
-				},
-				"FRGearHatch": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.6": {
-							"vector": [0, 0, 0]
-						},
-						"1.0": {
-							"vector": [0, 0, 48]
-						}
-					}
-				},
-				"BRGearHatch": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.6": {
-							"vector": [0, 0, 0]
-						},
-						"1.0": {
-							"vector": [0, 0, 48]
-						}
-					}
-				},
-				"FLGear": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.7": {
-							"vector": [-90, 0, 0]
-						}
-					}
-				},
-				"FRGear": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.7": {
-							"vector": [-90, 0, 0]
-						}
-					}
-				},
-				"BLGear": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.7": {
-							"vector": [-90, 0, 0]
-						}
-					}
-				},
-				"BRGear": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.7": {
-							"vector": [-90, 0, 0]
-						}
-					}
-				},
-				"FLWGear": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.7": {
-							"vector": [-90, 0, 0]
-						}
-					}
-				},
-				"FRWGear": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, 0]
-						},
-						"0.7": {
-							"vector": [-90, 0, 0]
-						}
-					}
-				}
-			}
-		},
 		"gear_down": {
 			"loop": "hold_on_last_frame",
 			"animation_length": 1.0,
@@ -126,50 +8,50 @@
 				"FLGearHatch": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, -48]
-						},
-						"0.4": {
 							"vector": [0, 0, 0]
-						}
-					}
-				},
-				"BLGearHatch": {
-					"rotation": {
-						"0.0": {
-							"vector": [0, 0, -48]
 						},
-						"0.4": {
-							"vector": [0, 0, 0]
+						"0.3": {
+							"vector": [-70, 0, 0]
 						}
 					}
 				},
 				"FRGearHatch": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, 48]
-						},
-						"0.4": {
 							"vector": [0, 0, 0]
+						},
+						"0.3": {
+							"vector": [75, 0, 0]
+						}
+					}
+				},
+				"BLGearHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.3": {
+							"vector": [-72.5, 0, 0]
 						}
 					}
 				},
 				"BRGearHatch": {
 					"rotation": {
 						"0.0": {
-							"vector": [0, 0, 48]
-						},
-						"0.4": {
 							"vector": [0, 0, 0]
+						},
+						"0.3": {
+							"vector": [70, 0, 0]
 						}
 					}
 				},
 				"FLGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [-90, 0, 0]
+							"vector": [125, 0, 0]
 						},
 						"0.3": {
-							"vector": [-90, 0, 0]
+							"vector": [125, 0, 0]
 						},
 						"1.0": {
 							"vector": [0, 0, 0]
@@ -179,10 +61,10 @@
 				"FRGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [-90, 0, 0]
+							"vector": [125, 0, 0]
 						},
 						"0.3": {
-							"vector": [-90, 0, 0]
+							"vector": [125, 0, 0]
 						},
 						"1.0": {
 							"vector": [0, 0, 0]
@@ -192,10 +74,10 @@
 				"BLGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, 85]
 						},
 						"0.3": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, 85]
 						},
 						"1.0": {
 							"vector": [0, 0, 0]
@@ -205,10 +87,10 @@
 				"BRGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, -85]
 						},
 						"0.3": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, -85]
 						},
 						"1.0": {
 							"vector": [0, 0, 0]
@@ -218,10 +100,10 @@
 				"FLWGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, 95]
 						},
 						"0.3": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, 95]
 						},
 						"1.0": {
 							"vector": [0, 0, 0]
@@ -231,10 +113,128 @@
 				"FRWGear": {
 					"rotation": {
 						"0.0": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, -95]
 						},
 						"0.3": {
-							"vector": [-90, 0, 0]
+							"vector": [0, 0, -95]
+						},
+						"1.0": {
+							"vector": [0, 0, 0]
+						}
+					}
+				}
+			}
+		},
+		"gear_up": {
+			"loop": "hold_on_last_frame",
+			"animation_length": 1.0,
+			"bones": {
+				"FLGear": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [125, 0, 0]
+						}
+					}
+				},
+				"FRGear": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [125, 0, 0]
+						}
+					}
+				},
+				"BLGear": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, 85]
+						}
+					}
+				},
+				"BRGear": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, -85]
+						}
+					}
+				},
+				"FLWGear": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, 95]
+						}
+					}
+				},
+				"FRWGear": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.7": {
+							"vector": [0, 0, -95]
+						}
+					}
+				},
+				"FLGearHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [-70, 0, 0]
+						},
+						"0.7": {
+							"vector": [-70, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"FRGearHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [75, 0, 0]
+						},
+						"0.7": {
+							"vector": [75, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"BLGearHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [-72.5, 0, 0]
+						},
+						"0.7": {
+							"vector": [-72.5, 0, 0]
+						},
+						"1.0": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"BRGearHatch": {
+					"rotation": {
+						"0.0": {
+							"vector": [70, 0, 0]
+						},
+						"0.7": {
+							"vector": [70, 0, 0]
 						},
 						"1.0": {
 							"vector": [0, 0, 0]

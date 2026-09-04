@@ -232,12 +232,12 @@
     }
   },
   "wing": {
-    "max_speed": 41.3,
+    "max_speed": 13.3,
     "stall_speed": 1.62,
     "lift": 0.0062,
     "lift_slope": 5.5,
     "stall_angle": 16,
-    "drag": 0.0000276,
+    "drag": 0.000215,
     "induced_drag": 0.00034,
     "lateral_drag": 0.15,
     "ground_effect": 0.28,
@@ -353,7 +353,12 @@
     {
       "name": "gun",
       "pos": [2.0, 3.0, 0.6],
-      "fixed": "ashvehicles:m61"
+      "fixed": "ashvehicles:m61",
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds",
+        "ashvehicles:autocannon_he",
+        "ashvehicles:autocannon_heat"
+      ]
     }
   ]
 }
