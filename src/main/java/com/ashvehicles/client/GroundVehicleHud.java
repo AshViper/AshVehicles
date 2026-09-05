@@ -377,7 +377,10 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         boolean loaded = vehicle.getMissiles() > 0;
         boolean settled = vehicle.getMissileReload() <= 0;
 
-        if (laid == null) {
+        // 「据えていない」と「据えた点がこちらから見えない」は別物だ。後者は弾道弾では普通の状態——マーカーが
+        // 届くのは2304ブロックまでで、射程はその26倍ある。同じに扱っていたので、実際には起立して撃てる発射機が
+        // 「まだどこも指していない」と表示していた。GroundVehicleEntity#hasDesignation 参照。
+        if (!vehicle.hasDesignation()) {
             String prompt = loaded ? "NO TARGET" : "TUBES EMPTY";
 
             graphics.drawString(minecraft.font, prompt, centreX - minecraft.font.width(prompt) / 2,
@@ -393,7 +396,10 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             return;
         }
 
-        int[] at = AircraftHud.project(minecraft, laid.subtract(camera).normalize(), focal, centreX, centreY);
+        // 印も数字も、点がこちら側にある時だけ。届いていない点の方角は誰にも分からないし、推測して描いた印は
+        // 「そこにある」と言ってしまう。状態表示の方は保持だけで決まるので、遠くを撃つ乗員にも出る。
+        int[] at = laid == null ? null
+                : AircraftHud.project(minecraft, laid.subtract(camera).normalize(), focal, centreX, centreY);
         int colour = settled ? AircraftHud.WARNING : AircraftHud.GREEN;
 
         if (at != null) {
@@ -404,6 +410,10 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         String status = settled ? "TARGET SET" : "ALIGNING";
         graphics.drawString(minecraft.font, status, centreX - minecraft.font.width(status) / 2,
                 centreY + 54, colour, true);
+
+        if (laid == null) {
+            return;
+        }
 
         String where = String.format("%d  %d  %d m", Math.round(laid.x), Math.round(laid.z),
                 Math.round(vehicle.position().distanceTo(laid)));
@@ -650,8 +660,11 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             // シーカーを持つ弾はロックするまで撃てない。妨げているのがどれかを乗員に伝える。
             WeaponDefinition missile = missileOf(vehicle);
             boolean beam = missile != null && isBeam(missile);
+            // 保持を問うのであって、マーカーがこちらへ届いているかではない。据えた点が追跡距離の外にある弾道弾
+            // では後者は常に偽で、実際には据わっている発射機が「NO TARGET」と表示していた。
+            // GroundVehicleEntity#hasDesignation 参照。
             boolean armed = beam || (vehicle.aimsAtPoint()
-                    ? vehicle.getDesignated() != null : vehicle.isSeekerLocked());
+                    ? vehicle.hasDesignation() : vehicle.isSeekerLocked());
             String state = armed ? "READY" : vehicle.laysPoint() ? "NO TARGET" : "NO LOCK";
 
             panel.line(state, armed ? AircraftHud.GREEN : AircraftHud.WARNING);

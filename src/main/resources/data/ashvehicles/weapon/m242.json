@@ -13,7 +13,7 @@
     "speed": 55.0,
     "gravity": 0.0245,
     "range": 2500.0,
-    "explosion": 0.35,
+    "explosion": 0.6,
     "ricochet": 22,
     "tracer": "FFD27A"
   },

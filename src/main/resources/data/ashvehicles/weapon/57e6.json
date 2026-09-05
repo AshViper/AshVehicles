@@ -3,19 +3,19 @@
   "item": false,
   "ammo": 12,
   "firing": {
-    "rounds_per_second": 0.5,
+    "rounds_per_second": 1.5,
     "spread": 0.2
   },
   "projectile": {
     "damage": 150.0,
-    "speed": 4.0,
+    "speed": 10.0,
     "thrust": 0.99,
     "burn_ticks": 70,
-    "spool_ticks": 12,
+    "spool_ticks": 4,
     "top_speed": 65.0,
     "gravity": 0.0005,
     "range": 0,
-    "explosion": 3.5,
+    "explosion": 3.6,
     "tracer": "FFE0A0",
     "trail": {
       "colour": "DEDBD3",

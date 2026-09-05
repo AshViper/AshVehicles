@@ -17,7 +17,7 @@
     "top_speed": 68.0,
     "gravity": 0.000188,
     "range": 0,
-    "explosion": 5.0,
+    "explosion": 3.7,
     "tracer": "FFEFC0",
     "trail": {
       "colour": "DCDAD4",

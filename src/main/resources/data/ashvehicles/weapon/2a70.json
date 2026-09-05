@@ -13,7 +13,7 @@
     "speed": 12.5,
     "gravity": 0.0245,
     "range": 4000.0,
-    "explosion": 2.0,
+    "explosion": 2.1,
     "ricochet": 18.0,
     "tracer": "FFC880"
   },

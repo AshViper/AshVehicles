@@ -182,7 +182,7 @@
     "lean": 5.5
   },
   "turret": {
-    "traverse_rate": 3,
+    "traverse_rate": 7,
     "elevation_rate": 2.5,
     "depression": 5,
     "elevation": 85,
@@ -236,9 +236,9 @@
     "range": 140
   },
   "radar": {
-    "range": 2400,
+    "range": 4500,
     "arc": 180,
-    "sweep_ticks": 10,
-    "warning_range": 2800
+    "sweep_ticks": 5,
+    "warning_range": 5000
   }
 }

@@ -1,5 +1,7 @@
 package com.ashvehicles.entity;
 
+import java.util.Optional;
+
 import javax.annotation.Nullable;
 
 import com.ashvehicles.network.HitReportPayload;
@@ -9,6 +11,7 @@ import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -105,8 +108,63 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      */
     private static final double BEAM_ABANDON = Math.toRadians(110.0);
 
+    /**
+     * 座標へ飛ぶ弾が、視線よりどれだけ上を狙うか（ラジアン）。{@link #loft} 参照。
+     *
+     * <p>30度。真上へ上がった弾がそこから倒し込んで、頂点を越えて降りてくるまでが1つの弧に見える角度で、
+     * かつ弾がワールドの天井へ消えていかない角度でもある。これを大きくすると弧は高く、飛翔は長くなる。
+     */
+    private static final double MOST_LOFT = Math.toRadians(32.0);
+
+    /** これ以上遠ければ目一杯持ち上げる距離（ブロック）。ここから {@link #LOFT_DONE_AT} へ向けて減っていく。 */
+    private static final double LOFT_FULL_AT = 4000.0;
+
+    /**
+     * 持ち上げをやめる距離（ブロック）。ここから内側では狙い先が目標そのものになる。
+     *
+     * <p><b>0ではないことが要点だ。</b>持ち上げ量を距離に正比例させて0でだけ0にすると、弾は最後の瞬間まで
+     * 目標より上を狙い続ける。そこから機首を下ろそうとしても、最高速での旋回半径は1268ブロックある
+     * （88.5 ÷ 4°）——間に合わない。数値で追うと、その形は600と1500ブロックでは当たるのに3000ブロック以上
+     * では<em>一度も</em>当たらず、弾は目標の上空を回り続けた。
+     *
+     * <p>800ブロックあれば、最高速からでも機首を目標へ向け直して降下角を作れる。ここが「弧を描く区間」と
+     * 「狙う区間」の境目であり、実物の弾道弾で言えば終末誘導の始まりにあたる。
+     */
+    private static final double LOFT_DONE_AT = 800.0;
+
+    /**
+     * 発射直後、舵を当てずに発射方向を保つ時間（tick）。
+     *
+     * <p>1.5秒。弾道弾は真上へ上がってから倒し込むもので、レールを離れた瞬間に目標へ向かって傾き始める物は
+     * 弾道弾に見えない。ここを0にすると、垂直に立った発射機から出た弾がその場で倒れ込む——「撃った感じ」が
+     * 一番出るはずの1秒を丸ごと捨てることになる。
+     *
+     * <p>両側で同じ値になる。この間どちらも舵を当てず発射時の軸を保つだけなので、{@code tickCount} が1tick
+     * ずれていても軌跡は変わらない。
+     */
+    private static final int BOOST_TICKS = 30;
+
     private static final EntityDataAccessor<Integer> DATA_TARGET =
             SynchedEntityData.defineId(RocketEntity.class, EntityDataSerializers.INT);
+
+    /**
+     * 人が据えた目標の座標。据えていない弾では空。
+     *
+     * <p><b>なぜ ID と別に座標を持つのか。</b>据える目標はエンティティ（{@link DesignationEntity}）として
+     * 存在するが、そのマーカーがクライアントへ届くのは登録距離の 2304ブロックまでで、弾道弾が狙う点は
+     * その何十倍も先にある。ところが飛行は<em>両側で</em>回る（{@code VehicleProjectile.steer} に側の
+     * 判定は無く、{@code simulated()} はクライアントで常に真）。だから ID しか無い弾は、サーバーでは誘導
+     * され、クライアントでは {@code getTarget()} が null を返して<em>まったく誘導されない</em>。同じ弾が
+     * 2つの別の軌跡を飛び、5tickごとの位置更新がそれを毎回引き戻す——最高速では1回の更新の間に442ブロック
+     * 進むので、見えるのは滑らかな飛翔ではなく秒4回の瞬間移動になる。しかも一番目立つのが、真上へ上がった
+     * 直後の倒し込み、つまり撃った本人が見ている場所だ。
+     *
+     * <p>座標は同期データなので距離に関係なく両側にある。追う先が<em>点</em>である弾にとって、追うべき物は
+     * 元からこの3つの数であって、それを運ぶ入れ物ではない。マーカー自体は今まで通り置かれ、
+     * {@link #holdMark} が生かし続ける——爆風の位置合わせや計器はあちらを見る——が、飛び方はこちらで決まる。
+     */
+    private static final EntityDataAccessor<Optional<BlockPos>> DATA_AIM =
+            SynchedEntityData.defineId(RocketEntity.class, EntityDataSerializers.OPTIONAL_BLOCK_POS);
 
     @Nullable
     private Entity target;
@@ -152,6 +210,38 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_TARGET, -1);
+        builder.define(DATA_AIM, Optional.empty());
+    }
+
+    /**
+     * 据えた目標の今の座標。据える目標を持たない弾では null。
+     *
+     * <p>マーカーを解決できる側ではマーカーから、できない側では同期された値から——どちらでも同じ点になる。
+     * {@link #DATA_AIM} 参照。
+     */
+    @Nullable
+    private Vec3 aimPoint() {
+        return this.entityData.get(DATA_AIM).map(Vec3::atCenterOf).orElse(null);
+    }
+
+    /**
+     * 据えた点を書き写す。サーバー専用で、変わった時だけ実際に送られる。
+     *
+     * <p>照準線に付いていく点（BEAM）は毎tick動くので毎tick書き、置いたら動かない点（POINT・LASER の地面）
+     * は最初の1回で終わる——同期データは値が変わらなければ何も送らないので、そこは無料になる。
+     */
+    private void recordAim(@Nullable Entity chasing) {
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        Optional<BlockPos> aim = chasing instanceof DesignationEntity mark
+                ? Optional.of(BlockPos.containing(mark.position()))
+                : Optional.empty();
+
+        if (!aim.equals(this.entityData.get(DATA_AIM))) {
+            this.entityData.set(DATA_AIM, aim);
+        }
     }
 
     /**
@@ -193,9 +283,14 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      * これに影響されない。破棄されたマークは死んでおり、保持を主張する相手も残っていない。
      */
     private void holdMark() {
-        if (this.getTarget() instanceof DesignationEntity mark) {
+        Entity chasing = this.getTarget();
+
+        if (chasing instanceof DesignationEntity mark) {
             mark.held();
         }
+
+        // マーカーを解決できるのはこちら側だけなので、書き写すのもこちらの仕事。DATA_AIM 参照。
+        this.recordAim(chasing);
     }
 
     /** パイロットがロックしていた相手をミサイルへ渡す。これが無ければ無誘導ロケットとして飛ぶ。 */
@@ -529,27 +624,39 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      */
     private Vec3 guidedHeading(Vec3 heading) {
         WeaponDefinition.Guidance guidance = this.getWeapon().guidance().orElse(null);
+
+        if (guidance == null) {
+            return heading;
+        }
+
+        // 据えた点は同期データから読む。マーカーを解決できない側——クライアントは、点が2304ブロックより
+        // 遠ければ必ずそうなる——でも、ここから先は両側まったく同じ計算になる。DATA_AIM 参照。
+        Vec3 laid = guidance.seeker().laid() ? this.aimPoint() : null;
         Entity chasing = this.lost ? null : this.getTarget();
 
         // 追う相手が無いので何も追わない。何もロックせずレールを離れたミサイルはシーカーが動いていない
         // ので、自分で目標を探しに行くこともなければ騙される相手にもならない——前方の空中へ投げ込まれた物
         // はただの煙だ。失探した物の探し直しはここではなく searchAgain の仕事で、取り戻した tick には
         // lost が false に戻っているので、この行はまた通らなくなる。
-        if (guidance == null || chasing == null) {
+        if (chasing == null && laid == null) {
             return heading;
         }
 
         // 追っていた物が消えた。撃墜された機体、そして燃え尽きたフレア——奪われたミサイルの信号は本当に
         // そこで消える。どちらも「視野から外れた」のと同じ失探として扱い、捜索と自爆の時計が回り始める。
-        if (!chasing.isAlive()) {
+        //
+        // <p>据えた点を持つ弾は別だ。マーカーが片付いても、狙っていた3つの数は変わらない——追っていたのは
+        // 元から座標であって、それを運んでいた入れ物ではない。だから飛び続ける。
+        if (laid == null && !chasing.isAlive()) {
             this.lose();
 
             return heading;
         }
 
         // 掃引と同じ理由で演算範囲の中だけ。フレアを撒くのは機体で、機体は自分の周りを開けているので、
-        // 騙される場面は必ずこの内側にある。
-        if (!this.level().isClientSide && this.isSimulated()) {
+        // 騙される場面は必ずこの内側にある。据えた点を追う弾は何にも騙されない（{@code fooledBy} は
+        // LASER・POINT・BEAM に常に false を返す）ので、そもそも問う必要が無い。
+        if (laid == null && !this.level().isClientSide && this.isSimulated()) {
             this.checkDecoys(guidance);
 
             // 上の行でデコイに奪われた可能性がある。その場合は今それを追っている。
@@ -562,7 +669,8 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
 
         // 視線そのもの。目標の足元ではなく中心へ、そして予測点ではなく直線で——比例航法に予測点の出番は
         // 無い。
-        Vec3 middle = chasing.position().add(0.0, chasing.getBbHeight() * 0.5, 0.0);
+        Vec3 middle = laid != null ? laid
+                : chasing.position().add(0.0, chasing.getBbHeight() * 0.5, 0.0);
         Vec3 los = middle.subtract(this.position());
         double range = los.length();
 
@@ -578,24 +686,52 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         // 役に立たない。
         double off = Math.toDegrees(Math.acos(Mth.clamp(losDirection.dot(heading), -1.0, 1.0)));
 
-        if (off > guidance.trackAngle()) {
+        // 据えた点は「見失う」対象ではない。座標は視野から出て行かないし、失探させたところで捜索する物も
+        // 無い。弾道弾は真上へ上がってから倒し込むので、上昇中の視線角は平気で90度を超える——ここで捨てて
+        // いたら、上がりきった瞬間に誘導を失って落ちるだけの物になる。諦めるかどうかは follow の管轄だ。
+        if (laid == null && off > guidance.trackAngle()) {
             this.lose();
 
             return heading;
         }
 
-        // 視線誘導は見越さない。狙っている点そのものへ機首を向ける。
+        // 人が据えた点を追う弾は見越さない。その点そのものへ機首を向ける。
         //
         // <p>比例航法は<em>動く物に当てる</em>ための式で、視線の回転率を打ち消すことで衝突針路を作る。追って
-        // いるのが照準線上に置かれた一点では、打ち消すべき回転が最初からほとんど無い——点は動かないし、その
-        // うえ射手が線を振ると位置が飛ぶだけで速度を持たないので、式に渡る回転率は距離で割られてほぼ0になる。
-        // 3750ブロック先の点に対しては、要求される旋回が実際に持っている舵の1%にもならなかった。
+        // いるのが人の据えた一点では、打ち消すべき回転が最初からほとんど無い——点は動かないので、式に渡る
+        // 回転率は自分の速度の横成分を距離で割った値でしかなく、遠いほど小さくなる。3750ブロック先の点に
+        // 対しては、要求される旋回が実際に持っている舵の1%にもならなかった。
         //
-        // <p>だからこの弾は追尾ではなく追従で飛ぶ。狙われている線へ機首を向け、舵の許す速さでそこへ寄せる。
-        // 有線誘導のミサイルが実際にすることであり、射手が照準を振った分だけ弾が付いてくるという操作感も、
+        // <p><b>これは BEAM だけの話ではない。</b>{@code laid()} の3つ——光点も、座標も、照準線上の点も——は
+        // どれも速度を持たない点であり、同じ式に同じ答えを出させる。以前ここが BEAM しか見ていなかったので、
+        // レーザー爆弾と弾道弾は遠距離で事実上無誘導だった。1500ブロック先を指したGBU-12 は、機首が20度
+        // 外れていても毎tick 0.2度ほどしか寄せられない——舵は2.2度切れるのに、その1割も使わない。投下時の
+        // 針路のまま飛ぶので、パイロットからは「横へ飛んでいく」ように見える。近距離では効いていたのは、
+        // 同じ式が距離に反比例して強くなるからにすぎない。
+        //
+        // <p>だからこれらは追尾ではなく追従で飛ぶ。据えられた物へ機首を向け、舵の許す速さでそこへ寄せる。
+        // 実物のレーザー誘導爆弾がしているのもこれで、射手が照準を振った分だけ弾が付いてくるという操作感も、
         // 見越しではなくこちらから出る。
-        if (guidance.seeker() == WeaponDefinition.Guidance.Seeker.BEAM) {
-            return this.follow(heading, losDirection, guidance);
+        //
+        // <p><b>ただし据えた先が動く物なら見越す。</b>ポッドが実体を指した指示（{@code AircraftEntity#designate}）
+        // では、追う相手はマーカーではなく走っている車両そのものであり、そちらは本物の速度を持っている。真っ直ぐ
+        // 相手へ向け続ける弾はその分だけ後ろへ流れるので、動いている分を先回りした点へ向ける。止まっている物と
+        // マーカーでは速度が0なので、この式はそのまま元の追従に戻る——場合分けを増やさずに両方が正しくなる。
+        //
+        // <p>そして座標へ飛ぶ弾（POINT）は、その狙い先をさらに<em>持ち上げる</em>。{@link #loft} 参照。
+        if (guidance.seeker().laid()) {
+            // 弾道弾は真上へ上がってから倒し込む。BOOST_TICKS 参照。
+            if (guidance.seeker() == WeaponDefinition.Guidance.Seeker.POINT
+                    && this.tickCount < BOOST_TICKS) {
+                return heading;
+            }
+
+            Vec3 wanted = guidance.seeker() == WeaponDefinition.Guidance.Seeker.POINT
+                    ? this.loft(middle, range)
+                    : this.leadTo(middle, chasing, range);
+
+            return this.follow(heading, wanted, guidance,
+                    guidance.seeker() != WeaponDefinition.Guidance.Seeker.POINT);
         }
 
         // 視線が回転する速さをベクトルで。向きが回転軸、長さが回転率そのもの（1tickあたりラジアン）。
@@ -739,10 +875,94 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      * 越す。そこで振り返らせると、弾は点の周りを永遠に回る——空に輪を描く。追い越したらそのまま飛ばす方が、
      * 誘導を手放された弾のすることとして正しい。
      */
+    /**
+     * 据えた目標へ機首を向ける方向。止まっている物へは真っ直ぐ、動いている物へは動く分だけ先へ。
+     *
+     * <p>{@link #follow} に渡す狙い先を作る。追従は見越しを持たない法則なので、走っている車両へ真っ直ぐ向け
+     * 続ける弾は常に相手の後ろを追うことになる——当たりはするが、当たるのは弾が追い付けるだけ遅い相手に限られる。
+     * 相手が動く分だけ先の点を作って追従に渡せば、追従はその点へ向かい、結果として交差する針路になる。
+     *
+     * <p>到達時間は自分の速さと距離から1度だけ求める。反復して精度を上げることはしない。動く目標との速度差は
+     * この兵器では大きく——爆弾でも車両の10倍以上ある——1回の見積もりで残る誤差は終末で追従自身が詰める。
+     *
+     * <p>マーカーを追っている弾はここを素通りする。据えられた点の速度は0だからだ（{@code hold} は位置を
+     * 置き直すだけで速度を持たせない）ので、返る方向は相手そのものへの視線に一致する。
+     */
+    private Vec3 leadTo(Vec3 middle, @Nullable Entity chasing, double range) {
+        Vec3 straight = middle.subtract(this.position());
+        // 追う相手を解決できない側では見越せない。据えた点しか無いということは動く物ではないということ
+        // なので、見越す物がそもそも無い。DATA_AIM 参照。
+        Vec3 drift = chasing == null ? Vec3.ZERO : velocityOf(chasing);
+        double speed = this.getDeltaMovement().length();
+
+        if (drift.lengthSqr() < 1.0E-8 || speed < 1.0E-6) {
+            return straight.normalize();
+        }
+
+        Vec3 lead = straight.add(drift.scale(range / speed));
+
+        return lead.lengthSqr() < 1.0E-8 ? straight.normalize() : lead.normalize();
+    }
+
+    /**
+     * 座標へ飛ぶ弾の狙い先。目標そのものではなく、目標より<em>上</em>の一点。
+     *
+     * <p>これが弾道弾を弾道弾にしている。真っ直ぐ目標へ機首を向ける弾は、真上へ上がった直後に倒し込んで、
+     * あとは60km を水平に飛ぶ——弾道弾ではなく、非常に速い矢だ。狙い先を視線より上へ持ち上げると、弾は
+     * その分だけ登り続ける。
+     *
+     * <p><b>持ち上げる量は残り距離で決まり、状態を持たない。</b>遠いうちは {@link #MOST_LOFT} まで持ち上げ、
+     * 近づくにつれ0へ戻す。だから軌道は自然に弧を描く——上昇、頂点、そして最後は目標そのものへの降下——のに、
+     * 「今どの段階か」を覚えておく必要が無い。段階を持たせると、撃ち直しや再ロード、ワールドの再起動を跨いで
+     * その値を運ぶ羽目になり、跨ぎ損ねた弾が空中で挙動を変える。ここは毎tick距離から引き直すだけなので、
+     * どちら側で計算しても、いつ計算し直しても同じ答えになる。
+     *
+     * <p>持ち上げるのは視線に対してであって、真上へずらすのではない。距離に比例した絶対高度でずらすと、
+     * 60km の射撃では成層圏どころかワールドの外を狙うことになる。角度なら射程に関係なく同じ形の弧になる。
+     */
+    private Vec3 loft(Vec3 middle, double range) {
+        Vec3 straight = middle.subtract(this.position());
+
+        if (straight.lengthSqr() < 1.0E-8) {
+            return this.axis();
+        }
+
+        Vec3 direction = straight.normalize();
+        double climb = MOST_LOFT * Mth.clamp((range - LOFT_DONE_AT) / (LOFT_FULL_AT - LOFT_DONE_AT),
+                0.0, 1.0);
+
+        if (climb < 1.0E-4) {
+            return direction;
+        }
+
+        // 視線を、視線と鉛直の作る面の中で上へ回す。水平成分が無い（真下・真上）ときは回す面が決まらない
+        // ので、そのまま返す——真下に狙いがある弾に持ち上げる意味も無い。
+        Vec3 flat = new Vec3(direction.x, 0.0, direction.z);
+
+        if (flat.lengthSqr() < 1.0E-8) {
+            return direction;
+        }
+
+        // 水平方向と鉛直の外積が、その2つが張る面の法線。その軸回りの正の回転が視線を上へ持ち上げる
+        // （{@link #rotateAbout} はロドリゲスの式そのままなので、軸×ベクトルの向きがそのまま回る向きだ）。
+        Vec3 axis = flat.normalize().cross(new Vec3(0.0, 1.0, 0.0));
+
+        return axis.lengthSqr() < 1.0E-8 ? direction
+                : rotateAbout(direction, axis.normalize(), climb);
+    }
+
     private Vec3 follow(Vec3 heading, Vec3 wanted, WeaponDefinition.Guidance guidance) {
+        return this.follow(heading, wanted, guidance, true);
+    }
+
+    /**
+     * @param mayAbandon 狙い先が後ろへ回り込んだら誘導を捨ててよいか。座標へ飛ぶ弾では false——真上へ
+     *                   上がる弾は上昇中に必ず大角度を通るし、座標は逃げないので捨てる理由が無い
+     */
+    private Vec3 follow(Vec3 heading, Vec3 wanted, WeaponDefinition.Guidance guidance, boolean mayAbandon) {
         double away = Math.acos(Mth.clamp(heading.dot(wanted), -1.0, 1.0));
 
-        if (away > BEAM_ABANDON) {
+        if (mayAbandon && away > BEAM_ABANDON) {
             this.beamRate = 0.0;
 
             return heading;

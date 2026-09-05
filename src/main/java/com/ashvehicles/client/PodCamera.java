@@ -7,6 +7,9 @@ import javax.annotation.Nullable;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.TargetDroneEntity;
+import com.ashvehicles.entity.VehicleEntityBase;
+import com.ashvehicles.entity.VehiclePart;
 import com.ashvehicles.network.DesignatePayload;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.weapon.EquipmentDefinition;
@@ -17,9 +20,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.joml.Quaternionf;
@@ -74,6 +77,22 @@ public final class PodCamera {
     private static final double REACH = 2048.0;
     /** どれだけ外しても「十字線が物に乗っている」と数えるか（ブロック）。 */
     private static final double ENTITY_MARGIN = 0.6;
+
+    /**
+     * 十字線からこの角度までに入っている物を「乗っている」と数える（度）。
+     *
+     * <p><b>箱への交差ではなく角度で問う理由。</b>この MOD の機体は素の直方体で当たり判定を持たない——箱は
+     * パイロンや機体構造の {@code VehiclePart} 側にあり、本体の {@code isPickable()} はそのために false を
+     * 返す。だから交差判定は本体を素通りするし、部品の方はゴーストの距離までクライアントへ送られない
+     * （{@code EntityTrackingMixin} が距離制限を外しているのは機体・弾・マーカー・標的ドローンだけ）。
+     * 交差で探す限り、遠方の機体は「そこに描かれているのに掴めない」ままになる。
+     *
+     * <p>角度で問えばどちらも要らない。1度は1500ブロック先で半径26ブロックの籠であり、ポッドの倍率で覗いて
+     * いる乗員が十字線を機体に乗せれば確実に入る一方、隣を飛ぶ別機まで飲み込むほどは広くない。
+     * {@code TargetLock} が照準線に最も近い物を採るのと同じ考え方で、あちらと同じく<em>最も近い物</em>では
+     * なく<em>最も十字線に近い物</em>を採る。狙っている物こそ指したい物だからだ。
+     */
+    private static final double BASKET_ANGLE = 1.0;
 
     private static final float DEG_TO_RAD = (float) (Math.PI / 180.0);
 
@@ -316,26 +335,126 @@ public final class PodCamera {
         // その外では何も見つからず、キーはまったく何もせず、機体はほぼ真上にある物しか指示できなかった。Terrain 参照。
         Terrain.Ground ground = Terrain.along(aircraft.level(), from, along, REACH, aircraft);
 
+        // 次に、その手前に何か立っていたか。地面が見つかっていればそこまで、見つかっていなければポッドの
+        // 到達距離いっぱいまで探す。
+        //
+        // <p><b>地面が無いことは「指示する物が無い」ことではない。</b>以前はここで先に打ち切っていたので、
+        // 空を背にした物——つまり飛んでいる機体すべて——は十字線に乗せても指示できなかった。地平線の上に
+        // 見えている物には背後に地面が無いのだから、地面を先に要求する順序がそのまま「空の目標は指せない」
+        // という規則になっていた。ゴーストとして描かれている遠方の機体が指せなかったのはこれで、描画とは
+        // 関係が無い——実体はクライアントにちゃんと届いている（{@code EntityTrackingMixin}）。
+        //
+        // <p>地面までで打ち切る意味自体は残す。斜面の向こうに立っている車両はパイロットの意図ではないし、
+        // 走査の代金も実際に指している距離で済む。変わったのは、地面が無い時に代金を最大距離まで払うことだけだ。
+        // 実体は常にポッドの到達距離いっぱいまで探す。<em>地面で打ち切ってよいのは、その地面が実際に見えた
+        // ブロックだった場合だけ</em>だからだ。
+        //
+        // <p>ロード範囲の外で {@link Terrain} が返す地面は、見た物ではなく仮定した平らな床との交点である
+        // （{@code surface} は chunk を持たない列に NaN を返し、そこから先は最後に見た高さが床になる）。
+        // Distant Horizons を入れていると、乗員には本物の山や谷がそこに描かれているのに、ポッドはその平面と
+        // 交わった距離——しばしば数百ブロック——を「地面」と呼ぶ。その値で実体の捜索を打ち切っていたので、
+        // 1500ブロック先の機体は角度を見る前に落とされ、指示はいつも目標の手前か向こうの床に着いた。
+        // 推測が実物を隠してはならない。
+        Entity struck = aimedAt(from, along, REACH);
+
+        // 実体が乗っていれば、それが指示先。サーバーはこの場合マークを置かず対象そのものを保持するので
+        // （{@code AircraftEntity#designate}）、渡す点はその位置でよく、推定でもない。
+        if (struck != null && !behindGround(from, struck, ground)) {
+            PacketDistributor.sendToServer(new DesignatePayload(false, centreOf(struck),
+                    struck.getId(), false));
+
+            return;
+        }
+
+        // 実体も地面も無い。本当に何も乗っていないので、指示する物が無いと言う方が正しい。
         if (ground == null) {
             return;
         }
 
-        // 次に、その手前に何か立っていたか。地面までしか見ないので、十字線が乗っている斜面の向こうの車両はパイロット
-        // の意図ではない——そしてスイープのコストが最大到達距離ではなく実際に指示している距離で済む。
-        Vec3 point = ground.point();
-        EntityHitResult struck = ProjectileUtil.getEntityHitResult(aircraft.level(), aircraft,
-                from, point, new AABB(from, point).inflate(ENTITY_MARGIN), PodCamera::designatable);
+        PacketDistributor.sendToServer(new DesignatePayload(false, ground.point(), -1, ground.estimated()));
+    }
 
-        PacketDistributor.sendToServer(new DesignatePayload(false, point,
-                struck == null ? -1 : struck.getEntity().getId(), ground.estimated()));
+    /**
+     * 十字線が乗っている物。無ければ null。
+     *
+     * <p>採るのは籠に入っている物のうち<em>最も十字線に近い</em>物で、最も近い物ではない。乗員が狙いを付けて
+     * いる先こそ指したい物だから。{@link #BASKET_ANGLE} 参照。
+     *
+     * @param reach ここまでの物だけ見る。地面が見つかっていればそこまで——斜面の向こうに立っている車両は
+     *              乗員の意図ではない——見つかっていなければポッドの到達距離いっぱい
+     */
+    @Nullable
+    private static Entity aimedAt(Vec3 from, Vec3 along, double reach) {
+        // 箱は籠を包める太さにする。線分の AABB をそのまま使うと、真北へ向いた視線では箱が X 方向に薄い
+        // ままになり、1度外れた——2000ブロック先では35ブロック横の——目標が箱に入らない。角度で選ぶ前に
+        // 箱で落としてしまえば、籠は名ばかりになる。
+        double spread = reach * Math.tan(Math.toRadians(BASKET_ANGLE));
+        AABB box = new AABB(from, from.add(along.scale(reach))).inflate(Math.max(ENTITY_MARGIN, spread));
+        double basket = Math.cos(Math.toRadians(BASKET_ANGLE));
+        Entity best = null;
+        double closest = basket;
+
+        for (Entity candidate : aircraft.level().getEntities(aircraft, box, PodCamera::designatable)) {
+            Vec3 gap = centreOf(candidate).subtract(from);
+            double distance = gap.length();
+
+            if (distance < 1.0E-3 || distance > reach) {
+                continue;
+            }
+
+            double alignment = gap.scale(1.0 / distance).dot(along);
+
+            if (alignment > closest) {
+                closest = alignment;
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    /** その物の中心。足元ではなく。遠方では機体の高さの半分だけでも十字線の乗り方が変わる。 */
+    private static Vec3 centreOf(Entity entity) {
+        return entity.position().add(0.0, entity.getBbHeight() * 0.5, 0.0);
+    }
+
+    /**
+     * その実体が、乗員に見えている地面の向こうに立っているか。
+     *
+     * <p>斜面の裏に隠れている車両は十字線が乗っていても指示の対象ではない——それは前からの規則で、そのまま
+     * 残す。ただし遮る資格があるのは<em>実際に見えたブロック</em>だけだ。ロード範囲の外で推定された床は、
+     * 乗員が見ている物ではなく計算の産物であり、しかも Distant Horizons を入れていれば乗員はそこに本物の
+     * 地形を見ている。推定に実物を隠す権利は無い。
+     */
+    private static boolean behindGround(Vec3 from, Entity struck, @Nullable Terrain.Ground ground) {
+        return ground != null && !ground.estimated()
+                && centreOf(struck).distanceTo(from) > ground.point().distanceTo(from);
     }
 
     /**
      * マークを置く価値のある物。爆弾に値するだけの実体があり、かつ指示している機体自身やその搭乗者でないこと。
+     *
+     * <p><b>{@code isPickable()} は訊かない。</b>自前の箱を持つ機体と車両はそこで false を返す——素の直方体が
+     * 脇へ退き、当たり判定を {@code VehiclePart} に譲るからだ。プレイヤーの手にとってはそれが正しいが、ポッドに
+     * とっては「この MOD の全てのまともな目標が指示できない」という意味になっていた。部品は部品で、ゴーストの
+     * 距離ではクライアントへ送られてすらいない。だからここは種類で問う。
      */
     private static boolean designatable(Entity candidate) {
-        return candidate.isAlive() && candidate.isPickable()
-                && !WeaponMounts.isPartOf(aircraft, candidate);
+        if (!candidate.isAlive() || WeaponMounts.isPartOf(aircraft, candidate)) {
+            return false;
+        }
+
+        // 部品に十字線が乗っていても指すのは機体本体だ。部品はゴーストの距離まで届かないし、受け取る側に
+        // とっても「主翼の一部」ではなく機体そのものを追う方が正しい。本体は籠の中心にいるので取りこぼさない。
+        if (candidate instanceof VehiclePart) {
+            return false;
+        }
+
+        // 生き物なら何でも、ではない。籠は十字線の周りに広がりを持つので、地面を指したつもりの押下が、
+        // 狙った点の脇を歩いていた牛を掴みうる。爆弾を落とす理由がある物だけを載せる——{@code TargetLock}
+        // の名簿と同じ判断で、同じ理由だ。
+        return candidate instanceof VehicleEntityBase || candidate instanceof TargetDroneEntity
+                || candidate instanceof Player || candidate instanceof Enemy;
     }
 
     /** 現時点で視界が通常よりどれだけ狭いか。1なら通常のまま。 */

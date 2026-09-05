@@ -13,7 +13,7 @@
     "speed": 0.15,
     "gravity": 0.0245,
     "range": 4000.0,
-    "explosion": 7.0,
+    "explosion": 8.3,
     "tracer": "8A8F7A",
     "trail": false
   },

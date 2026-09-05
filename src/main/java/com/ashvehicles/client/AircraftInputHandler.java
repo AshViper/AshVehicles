@@ -126,10 +126,14 @@ public final class AircraftInputHandler {
         // マウスを機首から外さずに横滑りできなくなる。そもそもロールは回転翼機がキーに委ねている唯一の軸なのだ。
         MouseAim.Stick aim = MouseAim.stick();
 
+        // 引き過ぎたパイロットは操縦桿を保てない。舵にだけ掛ける——意識が遠のいた人間は引くのをやめるので
+        // あって、エンジンを切るわけではない。1を返している間は何も変わらない。PilotLoad 参照。
+        float grip = PilotLoad.grip();
+
         AircraftInput input = new AircraftInput(
-                keyPitch != 0.0F ? keyPitch : aim.pitch(),
-                keyRoll != 0.0F ? keyRoll : aim.roll(),
-                keyYaw != 0.0F ? keyYaw : aim.yaw(),
+                (keyPitch != 0.0F ? keyPitch : aim.pitch()) * grip,
+                (keyRoll != 0.0F ? keyRoll : aim.roll()) * grip,
+                (keyYaw != 0.0F ? keyYaw : aim.yaw()) * grip,
                 axis(ModKeyMappings.THROTTLE_UP, ModKeyMappings.THROTTLE_DOWN),
                 ModKeyMappings.AIR_BRAKE.isDown(),
                 minecraft.options.keyAttack.isDown(),

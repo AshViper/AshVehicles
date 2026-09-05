@@ -168,7 +168,19 @@ public final class Sensors {
                     warnings.add(new Threat(bearing, Threat.Kind.MISSILE));
                 }
 
-                continue;
+                // ここで抜けない。飛翔中の誘導弾は<em>スコープにも載る</em>。
+                //
+                // <p>以前はここで全部捨てていたので、ミサイルが乗員に届く形は方位だけの警報1本しか無かった
+                // ——距離も高度も無く、しかも自分が狙われている場合に限られた。対空システムにとってそれは
+                // 二重に痛い。飛来する弾こそ最も撃ちたい目標であり、そして {@code TargetLock} は自前の
+                // シーカー距離より遠くではレーダーの一覧からしか目標を取らないので、載らない物は照準を
+                // 渡せない＝事実上迎撃できないからだ。味方へ向かう弾が一切見えないのも同じ1行の結果だった。
+                //
+                // <p>載せないのは手の出しようが無い2つだけ。迎撃できない弾と、自分が今撃った弾——後者は
+                // {@code TargetLock} が候補から外すのと同じ理由で、スコープでも同じ扱いにする。
+                if (!missile.isInterceptable() || missile.wasFiredBy(this.vehicle)) {
+                    continue;
+                }
             }
 
             Iff identity = Iff.between(this.vehicle, other);
@@ -193,11 +205,13 @@ public final class Sensors {
             // ステルス機はもうその形状ではない。
             if (radar.fitted() && distance <= radar.range() * AircraftEntity.visibility(other)
                     && gap.scale(1.0 / distance).dot(along) > widest) {
-                // 標的ドローンは空中の的なので、スコープでは航空機の記号で出す。
+                // 標的ドローンは空中の的なので、スコープでは航空機の記号で出す。飛翔中のミサイルも同じ
+                // ——地上目標の記号で出れば、高度を持って向かってくる物が地面を這う物に見える。
                 found.add(new Contact(other.getId(), bearing, (float) distance,
                         (float) (other.getY() - this.vehicle.getY()),
                         other == seeking,
-                        other instanceof AircraftEntity || other instanceof TargetDroneEntity,
+                        other instanceof AircraftEntity || other instanceof TargetDroneEntity
+                                || other instanceof RocketEntity,
                         identity));
             }
         }

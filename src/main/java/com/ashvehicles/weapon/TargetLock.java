@@ -15,7 +15,8 @@ import com.ashvehicles.vehicle.VehicleChassis;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -388,13 +389,15 @@ public final class TargetLock {
         AABB box = this.vehicle.getBoundingBox().inflate(Math.min(seeker, NEAR_REACH));
 
         for (Entity candidate : this.vehicle.level().getEntities(this.vehicle, box, this::couldTarget)) {
-            aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle);
+            aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle,
+                    this.inbound(candidate));
         }
 
         // それより遠くは、新規掃引ではなく直近の掃引結果から。SWEEP_TICKS 参照。
         for (Entity candidate : this.candidates(seeker)) {
             if (this.couldTarget(candidate)) {
-                aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle);
+                aim.consider(candidate, reachAgainst(guidance, candidate, seeker), ownAngle,
+                    this.inbound(candidate));
             }
         }
 
@@ -407,7 +410,7 @@ public final class TargetLock {
             Entity candidate = this.vehicle.level().getEntity(contact.id());
 
             if (candidate != null && this.couldTarget(candidate)) {
-                aim.consider(candidate, Double.MAX_VALUE, radarAngle);
+                aim.consider(candidate, Double.MAX_VALUE, radarAngle, this.inbound(candidate));
             }
         }
 
@@ -478,9 +481,15 @@ public final class TargetLock {
         @Nullable
         private Entity best;
 
+        /** 視野の下限。構築時に決まり動かない。最良値と別に持つのは、脅威が最良値を巻き戻すからだ。 */
+        private final double widest;
+        /** 今掴んでいる候補が「こちらへ飛んできている弾」か。 */
+        private boolean bestInbound;
+
         private Aim(Vec3 from, Vec3 nose, double widest) {
             this.from = from;
             this.nose = nose;
+            this.widest = widest;
             this.bestAlignment = widest;
         }
 
@@ -488,8 +497,9 @@ public final class TargetLock {
          * @param minAlignment この候補が通ってよい最も狭い一致度。{@link #bestAlignment} 自身の下限とは
          *                     限らない——同じ {@code Aim} に提示される、より広い視野を持つ供給源があっても、
          *                     この候補は自分の狭い方の基準で判定される。{@link #bestCandidate} 参照
+         * @param inbound この候補が、この車両自身へ向かって飛んでいる誘導弾か
          */
-        private void consider(Entity candidate, double reach, double minAlignment) {
+        private void consider(Entity candidate, double reach, double minAlignment, boolean inbound) {
             Vec3 middle = candidate.position().add(0.0, candidate.getBbHeight() * 0.5, 0.0);
             Vec3 gap = middle.subtract(this.from);
             double distance = gap.length();
@@ -500,10 +510,31 @@ public final class TargetLock {
 
             double alignment = gap.scale(1.0 / distance).dot(this.nose);
 
-            if (alignment >= minAlignment && alignment > this.bestAlignment) {
-                this.bestAlignment = alignment;
-                this.best = candidate;
+            if (alignment < minAlignment || alignment < this.widest) {
+                return;
             }
+
+            // こちらへ向かっている弾は、視野の中で最も中央にある物より優先する。
+            //
+            // <p>他は全部「乗員が向けている先を撃つ」で正しいが、自分を殺しに来ている1本だけは違う。撃った
+            // 機体は自分のミサイルとほぼ同じ方位に、しかも後ろに残っているので、素直に中央を採ると照準は
+            // 高い確率で機体の方へ落ちる——そして対空システムは、2秒後に自分に当たる物ではなく、当てても
+            // 何も止まらない物を掴んだまま待つことになる。実物の自衛モードがしていることでもある。
+            //
+            // <p>脅威どうしでは従来通り最も中央にある物を採る。複数飛んできているなら、まず正面の1本だ。
+            if (this.best != null && this.bestInbound && !inbound) {
+                return;
+            }
+
+            boolean promotes = inbound && !this.bestInbound && this.best != null;
+
+            if (!promotes && alignment <= this.bestAlignment) {
+                return;
+            }
+
+            this.bestAlignment = alignment;
+            this.bestInbound = inbound;
+            this.best = candidate;
         }
     }
 
@@ -550,7 +581,20 @@ public final class TargetLock {
             return true;
         }
 
-        return candidate instanceof LivingEntity;
+        // 生き物なら何でも、ではない。牛と羊と村人がシーカーに載ると、戦場の上空でロックが草を食んでいる
+        // 群れへ落ち着き、乗員は本当に撃ちたい物へ手動で戻し続けることになる——しかも野原1枚が対空ミサイル
+        // の正当な目標になってしまう。撃つ理由がある生き物だけを載せる。プレイヤーと、敵対する物だ。
+        return candidate instanceof Player || candidate instanceof Enemy;
+    }
+
+    /**
+     * その候補が、この車両自身へ向かって飛んできている誘導弾か。
+     *
+     * <p>{@link Aim} が照準の優先順位に使う。他の全部は「乗員が向けている先」で決まってよいが、これ1つだけは
+     * 別扱いにする理由がある——{@link Aim#consider} 参照。
+     */
+    private boolean inbound(Entity candidate) {
+        return candidate instanceof RocketEntity missile && missile.getTarget() == this.vehicle;
     }
 
     /** 計器が必要とする物。どのエンティティか、そしてシーカーが既に捉えたか。 */

@@ -274,7 +274,7 @@
   },
   "turret": {
     "traverse_rate": 1.2,
-    "elevation_rate": 1.5,
+    "elevation_rate": 1.0,
     "depression": 0,
     "elevation": 90,
     "ring": [0.0, 1.24, -5.84]

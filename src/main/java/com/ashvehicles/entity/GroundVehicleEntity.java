@@ -173,6 +173,26 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 撃つ操作（{@code GroundVehicleInputHandler} 参照）が、クリック2回で発射にならないための間でもある。
      */
     private static final int LAY_SETTLE_TICKS = 20;
+
+    /**
+     * 砲塔が残差のどれだけを1tickで詰めようとするか。上限は機体ファイルの旋回速度。
+     *
+     * <p>0.12 だと上限に張り付くのは残差がおよそ8度より大きい間で、そこから内側は滑らかに減速して止まる。
+     * つまり「遠い角へは全速、目標角へはそっと」になる。
+     */
+    private static final float SLEW_GAIN = 0.12F;
+
+    /** 砲塔の速度が命令に追い付く速さ（1tickあたりの割合）。動き出しと止まりの重さがここで決まる。 */
+    private static final float SLEW_SMOOTH = 0.15F;
+
+    /**
+     * 運転していない側が、報告された砲塔角へ1tickで詰める割合。
+     *
+     * <p>受信の粗さを均すためだけの値で、機械の限界とは無関係——限界は運転側で既に掛かっている。0.3 なら
+     * 跳びは数tickで吸収され、遅れは目に見えるほど溜まらない。{@link #tick} 参照。
+     */
+    private static final float TURRET_CATCH_UP = 0.3F;
+
     /**
      * ハンドルの切れ量。-1〜1。
      *
@@ -325,6 +345,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private float turretYawO;
     private float gunPitch;
     private float gunPitchO;
+    /**
+     * 砲塔が今出している旋回・俯仰の速度（度/tick）。命令ではなく<em>効き</em>。
+     *
+     * <p>{@code RocketEntity.beamRate} と同じ考え方で、理由も同じだ。命令された速度をその tick で出せば、
+     * 架台は止まっている状態から全速へ1tickで飛び移り、目標角で同じだけ唐突に止まる——動いてはいるが、
+     * 質量を持った物には見えない。1次遅れで追わせれば、動き出しと止まりに数tickかかる。数トンの架台が
+     * 実際にすることであり、垂直に起き上がる発射機ではそこが一番目に付く。
+     *
+     * <p>同期しない。運転側が自分で回し、他の側は報告された角へ寄せるだけなので（{@link #tick} 参照）、
+     * どちらもこの値を必要としない。
+     */
+    private float turretRate;
+    private float pitchRate;
 
     /**
      * 乗員の視線を自分の目線からどれだけ下へ倒したか（度）。砲もそれに合わせて下げられる。
@@ -780,6 +813,27 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         Entity held = this.level().getEntity(id);
 
         return held != null && held.isAlive() ? held : null;
+    }
+
+    /**
+     * この車両が今、据えた点を1つ持っているか。<em>その点がどこかは問わない。</em>
+     *
+     * <p>{@link #getDesignated} との違いが要点で、それは距離の問題だ。あちらは保持している物をこちら側の世界から
+     * 引いてくるので、答えられるのはマーカーがこのクライアントへ届いている間だけ——{@code EntityTrackingMixin} が
+     * 送るのは登録距離（{@code clientTrackingRange} 144 chunk ＝ 2304ブロック）までである。ところが弾道弾の盤が
+     * 受け付ける座標は {@code lock_range} まで、Grim-2 では60000ブロックだ。26倍離れている。
+     *
+     * <p>だから「保持しているか」を「マーカーが見えるか」で答えると、遠くを指した瞬間に嘘になる。架台を起こすのは
+     * 運転クライアント（{@link #tickTurret}）で、その判断が偽になれば架台は上がらず、上がらなければサーバーの
+     * {@code TurretLauncher} は撃たない——盤で座標を入れて LOCK を押しても<em>何も起きない</em>。射程の大半で
+     * 撃てない兵器になっていた。
+     *
+     * <p>こちらは保持そのものを問う。{@code DATA_DESIGNATED} は車両自身の同期データで、車両はどれだけ離れていても
+     * 乗員の目の前にいる。据えた点の<em>座標</em>を要る者はいない——架台は方位を振らず（真上へ起きるだけ）、弾は
+     * 発射時にサーバー側でマーカーを受け取る。要るのは「据えたか」の一語だけだ。
+     */
+    public boolean hasDesignation() {
+        return this.entityData.get(DATA_DESIGNATED) >= 0;
     }
 
     /**
@@ -1515,8 +1569,22 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             this.hullPitch = -Attitude.elevation(this.attitude);
             this.hullBank = Attitude.bank(this.attitude);
             this.speed = this.entityData.get(DATA_SPEED);
-            this.turretYaw = this.entityData.get(DATA_TURRET_YAW);
-            this.gunPitch = this.entityData.get(DATA_GUN_PITCH);
+            // 報告された角へ<em>寄せる</em>。そのまま代入してはいけない。
+            //
+            // <p>同期データが届くのは値が変わった時だけ、しかもエンティティの更新間隔ごとにまとめてだ。
+            // 代入すると砲塔は「何tickも static、届いた tick に一気に跳ぶ」を繰り返す——運転している本人は
+            // 毎tick自分で回しているので滑らかなのに、他の全員には小刻みに震えて見える。砲塔を眺めている
+            // 側から報告されていた「カクつき」の正体はこれで、砲塔の動きが速いほど跳びも大きくなる。
+            //
+            // <p>指数的に寄せるので、届いた値が飛んでいても数tickで吸収され、届かない間も動き続ける。
+            // 追い付く速さは砲塔の旋回速度とは無関係——これは機械の限界ではなく受信の粗さを均す処理であり、
+            // 限界の方は既に運転側で掛かっている。
+            float reportedYaw = this.entityData.get(DATA_TURRET_YAW);
+            float reportedPitch = this.entityData.get(DATA_GUN_PITCH);
+
+            this.turretYaw = Mth.wrapDegrees(this.turretYaw
+                    + Mth.wrapDegrees(reportedYaw - this.turretYaw) * TURRET_CATCH_UP);
+            this.gunPitch += (reportedPitch - this.gunPitch) * TURRET_CATCH_UP;
             // この側へ通知された速度から進める。運転側が自分の車輪を回しているのと同じ値だ。
             this.windTrack(this.speed);
         }
@@ -2299,13 +2367,62 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 撃つ。据えれば起立し、解除すれば寝る。それが車両の外から見える唯一の状態表示でもある。
         if (this.laysPoint()) {
             wantYaw = 0.0F;
-            wantPitch = this.getDesignatedPoint() != null ? turret.elevation() : 0.0F;
+            // 点の座標ではなく保持そのものを問う。架台は方位を振らないので座標は要らないし、弾道弾の座標は
+            // マーカーがこのクライアントへ届く距離の遥か外にあることの方が多い。hasDesignation 参照。
+            wantPitch = this.hasDesignation() ? turret.elevation() : 0.0F;
         }
 
-        float yaw = approachAngle(this.turretYaw, wantYaw, turret.traverseRate());
-        float pitch = approach(this.gunPitch, wantPitch, turret.elevationRate());
+        float yaw = this.slewYaw(wantYaw, turret.traverseRate());
+        float pitch = this.slewPitch(wantPitch, turret.elevationRate());
 
         this.setTurret(yaw, pitch);
+    }
+
+    /**
+     * 砲塔を目標方位へ、質量のある物として回す。{@link #turretRate} 参照。
+     *
+     * <p>最短経路で回すのは従来通り。変わったのは速度の出し方だけで、残差に比例した速度を上限で頭打ちにし、
+     * それを1次遅れで追う。だから遠い角へは全速で振れるのに、動き出しと止まりには数tickかかる。
+     */
+    private float slewYaw(float target, float limit) {
+        float error = Mth.wrapDegrees(target - this.turretYaw);
+
+        if (limit <= 0.0F) {
+            this.turretRate = 0.0F;
+
+            return Mth.wrapDegrees(target);
+        }
+
+        this.turretRate = this.slewRate(this.turretRate, error, limit);
+
+        return Mth.wrapDegrees(this.turretYaw + this.step(this.turretRate, error));
+    }
+
+    /** 同じ処理を俯仰へ。角度を折り返さない点だけが違う——砲は一周しない。 */
+    private float slewPitch(float target, float limit) {
+        float error = target - this.gunPitch;
+
+        if (limit <= 0.0F) {
+            this.pitchRate = 0.0F;
+
+            return target;
+        }
+
+        this.pitchRate = this.slewRate(this.pitchRate, error, limit);
+
+        return this.gunPitch + this.step(this.pitchRate, error);
+    }
+
+    /** 今の速度を、残差の求める速度へ1tick分近づけた値。 */
+    private float slewRate(float rate, float error, float limit) {
+        float demand = Mth.clamp(error * SLEW_GAIN, -limit, limit);
+
+        return rate + (demand - rate) * SLEW_SMOOTH;
+    }
+
+    /** その速度で実際に動く量。残差を超えて回して行き過ぎることはしない。 */
+    private float step(float rate, float error) {
+        return error < 0.0F ? Math.max(rate, error) : Math.min(rate, error);
     }
 
     /**
