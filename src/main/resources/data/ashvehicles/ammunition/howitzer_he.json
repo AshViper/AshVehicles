@@ -3,9 +3,10 @@
   "rounds_per_item": 1,
   "projectile": {
     "damage": 110.0,
-    "speed": 28.0,
-    "gravity": 0.055,
-    "range": 4000.0,
+    "speed": 6.0,
+    "gravity": 0.0245,
+    "drag": 0.000055,
+    "range": 3000.0,
     "explosion": 4.2,
     "ricochet": 0.0,
     "tracer": "FFC062"

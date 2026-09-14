@@ -240,6 +240,34 @@ public final class Hitbox {
     }
 
     /**
+     * ワールドで測った向きを、箱自身の3軸に沿った成分へ。x が箱の<em>左</em>、y が上、z が前。
+     *
+     * <p>{@link #normalAt} の答えを渡せば、弾がどの面に入ったかが箱自身の言葉で返る——軸の1つだけが ±1 で
+     * 残りは 0。面ごとの装甲厚を引く {@code VehicleShape.Plate#facing} がそれを読む。
+     *
+     * <p>x が左なのは {@link #within} と同じ理由で、機体座標系の +X が左翼方向へ伸びるから
+     * （{@code Attitude.toWorld} 参照）。ファイルに書く x が右向きなのとは逆なので、読む側で取り違えない
+     * こと。
+     */
+    public Vec3 local(Vec3 direction) {
+        return new Vec3(direction.dot(this.axes[0]), direction.dot(this.axes[1]), direction.dot(this.axes[2]));
+    }
+
+    /**
+     * 点から箱の表面までの距離（ブロック）。点が箱の中なら0。
+     *
+     * <p>{@link #contains} と同じ3つの射影で、各軸で半長からはみ出した分だけを数える。
+     */
+    public double distanceTo(Vec3 point) {
+        Vec3 from = point.subtract(this.centre);
+        double x = Math.max(Math.abs(from.dot(this.axes[0])) - this.half.x, 0.0);
+        double y = Math.max(Math.abs(from.dot(this.axes[1])) - this.half.y, 0.0);
+        double z = Math.max(Math.abs(from.dot(this.axes[2])) - this.half.z, 0.0);
+
+        return Math.sqrt(x * x + y * y + z * z);
+    }
+
+    /**
      * 直立した箱が、この箱に触れるまで移動のどれだけを進めるか。移動量に対する比率で、1 なら一度も触れ
      * ず、0 なら開始時点で止められる。
      *

@@ -87,6 +87,31 @@ public final class BakedGeometry {
             return new Vector3f(this.min).add(this.max).mul(0.5F);
         }
 
+        /**
+         * その点が、Z 軸に沿って見たときこの箱の内側にあるか。
+         *
+         * <p>問うているのは「その点はこの部品<em>の中</em>にあるか」であって「中心にあるか」ではない。
+         * 回る部品にとって、この2つは別物だ——3枚羽根のプロペラの箱の中心は軸から外れている（羽根が
+         * 120 度ごとにしか無いので、箱は円板ではない）が、軸は間違いなくプロペラの中を通っている。
+         *
+         * <p>測るのは回転が動かせる2軸だけ。Z 軸回りの回転は z を変えないので、支点が円板の少し前に
+         * 置かれていても——スピナーの先端はごく普通の置き場所だ——それは軸を外したことにならない。
+         */
+        public boolean holdsAboutZ(Vector3f point) {
+            return within(point.x(), this.min.x(), this.max.x())
+                    && within(point.y(), this.min.y(), this.max.y());
+        }
+
+        /** 同じ問いを Y 軸回りに。動くのは x と z。 */
+        public boolean holdsAboutY(Vector3f point) {
+            return within(point.x(), this.min.x(), this.max.x())
+                    && within(point.z(), this.min.z(), this.max.z());
+        }
+
+        private static boolean within(float value, float low, float high) {
+            return value >= low && value <= high;
+        }
+
         public float sizeY() {
             return this.max.y() - this.min.y();
         }

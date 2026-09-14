@@ -198,6 +198,25 @@ public final class Attitude {
         return new Vec3(-body.x, body.y, body.z);
     }
 
+    /**
+     * ワールドでの向きを、車体に載った架台（旋回してから俯仰する砲塔）の2つの角へ。
+     * {@code GroundVehicleEntity.getAimDirection} の逆で、どんな車体姿勢でも厳密。
+     *
+     * <p>車首方位と車体の仰角を引くだけの近似は、砲塔が前を向いているときしか合わない。斜面を横切りながら
+     * 砲塔を横へ回せば、車体のバンクがそのまま俯仰へ漏れる。{@link #toBody} で車体の座標系へ戻してから
+     * 読めば、その漏れは最初から無い。
+     *
+     * @param direction 向き。長さは問わない
+     * @return {旋回（度、右が正）, 俯仰（度、上が正）}
+     */
+    public static float[] mountAngles(Quaternionf attitude, Vec3 direction) {
+        Vec3 local = toBody(attitude, direction);
+        double level = Math.sqrt(local.x * local.x + local.z * local.z);
+
+        return new float[] {(float) (Mth.atan2(local.x, local.z) * (180.0 / Math.PI)),
+                (float) (Mth.atan2(local.y, level) * (180.0 / Math.PI))};
+    }
+
     private static Vec3 toVec3(Vector3f vector) {
         return new Vec3(vector.x(), vector.y(), vector.z());
     }

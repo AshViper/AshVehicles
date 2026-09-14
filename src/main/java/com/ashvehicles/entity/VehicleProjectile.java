@@ -1,5 +1,8 @@
 package com.ashvehicles.entity;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import javax.annotation.Nullable;
 
 import com.ashvehicles.data.Definitions;
@@ -10,6 +13,7 @@ import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.vehicle.Hitbox;
 import com.ashvehicles.weapon.AmmunitionDefinition;
 import com.ashvehicles.weapon.Impact;
+import com.ashvehicles.weapon.Penetration;
 import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponEffects;
@@ -249,6 +253,38 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     private static final boolean TRACE = false;
     /** 一時的。上のトレースが兵装の飛行の何 tick 分を対象にするか。 */
     private static final int TRACE_TICKS = 8;
+    /**
+     * 炎の粒を何ブロック間隔で置くか、そして1tickあたり何粒までか。
+     *
+     * <p>粒数を固定しないのは、炎の長さが兵装ごとにも速度によっても変わるからだ。間隔で決めれば、TOW の
+     * 2ブロックの炎も弾道弾の17ブロックの炎も同じ密度になり、<b>炎の太さが速度で変わらない</b>——粒の
+     * 大きさは間隔から引くので、間隔が一定なら太さも一定になる。上限に当たるのは1tickに十数ブロック以上
+     * 飛ぶ物だけで、そこでは間隔が開くぶん太くなる（航跡と同じ妥協）。
+     */
+    private static final double FLAME_SPACING = 1.0;
+    private static final int FLAME_PUFFS = 14;
+    /** ただし短い炎でもこれだけは置く。3粒の炎は炎に見えない。 */
+    private static final int FLAME_PUFFS_LEAST = 4;
+    /** 炎の粒を飛行経路からどれだけ外して置くか（ブロック）。噴煙より締まっている。炎は柱だ。 */
+    private static final double FLAME_SCATTER = 0.05;
+    /** 炎の粒に残すミサイル速度の割合。ガスは置き去りにされるので、ほとんど残らない。 */
+    private static final double FLAME_DRIFT = 0.10;
+    /**
+     * 炎の粒の大きさの上限（{@link #TRAIL_SPREAD_MOST} と同じ尺度）。煙より低い。
+     *
+     * <p>高速で撒く粒を太らせるのは、隣に届かせて柱を繋ぐためだ。だが炎は噴煙の<em>内側</em>にある物なので、
+     * 煙と同じ太さまで許すと、ミサイルは自分の煙と同じ幅の白熱した筒を引くことになる。ここを煙より低く
+     * 抑えておけば、どれだけ速くても炎は煙の芯に留まる。
+     */
+    private static final double FLAME_SPREAD_MOST = 4.0;
+    /**
+     * 点火の瞬間、炎が何倍になるか。そして何 tick でそれが引くか。
+     *
+     * <p>実物の発射が発射に見えるのは最初の1秒だ。まだ動いていない機体のノズルの下でガスの行き場が無く、
+     * 炎が架台の周りへ跳ね返って広がる。ミサイルが動き出せばそれは終わり、あとは飛行中の細い炎になる。
+     */
+    private static final double IGNITION_FLARE = 2.4;
+    private static final int IGNITION_TICKS = 12;
     /** モーター燃焼中、1tickあたりの噴煙の粒数。 */
     private static final int EXHAUST_PUFFS = 8;
     /** 噴煙がミサイルの後方どこまで届くか。1tick分の飛行に対する割合で。 */
@@ -275,6 +311,13 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     private Vec3 firedFromAt = Vec3.ZERO;
     /** 発射からの tick 数。寿命はこれに対して測られる。 */
     protected int age;
+    /**
+     * 砲口からここまで実際に飛んだ距離（ブロック）。直線距離ではなく踏んだ歩の総和。
+     *
+     * <p>{@link #carriedShare} が読む。山なりに撃った砲弾では両者が大きく違い、空気が削るのは
+     * 「どこまで届いたか」ではなく「どれだけ空気の中を通ったか」の方だ。
+     */
+    private double flown;
     /**
      * 装甲がこの弾を弾いた回数。サーバー専用。弾に残っているエネルギーを表す値で、クライアント側で訊く物は
      * 無い。{@link Ricochet} 参照。
@@ -910,7 +953,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     }
 
     /**
-     * 1tick分の飛行。この tick の速度が運ぶ先と、次のために引く落下分。
+     * 1tick分の飛行。この tick の速度が運ぶ先と、次のために引く抗力と落下分。
      *
      * <p>独立したメソッドなのは、これが弾の飛行そのものであってそれ以外を含まないから。衝突も航跡も無く、
      * 世界に何も訊かない。クライアントがその上に後から乗せる物（{@link #settle} 参照）は、そうすることで
@@ -922,8 +965,25 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
         this.setPos(next.x, next.y, next.z);
         this.lastTravel = velocity;
-        this.setDeltaMovement(velocity.subtract(0.0, this.gravityNow(), 0.0));
+        this.flown += velocity.length();
+        this.setDeltaMovement(this.dragged(velocity).subtract(0.0, this.gravityNow(), 0.0));
         this.updateRotation();
+    }
+
+    /**
+     * この tick に空気が持っていく分を引いた速度。向きは変えず、速さだけを削る。
+     *
+     * <p><b>弾道が弧になるのは重力のせいだけではない。</b> 重力は誰にでも同じ 9.8 m/s² で働くので、それ
+     * だけでは全ての弾が同じ落ち方をしてしまう。実際に 7.62mm と 120mm APFSDS の弾道を別物にしているのは
+     * 減速の速さだ——1000m 先に届くまでに前者は 1.9 秒かかり後者は 0.6 秒しかかからないので、同じ重力でも
+     * 落ちる量が 9 倍違う。だから落下を機種ごとに変えるつまみは重力ではなく
+     * {@link WeaponDefinition.Projectile#DEFAULT_DRAG 抗力} でなければならない。
+     *
+     * <p>ロケットとミサイルはこれを返さない。あちらは {@code steer()} が向きと速さを同時に決めており、
+     * 抗力もその中にある（燃焼中は効かせない・旋回でも失う、という弾には無い規則があるため）。
+     */
+    protected Vec3 dragged(Vec3 velocity) {
+        return this.getRound().slowedByAir(velocity);
     }
 
     /**
@@ -1166,6 +1226,32 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     }
 
     /**
+     * 弾の真下 {@code depth} ブロック以内にある地面。無ければ null。
+     *
+     * <p>信管の中でも「地面までの高さ」を訊く物のために置いてある。クラスター弾頭の開傘高度がそれで、
+     * 触れてから開いたのでは子弾を撒く高さが残らない。{@link com.ashvehicles.weapon.WeaponDefinition.Cluster}
+     * 参照。
+     *
+     * <p>読み方は {@link #strike} とまったく同じ規律に従う。{@link #groundUnder} に訊いてから引くので、
+     * この側がまだ持っていない chunk では何も問い合わせない——落ちてくる爆弾が自分の下の地形を生成させる
+     * ようなことはしない。高高度ではその判定が {@code OVERHEAD} で終わり、ブロックは1つも読まれない。
+     */
+    @Nullable
+    protected Vec3 groundBelow(double depth) {
+        Vec3 from = this.position();
+        Vec3 to = from.subtract(0.0, depth, 0.0);
+
+        if (this.groundUnder(from, to) != Ground.IN_REACH) {
+            return null;
+        }
+
+        BlockHitResult ground = this.level().clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE, this));
+
+        return ground.getType() == HitResult.Type.MISS ? null : ground.getLocation();
+    }
+
+    /**
      * 線分の始点から、その軸で次の chunk 境界を跨ぐまでの進み具合。線分全体を1とする。その軸に動かない歩
      * は境界を跨がないので、無限遠に置いてもう一方の軸に選ばせる。
      */
@@ -1333,6 +1419,69 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
                     at.z + random.nextGaussian() * EXHAUST_SCATTER,
                     blown.x, blown.y, blown.z);
         }
+
+        this.spawnFlame(trail, head, step, flown);
+    }
+
+    /**
+     * その煙が出てくる元の火。書いてある兵装だけが持つ。
+     *
+     * <p>燃えているモーターは全部これを出す。兵装ファイルが {@code flame} を書いていなければ、寸法は煙の
+     * 大きさから引かれる（{@link WeaponDefinition.Trail#fire()}）。
+     *
+     * <p>煙と別に撒くのは、両者が長さで別物だからだ。煙はミサイルの後ろへ何百ブロックも伸びていく物だが、
+     * 火はノズルから数ブロックで終わる——実物でそう見えるのは、そこで火が消えるからではなく、そこまで来た
+     * ガスが暗くなるからだ。こちらでは粒の寿命がその役をする（{@code MotorFlameParticle} 参照）。
+     *
+     * <p><b>長さは兵装ファイルの値と、この tick に実際に飛んだ距離の大きい方。</b> 定義どおり数ブロックに
+     * 収めると、1tickに数十ブロック進むミサイルの炎は tick ごとに離れた位置へ点を打つだけになり、燃えている
+     * 物ではなく点滅する物に見える。飛んだ分まで伸ばせば、モーターが「その間ずっと燃えていた」という事実の
+     * 方が描かれる。これは航跡が速度に依らず一本の柱に見える理由と同じ理屈だ。
+     *
+     * @param head この tick の終わりのノズル位置
+     * @param step この tick に飛んだ線
+     * @param flown その長さ（ブロック）。0ではない
+     */
+    private void spawnFlame(WeaponDefinition.Trail trail, Vec3 head, Vec3 step, double flown) {
+        WeaponDefinition.Flame flame = trail.fire();
+        RandomSource random = this.random;
+        // 点火直後だけ大きい。IGNITION_FLARE 参照。
+        double flare = 1.0 + (IGNITION_FLARE - 1.0)
+                * Math.max(0.0, 1.0 - this.age / (double) IGNITION_TICKS);
+        double reach = Math.max(flame.length() * flare, flown);
+        int puffs = Mth.clamp(Mth.ceil(reach / FLAME_SPACING), FLAME_PUFFS_LEAST, FLAME_PUFFS);
+        // 粒の大きさは間隔から引く。航跡と同じ理由で、隣に届かない大きさで置けば炎は点線になる。
+        float spread = (float) Mth.clamp(reach / puffs * TRAIL_SPREAD, 1.0, FLAME_SPREAD_MOST);
+        TintedParticleOption fire = ModParticles.MOTOR_FLAME.get()
+                .of(flame.colour(), flame.size() * spread);
+        Vec3 back = step.scale(-reach / flown);
+        Vec3 drift = step.scale(FLAME_DRIFT / flown);
+
+        for (int i = 0; i < puffs; i++) {
+            // ノズル側を濃く。平方根が粒の大半を手前へ寄せるので、炎は根元が明るく末端へ向かって細る。
+            Vec3 at = head.add(back.scale(Math.sqrt((i + random.nextDouble()) / puffs)));
+
+            this.level().addParticle(fire,
+                    at.x + random.nextGaussian() * FLAME_SCATTER,
+                    at.y + random.nextGaussian() * FLAME_SCATTER,
+                    at.z + random.nextGaussian() * FLAME_SCATTER,
+                    drift.x, drift.y, drift.z);
+        }
+    }
+
+    /**
+     * 今このモーターが出している炎。燃えていない物、そもそもモーターを持たない物は null。
+     *
+     * <p>読むのはクライアントだけだ。炎は自分の煙を内側から照らし（{@code glow}）、規模の大きい物は見て
+     * いる者の画面まで染める（{@code wash}）。{@link com.ashvehicles.client.MotorLight} 参照。
+     */
+    @Nullable
+    public WeaponDefinition.Flame plume() {
+        if (!this.underPower()) {
+            return null;
+        }
+
+        return this.getRound().trail().map(WeaponDefinition.Trail::fire).orElse(null);
     }
 
     /**
@@ -1366,12 +1515,23 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     }
 
     @Nullable
-    protected Entity firedFrom() {
+    public Entity firedFrom() {
         if (this.firedFrom == null && this.firedFromId >= 0) {
             this.firedFrom = this.level().getEntity(this.firedFromId);
         }
 
         return this.firedFrom;
+    }
+
+    /**
+     * この弾を撃ったのがその機体か。
+     *
+     * <p>自分の撃った物を目標として扱わないための問い。シーカーが訊き（{@code RocketEntity.checkDecoys}）、
+     * レーダーも訊く——{@code sensor.Sensors} は世界にある物を残らずスコープに載せるので、訊かなければ
+     * 引き金を引いた瞬間に自機の弾が最も近い十数件を占め、スコープが撃っている間だけ真っ白になる。
+     */
+    public boolean wasFiredBy(@Nullable Entity vehicle) {
+        return vehicle != null && this.firedFrom() == vehicle;
     }
 
     @Override
@@ -1384,16 +1544,52 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
         super.onHitEntity(hit);
 
-        // 砲身を出た時の威力ではなく今残っている威力。ここまで真っ直ぐ来た弾——ほぼ全部——では両者は同じ。
-        float damage = this.getRound().damage() * Ricochet.energy(this.deflections);
+        // 砲身を出た時の威力ではなく今残っている威力。減った理由は2つあり、掛け合わせても二重には数え
+        // ない——装甲が取った分は跳ね返った回数から、空気が取った分は飛んだ距離から、それぞれ別の物を
+        // 測っているからだ。Ricochet.energy と Projectile.energyAfter 参照。
+        //
+        // <b>これが「遠くの当たりは軽い」の全部である。</b> 距離そのものは見ない。見るのは弾が空気の中を
+        // 通ってきた長さで、同じ 1000 ブロックでも 7.62mm は 6 割を失い 120mm APFSDS は 1 割も失わない。
+        WeaponDefinition.Projectile round = this.getRound();
+        Entity struck = hit.getEntity();
+        // そして入った面の板を抜けたか。抜けなければ半分。角度は跳弾の側で済んでいるので、ここで訊くのは
+        // 厚さだけ。Penetration 参照。
+        boolean held = !Penetration.pierces(round, plateAt(struck, hit.getLocation()));
+        float damage = round.damage() * Ricochet.energy(this.deflections) * round.energyAfter(this.flown)
+                * (held ? Penetration.HELD : 1.0F);
 
-        hit.getEntity().hurt(this.damageSource(), damage);
+        // 撃破の判定は打撃を挟んで測る。燃えている残骸への追撃を全部「撃破」と呼ばないため。
+        // HitReportPayload.isDown 参照。
+        boolean standing = !HitReportPayload.isDown(struck);
+
+        struck.hurt(this.damageSource(), damage);
+        this.struck(hit);
+
+        // 報告に載せる位置と進行方向は炸裂の前に控える。マークは弾が「入ってきた線」に対して描かれるし、
+        // 炸裂は弾自身を消してしまうからだ。
+        Entity shooter = this.getOwner();
+        Vec3 at = hit.getLocation();
+        Vec3 travel = this.getDeltaMovement();
+
+        // 榴弾では車体に開く穴を作るのは弾頭ではなく爆風なので、撃破の判定は炸裂の後でなければならない。
+        // 直撃の瞬間だけを見て報告すると、榴弾で倒した目標は「命中」としか読み上げられない。
+        this.noteWarhead(struck, damage);
+        this.burst(at, null, struck);
         // 撃った者だけに伝える。この兵装が使われる距離では、弾が目標のどこへ行ったかを砲手が知る唯一の
         // 手段がこれ。HitReportPayload 参照。
-        HitReportPayload.report(this.getOwner(), hit.getEntity(), hit.getLocation(),
-                this.getDeltaMovement(), damage, false);
-        this.struck(hit);
-        this.burst(hit.getLocation(), null, hit.getEntity());
+        HitReportPayload.report(shooter, struck, at, travel, damage, false, held,
+                standing && HitReportPayload.isDown(struck));
+    }
+
+    /**
+     * 弾が入った面の装甲厚（mm）。機体の箱でなければ 0。
+     *
+     * <p>面は命中を見つけたのと同じ、膨らませた箱で求める。{@link #thrownOff} が法線をそう求めるのと同じ
+     * 理由で、稜線の近くで隣の面を読まないため。
+     */
+    private static float plateAt(Entity struck, Vec3 at) {
+        return struck instanceof VehiclePart part && part.getParent() instanceof VehicleEntityBase machine
+                ? machine.plateAt(part, at, PICK_INFLATION) : 0.0F;
     }
 
     /**
@@ -1501,7 +1697,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         // 弾の向きを変える前に報告する。マークが「去った線」ではなく「入ってきた線」に対して描かれるように。
         // 跳弾はそれ自体を砲手へ伝える価値がある。照準の後ろから見れば外れとまったく同じに見えるし、外れへの
         // 答えは「同じ場所をもう一度撃つ」ことだから。
-        HitReportPayload.report(this.getOwner(), hit.getEntity(), at, velocity, 0.0F, true);
+        HitReportPayload.report(this.getOwner(), hit.getEntity(), at, velocity, 0.0F, true, false, false);
         this.deflections++;
         // 命中判定に許されている全ての余裕の外へ出す。さもないと次の tick も、その後の毎tickも、同じ装甲板
         // の同じ場所から弾かれ続ける。Ricochet.CLEARANCE 参照。
@@ -1526,6 +1722,20 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
     /** 既に炸裂の処理へ入っているか。連鎖爆発が同じ弾へ戻ってこないための印。{@link #burst} 参照。 */
     private boolean bursting;
+
+    /**
+     * 炸裂の直前に弾頭を直接渡した相手と、渡した量。爆風がその相手に重ねて効かないように（{@link #blastMachines}）。
+     * 直撃は {@link #onHitEntity}、近接信管は {@code RocketEntity.detonate} が書く。
+     */
+    @Nullable
+    private Entity warheadTo;
+    private float warheadDealt;
+
+    /** 爆風の前に、弾頭を誰にどれだけ渡したかを控える。 */
+    protected void noteWarhead(@Nullable Entity target, float dealt) {
+        this.warheadTo = target;
+        this.warheadDealt = dealt;
+    }
 
     /**
      * 着弾点で何をするか。炎と煙と削れた破片、そして炸薬があれば爆発。
@@ -1579,9 +1789,56 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
             if (round.explosion() > 0.0F) {
                 WeaponEffects.blast(level, this, where, round);
             }
+
+            if (round.blast() > 0.0F) {
+                this.blastMachines(level, where, round);
+            }
         }
 
         this.discard();
+    }
+
+    /**
+     * 爆風が機体に与える打撃。{@code projectile.blast} を持つ弾だけ（法則は {@link WeaponDefinition.Projectile#blastAt}）。
+     *
+     * <p><b>バニラの爆発の式では足りないから別に持つ</b>（2026-09-14 の指示「至近弾で300ほど、直撃で500」）。あの式の上限は
+     * 爆心で {@code 7 × 威力の2倍 + 1}——FAB-250（威力 8.3）で 117——で、至近弾に300を与えるには威力を3倍近くにするしかなく、
+     * そうすると被害半径もクレーターも一緒に3倍になる。だから穴と光と押しは今まで通り {@code explosion} が作り、機体への打撃
+     * だけをここが渡す。機体はこの弾のバニラの爆発を受けない（{@code VehicleEntityBase.hurt}）。人とモブには今まで通り効く。
+     *
+     * <p>距離は機体の原点ではなく一番近い箱の表面まで（{@code VehicleEntityBase.distanceToShape}）。地形の遮蔽は見ない
+     * ——ロード済みの外の爆風（{@code Effects.shockwave}）と同じ。
+     *
+     * <p><b>弾頭を直接受けた相手には差分だけ。</b> 直撃で500を受けた戦車に爆風の300を重ねれば800になり、「直撃で500」に
+     * ならない。だからその相手（{@link #noteWarhead}）には爆風の値から受けた量を引いた残りだけを足す。近接信管で弾頭の一部しか
+     * 受けなかった相手は、爆風の値まで引き上げられる。
+     */
+    private void blastMachines(ServerLevel level, Vec3 where, WeaponDefinition.Projectile round) {
+        double reach = round.explosion() * 2.0;
+        // 箱（パーツ）も同じ検索で見つかる。原点の小さな当たり判定だけで探すと、大きな機体の端で起きた爆風を拾い損ねる。
+        AABB caught = new AABB(where, where).inflate(reach + 1.0);
+        Entity hit = this.warheadTo instanceof VehiclePart part ? part.getParent() : this.warheadTo;
+        // 全員で1つを使い回す。機体は同じ tick の同じ打撃を箱の数だけ数えない（VehicleEntityBase.hurt）。
+        DamageSource source = this.damageSource();
+        Set<VehicleEntityBase> seen = new HashSet<>();
+
+        for (Entity entity : level.getEntities(this, caught)) {
+            Entity subject = entity instanceof VehiclePart part ? part.getParent() : entity;
+
+            if (!(subject instanceof VehicleEntityBase machine) || machine.isRemoved() || !seen.add(machine)) {
+                continue;
+            }
+
+            double amount = round.blastAt(machine.distanceToShape(where));
+
+            if (machine == hit) {
+                amount -= this.warheadDealt;
+            }
+
+            if (amount > 0.0) {
+                machine.hurt(source, (float) amount);
+            }
+        }
     }
 
     /**
@@ -1603,6 +1860,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         super.readAdditionalSaveData(tag);
         this.entityData.set(DATA_WEAPON, tag.getString("Weapon"));
         this.age = tag.getInt("Age");
+        this.flown = tag.getDouble("Flown");
         this.deflections = tag.getInt("Deflections");
         this.firedFromId = tag.contains("FiredFrom") ? tag.getInt("FiredFrom") : -1;
     }
@@ -1612,6 +1870,7 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         super.addAdditionalSaveData(tag);
         tag.putString("Weapon", this.entityData.get(DATA_WEAPON));
         tag.putInt("Age", this.age);
+        tag.putDouble("Flown", this.flown);
         tag.putInt("Deflections", this.deflections);
         tag.putInt("FiredFrom", this.firedFromId);
     }

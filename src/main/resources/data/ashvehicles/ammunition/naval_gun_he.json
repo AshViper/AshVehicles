@@ -1,0 +1,14 @@
+{
+  "gun_class": "naval_gun",
+  "rounds_per_item": 1,
+  "projectile": {
+    "damage": 320.0,
+    "speed": 44.5,
+    "gravity": 0.0245,
+    "drag": 2.3e-05,
+    "range": 8000.0,
+    "explosion": 7.0,
+    "ricochet": 0.0,
+    "tracer": "FFC062"
+  }
+}

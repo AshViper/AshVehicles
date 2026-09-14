@@ -231,10 +231,15 @@ public final class AircraftHud implements LayeredDraw.Layer {
             return;
         }
 
-        // レーザー誘導兵器は何も探していない。追うのはターゲティングポッドが捉えている物であり、ポッドはシーカーが
+        // 据える系のシーカーは何も探していない。追うのはターゲティングポッドが捉えている物であり、ポッドはシーカーが
         // 見つけるのではなくパイロットが据える。ポッド内だけでなくここにも描くので、進入はキャノピー越しに飛べる——
         // 指示し、ポッドを仕舞い、機体を飛ばしても、マークは計器面に残っている。
-        if (weapon.guidance().get().seeker() == WeaponDefinition.Guidance.Seeker.LASER) {
+        //
+        // <p>レーザーだけを名指ししていた。{@code laid()} の3つ——光点・座標・照準線——はどれも同じ経路で目標を
+        // 受け取り、どれも {@code WeaponMounts.seekerOf} が {@code TargetLock} を回さない。名指しから漏れた2つは
+        // 下の枠の側へ落ち、シーカーが動いていないので「SEEK」を永久に表示していた。撃てるのに捕捉できない計器面
+        // である。据える側は1つの述語で問うこと。
+        if (weapon.guidance().get().seeker().laid()) {
             drawDesignation(graphics, minecraft, aircraft, partialTick, centreX, centreY);
 
             return;
@@ -335,10 +340,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
     private static Vec3[] cuedAt = new Vec3[0];
 
     /**
-     * より広い画。レーダーが現在保持している全接触を、隅のスコープ上だけでなく画面上の実際の位置へ印す。シーカー自身が
-     * 捉えた物にだけ存在する {@link #drawLock} の枠と違い、これはレーダーが見つけた全てに描かれる——だからパイロットは
-     * 描画された瞬間に接触を見られる。機首をそちらへ向けて何かが閉じるずっと前にだ。スコープではなくヘルメット装着型
-     * キューの見た目にしてある。重要なのはどちらを見るかであって、スコープが綴る方位と距離ではない。
+     * より広い画。レーダーが見つけた<em>対空陣地</em>を、隅のスコープ上だけでなく画面上の実際の位置へ印す。シーカー自身が
+     * 捉えた物にだけ存在する {@link #drawLock} の枠と違い、これは機首をそちらへ向けるずっと前に描かれる——だからパイロットは
+     * 首を振るべき方向を先に知る。スコープではなくヘルメット装着型キューの見た目にしてある。重要なのはどちらを見るかで
+     * あって、スコープが綴る方位と距離ではない。
+     *
+     * <p><b>印を置くのはレーダーを積んだ地上車両だけ</b>（{@link Contact#emitter()}）。<b>スコープと同じ物を描かない
+     * のは意図的だ。</b> 隅のスコープは見つけた物を全部並べる場所で、それでいい——読みに行く計器だから。こちらは風防越し
+     * の視界そのものに重なるので、載せる資格の基準が違う。載せてよいのは「首を振ってでも位置を知っておくべき相手」だけで、
+     * それはこちらを撃てる場所で電波を出している物だ。レーダーが世界にある物を残らず載せるようになった今
+     * （{@code sensor.Sensors.worthLookingAt}）、全接触に印を置けば、視界は羊と落ちたアイテムの菱形で埋まる。
      *
      * <p>スコープ自身が描く元と同じ方位・距離・高度から求める——それがクライアントの持つ全てである理由は {@link Contact}
      * 参照。通知されたことすら無いかもしれないエンティティのワールド位置ではないのだ。再構成は {@code Sensors.sweep} を
@@ -389,6 +400,11 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         for (int i = 0; i < cuedFrom.size(); i++) {
             Contact contact = cuedFrom.get(i);
+
+            if (!contact.emitter()) {
+                continue;
+            }
+
             int[] at = project(minecraft, cuedAt[i].subtract(camera).normalize(), focal, centreX, centreY);
 
             if (at != null) {
@@ -956,6 +972,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
                     open ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
         }
 
+        // 後部ハッチを持つ機体のみ。倉と違って代償は無いので、開いていること自体は警告ではない——動いて
+        // いる間だけ琥珀にする。降りきる前に何かを出そうとしているパイロットが見たいのはそこだ。
+        if (aircraft.hasRamp()) {
+            boolean open = aircraft.isRampOpen();
+            boolean settled = aircraft.isRampSettled();
+
+            panel.pair("RAMP", DIM, open ? "OPEN" : "SHUT", settled ? GREEN : WARNING,
+                    open ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
+        }
+
         // 可変翼を持つ機体のみ。翼はパイロットが動かす物ではないが、だからこそ今どこにあるかは見えている必要が
         // ある——後退角は、この機体が同じ速度で何ができるかを丸ごと決めてしまう。作動中は琥珀。
         if (aircraft.hasSweepWing()) {
@@ -989,12 +1015,21 @@ public final class AircraftHud implements LayeredDraw.Layer {
         if (clean < 1.0F) {
             float cross = aircraft.radarCrossSection();
 
-            panel.pair("RCS", DIM, String.format("%.2f", cross), cross > clean ? WARNING : GREEN);
+            // 断面積そのものと、それが探知距離に換算していくらか。桁は 0.0001 から 1 までまたぐので、
+            // 有効数字が消えない書式を選ぶ。読んで判断に使うのは後ろの割合だ——「あと何割まで近づかれ
+            // ないと見つからないか」であり、パイロンに1本吊るたびにその数字が動く。
+            String area = cross >= 0.1F ? String.format("%.2f", cross)
+                    : cross >= 0.01F ? String.format("%.3f", cross)
+                            : String.format("%.4f", cross);
+
+            panel.pair("RCS", DIM,
+                    area + String.format("  %.0f%%", AircraftDefinition.Signature.reach(cross) * 100.0F),
+                    cross > clean ? WARNING : GREEN);
         }
 
         panel.divider();
         panel.pair(String.format("AOA  %+.0f°", angleOfAttack(attitude, velocity, speed)), GREEN,
-                String.format("%.1f G", aircraft.getLoadFactor(velocity)), GREEN);
+                String.format("%+.1f G", aircraft.getLoadFactor(velocity)), GREEN);
 
         return panel;
     }
@@ -1009,7 +1044,19 @@ public final class AircraftHud implements LayeredDraw.Layer {
         HudPanel panel = new HudPanel();
 
         panel.title("STORES / WEAPONS");
-        stores(panel, aircraft);
+
+        // 矢印は1つだけ。意味は「今この画面の持ち主が引き金を引いたら出て行く物」で、それ以外の意味を
+        // 持たせない。
+        //
+        // <p>以前はパイロンの選択と自分の砲座がそれぞれ独立に矢印を付けていたので、砲座を持ったまま
+        // 飛んでいるパイロット——単独で飛ぶヘリはいつもそれだ——の画面には矢印が2つ並んだ。引き金は1つ
+        // しか無く、そのとき効くのは砲座の側だけ（{@code WeaponMounts.tick} の {@code pilotHoldsStation}）
+        // なので、パイロンの矢印は撃てない物を指していたことになる。どれが出るのか分からない、の正体。
+        int mine = aircraft.getStations().liveStationOf(minecraft.player);
+        boolean pylonTrigger = mine == GunStations.NONE
+                && aircraft.getAviator() == minecraft.player;
+
+        stores(panel, aircraft, pylonTrigger);
         stations(panel, minecraft, aircraft);
         panel.divider();
         load(panel, aircraft);
@@ -1084,7 +1131,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
      *
      * <p>何も積んでいない機体では1行も足さない。非武装機の計器を従来通りに保つためだ。
      */
-    private static void stores(HudPanel panel, AircraftEntity aircraft) {
+    private static void stores(HudPanel panel, AircraftEntity aircraft, boolean pylonTrigger) {
         // 撃てる物だけでなく吊っている物全部。増槽は選択されないが、翼の下にぶら下がっており、パイロットが
         // 搭載一覧に対して問うのは「今この機体は何を持っているか」だ。
         List<ResourceLocation> carried = aircraft.getWeapons().carriedStores();
@@ -1103,7 +1150,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
             boolean shut = armed && aircraft.getWeapons().selectedIsShutIn();
             int colour = unusable || shut || rounds <= 0 ? WARNING : (armed ? GREEN : DIM);
 
-            panel.pair((armed ? "> " : "  ") + name(weapon), colour,
+            // 選択されている物は緑のまま——切り替えキーがどこにあるかは常に見えているべきだ——が、
+            // 矢印は引き金が本当にそこへ繋がっている時だけ付ける。砲座を持っているパイロットにとって、
+            // 選択中のパイロンは「次に砲座を降りたら撃つ物」であって「今撃つ物」ではない。
+            panel.pair((armed && pylonTrigger ? "> " : "  ") + name(weapon), colour,
                     unusable ? "NO POD" : shut ? "BAY SHUT" : String.valueOf(rounds), colour);
 
             // 何のベルトが入っているか。同じ機関砲でも弾種で威力も弾道も変わるので、残弾の数だけでは
@@ -1266,8 +1316,25 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /** 計器が表示する兵装名。名前空間を除いたパスを大文字にした物。 */
+    /**
+     * 計器に出す兵装の名前。
+     *
+     * <p><b>ID ではなく実名を出す。</b>以前はパスを大文字にしただけだったので、AH-64 のパイロンには
+     * {@code AGM114} {@code HYDRA-70} {@code M230} が並んでいた。読めはするが、覚えている者にしか
+     * 読めない——同じ機体に載る3つが、名前の形の上では区別を持たない。翻訳を通せば
+     * 「AGM-114 Hellfire」になり、それは選ぶ前から何であるかを言っている。
+     *
+     * <p>翻訳が無ければ従来通り ID を大文字で出す。内蔵砲——{@code m230} や {@code gau_13}——は
+     * アイテムを持たないので言語ファイルにも無く、そこは今までと1文字も変わらない。
+     * {@code GroundVehicleHud.roundName} が弾種に対して同じことをしている。
+     */
     private static String name(ResourceLocation weapon) {
-        return weapon.getPath().replace('_', '-').toUpperCase(java.util.Locale.ROOT);
+        String key = "item." + weapon.getNamespace() + "." + weapon.getPath();
+        String text = Component.translatable(key).getString();
+
+        return key.equals(text)
+                ? weapon.getPath().replace('_', '-').toUpperCase(java.util.Locale.ROOT)
+                : text;
     }
 
     /**

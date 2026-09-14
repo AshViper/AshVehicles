@@ -38,23 +38,29 @@ public final class Ricochet {
             AshVehicles.MODID, WeaponMounts.SOUND_PREFIX + SOUND_ROLE);
 
     /**
-     * 跳弾音の大きさ。兵装の発砲音と同じ尺度で、この数値は音量ではなく到達距離。発砲音より小さいのは意図
-     * 的で、砲塔を滑る弾は硬い音ではあっても発砲そのものではないし、最も聞く必要があるのは遠く離れた発射
-     * 側だから。
+     * 跳弾音が届く距離（ブロック）。命中音と同じで、理由も同じ——装甲を滑る弾の音は近所の音だ。
+     * {@link Impact#RANGE} 参照。
      */
-    public static final float VOLUME = 0.9F;
+    public static final float RANGE = 10.0F;
+
+    /** 上を {@code volume} 欄の値へ直した物。この欄は音量ではなく距離だ。 */
+    public static final float VOLUME = WeaponDefinition.SoundSetup.volumeForCarry(RANGE);
     /** 高めのピッチ。中で何かが炸裂したのではなく装甲板を叩いた音なので。 */
     public static final float PITCH = 1.35F;
 
+    /** 録音を鳴らす大きさ。{@link WeaponDefinition.SoundSetup#gain()} 参照。従来と同じ値。 */
+    public static final float GAIN = 0.9F;
+
     /**
-     * 上の2つを、音の送受信両側が読む1つのオブジェクトにまとめた物。
+     * 上の3つを、音の送受信両側が読む1つのオブジェクトにまとめた物。
      *
      * <p>サーバーは「どこまで届くか」を、クライアントは「聴き手の位置でどれだけの音量か」を訊く。同じ
      * 数値でなければ、音は間違った音量で届くか、まったく届かない。
      * {@link WeaponDefinition.SoundSetup#packetVolume()} 参照。
      */
     public static final WeaponDefinition.SoundSetup SOUND_SETUP =
-            new WeaponDefinition.SoundSetup(Optional.empty(), VOLUME, PITCH);
+            new WeaponDefinition.SoundSetup(Optional.empty(), VOLUME, PITCH, GAIN,
+                    WeaponDefinition.SoundSetup.DEFAULT.interval());
 
     /**
      * 1発の弾が弾かれてよい回数。

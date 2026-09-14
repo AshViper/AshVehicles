@@ -10,9 +10,10 @@
   },
   "projectile": {
     "damage": 120.0,
-    "speed": 24.7,
+    "speed": 4.2,
     "gravity": 0.0245,
-    "range": 8000.0,
+    "drag": 0.00007,
+    "range": 3000.0,
     "explosion": 2.3,
     "ricochet": 0.0,
     "tracer": "FFD9A0"

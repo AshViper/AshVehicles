@@ -1,0 +1,26 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 48,
+  "gun_class": "naval_gun",
+  "firing": {
+    "rounds_per_second": 0.06,
+    "automatic": false,
+    "spread": 0.12
+  },
+  "projectile": {
+    "damage": 320.0,
+    "speed": 44.5,
+    "gravity": 0.0245,
+    "drag": 2.3e-05,
+    "range": 8000.0,
+    "explosion": 7.0,
+    "ricochet": 55.0,
+    "tracer": "FFE9B0"
+  },
+  "sound": {
+    "fire": "ashvehicles:weapon.tank",
+    "volume": 4.0,
+    "pitch": 0.55
+  }
+}

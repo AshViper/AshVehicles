@@ -1,0 +1,22 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_vehicle",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 3
+    },
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 3
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:zu_23"
+  }
+}

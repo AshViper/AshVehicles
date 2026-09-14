@@ -1,0 +1,30 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_vehicle",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 16
+    },
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 32
+    },
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 24
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:engine",
+      "count": 4
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:p_1000"
+  }
+}

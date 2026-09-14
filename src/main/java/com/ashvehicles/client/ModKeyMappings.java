@@ -30,14 +30,43 @@ public final class ModKeyMappings {
      *
      * <p>フライトシミュレータと同様、操縦桿を前へ倒すと機首が下がるので、前進キーは {@code pitch_up} ではなく
      * {@code pitch_down} だ。
+     *
+     * <p>接地している間、この4つは何もしない。舵面は離陸速度の手前まで {@code rotationAuthority} が
+     * 押さえているからだ。地上を動かすのはスロットルとペダルで、{@link #THROTTLE_UP} と {@link #YAW_LEFT}
+     * の項を参照。
      */
     public static final KeyMapping PITCH_DOWN = create("pitch_down", GLFW.GLFW_KEY_W);
     public static final KeyMapping PITCH_UP = create("pitch_up", GLFW.GLFW_KEY_S);
     public static final KeyMapping ROLL_LEFT = create("roll_left", GLFW.GLFW_KEY_A);
     public static final KeyMapping ROLL_RIGHT = create("roll_right", GLFW.GLFW_KEY_D);
 
+    /**
+     * スロットル。ただし<b>回転翼機では高度</b>だ。
+     *
+     * <p>同じ2キーが機体の種類で別の物を要求する。固定翼機ではレバーそのもの——押した分だけ出力が上下し、
+     * 離した位置に留まる。ヘリではコレクティブを要求せず<em>昇降</em>を要求し、離せば機体はその高度に留まる。
+     * レバーを動かすのは機体自身だ（{@link com.ashvehicles.entity.AircraftEntity} の {@code trimCollective}）。
+     *
+     * <p><b>そして接地中の固定翼機では、レバーの下から1/4が速度になる。</b>そこに置いている間、機体は推力で
+     * はなくレバーの位置に比例した速さで転がる（0〜30 km/h）。それを超えたレバーは従来どおりの推力なので、
+     * 離陸滑走はレバーを開けるだけで始まる。タキシングに専用のキーが無いのはそのためだ——進めるのはこの
+     * 2キー、曲げるのはペダル（{@link #YAW_LEFT}）。
+     *
+     * <p>キーが2つの意味を持つのは、ヘリのコレクティブが「そこに置けば高度が決まる」レバーではないからだ。
+     * ホバリングに要る値は重さと空気密度で動くので、直接上下させると、パイロットは高度を変えるたびに新しい
+     * 釣り合いを探すことになる。計器の表示も分けてある——固定翼機は {@code THR}、回転翼機は {@code COLL} で、
+     * 後者は今その機体が自分で置いているレバーの位置を映している。
+     */
     public static final KeyMapping THROTTLE_UP = create("throttle_up", GLFW.GLFW_KEY_LEFT_SHIFT);
     public static final KeyMapping THROTTLE_DOWN = create("throttle_down", GLFW.GLFW_KEY_LEFT_CONTROL);
+    /**
+     * 方向舵。ただし<b>接地している間は前輪</b>だ。
+     *
+     * <p>タキシングで機体を曲げるのはこの2つ。空中の方向舵と同じキーだが、地面の上では車輪を切っている
+     * （{@link com.ashvehicles.entity.AircraftEntity} の {@code nosewheel}）。エンジン出力は要らない——
+     * レバーを下限に置いた機体が駐機場で向きを変えられないのでは、最も曲がりたい状態で曲がれないことに
+     * なる。速度が乗るにつれて方向舵へ引き継ぐ（{@code steer_fade}）。
+     */
     public static final KeyMapping YAW_LEFT = create("yaw_left", GLFW.GLFW_KEY_Q);
     public static final KeyMapping YAW_RIGHT = create("yaw_right", GLFW.GLFW_KEY_E);
     public static final KeyMapping AIR_BRAKE = create("air_brake", GLFW.GLFW_KEY_B);
@@ -51,9 +80,18 @@ public final class ModKeyMappings {
      * くる物だからだ——扉の場合は抗力ではなくレーダーに映る大きさとして返る。
      */
     public static final KeyMapping TOGGLE_BAY = create("toggle_bay", GLFW.GLFW_KEY_O);
+    /**
+     * 後部ハッチ。持たない機体では何も起きない。
+     *
+     * <p>兵装倉の隣に置いた。どちらも「機体に開く口」であり、押した結果が同じ形——1つの真偽値と、両側が
+     * 自分で進める作動量——で返ってくるからだ。ただし代償は無い。倉と違って、開いたランプはレーダーにも
+     * 撃てる物にも関わらない。
+     *
+     * <p>{@code H} はバニラのゲーム内キーと衝突せず、隣の兵装倉のキーの下に来る。
+     */
+    public static final KeyMapping TOGGLE_RAMP = create("toggle_ramp", GLFW.GLFW_KEY_H);
     public static final KeyMapping TOGGLE_VTOL = create("toggle_vtol", GLFW.GLFW_KEY_R);
     /** パイロン上の物を順送りする。トリガー自体はバニラの攻撃ボタン。 */
-    public static final KeyMapping CYCLE_WEAPON = create("cycle_weapon", GLFW.GLFW_KEY_X);
     /**
      * 吊っている増槽を全部切り離す。飛行中でも構わないし、むしろそのためにある。
      *
@@ -114,6 +152,22 @@ public final class ModKeyMappings {
     public static final KeyMapping DESIGNATE = create("designate", GLFW.GLFW_KEY_SPACE);
 
     /**
+     * 押している間、回転翼機をその場に止める。
+     *
+     * <p>離した所に留まるサイクリック（{@link com.ashvehicles.entity.AircraftEntity} の
+     * {@code rotorFlightTick}）の対になるキーだ。ディスクは置いた場所に残るので、巡航に入れたヘリを止めるには
+     * 流れている向きの逆へ傾け、速度が抜けた所で水平に戻す——実機でも同じだが、キーボードでは「少し戻して待つ」
+     * が上手くやれない。このキーは機体にその一連をやらせる。高度は既にコレクティブ側が保っているので、
+     * 押している間の機体は本当に止まる。
+     *
+     * <p>ジャンプキーに置く。地上車両のブレーキと同じキーであり、意味も同じ——スペースは「止まれ」だ。
+     * コックピット内では跳ぶ足場が無く、{@link AircraftInputHandler} がバニラのジャンプを飲み込む。
+     * {@link #DESIGNATE} と同じキーだが、あちらが働くのはポッド視界が上がっている間だけで、その状態の機体は
+     * どのみち止まっていたい。
+     */
+    public static final KeyMapping HOVER = create("hover", GLFW.GLFW_KEY_SPACE);
+
+    /**
      * 運転手の操作。パイロットとは別の組で、バインドも別々。
      *
      * <p>既定では同じ4キーに落ちる。物を動かすとき誰もが手を伸ばすのがその4キーだし、プレイヤーが飛行と運転を同時
@@ -168,9 +222,9 @@ public final class ModKeyMappings {
 
     public static final KeyMapping[] ALL = {PITCH_UP, PITCH_DOWN, ROLL_LEFT, ROLL_RIGHT,
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
-            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_BAY, TOGGLE_VTOL, CYCLE_WEAPON, JETTISON,
+            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_BAY, TOGGLE_RAMP, TOGGLE_VTOL, JETTISON,
             RELEASE_FLARE, RELEASE_CHAFF,
-            RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE,
+            RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE, HOVER,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,
             DISMOUNT, SWITCH_SEAT, SENSOR_POLARITY};
 

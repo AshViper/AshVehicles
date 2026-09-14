@@ -42,9 +42,12 @@ public class ProjectileSoundInstance extends EntitySoundInstance<RocketEntity> {
     protected void update() {
         this.gain = approach(this.gain, this.kind.targetGain(this.entity()), this.kind.rate);
 
-        float falloff = this.falloff(this.kind.range);
+        // 今の位置ではなく音が出た場所から測る。ミサイルは1tickに30ブロック進むので、飛翔音は
+        // 「今どこにいるか」ではなく「どこで鳴ったか」で聞こえる。
+        float falloff = this.carried(this.kind.range);
         this.volume = this.kind.volume * this.gain * falloff;
-        this.pitch = this.kind.pitch(this.gain);
+        // ドップラーと空気の吸収は基底が掛ける。ここは録音本来の速さだけを述べる。
+        this.note = this.kind.pitch(this.gain);
 
         this.heard(falloff > 0.0F && this.gain > SILENCE);
     }

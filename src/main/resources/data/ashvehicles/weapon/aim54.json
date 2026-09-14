@@ -1,0 +1,43 @@
+{
+  "type": "missile",
+  "nation": "us",
+  "item": true,
+  "ammo": 1,
+  "mass": 463,
+  "firing": {
+    "rounds_per_second": 1.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 260.0,
+    "speed": 1.9,
+    "thrust": 0.24,
+    "burn_ticks": 560,
+    "spool_ticks": 90,
+    "top_speed": 85.0,
+    "gravity": 0.000188,
+    "range": 0,
+    "explosion": 5.2,
+    "tracer": "FFE8B8",
+    "trail": {
+      "colour": "DCDAD4",
+      "exhaust": "8E887E",
+      "density": 2.4,
+      "size": 1.4
+    }
+  },
+  "guidance": {
+    "turn_rate": 4.0,
+    "lock_angle": 10.0,
+    "lock_range": 6000.0,
+    "lock_ticks": 16,
+    "track_angle": 55.0,
+    "proximity": 6.0,
+    "seeker": "radar"
+  },
+  "sound": {
+    "volume": 1.4,
+    "pitch": 0.85
+  }
+}

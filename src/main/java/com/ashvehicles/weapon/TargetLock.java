@@ -222,9 +222,11 @@ public final class TargetLock {
         // この行の実体は索敵の箱の問い合わせで、そのコストは箱の大きさで払う（bestCandidate 参照）。
         // 乗り手のいない機体まで毎tick空を掃かせると、駐機場に並んだ数だけ「サーバーで最も高価な処理」
         // が常時走る——押している間しか掃かなかった頃には存在しなかった負荷だ。無人機の遠隔操縦者は
-        // getAviator が数えるので、ドローンのシーカーはこれまで通り生きている。
+        // getAviator が数えるので、ドローンのシーカーはこれまで通り生きている。AI の車両も同じ理由で
+        // 数える——動かしている者がいることが条件であって、その者が人であることではない
+        // （{@code VehicleEntityBase.isOperated}）。
         boolean automatic = guidance.seeker() == WeaponDefinition.Guidance.Seeker.HEAT
-                && this.vehicle.getAviator() != null;
+                && this.vehicle.isOperated();
 
         // トグルの「切」。追っている物があれば、押下はそれを手放す合図。
         if (!automatic && pressed && this.target != null) {

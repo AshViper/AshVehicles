@@ -39,11 +39,18 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class BlockCrusher {
     /**
-     * 破壊力に関わらずどの車両の下でも倒れる物。草、作物、葉、苗木——世界の下草。
+     * 破壊力に関わらずどの車両の下でも倒れる物。柵と壁、そして草、作物、葉、苗木——世界の下草。
      *
      * <p>耐性判定と分けてあるのは別の概念だから。耐性は「どれだけ頑丈に作られているか」を言う値で、壁に問う
      * には正しい。生垣に問えば正しい答えを間違った理由で返し、破壊力の小さい軽車両が問えば端的に間違った
      * 答えを返す。生えている物が装軌車を止めるべきではないので、生えている物には問わない。
+     *
+     * <p><b>柵がここに入っているのは、耐性判定では届かない場所にあるからだ。</b> 木の柵の爆発耐性は 3.0 で、
+     * 既定の破壊力（{@code crush.resistance} = 3.0）でちゃんと壊れる——<em>車体の腹より上にあれば</em>。
+     * だが柵は地面に立っている物で、そこは「乗り越える地面」の領域であり、耐性を問わない場所だ
+     * （問えば全車両が世界に溝を掘る）。結果、車両は柵を壊さずに<b>その上へ乗り上げていた</b>——柵の
+     * 当たり判定は1.5ブロック分あるので、履帯はそこを地面として読む。柵は乗り越える物ではなく薙ぎ倒す物
+     * なので、下草と同じ扱いにする。
      *
      * <p>タグにしてあるので、パック側はここに一切触れずに「他に何が該当するか」を言える。
      */
@@ -130,7 +137,7 @@ public final class BlockCrusher {
         walk(level, body, (pos, state, inBody) -> {
             boolean give = inBody
                     ? crushable(level, pos, state, limit)
-                    : growing(level, pos, state);
+                    : mown(level, pos, state);
 
             if (give) {
                 level.destroyBlock(pos.immutable(), drops, by);
@@ -213,8 +220,14 @@ public final class BlockCrusher {
         return false;
     }
 
-    /** そのブロックが、指定の破壊力を持つ車両に対して壊れるか。 */
-    private static boolean crushable(Level level, BlockPos pos, BlockState state, float limit) {
+    /**
+     * そのブロックが、指定の破壊力を持つ車両に対して壊れるか。
+     *
+     * <p><b>AI の道もここを通る。</b> 避けるべき壁と、押し倒して進む物を、運転する側と道を引く側が別々の
+     * 基準で決めてはいけない——柵を壁と読んだ AI は、薙ぎ倒せる牧場を大回りして避ける
+     * （{@code ai/Obstacles}）。
+     */
+    public static boolean crushable(Level level, BlockPos pos, BlockState state, float limit) {
         if (!breakable(level, pos, state)) {
             return false;
         }
@@ -224,8 +237,18 @@ public final class BlockCrusher {
         return state.is(CRUSHABLE) || state.getBlock().getExplosionResistance() <= limit;
     }
 
-    /** そのブロックが、他に何も壊せない履帯でも押し倒す類の物か。 */
-    private static boolean growing(Level level, BlockPos pos, BlockState state) {
+    /**
+     * そのブロックが、他に何も壊せない履帯でも押し倒す類の物か。柵と壁、そして生えている物。
+     *
+     * <p><b>地面の高さで消えるのはこれだけ</b>だ。耐性判定（{@link #crushable}）は車体の中の物にしか
+     * 使わない——地面の高さでそれをやれば、土も砂も木材も耐性3以下なので、全車両が世界に溝を掘って進む
+     * ことになる。
+     *
+     * <p><b>AI の道もここを通る。</b> 薙ぎ倒せる物を壁として読んだ AI は、3秒で通れる牧場を大回りして
+     * 避ける（{@code ai/Obstacles}）。逆に、地面の高さで耐性判定を使えば、AI は登れない土手を「通れる」
+     * と言う。運転する側と道を引く側が同じ答えを出すことが要点で、その答えがこの1行だ。
+     */
+    public static boolean mown(Level level, BlockPos pos, BlockState state) {
         return breakable(level, pos, state) && state.is(CRUSHABLE);
     }
 

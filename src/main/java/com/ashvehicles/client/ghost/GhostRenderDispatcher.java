@@ -11,12 +11,14 @@ import javax.annotation.Nullable;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.client.ghost.dh.DHFog;
 import com.ashvehicles.client.ghost.dh.DHIntegration;
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexSorting;
 
 import org.joml.Matrix4f;
 import org.joml.Matrix4fStack;
+import org.lwjgl.opengl.GL11;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -62,11 +64,28 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
  * {@code AFTER_PARTICLES} で渡したジオメトリ——このパス全体を含む——は、フレームが画面へ届く前に単に塗り潰される。よって
  * パック使用中はパスを {@link RenderLevelStageEvent.Stage#AFTER_LEVEL} へ移す。あちらはフレーム組み立て後にディス
  * パッチされる。ゴーストは完成した画像へ直接描かれ、まさにこの種の遅延描画のためにパイプラインが残すシーン深度に対して
- * 深度テストされる。このステージでは2つが異なり、それぞれ生じる場所で対処している。イベントは pose stack を運ばないし、
+ * 深度テストされる。このステージでは3つが異なり、それぞれ生じる場所で対処している。イベントは pose stack を運ばないし、
  * あの場所では RenderSystem の行列を一切信用できない——フレームの組み立てが残した物が残っているだけだ——ので、パスは
  * レベル自身の投影と自前の pose stack を立て、どちらも見つけた状態に戻す。そしてレベルの霧は既に解除済みなので、近距離
- * フェーズは霧無しで描く——パック自身の空を背にした、より小さな嘘だ。パックが使用中かは Iris の API へリフレクションで
- * 問うので、Iris が無くてもコストも意味も無い。
+ * フェーズは霧無しで描く——パック自身の空を背にした、より小さな嘘だ。3つめは深度書き込みで、次の項がそれだ。パックが
+ * 使用中かは Iris の API へリフレクションで問うので、Iris が無くてもコストも意味も無い。
+ *
+ * <h2>描画型が言わない2つの状態</h2>
+ *
+ * <p>{@code RenderType} は自分に必要な GL 状態を全部立てているように見えて、2つだけ立てていない。
+ * {@code RenderStateShard} の {@code CULL} と {@code COLOR_DEPTH_WRITE} は<em>何もしない</em>——どちらも
+ * 「否定側でだけ動く」作りで、{@code NO_CULL} と {@code COLOR_WRITE} が設定と後片付けをする代わりに、肯定側は
+ * 「レベルを描いている間は既にそうなっている」という前提に乗っている。バニラの中では常に真だ。
+ * {@code ParticleEngine.render} は最後に {@code depthMask(true)} を戻すので、{@code AFTER_PARTICLES} は必ず
+ * その状態で始まる。
+ *
+ * <p>{@code AFTER_LEVEL} は始まらない。Iris の最終パス（{@code FinalPassRenderer.renderFinalPass}）は
+ * {@code depthMask(false)} で始まり、戻さずに返る。そこへ来たゴーストは深度テストこそするが深度を<em>書かない</em>
+ * ので、閉じた立体が自分自身に対して決着しなくなる——後から描かれた面が必ず上に乗り、こちら側の胴体の上に反対側の
+ * 胴体が塗られる。{@link com.ashvehicles.client.ghost.geo.GhostGeoRenderer#renderType} が
+ * {@code entityTranslucentCull} へ移して直したのと<b>同じ</b>裏返りが、シェーダーパックを入れた時だけ戻ってくる。
+ * あちらの修正は「裏面を捨て、深度を書く型」を選ぶことだったが、型は後半を頼まない。だからこのパスが自分で言う。
+ * 見つけた状態は控えておいて、帰りに戻す——次に描かれる手やパック自身の後処理は、置いていった状態を当てにしている。
  *
  * <h2>誰が何を描くか</h2>
  *
@@ -187,11 +206,25 @@ public final class GhostRenderDispatcher {
             Matrix4f projection = RenderSystem.getProjectionMatrix();
             VertexSorting sorting = RenderSystem.getVertexSorting();
             Matrix4fStack modelView = RenderSystem.getModelViewStack();
+            // 描画型が言わない2つ。クラスの注記参照。GL へ直に訊くのは、ここへ至るまでに状態を動かしたのが
+            // GlStateManager を通らない経路かもしれないからだ。訊くだけなので何も乱さない。
+            boolean depthWrite = GlStateManager._getInteger(GL11.GL_DEPTH_WRITEMASK) != 0;
+            boolean culls = GlStateManager._getInteger(GL11.GL_CULL_FACE) != 0;
 
             RenderSystem.setProjectionMatrix(event.getProjectionMatrix(), VertexSorting.DISTANCE_TO_ORIGIN);
             modelView.pushMatrix();
             modelView.identity();
             RenderSystem.applyModelViewMatrix();
+            // 見つけた値を先に控えへ写す。GlStateManager の控えが実状態とずれていれば、次の1行が
+            // 「もうそうなっている」と黙ってしまうからだ。
+            RenderSystem.depthMask(depthWrite);
+            RenderSystem.depthMask(true);
+
+            if (!culls) {
+                RenderSystem.disableCull();
+            }
+
+            RenderSystem.enableCull();
 
             PoseStack own = new PoseStack();
             own.mulPose(event.getModelViewMatrix());
@@ -199,6 +232,14 @@ public final class GhostRenderDispatcher {
             try {
                 pass(event, minecraft, own);
             } finally {
+                if (!depthWrite) {
+                    RenderSystem.depthMask(false);
+                }
+
+                if (!culls) {
+                    RenderSystem.disableCull();
+                }
+
                 modelView.popMatrix();
                 RenderSystem.applyModelViewMatrix();
                 RenderSystem.setProjectionMatrix(projection, sorting);
@@ -505,8 +546,11 @@ public final class GhostRenderDispatcher {
      * <p>{@code PULL_MARGIN × 遠方面} より近い物では1。それより遠いと、真の距離が無限大へ向かうにつれ描画距離が
      * そこから {@code (PULL_MARGIN + PULL_SPREAD) × 遠方面} へ向かって上がる。だから距離の違う2つのゴーストは今も
      * 違う深度に、正しい順序で描かれ、どちらも面そのものには到達しない。
+     *
+     * <p>この MOD のパーティクルも同じ写像を通る（{@link com.ashvehicles.client.particle.ParticleReach} 参照）。
+     * <b>同じでなければならない。</b>機体とその排気は同じ距離にある。片方だけを引き寄せれば煙が機体から離れる。
      */
-    static double pull(double away, double farPlane) {
+    public static double pull(double away, double farPlane) {
         double reach = farPlane * PULL_MARGIN;
 
         if (away <= reach) {
@@ -525,7 +569,7 @@ public final class GhostRenderDispatcher {
      * 液体・描画距離設定の全てを既に織り込んでいる——{@link DHFog} が知らないのはまさにこの帯だ。ゲームのシェーダー
      * 自身と同じ線形補間を、線形フォールオフの {@link DHFog#thickness} と同じ式で行う。
      */
-    private static float vanillaFogThickness(double distance, float start, float end) {
+    public static float vanillaFogThickness(double distance, float start, float end) {
         if (end <= start) {
             return 0.0F;
         }

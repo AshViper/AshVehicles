@@ -3,6 +3,7 @@ package com.ashvehicles.client.model;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 import com.ashvehicles.AshVehicles;
@@ -126,6 +127,12 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
      *
      * <p>差はモデル軸で取るので、この補正が正しいのは<b>回転を持たない親にぶら下がったボーン</b>——プロペラは
      * 例外なくそれだ。親が回っていれば、差は親の軸で測り直す必要がある。
+     *
+     * <p><b>支点が自分のジオメトリの中にあるなら、何もしない。</b> そこが軸だからだ。中心へ寄せてよいのは
+     * 「支点が遠くにある」＝複製で持ってきてしまった場合だけで、その2つを分けずに<em>中心</em>を軸として
+     * 扱うと、箱の中心が軸に乗らない部品を壊す——<b>3枚羽根のプロペラがまさにそれだ</b>。羽根が 120 度
+     * ごとにしか無いので箱は円板にならず、その中心はハブから外れている。Ju 87 D では 0.41 ブロック外れて
+     * おり、補正はプロペラをその半径で首振りさせていた。回転対称の中心は箱の中心からは求まらない。
      */
     protected static void spinZ(GeoModel<?> model, String bone, float degrees) {
         pose(model, bone, found -> {
@@ -134,15 +141,17 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
 
             found.setRotZ(rest.getRotZ() + radians);
 
-            Vector3f centre = BakedGeometry.centreOf(found);
             Vector3f pivot = BakedGeometry.pivotOf(found);
-            float dx = centre.x() - pivot.x();
-            float dy = centre.y() - pivot.y();
+            BakedGeometry.Bounds reach = BakedGeometry.reachOf(found).orElse(null);
 
-            if (dx * dx + dy * dy < 1.0E-8F) {
-                // 支点が既に中心にある。まっとうに作られたプロペラはここで終わる。
+            // 支点が自分のジオメトリの中を通っている。まっとうに作られたプロペラはここで終わる。
+            if (reach == null || reach.holdsAboutZ(pivot)) {
                 return;
             }
+
+            Vector3f centre = reach.centre();
+            float dx = centre.x() - pivot.x();
+            float dy = centre.y() - pivot.y();
 
             float cos = Mth.cos(radians);
             float sin = Mth.sin(radians);
@@ -172,14 +181,16 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
 
             found.setRotY(rest.getRotY() + radians);
 
-            Vector3f centre = BakedGeometry.centreOf(found);
             Vector3f pivot = BakedGeometry.pivotOf(found);
-            float dz = centre.z() - pivot.z();
-            float dx = centre.x() - pivot.x();
+            BakedGeometry.Bounds reach = BakedGeometry.reachOf(found).orElse(null);
 
-            if (dx * dx + dz * dz < 1.0E-8F) {
+            if (reach == null || reach.holdsAboutY(pivot)) {
                 return;
             }
+
+            Vector3f centre = reach.centre();
+            float dz = centre.z() - pivot.z();
+            float dx = centre.x() - pivot.x();
 
             float cos = Mth.cos(radians);
             float sin = Mth.sin(radians);
@@ -232,6 +243,52 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
     /** 同じ処理を、名前ではなくボーンを渡して行う版。@see #slideAlongY */
     protected static void turnAboutX(GeoBone bone, float degrees) {
         bone.setRotX(rest(bone).getRotX() + machineSignX(bone) * degrees * DEG_TO_RAD);
+    }
+
+    /**
+     * 俯仰。砲身がどちらを向いて作られていようと、銃口を上げる。
+     *
+     * <p>{@link #turnAboutX} では足りない砲がある。あちらが直すのは回転<em>軸</em>の反転だけで、
+     * ボーンが4分の1回転した親の下にある砲——砲塔ごと横を向いた姿勢で作られた模型がそうだ——では、
+     * ボーン自身の X 軸周りの回転が砲を上げるのではなく<em>転がす</em>。符号では直せないと注記した
+     * のはこの場合で、ここではそれを避けて別の軸を選ぶ。
+     *
+     * <p>選び方はジオメトリに訊く。ボーンの支点から自分のキューブの中心へ伸びる向きが砲身の向きで、
+     * それが Z に沿っていれば従来どおり X 軸周り、X に沿っていれば Z 軸周りになる。どちらの場合も
+     * 正の角が銃口を上げる。
+     *
+     * <p>2つの軸の間にある砲身——斜めに寝かせて作られた物——は扱わない。オイラー角1つでは表せないので、
+     * それは Blockbench で直す模型である。
+     */
+    protected static void elevate(GeoModel<?> model, String bone, float degrees) {
+        pose(model, bone, found -> {
+            Vector3f bore = boreOf(found);
+
+            if (Math.abs(bore.z()) >= Math.abs(bore.x())) {
+                turnAboutX(found, degrees);
+
+                return;
+            }
+
+            found.setRotZ(rest(found).getRotZ() + sign(bore.x()) * degrees * DEG_TO_RAD);
+        });
+    }
+
+    /**
+     * ボーン自身の軸で測った、支点から自分のジオメトリの中心へのベクトル。砲では砲身の向きそのもの。
+     *
+     * <p>キューブを1つも持たないボーンでは前方（Z）と答える。持たないボーンを振っても何も動かないので、
+     * どちらの軸を選んでも結果は同じだ。
+     */
+    private static Vector3f boreOf(GeoBone bone) {
+        BakedGeometry.Bounds bounds = BakedGeometry.bounds(bone, new Matrix4f());
+
+        if (bounds == null) {
+            return new Vector3f(0.0F, 0.0F, 1.0F);
+        }
+
+        return bounds.centre().sub(bone.getPivotX() / BakedGeometry.UNITS,
+                bone.getPivotY() / BakedGeometry.UNITS, bone.getPivotZ() / BakedGeometry.UNITS);
     }
 
     /** @see #turnAboutX */

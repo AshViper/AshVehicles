@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "ashvehicles:block/capture_point" },
+    "facing=east": { "model": "ashvehicles:block/capture_point", "y": 90 },
+    "facing=south": { "model": "ashvehicles:block/capture_point", "y": 180 },
+    "facing=west": { "model": "ashvehicles:block/capture_point", "y": 270 }
+  }
+}

@@ -1,5 +1,6 @@
 {
   "type": "missile",
+  "nation": "ru",
   "item": true,
   "ammo": 1,
   "mass": 300,

@@ -4,7 +4,7 @@
   "ammo": 240,
   "gun_class": "autocannon",
   "firing": {
-    "rounds_per_second": 5.5,
+    "rounds_per_second": 5,
     "automatic": true,
     "spread": 0.12
   },
@@ -12,6 +12,7 @@
     "damage": 14.0,
     "speed": 50.0,
     "gravity": 0.0245,
+    "drag": 0.00027,
     "range": 4000.0,
     "explosion": 0.8,
     "ricochet": 28.0,

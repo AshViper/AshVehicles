@@ -99,6 +99,23 @@ public final class Hitboxes {
      */
     private static final double RUN_OVER_BODY = CONTACT * 2.0;
 
+    /**
+     * 今この瞬間、誰かを運んでいる機体。運んでいる間だけ立つ。
+     *
+     * <p><b>運ばれている相手にとって、運んでいる機体は障害ではない。</b> 運搬は
+     * {@code Entity.move(MoverType.SELF, …)} で行うので、その移動は世界と同じように機体の箱にも判定
+     * される——そして箱は既に今 tick の位置へ進んでおり、乗っている者はまだ進んでいない。つまり掃引は
+     * 「機体に対して shift だけ後ろ」から始まる。甲板が一枚板だった頃はそこも甲板だったが、キューブ1個
+     * ＝箱1個になった今は、そこに手すりでも段でもリベットでもある。そこで止められた者は運ばれず、
+     * 機体だけが進み、数tickで甲板の端から落ちる。
+     *
+     * <p>外すのは運んでいる機体だけで、世界も他の機体も障害のまま残る。甲板が人を壁へ押し付ければ、
+     * その人は壁で止まる。
+     *
+     * <p>クライアントとサーバーは別スレッドで別のレベルを tick するので、スレッドごとに持つ。
+     */
+    private static final ThreadLocal<VehicleEntityBase> CARRYING = new ThreadLocal<>();
+
     private Hitboxes() {
     }
 
@@ -220,8 +237,11 @@ public final class Hitboxes {
         for (VehicleEntityBase machine : machines) {
             AABB bounds = machine.placedBounds();
 
-            if (machine == mover || machine == riding || machine.isRemoved()
-                    || bounds == null || !bounds.intersects(area)) {
+            // 自分が運んでいる物も障害ではない。貨物室の戦車は輸送機の中にいるのだから、輸送機の全ての箱と
+            // 重なっている——数えれば、その輸送機は自分の積み荷に止められて離陸できない。
+            if (machine == mover || machine == riding || machine.getRootVehicle() == mover
+                    || machine == CARRYING.get()
+                    || machine.isRemoved() || bounds == null || !bounds.intersects(area)) {
                 continue;
             }
 
@@ -462,7 +482,23 @@ public final class Hitboxes {
         Vec3 now = machine.position();
 
         for (Entity rider : machine.level().getEntities(machine, bounds.inflate(1.0), Hitboxes::carriable)) {
-            if (rider.getRootVehicle() == machine || !resting(machine, rider)) {
+            if (rider.getRootVehicle() == machine || rides(machine, rider)) {
+                continue;
+            }
+
+            // 貨物室の中にいる物は、足元を問わずに運ぶ。
+            //
+            // <p>{@link #resting} は「足元の薄い層がどれかの箱に重なっているか」を毎tick問い直す判定で、
+            // 甲板の上の人にはそれで足りる——落ちて甲板に着き直すからだ。<b>機内は違う。</b> 上昇する
+            // 輸送機の床は毎tick1ブロック人の足元から離れ、床は人を押し上げない（{@link #limit} は移動を
+            // 削るだけで押せない）ので、接触は切れたまま戻らない。切れた tick は運ばれず、機体は人を機内に
+            // 置き去りにして飛んでいく。
+            //
+            // <p>貨物室は「中にいるかどうか」で答える。飛んでいる輸送機の胴体の中は、床に足が付いていよう
+            // が跳ねていようが、その機体と一緒に動く場所だ。
+            // 足が触れているかは、運ぶかどうかの<em>問い</em>ではなく、乗った状態を保つ<em>合図</em>だ。
+            // 一度乗れば、離れても機体の上にいる限り運ばれ続ける。VehicleEntityBase.carries 参照。
+            if (!machine.carries(rider, machine.holdsInside(rider) || resting(machine, rider, shift))) {
                 continue;
             }
 
@@ -477,7 +513,14 @@ public final class Hitboxes {
             Vec3 at = rider.position();
             Vec3 want = now.add(turned(at.subtract(from), turn));
 
-            rider.move(MoverType.SELF, want.subtract(at));
+            // 運んでいる間だけ、この機体を障害から外す。CARRYING 参照。
+            CARRYING.set(machine);
+
+            try {
+                rider.move(MoverType.SELF, want.subtract(at));
+            } finally {
+                CARRYING.remove();
+            }
 
             if (turn != 0.0F) {
                 bringRound(rider, turn);
@@ -523,7 +566,10 @@ public final class Hitboxes {
         // 通り過ぎた相手が丸ごと網から漏れる。
         for (Entity victim : machine.level().getEntities(machine,
                 bounds.inflate(1.0).expandTowards(shift.scale(-1.0)), Hitboxes::carriable)) {
-            if (!(victim instanceof LivingEntity) || victim.getRootVehicle() == machine) {
+            // 運んでいる物は轢かない。貨物室の中に立っている乗客の体は、当然その機体の箱の中にある——
+            // 数えれば、輸送機は離陸してから着陸するまで自分の乗客を毎秒轢き続ける。
+            if (!(victim instanceof LivingEntity) || victim.getRootVehicle() == machine
+                    || machine.holdsInside(victim)) {
                 continue;
             }
 
@@ -595,6 +641,27 @@ public final class Hitboxes {
     }
 
     /**
+     * その機体が、その相手に運ばれている側か。
+     *
+     * <p><b>運んでくれている物を運び返してはいけない。</b> 運ばれている側の位置は毎tick運ぶ側が決めるので、
+     * 運ばれている側から見た「今tick進んだ距離」は運ぶ側の移動そのものだ。それで運ぶ側を動かせば、運ぶ側は
+     * 自分の移動を毎tick二重に受け取る——次のtickの差分はさらに大きくなり、機体は指数的に加速する。
+     *
+     * <p>2通りある。C-130 の貨物室の車両のように<b>搭乗している</b>場合（乗り物の連なりを遡って探す）と、
+     * 甲板の上に立っている車両のように<b>乗っているだけ</b>の場合（相手の乗員名簿に自分がいるか)。
+     * 前者は輸送機を傾けた瞬間に、後者は艦の上の戦車で起きる。
+     */
+    private static boolean rides(VehicleEntityBase machine, Entity rider) {
+        for (Entity up = machine.getVehicle(); up != null; up = up.getVehicle()) {
+            if (up == rider) {
+                return true;
+            }
+        }
+
+        return rider instanceof VehicleEntityBase carrier && carrier.isAboard(machine);
+    }
+
+    /**
      * パーツは機体そのもの、搭乗者は座席の管轄、飛んでいる弾は誰の足も乗せていない。残りが問い合わせる
      * 価値のある対象。
      *
@@ -635,14 +702,28 @@ public final class Hitboxes {
      * <p>問い合わせるのは足元の薄い層だけで、全身ではない。全身にすれば、岸壁から船体に寄りかかっていた者
      * まで運び去ってしまう。それは「上に立っている」とは別のこと。
      */
-    private static boolean resting(VehicleEntityBase machine, Entity rider) {
+    private static boolean resting(VehicleEntityBase machine, Entity rider, Vec3 shift) {
         AABB box = rider.getBoundingBox();
         AABB feet = new AABB(box.minX, box.minY - CONTACT, box.minZ, box.maxX, box.minY + CONTACT, box.maxZ);
+        // 動き<em>始めた</em>時点でも問う。
+        //
+        // <p>箱はこの tick の移動を終えた場所に既にあり、乗っている者はまだ動いていない。降下する甲板は
+        // 毎tick足元から離れ、上昇する甲板は足を通り過ぎる。今の場所だけを問えば、その tick の運搬は
+        // 起きず、機体だけが進む——数tickで人は甲板の端まで滑り、そこで落ちる。
+        //
+        // <p>正しい問いは「今その上に立っているか」ではなく<b>「動き出した時に立っていたか」</b>だ。箱を
+        // −shift 戻して問うのと、足を +shift 進めて問うのは同じ判定なので、箱を900個作り直す代わりに
+        // 直方体を1つ作る。
+        AABB was = shift.lengthSqr() > 1.0E-12 ? feet.move(shift.x, shift.y, shift.z) : null;
 
         for (VehiclePart part : machine.getParts()) {
             Hitbox hitbox = part.hitbox();
 
-            if (hitbox != null && !part.isPylon() && hitbox.overlaps(feet)) {
+            if (hitbox == null || part.isPylon()) {
+                continue;
+            }
+
+            if (hitbox.overlaps(feet) || (was != null && hitbox.overlaps(was))) {
                 return true;
             }
         }
@@ -749,6 +830,64 @@ public final class Hitboxes {
         }
 
         return nearest == null ? null : new EntityHitResult(nearest, where);
+    }
+
+    /**
+     * ある線分が下りていく先で、この MOD の機体の箱が作る一番高い面。どれにも当たらなければ
+     * {@link Double#NaN}。
+     *
+     * <p>車両が甲板の上に立つための問い。地上車両の高さは衝突の残りかすではなく「下に何があるか」の答えから
+     * 決まる（{@code GroundVehicleEntity.rest} 参照）ので、ブロックだけがその問いに答えられるうちは、輸送機の
+     * ランプへ乗り上げた戦車は板をすり抜けて落ちる。プレイヤーが甲板に立てるのに車両が立てなかったのは、
+     * 両者が別の仕組みで立っているからだ——人は衝突で止められ、戦車は下を測る。
+     *
+     * <p>線分の内側から始まった場合は開始点を返す（{@code Hitbox.clip} の約束）。呼ぶ側にとってそれは
+     * 「プローブが何かの中から始まった」——登れない壁——であり、ブロックに対して既にそう読んでいる。
+     *
+     * <p><b>自分の床より上にしかない箱は答えにならない。</b> 甲板に載っている車両はその条件に当てはまる
+     * ので、下の車両が自分の荷物を「登れない壁」と読んで動けなくなることがない。壁として効くべき船体は
+     * 地面まで下りているので、この条件で落ちることはない。
+     *
+     * @param looker 支えを探している物。自分の箱と、乗っている機体の箱は答えにならない
+     */
+    public static double deckUnder(Entity looker, Vec3 from, Vec3 to) {
+        Set<VehicleEntityBase> machines = MACHINES.get(looker.level());
+
+        if (machines == null || machines.isEmpty()) {
+            return Double.NaN;
+        }
+
+        AABB along = new AABB(from, to);
+        Entity riding = looker.getRootVehicle();
+        double floor = looker.getY();
+        double highest = Double.NaN;
+
+        for (VehicleEntityBase machine : machines) {
+            AABB bounds = machine.placedBounds();
+
+            // 自分が運んでいる物は自分を支えない。運ばれている側の位置を決めているのは自分だ。
+            if (machine == looker || machine == riding || machine.getRootVehicle() == looker
+                    || machine.isRemoved() || bounds == null || !bounds.intersects(along)) {
+                continue;
+            }
+
+            for (VehiclePart part : machine.getParts()) {
+                Hitbox box = part.hitbox();
+
+                if (box == null || part.isPylon() || box.reach().minY >= floor
+                        || !box.reach().intersects(along)) {
+                    continue;
+                }
+
+                Vec3 hit = box.clip(from, to).orElse(null);
+
+                if (hit != null && (Double.isNaN(highest) || hit.y > highest)) {
+                    highest = hit.y;
+                }
+            }
+        }
+
+        return highest;
     }
 
     // ------------------------------------------------------------------

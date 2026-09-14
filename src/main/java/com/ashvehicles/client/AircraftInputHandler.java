@@ -12,6 +12,7 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -48,15 +49,8 @@ public final class AircraftInputHandler {
         boolean toggleFlaps = ModKeyMappings.TOGGLE_FLAPS.consumeClick();
         boolean toggleVtol = ModKeyMappings.TOGGLE_VTOL.consumeClick();
         boolean toggleBay = ModKeyMappings.TOGGLE_BAY.consumeClick();
+        boolean toggleRamp = ModKeyMappings.TOGGLE_RAMP.consumeClick();
         boolean jettison = ModKeyMappings.JETTISON.consumeClick();
-        // 1つのキーが MOD 内すべての兵装を順送りするが、押下を取れるハンドラは1つだけだ——キーマッピングは
-        // クリックを最初に要求した側へ渡すし、この2つは順序の定めなく毎tick走る。よってこちらはプレイヤーが地上
-        // 車両に乗っている間は完全に身を引き {@link GroundVehicleInputHandler} に譲り、あちらは乗っていないとき
-        // 身を引く。2つの条件は互いの正確な鏡であり、それが「実行順に関わらずちょうど一方だけが取る」ことを保証
-        // する。短絡がこの仕組みの全てだ。消費しないことが、もう一方が見つけられる形で押下を残すのだから。
-        boolean cycleWeapon = !(player.getVehicle() instanceof com.ashvehicles.entity.GroundVehicleEntity)
-                && ModKeyMappings.CYCLE_WEAPON.consumeClick();
-
         // センサー映像の極性。砲座の映像を見ている間しか目に見える効果は無いが、他の切り替えと同じく座席の
         // 内外を問わず毎tick吸い出す。地上での押下がキューに残り、砲座に着いた瞬間に発火するのを防ぐためだ。
         // ThermalView 参照。
@@ -79,6 +73,9 @@ public final class AircraftInputHandler {
         // 同じ機体を飛ばすのだから、違う経路を作れば必ずどちらかが遅れる。
         AircraftEntity drone = aircraft == null ? RemoteLink.linkedDrone(player) : null;
         AircraftEntity flown = aircraft != null ? aircraft : drone;
+        // 兵装の切り替え。取り出すのは操縦している物が決まった後だ——溜まった段数には持ち主が
+        // 付いているので、機体を掴む前に取ると、その1回が誰宛てだったか判断できない。
+        int cycleWeapon = WeaponScroll.take(flown);
 
         // 誰か操縦中かに関わらずtickする。キーを押したまま降りたパイロットの視界がポッドから戻るようにするためだ。
         PodCamera.tick(flown);
@@ -143,7 +140,9 @@ public final class AircraftInputHandler {
                 ModKeyMappings.RELEASE_CHAFF.isDown(),
                 // 押下状態をそのまま送る。1押しの切り出し（掴む・手放す）はサーバーのシーカーが行う。
                 // TargetLock.tick 参照。
-                ModKeyMappings.RADAR_LOCK.isDown());
+                ModKeyMappings.RADAR_LOCK.isDown(),
+                // 押している間だけのホバリング。読むのは回転翼機だけで、固定翼機では何も起きない。
+                ModKeyMappings.HOVER.isDown());
 
         if (drone != null) {
             // 無人機はサーバーが飛ばす。ここで local に入力を置いても飛行モデルは回らない
@@ -162,8 +161,8 @@ public final class AircraftInputHandler {
         PacketDistributor.sendToServer(new AircraftInputPayload(
                 input, aircraft.getThrottle(), aircraft.getAfterburner(),
                 aircraft.getAttitude(), aircraft.getVelocity(),
-                aircraft.isCrashing(), toggleGear, toggleFlaps, toggleVtol, toggleBay, cycleWeapon,
-                jettison));
+                aircraft.isCrashing(), toggleGear, toggleFlaps, toggleVtol, toggleBay, toggleRamp,
+                cycleWeapon, jettison));
     }
 
     /**

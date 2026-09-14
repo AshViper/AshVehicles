@@ -23,9 +23,12 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * 地面は数 tick 遅れて届く。届くまでの間の扱いは飛行モデルが既に持っている
  * （{@code AircraftEntity.beyondTheWorld} と {@code flyOnThroughLateWorld}）。
  *
- * <p>窓は2つ。{@code ServerLevel.tickNonPassenger} が機体を tick している間（乗員の tick も、機体が
- * 最後に呼ぶ回廊の確保も、この中に入る）と、{@code handleMoveVehicle} が操縦報告を適用している間。
- * どちらもサーバースレッド専用で、この旗もそこでしか触らない。
+ * <p>窓は3つ。{@code ServerLevel.tickNonPassenger} が機体を tick している間（同乗者の {@code rideTick} も、
+ * 機体が最後に呼ぶ回廊の確保も、この中に入る）、{@code handleMoveVehicle} が操縦報告を適用している間、
+ * そして {@code ServerPlayer.doTick} がパイロット自身の本体の tick を走らせている間
+ * （{@code Player.tick} → {@code Entity.baseTick} の流体判定。{@code ServerPlayer.tick()} は
+ * {@code super.tick()} を呼ばないので、これは connection 段にあり、機体の tick の外だ——
+ * {@code com.ashvehicles.mixin.PilotTickMixin}）。どれもサーバースレッド専用で、この旗もそこでしか触らない。
  *
  * <p>弾はこの窓を使わない。弾は最初から世界に訊かない規律で書かれている（{@code VehicleProjectile}）。
  *

@@ -1,5 +1,6 @@
 {
   "type": "bomb",
+  "nation": "ru",
   "item": true,
   "ammo": 1,
   "mass": 500,
@@ -9,11 +10,12 @@
     "salvo": 1
   },
   "projectile": {
-    "damage": 40.0,
+    "damage": 500.0,
     "speed": 0.15,
     "gravity": 0.0245,
     "range": 4000.0,
     "explosion": 11,
+    "blast": 300.0,
     "tracer": "7C806E",
     "trail": false
   },

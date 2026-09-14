@@ -1,5 +1,6 @@
 package com.ashvehicles.aircraft;
 
+import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.vehicle.VehicleType;
 import java.util.List;
@@ -33,8 +34,8 @@ import net.minecraft.world.phys.Vec3;
 public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Model model, Engine engine, Wing wing,
         Handling handling, Airframe airframe, Undercarriage landingGear, Surface flaps,
         VehicleChassis.CameraMount camera, VehicleChassis.Sound sound, VehicleChassis.Radar radar, Signature signature,
-        Countermeasures countermeasures, VehicleType type, Optional<Vtol> vtol, Optional<Rotor> rotor,
-        List<Hardpoint> hardpoints, List<Station> stations, Sync sync) {
+        Effects effects, Countermeasures countermeasures, VehicleType type, Optional<Vtol> vtol,
+        Optional<Rotor> rotor, List<Hardpoint> hardpoints, List<Station> stations, Sync sync) {
 
 
     /**
@@ -67,6 +68,17 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             Codec.mapPair(Hardpoint.CODEC.listOf().optionalFieldOf("hardpoints", List.of()),
                     Station.CODEC.listOf().optionalFieldOf("stations", List.of()));
 
+    /**
+     * この機体が外へ出している物——センサーに映る物と、目に映る物——を1つのフィールドとして読む。理由は
+     * 上の3つと同じ16項目の上限で、継ぎ目としてはここが妥当だった。{@code signature} が反射断面積と熱で
+     * 「レーダーとシーカーからどう見えるか」を言い、{@code effects} が凝結で「見上げた人からどう見えるか」
+     * を言う。どちらも飛び方には一切関わらず、相手が空でも成立する。{@code "signature"} と
+     * {@code "effects"} は独立項目とまったく同じに読み書きされる。
+     */
+    private static final MapCodec<Pair<Signature, Effects>> PRESENCE =
+            Codec.mapPair(Signature.CODEC.optionalFieldOf("signature", Signature.DEFAULT),
+                    Effects.CODEC.optionalFieldOf("effects", Effects.DEFAULT));
+
     public static final Codec<AircraftDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             VehicleChassis.Hitbox.CODEC.optionalFieldOf("hitbox", VehicleChassis.Hitbox.DEFAULT).forGetter(AircraftDefinition::hitbox),
             VehicleChassis.Model.CODEC.optionalFieldOf("model", VehicleChassis.Model.DEFAULT).forGetter(AircraftDefinition::model),
@@ -83,7 +95,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             // 節を書き忘れた機体に3kmの索敵レーダーと4kmの警戒受信機が黙って付いていた。
             VehicleChassis.Radar.CODEC.optionalFieldOf("radar", VehicleChassis.Radar.NONE)
                     .forGetter(AircraftDefinition::radar),
-            Signature.CODEC.optionalFieldOf("signature", Signature.DEFAULT).forGetter(AircraftDefinition::signature),
+            PRESENCE.forGetter(definition -> Pair.of(definition.signature(), definition.effects())),
             Countermeasures.CODEC.optionalFieldOf("countermeasures", Countermeasures.DEFAULT)
                     .forGetter(AircraftDefinition::countermeasures),
             KIND_AND_LIFT.forGetter(definition ->
@@ -91,10 +103,11 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             ARMAMENT.forGetter(definition -> Pair.of(definition.hardpoints(), definition.stations())),
             Sync.CODEC.optionalFieldOf("sync", Sync.DEFAULT).forGetter(AircraftDefinition::sync)
     ).apply(instance, (hitbox, model, engine, wing, handling, airframe, landingGear, flaps, camera,
-            sound, radar, signature, countermeasures, kindLift, armament, sync) ->
+            sound, radar, presence, countermeasures, kindLift, armament, sync) ->
             new AircraftDefinition(hitbox, model, engine, wing, handling, airframe, landingGear, flaps,
-                    camera, sound, radar, signature, countermeasures, kindLift.getFirst(),
-                    kindLift.getSecond().getFirst(), kindLift.getSecond().getSecond(),
+                    camera, sound, radar, presence.getFirst(), presence.getSecond(), countermeasures,
+                    kindLift.getFirst(), kindLift.getSecond().getFirst(),
+                    kindLift.getSecond().getSecond(),
                     armament.getFirst(), armament.getSecond(), sync)));
 
     /**
@@ -108,14 +121,17 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 20.0F, 0.02F, 0.15F, 0.28F, 6.0F, 0.0F,
                     Optional.empty()),
             new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F),
-            new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0, 0.0F, 0.0F,
-                    List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0))), Optional.empty()),
-            new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true, Optional.empty()),
+            new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0, 0.0F, 0.0F, 0,
+                    List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0))),
+                    Optional.empty(), Optional.empty(), Optional.empty(), List.of()),
+            new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true, Optional.empty(),
+                    0.0F, 0.0F),
             new Surface(20, 0.5F, 0.4F),
             VehicleChassis.CameraMount.DEFAULT,
             VehicleChassis.Sound.DEFAULT,
             VehicleChassis.Radar.NONE,
             Signature.DEFAULT,
+            Effects.DEFAULT,
             Countermeasures.DEFAULT,
             VehicleType.AIRCRAFT,
             Optional.empty(),
@@ -500,10 +516,16 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * @param seats 座席1つにつき1項目。機体自身の軸で x が右、y が上、z が機首方向。項目数が搭乗可能人数。
      *              各要素は裸の点か、その乗員がどこから外を見るかも書いたブロック。複座機が欲しいのは後者。
      *              {@link VehicleChassis.Seat} 参照
+     * @param nation この機体の国籍。小文字の2文字（{@code us} {@code ru} {@code jp} {@code se} {@code de}…）。
+     *               ソ連の機体は {@code ru} と書く——兵装の系譜が同じだから。書かなければ国籍を持たず、
+     *               どこの吊り物も区別しない
+     * @param storesFrom 自国の物と同じに扱う、他国の吊り物の国籍。F-2 と JAS 39 は米国の兵装を吊るので
+     *                   {@code ["us"]}。{@link #uses} 参照
      */
     public record Airframe(float health, float crashSpeed, float explosionPower, float maxG,
-            int salvage, float mass, float payload, List<VehicleChassis.Seat> seats,
-            Optional<Ejection> ejection) {
+            int salvage, float mass, float payload, int cost, List<VehicleChassis.Seat> seats,
+            Optional<Ejection> ejection, Optional<Hold> hold, Optional<String> nation,
+            List<String> storesFrom) {
 
         /** ファイルに書かれていない場合の機体の耐久値。 */
         public static final float DEFAULT_HEALTH = 300.0F;
@@ -516,9 +538,30 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.INT.optionalFieldOf("salvage", 0).forGetter(Airframe::salvage),
                 Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(Airframe::mass),
                 Codec.FLOAT.optionalFieldOf("payload", 0.0F).forGetter(Airframe::payload),
+                // 試合で1機出すのに要る出撃ポイント。0 なら種別の既定（{@code match/Costs}）。
+                //
+                // <p><b>強い機体ほど高い。</b> チケットが陣営の残機なら、こちらは個人の財布だ。書くのは
+                // ここ——機体ごとの数値であり、機体ファイルは既にその類の数値を全部持っている。
+                Codec.INT.optionalFieldOf("cost", 0).forGetter(Airframe::cost),
                 VehicleChassis.Seat.CODEC.listOf().fieldOf("seats").forGetter(Airframe::seats),
-                Ejection.CODEC.optionalFieldOf("ejection").forGetter(Airframe::ejection)
+                Ejection.CODEC.optionalFieldOf("ejection").forGetter(Airframe::ejection),
+                Hold.CODEC.optionalFieldOf("hold").forGetter(Airframe::hold),
+                // 国籍は吊れるかどうかを決めない。どの機体にも何でも吊れるのは今まで通りで、これを読むのは
+                // 出撃盤のプリセットが「どれを先に選ぶか」だけだ（{@code match/AirPresets}）。
+                Codec.STRING.optionalFieldOf("nation").forGetter(Airframe::nation),
+                Codec.STRING.listOf().optionalFieldOf("stores_from", List.of()).forGetter(Airframe::storesFrom)
         ).apply(instance, Airframe::new));
+
+        /**
+         * その国籍の吊り物を、この機体が自分の物として扱うか。
+         *
+         * <p>国籍を持たない吊り物（増槽や汎用の照準ポッド）と、国籍を持たない機体では常に真——区別する材料が
+         * 片側に無い。
+         */
+        public boolean uses(Optional<String> store) {
+            return store.isEmpty() || this.nation.isEmpty() || store.equals(this.nation)
+                    || this.storesFrom.contains(store.get());
+        }
 
         /**
          * 吊り物の重さを与えたときの、機体が持ち上げている物の総重量に対する空虚時の比。1で「ファイル
@@ -532,6 +575,34 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
          */
         public double burden(float carried) {
             return this.mass > 0.0F ? (this.mass + Math.max(carried, 0.0F)) / this.mass : 1.0;
+        }
+    }
+
+    /**
+     * 貨物室。書かれていない機体は何も積めない——戦闘機の胴体に戦車の入る場所は無い。
+     *
+     * <p>座席とは別物で、乗員の数を1人も消費しない。座席に着くのは操縦する者であり、貨物室に入るのは
+     * 運ばれる物だ。中の車両は{@link com.ashvehicles.entity.VehicleEntityBase 機体}のまま——弾も当たれば
+     * 砲塔も回る——が、位置は運んでいる側が決める。
+     *
+     * <p>積み下ろしに専用の操作は無い。**後部ハッチが全開で、かつ機体が接地している間だけ貨物は自由**で、
+     * それ以外の時（扉が閉まった、あるいは車輪が地面を離れた）に貨物室の中にいた車両は固定される。だから
+     * 手順は「ランプを下ろす・乗り入れる・閉じる・飛ぶ」になり、覚えるキーが1つも増えない。
+     *
+     * @param anchor 貨物室の中心。機体自身の軸で、当たり判定の箱の {@code offset} と同じ座標
+     * @param size 積める空間の幅・高さ・長さ。この中に収まっている車両だけが固定される
+     */
+    public record Hold(Vec3 anchor, Vec3 size) {
+        public static final Codec<Hold> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Vec3.CODEC.fieldOf("anchor").forGetter(Hold::anchor),
+                Vec3.CODEC.fieldOf("size").forGetter(Hold::size)
+        ).apply(instance, Hold::new));
+
+        /** 機体自身の軸で書かれた点が、貨物室の内側にあるか。 */
+        public boolean contains(Vec3 at) {
+            return Math.abs(at.x - this.anchor.x) <= this.size.x * 0.5
+                    && Math.abs(at.y - this.anchor.y) <= this.size.y * 0.5
+                    && Math.abs(at.z - this.anchor.z) <= this.size.z * 0.5;
         }
     }
 
@@ -573,8 +644,16 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * する。反射が距離の4乗で減衰するからだ——つまり反射が1/16の目標は1/16の距離ではなく半分の距離で見え
      * る。ステルスの価値は大きいが全能ではない。航空機設計者が付き合っているのと同じ算術。
      *
-     * @param radar 清浄形態の反射断面積。通常の戦闘機を1.0とする。1/10なら見つけにくく、1/100なら極めて
-     *              見つけにくい。0なら不可視だが、そんな物は存在しない
+     * <p><b>4乗根が入るので、書く数値は圧縮してはならない。</b> ここを「1.0の機体より少し小さい」程度に
+     * 丸めた値は、4乗根を通った時点で差が消える。0.02 と書かれた F-22 は探知距離0.38倍——ミサイルを4本
+     * 吊れば0.9倍——であり、それは「他機と同じように映る」と同義だった。実機の比（下記）をそのまま書いて
+     * 初めて、あの4乗根が意図された効き方をする。圧縮したいなら圧縮するのは指数ではなく、この欄でもなく、
+     * レーダー側の {@code range} だ。
+     *
+     * @param radar 清浄形態の反射断面積。<b>実機の公表値（m²）を「普通の戦闘機 ≒ 1.2 m²」で割った比を
+     *              そのまま書く。</b>F-16 級が 1、B-52 級が 100 前後、F-117 が 0.0025、F-22 と B-2 が
+     *              0.0001。1を超える値は {@link #reach} が頭打ちにするので、非ステルス機で正確さを競う
+     *              意味は無い——効くのは1を下回る側だけ。0なら不可視だが、そんな物は存在しない
      * @param store <em>外部</em>搭載物1つあたりの上乗せ分。ウェポンベイ内の物は0で、ベイとはそのための物。
      *              {@link Hardpoint#internal()} 参照
      */
@@ -620,6 +699,45 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             // ないと見つからない。この関数の役目はそれだけ。
             return (float) Math.min(Math.pow(Math.max(cross, 0.0F), 0.25), 1.0);
         }
+    }
+
+    /**
+     * 空気が機体の周りで凝結する場所。ベイパーコーンと翼端渦。
+     *
+     * <p><b>飛び方には一切関わらない。</b>ここにある数値を全部変えても機体の速度も揚力も舵の効きも変わら
+     * ず、変わるのは見え方だけだ。だから飛行モデルの節ではなく {@code signature} の隣にある——あちらが
+     * 「センサーから見てこの機体がどう映るか」なら、こちらは「目から見てどう映るか」で、どちらも機体が外へ
+     * 出している物の話だ。
+     *
+     * <p>位置を機体ごとに持つのは、全機共通の定数では合わないからだ。以前はここが機体原点から上へ 1.5、
+     * 前へ 2.0 の固定値で、それは戦闘機には概ね合っていたが、B-52 では主翼のはるか下、AH-64 では機首の
+     * 前方の空中にコーンが出ていた。凝結が起きるのは翼の上面の気流が最も速い所であり、それがどこかは
+     * 機体の形が決める。
+     *
+     * <p>どの項目も、書かなければ以前とまったく同じ物が出る。{@code cone} と {@code vortex} を空のまま
+     * にした機体では、位置は当たり判定形状から導かれる——コーンは原点の上 1.5・前 2.0、翼端は形状の最も
+     * 外側の箱の縁。だから既存のファイルは1行も足さずに今までどおり飛ぶ。
+     *
+     * @param cone ベイパーコーンの中心。機体座標系（x 右、y 上、z 機首）。空なら原点の上 1.5・前 2.0
+     * @param coneRadius コーンの半径（ブロック）。粒はこの 0.7〜1.0 倍の円周上に置かれる
+     * @param coneSpeed コーンが出始める速度。その機体の最大速度に対する割合。実機の遷音速に相当するので、
+     *                  1 に近づけるほど「最高速度でだけ出る」になる
+     * @param vortex 右翼端の渦の出る位置。機体座標系。左翼端は x を反転した鏡像で、翼が対称だから2点を
+     *               別々に書く意味が無い。空なら当たり判定形状の最も外側の箱の縁、高さ 1.5
+     * @param vortexLoad 翼端が蒸気を曳き始める荷重倍数。向きは問わない——背面で引いても渦は同じだけ巻く
+     */
+    public record Effects(Optional<Vec3> cone, float coneRadius, float coneSpeed,
+            Optional<Vec3> vortex, float vortexLoad) {
+        public static final Effects DEFAULT =
+                new Effects(Optional.empty(), 3.0F, 0.88F, Optional.empty(), 2.5F);
+
+        public static final Codec<Effects> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Vec3.CODEC.optionalFieldOf("cone").forGetter(Effects::cone),
+                Codec.FLOAT.optionalFieldOf("cone_radius", DEFAULT.coneRadius()).forGetter(Effects::coneRadius),
+                Codec.FLOAT.optionalFieldOf("cone_speed", DEFAULT.coneSpeed()).forGetter(Effects::coneSpeed),
+                Vec3.CODEC.optionalFieldOf("vortex").forGetter(Effects::vortex),
+                Codec.FLOAT.optionalFieldOf("vortex_load", DEFAULT.vortexLoad()).forGetter(Effects::vortexLoad)
+        ).apply(instance, Effects::new));
     }
 
     /**
@@ -821,9 +939,11 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * @param wingtip 翼の先端のステーションか。{@link #wingtip()} 参照
      * @param kind このステーションが兵装を積むかポッドを積むか。fixed ステーションではどちらでもないので
      *             無視される
+     * @param rack このステーションが最初から付けているラック。{@link #rack()} 参照
      */
     public record Hardpoint(String name, Vec3 pos, Optional<ResourceLocation> fixed, boolean internal,
-            boolean wingtip, Kind kind, List<ResourceLocation> ammunition) {
+            boolean wingtip, Kind kind, List<ResourceLocation> ammunition, Optional<Integer> ammo,
+            Optional<ResourceLocation> rack) {
 
         public static final Codec<Hardpoint> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.STRING.optionalFieldOf("name", "").forGetter(Hardpoint::name),
@@ -842,8 +962,38 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 // 吊り物のパイロンでは意味を持たない。あちらに載るのは兵装そのもので、兵装は自分の弾を
                 // 持っている。
                 ResourceLocation.CODEC.listOf().optionalFieldOf("ammunition", List.of())
-                        .forGetter(Hardpoint::ammunition)
+                        .forGetter(Hardpoint::ammunition),
+                // その内蔵砲がこの機体で積める発数。書かなければ兵装ファイルの値。
+                //
+                // <p><b>同じ砲でも機体ごとに違うので、ここに置く場所が要る。</b>M61 は MOD 内の 8 機が
+                // 積んでいるが、実機の携行弾数は F/A-18E の 412 発から F-15 の 940 発まで倍以上の幅が
+                // ある。兵装ファイルは砲そのものの性質——発射速度、口径、初速——を持つ場所であって、
+                // それを積む機体の胴体の大きさを持つ場所ではない。
+                //
+                // <p>吊り物のパイロンでは意味を持たない。あちらに載るのは兵装そのもので、兵装は自分の
+                // 弾を持っている。
+                Codec.INT.optionalFieldOf("ammo").forGetter(Hardpoint::ammo),
+                // 生成された機体がこのステーションに最初から付けているラック。
+                //
+                // <p><b>ウェポンベイのためにある。</b> 機内のレールは翼下のパイロンと違って積み下ろし
+                // の対象ではない——扉の内側にあるので、そこへラックを付ける作業自体が地上作業の中でも
+                // 別の話になる。そして機内に積む機体は、その機内に何も無ければ何も積めない。だから
+                // 「機内は最初から装備している」をファイル側で言えるようにしてある。
+                //
+                // <p>付くのは1度だけで、外せる。プレイヤーが外したステーションは外れたまま——保存された
+                // 機体は自分の搭載内容を持っており、初期装備はその内容を作った最初の1回でしかない
+                // （{@code WeaponMounts.ensureLayout}）。
+                //
+                // <p>レーダー反射には出ない。機内のステーションは扉が閉じている限り
+                // {@code WeaponMounts.externalStores} が数えないので、機内のラックも、その上の兵装も
+                // 断面積を1ミリも増やさない。ステルス機がそこへ積む理由がそれである。
+                ResourceLocation.CODEC.optionalFieldOf("rack").forGetter(Hardpoint::rack)
         ).apply(instance, Hardpoint::new));
+
+        /** この砲がこの機体で積める発数。機体が言わなければ砲自身の値。 */
+        public int capacity(WeaponDefinition gun) {
+            return this.ammo.orElseGet(gun::ammo);
+        }
 
         public boolean isFixed() {
             return this.fixed.isPresent();
@@ -1044,9 +1194,32 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      *                     に出る値なので、2.78 は表示上の 200 km/h。省略時は機体の種別により
      *                     {@link #DEFAULT_LANDING_SPEED} か {@link #HELICOPTER_LANDING_SPEED}
      */
+    /**
+     * @param groundStance 全輪を接地させたとき、この機体が立つ機首上げ角（度）。前輪式は0——3点が同じ高さに
+     *                     並ぶよう作られているので、模型の姿勢のまま置けば車輪は地面に着く。<b>尾輪式は違う。</b>
+     *                     模型は巡航姿勢（水平）で作られており、そのまま置くと尾輪が宙に浮く。P-51 なら 9.9 度
+     *                     で、主輪と尾輪の高さの差（模型座標で 1.34）を両者の前後間隔（7.70）で割った角そのもの。
+     *                     地面の傾きに<em>足して</em>効くので、坂の上でも尾輪は地面に着く。
+     * @param stancePivot その機首上げが起きる支点の、機体座標での z（ブロック）。主輪の接地点であり、実機が
+     *                    尻を下ろすときに回る点でもある。姿勢を原点周りに回すと機体全体が
+     *                    {@code stancePivot × sin(groundStance)} だけ持ち上がって車輪が地面から浮くので、
+     *                    描画がその分だけ模型を下げる（{@code AircraftRenderer.applyBodyMotion}）。
+     *                    {@code groundStance} が0なら読まれない
+     */
     public record Undercarriage(int cycleTicks, float dragPenalty, float rollingFriction, float brakeFriction,
             float lateralFriction, float steerRate, float steerFade, float climbHeight, boolean retractable,
-            Optional<Float> landingSpeed) {
+            Optional<Float> landingSpeed, float groundStance, float stancePivot) {
+
+        /**
+         * 車輪が地面に着くまで模型を下げる量（ブロック）。
+         *
+         * <p>姿勢は機体の原点周りに回る。尾輪式の機首上げをそこへ掛けると、支点にあるはずの主輪が
+         * {@code sin(角) × 支点までの距離} だけ持ち上がり、機体が浮いて見える。実機が回るのは主輪の接地点
+         * なので、その差だけ模型を下げれば同じことになる。
+         */
+        public float stanceRise() {
+            return this.stancePivot * (float) Math.sin(Math.toRadians(this.groundStance));
+        }
 
         /**
          * ファイルが書かない場合に飛行機の降着装置が受け入れる接地速度。200 km/h＝1tickあたり2.78ブロック。
@@ -1071,7 +1244,9 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.FLOAT.optionalFieldOf("steer_fade", 1.2F).forGetter(Undercarriage::steerFade),
                 Codec.FLOAT.optionalFieldOf("climb_height", 1.05F).forGetter(Undercarriage::climbHeight),
                 Codec.BOOL.optionalFieldOf("retractable", true).forGetter(Undercarriage::retractable),
-                Codec.FLOAT.optionalFieldOf("landing_speed").forGetter(Undercarriage::landingSpeed)
+                Codec.FLOAT.optionalFieldOf("landing_speed").forGetter(Undercarriage::landingSpeed),
+                Codec.FLOAT.optionalFieldOf("ground_stance", 0.0F).forGetter(Undercarriage::groundStance),
+                Codec.FLOAT.optionalFieldOf("stance_pivot", 0.0F).forGetter(Undercarriage::stancePivot)
         ).apply(instance, Undercarriage::new));
     }
 

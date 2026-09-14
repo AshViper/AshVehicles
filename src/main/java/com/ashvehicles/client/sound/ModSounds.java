@@ -42,6 +42,10 @@ public final class ModSounds {
     public static final String AFTERBURNER_ROLE = AircraftEntity.AFTERBURNER_ROLE;
     /** {@code gear.<aircraft>}: 機体固有の降着装置音。 */
     public static final String GEAR_PREFIX = "gear.";
+    /** {@code dive.<aircraft>}: 機体固有の急降下サイレン。 */
+    public static final String DIVE_PREFIX = "dive.";
+    /** {@code turret.<vehicle>}: 車両固有の砲塔・砲架の音。 */
+    public static final String TURRET_PREFIX = "turret.";
     /** {@code weapon.<weapon>}、および発砲音以外の全てに使う {@code weapon.<weapon>.<role>}。 */
     public static final String WEAPON_PREFIX = WeaponMounts.SOUND_PREFIX;
     /** {@code rwr.<role>}: 警戒受信機。特定の兵装には属さない。 */
@@ -74,6 +78,31 @@ public final class ModSounds {
      * 脚レバー操作時に無音だ。
      */
     public static final ResourceLocation GEAR = id(GEAR_PREFIX + "default");
+
+    /**
+     * 急降下サイレンのフォールバック。同梱済み（合成音）。
+     *
+     * <p>降着装置と違い、これは<b>要求されない限り決して鳴らない</b>。サイレンは翼が生む音ではなく機体に
+     * 取り付けられた装置なので、既定は「積んでいない」でなければならない。積んでいると言うのは機体ファイル
+     * の {@code sound.dive} だけで、{@link DiveSounds} 参照。
+     */
+    public static final ResourceLocation DIVE = id(DIVE_PREFIX + "siren");
+
+    /**
+     * 動力で回る砲塔・砲架のフォールバック。ループであり同梱済み（合成音）。
+     *
+     * <p>脚と同じく、架台が<em>動いている間だけ</em>鳴る音だ。違うのは既定が1つではないことで、それが
+     * 下の {@link #TURRET_CRANK} である。{@link TurretSounds} 参照。
+     */
+    public static final ResourceLocation TURRET = id(TURRET_PREFIX + "default");
+    /**
+     * 人が回すハンドルのフォールバック。{@code hull.crewed} の砲——牽引砲——だけがここへ落ちる。
+     *
+     * <p><b>動力の架台と同じ音にしてはいけない。</b>牽引砲に電動機は無く、鳴るのはウォームギヤと歯車が
+     * 噛む音だけだ。そして操作しているのは席ではなく人の手なので、聞こえるべきは滑らかな唸りではなく
+     * 手が回している速さそのものになる。同梱済み（合成音）。
+     */
+    public static final ResourceLocation TURRET_CRANK = id(TURRET_PREFIX + "crank");
 
     /** 銃の発砲音のフォールバック。同梱済み。 */
     public static final ResourceLocation GUN = id(WEAPON_PREFIX + "gun");
@@ -110,7 +139,7 @@ public final class ModSounds {
 
     /**
      * 弾が装甲を跳ねずに食い込む音。専用の命中音を録音していない全兵装用。名前はサーバーが指定する。同梱していない
-     * ので、誰かが録音するまではゲーム自身の金床設置音へ落ちる。{@link Impact} 参照。
+     * ので、誰かが録音するまではゲーム自身の殴打音——素手で殴った時のあれ——へ落ちる。{@link Impact} 参照。
      */
     public static final ResourceLocation IMPACT = Impact.SOUND;
 
@@ -153,6 +182,12 @@ public final class ModSounds {
      * {@link SeekerSounds} 参照。
      */
     public static final ResourceLocation SEEKER_LOST = id(SEEKER_PREFIX + LOST_ROLE);
+
+    /**
+     * 目標が終わったことを乗員へ告げる音。特定の兵装にも機体にも属さない、席の計器が出す音だ。同梱済み。
+     * {@link KillSounds} 参照。
+     */
+    public static final ResourceLocation KILL = id("hud.kill");
 
     /** 特定の機体や兵装の名を冠したイベント。{@code <namespace>:<prefix><name>}。 */
     public static ResourceLocation named(ResourceLocation subject, String prefix) {

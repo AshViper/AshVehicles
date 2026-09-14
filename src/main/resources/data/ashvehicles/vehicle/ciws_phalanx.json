@@ -5,44 +5,624 @@
     "tracking_range": 8,
     "boxes": [
       {
-        "name": "deck",
-        "offset": [0.0, 0.088, 0.0],
+        "name": "main",
+        "offset": [0.0, 0.087, 0.0],
         "size": [2.975, 0.175, 2.975]
       },
       {
-        "name": "mount_left",
-        "offset": [1.011, 1.33, 0.0],
-        "size": [0.621, 2.415, 1.925],
+        "name": "gun",
+        "offset": [0.0, 3.413, 0.0],
+        "size": [1.4, 1.75, 0.577],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_2",
+        "offset": [0.0, 3.413, 0.0],
+        "size": [0.577, 1.75, 1.4],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_3",
+        "offset": [0.0, 3.413, 0.0],
+        "size": [1.4, 1.75, 0.577],
+        "rotation": [0.0, 45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_4",
+        "offset": [0.0, 3.413, 0.0],
+        "size": [1.4, 1.75, 0.577],
+        "rotation": [0.0, -45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_5",
+        "offset": [0.0, 2.188, 0.0],
+        "size": [1.4, 0.7, 1.4],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_6",
+        "offset": [0.0, 1.487, 0.175],
+        "size": [0.7, 0.7, 2.275],
+        "rotation": [0.0, 0.0, -25.0],
+        "mount": "gun"
+      },
+      {
+        "name": "turret",
+        "offset": [1.011, 1.356, 0.0],
+        "size": [0.621, 2.362, 0.7],
         "mount": "turret"
       },
       {
-        "name": "mount_right",
-        "offset": [-1.011, 1.33, 0.0],
-        "size": [0.621, 2.415, 1.925],
+        "name": "turret_2",
+        "offset": [-1.011, 1.356, 0.0],
+        "size": [0.621, 2.362, 0.7],
         "mount": "turret"
       },
       {
-        "name": "magazine",
-        "offset": [0.0, 1.837, 0.35],
-        "size": [1.4, 1.4, 2.625],
+        "name": "turret_3",
+        "offset": [1.006, 1.677, -0.316],
+        "size": [0.613, 1.641, 0.525],
+        "rotation": [-15.5, 0.0, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_4",
+        "offset": [-1.006, 1.677, -0.316],
+        "size": [0.613, 1.641, 0.525],
+        "rotation": [-15.5, 0.0, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_5",
+        "offset": [1.006, 1.677, 0.316],
+        "size": [0.613, 1.641, 0.525],
+        "rotation": [15.5, 0.0, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_6",
+        "offset": [-1.006, 1.677, 0.316],
+        "size": [0.613, 1.641, 0.525],
+        "rotation": [15.5, 0.0, 0.0],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_7",
+        "offset": [0.813, 0.547, 0.0],
+        "size": [0.35, 0.788, 1.61],
+        "rotation": [0.0, 0.0, 8.805],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_8",
+        "offset": [-0.813, 0.547, 0.0],
+        "size": [0.35, 0.787, 1.61],
+        "rotation": [0.0, 0.0, -8.805],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_9",
+        "offset": [0.875, 0.569, 0.525],
+        "size": [0.35, 0.787, 0.525],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_10",
+        "offset": [0.875, 0.569, -0.525],
+        "size": [0.35, 0.787, 0.525],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_11",
+        "offset": [-0.875, 0.569, 0.525],
+        "size": [0.35, 0.787, 0.525],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_12",
+        "offset": [-0.875, 0.569, -0.525],
+        "size": [0.35, 0.787, 0.525],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_13",
+        "offset": [1.087, 0.553, 0.529],
+        "size": [0.262, 0.897, 0.534],
+        "rotation": [0.0, 0.0, 12.5],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_14",
+        "offset": [1.087, 0.553, -0.529],
+        "size": [0.262, 0.897, 0.534],
+        "rotation": [0.0, 0.0, 12.5],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_15",
+        "offset": [-1.087, 0.553, 0.529],
+        "size": [0.262, 0.897, 0.534],
+        "rotation": [0.0, 0.0, -12.5],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_16",
+        "offset": [-1.087, 0.553, -0.529],
+        "size": [0.262, 0.897, 0.534],
+        "rotation": [0.0, 0.0, -12.5],
+        "mount": "turret"
+      },
+      {
+        "name": "gun_7",
+        "offset": [-0.875, 3.5, 0.0],
+        "size": [0.35, 0.35, 0.927],
         "mount": "gun"
       },
       {
-        "name": "mast",
-        "offset": [-0.175, 3.412, 0.0],
-        "size": [1.75, 1.75, 0.93],
+        "name": "gatring",
+        "offset": [0.0, 2.188, 3.412],
+        "size": [0.394, 0.394, 0.7],
+        "rotation": [0.0, 0.0, 35.0],
         "mount": "gun"
       },
       {
-        "name": "array",
-        "offset": [0.0, 4.43, 0.0],
-        "size": [1.25, 0.5, 2.75],
+        "name": "gun_8",
+        "offset": [-0.875, 4.025, 0.0],
+        "size": [0.35, 0.35, 0.752],
         "mount": "gun"
       },
       {
-        "name": "barrels",
-        "offset": [0.0, 2.188, 2.712],
-        "size": [0.394, 0.394, 2.275],
+        "name": "turret_17",
+        "offset": [1.006, 0.842, 0.0],
+        "size": [0.437, 0.109, 1.925],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_18",
+        "offset": [-1.006, 0.842, 0.0],
+        "size": [0.437, 0.109, 1.925],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_19",
+        "offset": [1.006, 1.367, 0.0],
+        "size": [0.437, 0.109, 1.75],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_20",
+        "offset": [-1.006, 1.367, 0.0],
+        "size": [0.437, 0.109, 1.75],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_21",
+        "offset": [1.006, 1.805, 0.0],
+        "size": [0.437, 0.109, 1.575],
+        "mount": "turret"
+      },
+      {
+        "name": "gun_9",
+        "offset": [0.0, 2.409, 0.899],
+        "size": [1.024, 0.166, 0.437],
+        "rotation": [-10.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_10",
+        "offset": [0.0, 1.966, 0.899],
+        "size": [1.024, 0.166, 0.437],
+        "rotation": [10.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "turret_22",
+        "offset": [1.006, 2.242, 0.0],
+        "size": [0.437, 0.109, 1.4],
+        "mount": "turret"
+      },
+      {
+        "name": "turret_23",
+        "offset": [-1.006, 1.805, 0.0],
+        "size": [0.437, 0.109, 1.4],
+        "mount": "turret"
+      },
+      {
+        "name": "gun_11",
+        "offset": [-0.431, 2.188, 1.109],
+        "size": [0.166, 0.394, 0.962],
+        "rotation": [0.0, 22.5, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_12",
+        "offset": [0.431, 2.188, 1.109],
+        "size": [0.166, 0.394, 0.962],
+        "rotation": [0.0, -22.5, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "turret_24",
+        "offset": [-1.006, 2.242, 0.0],
+        "size": [0.437, 0.109, 1.225],
+        "mount": "turret"
+      },
+      {
+        "name": "gun_13",
+        "offset": [0.0, 2.331, 1.341],
+        "size": [0.656, 0.166, 0.459],
+        "rotation": [-10.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_14",
+        "offset": [0.0, 2.044, 1.341],
+        "size": [0.656, 0.166, 0.459],
+        "rotation": [10.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_15",
+        "offset": [-0.003, 4.623, -0.004],
+        "size": [0.963, 0.087, 0.411],
+        "rotation": [0.0, 45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_16",
+        "offset": [-0.003, 4.623, -0.004],
+        "size": [0.963, 0.087, 0.411],
+        "rotation": [0.0, 2.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_17",
+        "offset": [-0.003, 4.623, -0.004],
+        "size": [0.411, 0.087, 0.962],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_18",
+        "offset": [-0.003, 4.623, -0.004],
+        "size": [0.962, 0.087, 0.411],
+        "rotation": [0.0, -44.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_19",
+        "offset": [0.431, 1.995, 1.087],
+        "size": [0.175, 0.175, 0.962],
+        "rotation": [9.198, -23.317, -3.941],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_20",
+        "offset": [0.444, 2.007, 1.09],
+        "size": [0.175, 0.175, 0.963],
+        "rotation": [10.0, -22.5, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_21",
+        "offset": [0.431, 2.38, 1.087],
+        "size": [0.175, 0.175, 0.962],
+        "rotation": [-9.198, -23.317, 3.941],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_22",
+        "offset": [-0.431, 1.995, 1.087],
+        "size": [0.175, 0.175, 0.962],
+        "rotation": [9.198, 23.317, 3.941],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_23",
+        "offset": [0.444, 2.368, 1.09],
+        "size": [0.175, 0.175, 0.962],
+        "rotation": [-10.0, -22.5, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_24",
+        "offset": [-0.444, 2.007, 1.09],
+        "size": [0.175, 0.175, 0.962],
+        "rotation": [10.0, 22.5, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_25",
+        "offset": [-0.444, 2.368, 1.09],
+        "size": [0.175, 0.175, 0.962],
+        "rotation": [-10.0, 22.5, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_26",
+        "offset": [-0.431, 2.38, 1.087],
+        "size": [0.175, 0.175, 0.962],
+        "rotation": [-9.198, 23.317, -3.941],
+        "mount": "gun"
+      },
+      {
+        "name": "gatring_2",
+        "offset": [0.075, 2.295, 2.756],
+        "size": [0.088, 0.088, 2.188],
+        "rotation": [0.0, 0.0, 35.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gatring_3",
+        "offset": [0.131, 2.176, 2.756],
+        "size": [0.088, 0.088, 2.188],
+        "rotation": [0.0, 0.0, 5.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gatring_4",
+        "offset": [0.055, 2.069, 2.756],
+        "size": [0.088, 0.087, 2.188],
+        "rotation": [0.0, 0.0, -25.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gatring_5",
+        "offset": [-0.055, 2.306, 2.756],
+        "size": [0.088, 0.087, 2.188],
+        "rotation": [0.0, 0.0, -25.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gatring_6",
+        "offset": [-0.131, 2.199, 2.756],
+        "size": [0.087, 0.087, 2.188],
+        "rotation": [0.0, 0.0, 5.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gatring_7",
+        "offset": [-0.075, 2.08, 2.756],
+        "size": [0.087, 0.087, 2.188],
+        "rotation": [0.0, 0.0, 35.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_27",
+        "offset": [-0.766, 3.763, 0.0],
+        "size": [0.35, 0.175, 0.227],
+        "mount": "gun"
+      },
+      {
+        "name": "gatring_8",
+        "offset": [0.0, 2.188, 1.619],
+        "size": [0.394, 0.394, 0.087],
+        "rotation": [0.0, 0.0, 35.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_28",
+        "offset": [-0.359, 4.525, -0.359],
+        "size": [0.402, 0.271, 0.079],
+        "rotation": [-30.0, 45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_29",
+        "offset": [0.0, 4.525, 0.507],
+        "size": [0.402, 0.271, 0.079],
+        "rotation": [30.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_30",
+        "offset": [0.507, 4.525, 0.0],
+        "size": [0.079, 0.271, 0.402],
+        "rotation": [0.0, 0.0, -30.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_31",
+        "offset": [0.0, 4.525, -0.507],
+        "size": [0.402, 0.271, 0.079],
+        "rotation": [-30.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_32",
+        "offset": [-0.507, 4.525, 0.0],
+        "size": [0.079, 0.271, 0.402],
+        "rotation": [0.0, 0.0, 30.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_33",
+        "offset": [0.359, 4.525, 0.358],
+        "size": [0.079, 0.271, 0.402],
+        "rotation": [0.0, -45.0, -30.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_34",
+        "offset": [-0.358, 4.525, 0.358],
+        "size": [0.402, 0.271, 0.079],
+        "rotation": [30.0, -45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_35",
+        "offset": [0.359, 4.525, -0.36],
+        "size": [0.402, 0.271, 0.079],
+        "rotation": [-30.0, -45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_36",
+        "offset": [0.439, 4.335, 0.433],
+        "size": [0.481, 0.184, 0.079],
+        "rotation": [30.0, 45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_37",
+        "offset": [0.44, 4.335, -0.434],
+        "size": [0.079, 0.184, 0.481],
+        "rotation": [0.0, 45.0, -30.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_38",
+        "offset": [-0.433, 4.335, -0.44],
+        "size": [0.481, 0.184, 0.079],
+        "rotation": [-30.0, 45.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_39",
+        "offset": [0.004, 4.335, -0.617],
+        "size": [0.481, 0.184, 0.079],
+        "rotation": [-30.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_40",
+        "offset": [0.617, 4.335, -0.004],
+        "size": [0.079, 0.184, 0.481],
+        "rotation": [0.0, 0.0, -30.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_41",
+        "offset": [-0.617, 4.335, -0.004],
+        "size": [0.079, 0.184, 0.481],
+        "rotation": [0.0, 0.0, 30.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_42",
+        "offset": [-0.433, 4.335, 0.438],
+        "size": [0.079, 0.184, 0.481],
+        "rotation": [0.0, 45.0, 30.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_43",
+        "offset": [0.004, 4.335, 0.617],
+        "size": [0.481, 0.184, 0.079],
+        "rotation": [30.0, 0.0, 0.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_44",
+        "offset": [-0.55, 4.447, -0.238],
+        "size": [0.087, 0.437, 0.053],
+        "rotation": [9.511, -39.449, 30.462],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_45",
+        "offset": [-0.557, 4.447, 0.221],
+        "size": [0.088, 0.437, 0.053],
+        "rotation": [9.511, 5.551, 30.462],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_46",
+        "offset": [-0.557, 4.447, -0.22],
+        "size": [0.088, 0.438, 0.053],
+        "rotation": [-9.511, -5.551, 30.462],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_47",
+        "offset": [-0.55, 4.447, 0.237],
+        "size": [0.088, 0.438, 0.053],
+        "rotation": [-9.511, 39.449, 30.462],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_48",
+        "offset": [-0.221, 4.447, -0.557],
+        "size": [0.053, 0.438, 0.088],
+        "rotation": [-30.0, 0.0, 11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_49",
+        "offset": [0.221, 4.447, -0.557],
+        "size": [0.053, 0.438, 0.088],
+        "rotation": [-30.0, 0.0, -11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_50",
+        "offset": [-0.238, 4.447, -0.551],
+        "size": [0.053, 0.437, 0.088],
+        "rotation": [-30.0, 45.0, -11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_51",
+        "offset": [0.238, 4.447, 0.55],
+        "size": [0.053, 0.437, 0.088],
+        "rotation": [30.0, 45.0, 11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_52",
+        "offset": [-0.221, 4.447, 0.557],
+        "size": [0.053, 0.437, 0.088],
+        "rotation": [30.0, 0.0, 11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_53",
+        "offset": [0.221, 4.447, 0.557],
+        "size": [0.053, 0.437, 0.088],
+        "rotation": [30.0, 0.0, -11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_54",
+        "offset": [-0.238, 4.447, 0.549],
+        "size": [0.053, 0.437, 0.088],
+        "rotation": [30.0, -45.0, -11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_55",
+        "offset": [0.238, 4.447, -0.551],
+        "size": [0.052, 0.438, 0.088],
+        "rotation": [-30.0, -45.0, 11.0],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_56",
+        "offset": [0.55, 4.447, 0.237],
+        "size": [0.088, 0.438, 0.052],
+        "rotation": [-9.511, -39.449, -30.462],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_57",
+        "offset": [0.55, 4.447, -0.239],
+        "size": [0.088, 0.437, 0.052],
+        "rotation": [9.511, 39.449, -30.462],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_58",
+        "offset": [0.557, 4.447, 0.221],
+        "size": [0.088, 0.437, 0.053],
+        "rotation": [9.511, -5.551, -30.462],
+        "mount": "gun"
+      },
+      {
+        "name": "gun_59",
+        "offset": [0.557, 4.447, -0.22],
+        "size": [0.088, 0.437, 0.052],
+        "rotation": [-9.511, 5.551, -30.462],
         "mount": "gun"
       }
     ]
@@ -55,35 +635,35 @@
     }
   },
   "powertrain": {
-    "max_speed": 0.0,
-    "reverse_speed": 0.0,
-    "acceleration": 0.0,
-    "braking": 1.0,
-    "rolling_resistance": 1.0,
-    "steer_rate": 0.0,
-    "pivot_rate": 0.0,
-    "grade_resistance": 1.0,
+    "max_speed": 0,
+    "reverse_speed": 0,
+    "acceleration": 0,
+    "braking": 1,
+    "rolling_resistance": 1,
+    "steer_rate": 0,
+    "pivot_rate": 0,
+    "grade_resistance": 1,
     "fuel": {
-      "capacity": 0.0,
-      "burn_rate": 0.0
+      "capacity": 0,
+      "burn_rate": 0
     }
   },
   "suspension": {
-    "climb_height": 0.0,
+    "climb_height": 0,
     "slope_limit": 90,
     "settle_rate": 0.4,
-    "grip": 1.0,
+    "grip": 1,
     "wheel_radius": 0.1,
     "contact_length": 2.975,
     "contact_width": 2.975,
-    "travel": 0.0,
-    "stiffness": 1.0,
-    "damping": 1.0,
-    "dive": 0.0,
-    "lean": 0.0
+    "travel": 0,
+    "stiffness": 1,
+    "damping": 1,
+    "dive": 0,
+    "lean": 0
   },
   "turret": {
-    "traverse_rate": 5.5,
+    "traverse_rate": 5.75,
     "elevation_rate": 4.5,
     "depression": 25,
     "elevation": 85,
@@ -91,29 +671,26 @@
   },
   "armament": {
     "main": "ashvehicles:m61",
-    "ammunition": [
-      "ashvehicles:autocannon_apfsds",
-      "ashvehicles:autocannon_he",
-      "ashvehicles:autocannon_heat"
-    ],
+    "ammunition": ["ashvehicles:autocannon_apfsds", "ashvehicles:autocannon_he", "ashvehicles:autocannon_heat"],
     "trunnion": [0.0, 2.275, 0.0],
     "barrel_length": 3.85,
     "recoil": 0.04,
     "recoil_ticks": 1
   },
   "hull": {
+    "cost": 300,
     "health": 200,
-    "explosion_power": 3.0,
+    "explosion_power": 3,
     "salvage": 8,
     "armour": 0,
     "seats": [
-      [0.0, 0.2, -1.4]
+      [0.0, 0.05, -1.45]
     ]
   },
   "camera": {
     "pos": [0.0, 3.6, -9.0],
     "tilt": 8,
-    "cockpit": [0.0, 1.45, -1.45]
+    "cockpit": [-0.7, 2.45, 0.8]
   },
   "sound": {
     "engine": "ashvehicles:engine.tank",
@@ -128,6 +705,5 @@
     "arc": 180,
     "sweep_ticks": 4,
     "warning_range": 2000
-  },
-  "type": "ground_vehicle"
+  }
 }

@@ -6,6 +6,7 @@ import com.ashvehicles.entity.RocketEntity;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
@@ -25,6 +26,14 @@ import software.bernie.geckolib.renderer.GeoEntityRenderer;
  * で描くので、引き継ぎを跨いでもミサイルは何も変わらない。
  */
 public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
+    /**
+     * 燃えている間の機体のブロック光。松明1本ぶんより明るく、最大ではない。
+     *
+     * <p>照らしているのは後ろのノズルであって、機首が自分で光っているのではない。最大まで上げると、夜空を
+     * 行く白い棒になる。
+     */
+    private static final int BODY_LIGHT = 11;
+
     public RocketRenderer(EntityRendererProvider.Context context) {
         super(context, new Model());
     }
@@ -40,6 +49,31 @@ public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
         }
 
         return super.shouldRender(rocket, frustum, camX, camY, camZ);
+    }
+
+    /**
+     * 燃えているモーターは、そのすぐ前にある物——自分の機体——も照らす。
+     *
+     * <p>照らす相手が1つしかないので、ここでは光源を置かずに受け手の明るさを直接上げる。周りの煙に同じ事を
+     * している {@link com.ashvehicles.client.MotorLight} と同じ考え方で、違いは相手が粒ではなくモデルだと
+     * いう点だけだ。これが無いと、夜のミサイルは自分の炎の真ん中で黒いままになる。
+     *
+     * <p>上げるのはブロック光の側だけ。空の光はそのままなので、昼のミサイルは昼の明るさで描かれる。
+     */
+    @Override
+    public void render(RocketEntity rocket, float entityYaw, float partialTick, PoseStack poseStack,
+            MultiBufferSource bufferSource, int packedLight) {
+        super.render(rocket, entityYaw, partialTick, poseStack, bufferSource, lit(rocket, packedLight));
+    }
+
+    /** モーターが燃えている間の明るさ。燃えていなければ世界が答えた通り。 */
+    private static int lit(RocketEntity rocket, int packedLight) {
+        if (rocket.plume() == null) {
+            return packedLight;
+        }
+
+        return LightTexture.pack(Math.max(LightTexture.block(packedLight), BODY_LIGHT),
+                LightTexture.sky(packedLight));
     }
 
     /**

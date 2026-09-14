@@ -8,6 +8,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -34,7 +35,7 @@ import net.minecraft.world.phys.Vec3;
 public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Model model, Powertrain powertrain,
         Suspension suspension, Turret turret, Armament armament, Coaxial coaxial, Launcher launcher, Hull hull,
         VehicleChassis.CameraMount camera, VehicleChassis.Sound sound, VehicleChassis.Radar radar,
-        VehicleType type, Buoyancy buoyancy, Crush crush) {
+        VehicleType type, Buoyancy buoyancy, Crush crush, List<Station> turrets) {
 
     public static final Codec<GroundVehicleDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             VehicleChassis.Hitbox.CODEC.optionalFieldOf("hitbox", VehicleChassis.Hitbox.DEFAULT).forGetter(GroundVehicleDefinition::hitbox),
@@ -58,7 +59,14 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
             VehicleType.CODEC.optionalFieldOf("type", VehicleType.GROUND_VEHICLE)
                     .forGetter(GroundVehicleDefinition::type),
             Buoyancy.CODEC.optionalFieldOf("buoyancy", Buoyancy.DEFAULT).forGetter(GroundVehicleDefinition::buoyancy),
-            Crush.CODEC.optionalFieldOf("crush", Crush.DEFAULT).forGetter(GroundVehicleDefinition::crush)
+            Crush.CODEC.optionalFieldOf("crush", Crush.DEFAULT).forGetter(GroundVehicleDefinition::crush),
+            // 主砲塔以外の砲塔。1つも書かない車両——同梱のほぼ全部——では、このリストに関わる処理は
+            // どれも1tickに1度も走らない。{@link Station} 参照。
+            //
+            // <b>これがトップレベル16個目のフィールドであり、DFU が一度に組める上限そのものだ。</b>
+            // これ以上足すものは、どれかのブロックの中へ入れ子にすること。
+            Station.CODEC.listOf().optionalFieldOf("turrets", List.of())
+                    .forGetter(GroundVehicleDefinition::turrets)
     ).apply(instance, GroundVehicleDefinition::new));
 
     /** Whether this vehicle is a ship, floated on the water rather than resting on the ground. */
@@ -81,13 +89,15 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
             Coaxial.NONE,
             Launcher.NONE,
             new Hull(Hull.DEFAULT_HEALTH, 3.0F, 0, 0.0F,
-                    List.of(VehicleChassis.Seat.at(new Vec3(0.0, 1.0, 0.0)))),
+                    List.of(VehicleChassis.Seat.at(new Vec3(0.0, 1.0, 0.0))), false, Optional.empty(),
+                    1.0F, 0),
             VehicleChassis.CameraMount.DEFAULT,
             VehicleChassis.Sound.DEFAULT,
             VehicleChassis.Radar.NONE,
             VehicleType.GROUND_VEHICLE,
             Buoyancy.DEFAULT,
-            Crush.DEFAULT);
+            Crush.DEFAULT,
+            List.of());
 
 
 
@@ -268,6 +278,157 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
         /** Whether this vehicle has a turret worth turning. */
         public boolean exists() {
             return this.traverseRate > 0.0F || this.elevationRate > 0.0F;
+        }
+    }
+
+    /**
+     * 主砲塔とは別に、自分の砲手・自分の砲・自分の旋回輪を持つ砲塔。
+     *
+     * <p><b>{@code slaved_turrets} とは正反対の物だ。</b>あちらは同じ射撃指揮に従う第2砲塔——主砲塔が
+     * 向いた先へ一緒に向く模型上のボーンでしかない——で、撃つ者も弾倉も1つだ。こちらは独立した砲塔で、
+     * 席番号を持ち、その席に座った者の視線で据わり、その者の引き金で撃ち、自分の弾倉を数える。
+     *
+     * <p><b>砲を持つのは席であって人ではない。</b>空席の砲塔は運転手へ戻る（{@code TurretStations} 参照）
+     * ので、1人で走らせれば全砲塔が1人の物になり、砲手が乗った砲塔から順に手が離れていく。乗り降りに伴う
+     * 特別な処理は無く、毎tick誰がどこに座っているかを見るだけだ。機体の砲座
+     * （{@link com.ashvehicles.aircraft.AircraftDefinition.Station}）とまったく同じ取り決めで、あちらに
+     * 倣って名前も揃えてある。
+     *
+     * <p><b>主砲塔はここに書かない。</b>運転手が据える砲塔は今までどおり {@code turret} と
+     * {@code armament} であり、ここに並ぶのはそれ以外の砲塔だけ。運転席＝主砲塔の砲手という戦車の取り決めを
+     * 変えないためで、同梱の単砲塔車両はこのリストを持たない。
+     *
+     * @param name 計器に出す名前。書かなければ砲塔ボーンの名前
+     * @param seat この砲塔を受け持つ座席の番号。0 は運転席なので、砲手を乗せるなら1以上。空席ならこの
+     *             砲塔は運転手のものになる
+     * @param weapon この砲塔が撃つ兵装ファイル。空なら模型が回るだけの砲塔になる
+     * @param ring この砲塔が旋回する輪の位置。車両座標系で、主砲塔の {@code turret.ring} と同じ意味
+     * @param trunnion この砲塔の砲が俯仰する耳軸。同じく車両座標系
+     * @param barrelLength 耳軸から砲口までの距離（ブロック）
+     * @param barrels 砲口が2つ以上ある砲架のための一覧。{@link Barrel} と同じ物で、ここでは
+     *                {@code ring} を書く意味が無い——この砲塔の旋回輪は上の {@code ring} だからだ
+     * @param bearing 砲手がいないときに向いている方位（度）。可動範囲の中心でもある
+     * @param traverse その方位から左右へ振れる角（度）。180 以上で全周旋回
+     * @param elevation 仰角の上限（度）
+     * @param depression 俯角の下限（度）
+     * @param traverseRate 旋回速度（度/tick）
+     * @param elevationRate 俯仰速度（度/tick）
+     * @param model この砲塔を描くボーンと、模型がそれをどの向きで残しているか。{@link Model} 参照
+     * @param ammunition この砲塔が受け取る弾種。書かなければ兵装ファイル自身の弾を撃ち、弾を積む手段が
+     *                   無い砲塔になる。<b>並べた砲塔は一度に1種類だけを積む</b>——車両の3つの架台
+     *                   （{@link com.ashvehicles.weapon.Magazine}）と違い、砲塔は種類ごとの内訳を持たない。
+     *                   空になれば別の種類を積める
+     */
+    public record Station(String name, int seat, Optional<ResourceLocation> weapon, Vec3 ring, Vec3 trunnion,
+            float barrelLength, List<Barrel> barrels, float bearing, float traverse, float elevation,
+            float depression, float traverseRate, float elevationRate, Model model,
+            List<ResourceLocation> ammunition) {
+
+        public static final Codec<Station> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.STRING.optionalFieldOf("name", "").forGetter(Station::name),
+                Codec.INT.optionalFieldOf("seat", 0).forGetter(Station::seat),
+                ResourceLocation.CODEC.optionalFieldOf("weapon").forGetter(Station::weapon),
+                Vec3.CODEC.optionalFieldOf("ring", Vec3.ZERO).forGetter(Station::ring),
+                Vec3.CODEC.optionalFieldOf("trunnion", Vec3.ZERO).forGetter(Station::trunnion),
+                Codec.FLOAT.optionalFieldOf("barrel_length", 0.0F).forGetter(Station::barrelLength),
+                Barrel.CODEC.listOf().optionalFieldOf("barrels", List.of()).forGetter(Station::barrels),
+                Codec.FLOAT.optionalFieldOf("bearing", 0.0F).forGetter(Station::bearing),
+                Codec.FLOAT.optionalFieldOf("traverse", 180.0F).forGetter(Station::traverse),
+                Codec.FLOAT.optionalFieldOf("elevation", 20.0F).forGetter(Station::elevation),
+                Codec.FLOAT.optionalFieldOf("depression", 8.0F).forGetter(Station::depression),
+                Codec.FLOAT.optionalFieldOf("traverse_rate", 1.8F).forGetter(Station::traverseRate),
+                Codec.FLOAT.optionalFieldOf("elevation_rate", 1.2F).forGetter(Station::elevationRate),
+                Model.CODEC.optionalFieldOf("model", Model.NONE).forGetter(Station::model),
+                ResourceLocation.CODEC.listOf().optionalFieldOf("ammunition", List.of())
+                        .forGetter(Station::ammunition)
+        ).apply(instance, Station::new));
+
+        /**
+         * 砲塔を描く物。どのボーンが回り、どのボーンが俯仰し、模型がそれをどの向きで残しているか。
+         *
+         * @param bone 旋回するボーン。書かなければ模型は動かない——照準と弾は正しいまま、砲塔だけが
+         *             据え付けで描かれる
+         * @param gun そのボーンの中で俯仰するボーン。省略すると {@code bone} が両方受け持つ
+         * @param rest 模型が既に振られている砲塔の角度（度）。0 で車首方向——大半の砲塔はそう作られて
+         *             いる。横や後ろを向いた姿勢で作られている砲塔（{@code .geo.json} のボーン自身が
+         *             回転を持っている物）ではその角度をここに書く。{@code model.nozzle_rest} と
+         *             まったく同じ仕組みで、同じ理由でここにある——模型の作られ方の話は、模型ごとに
+         *             言うしかない。<b>{@code ring} と {@code trunnion}、そして砲塔上の当たり判定箱は
+         *             この角を差し引いた「車首を向いた姿勢」で書く</b>——模型が寝ている向きで書くと、
+         *             砲塔が回った瞬間に弾と箱が模型から離れる
+         */
+        public record Model(String bone, String gun, float rest) {
+            /** 模型に動く部品が無い砲塔。照準も弾も正しいまま、砲塔だけが据え付けで描かれる。 */
+            public static final Model NONE = new Model("", "", 0.0F);
+
+            public static final Codec<Model> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                    Codec.STRING.optionalFieldOf("bone", "").forGetter(Model::bone),
+                    Codec.STRING.optionalFieldOf("gun", "").forGetter(Model::gun),
+                    Codec.FLOAT.optionalFieldOf("rest", 0.0F).forGetter(Model::rest)
+            ).apply(instance, Model::new));
+        }
+
+        /** 計器に出す名前。ファイルが黙っていれば旋回するボーンの名前。 */
+        public String label() {
+            return !this.name.isEmpty() ? this.name
+                    : this.model.bone().isEmpty() ? "turret" : this.model.bone();
+        }
+
+        /** 旋回を受け持つボーン。 */
+        public String bone() {
+            return this.model.bone();
+        }
+
+        /** 俯仰を受け持つボーン。専用の物が無ければ旋回するボーンそのもの。 */
+        public String elevates() {
+            return this.model.gun().isEmpty() ? this.model.bone() : this.model.gun();
+        }
+
+        /** 模型が既に振られている角（度）。描くときだけ差し引く。 */
+        public float rest() {
+            return this.model.rest();
+        }
+
+        /** 撃つ物があるか。無い砲塔も回りはする——照準器は据えられるし、模型も付いてくる。 */
+        public boolean armed() {
+            return this.weapon.isPresent();
+        }
+
+        /** 全周旋回する砲塔か。可動範囲を持つ砲塔と違い、方位は折り返して最短経路で回る。 */
+        public boolean allRound() {
+            return this.traverse >= 180.0F;
+        }
+
+        /** 旋回範囲へ収めた方位（度）。全周旋回の砲塔はそのまま。 */
+        public float clampYaw(float degrees) {
+            if (this.allRound()) {
+                return Mth.wrapDegrees(degrees);
+            }
+
+            return Mth.clamp(Mth.wrapDegrees(degrees - this.bearing), -this.traverse, this.traverse)
+                    + this.bearing;
+        }
+
+        /** 俯仰範囲へ収めた仰角（度）。 */
+        public float clampPitch(float degrees) {
+            return Mth.clamp(degrees, -this.depression, this.elevation);
+        }
+
+        /** 砲口の数。1本を下回らない——砲には砲身がある。 */
+        public int barrelCount() {
+            return Math.max(this.barrels.size(), 1);
+        }
+
+        /**
+         * 砲身1本。並べていない砲架では、上の耳軸と長さが記述しているその1本。範囲外の添字は最後の1本で、
+         * 砲身数を間違えたファイルは撃てなくなるのではなく違う穴から撃つ。
+         */
+        public Barrel barrel(int index) {
+            if (this.barrels.isEmpty()) {
+                return new Barrel(this.trunnion, Optional.of(this.barrelLength), Optional.empty());
+            }
+
+            return this.barrels.get(Math.min(Math.max(index, 0), this.barrels.size() - 1));
         }
     }
 
@@ -495,22 +656,54 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      *                   the next mount. Each name is a file under
      *                   {@code data/<namespace>/ammunition/}: see
      *                   {@link com.ashvehicles.weapon.AmmunitionDefinition}
+     * @param backblast what comes out of the back of the tubes, for a launcher whose tubes are open
+     *                  at that end. Left out, nothing does. See {@link Backblast}
      */
     public record Launcher(Optional<ResourceLocation> missile, Vec3 rail,
-            List<ResourceLocation> ammunition) {
+            List<ResourceLocation> ammunition, Optional<Backblast> backblast) {
         /** A vehicle with no missiles. */
-        public static final Launcher NONE = new Launcher(Optional.empty(), Vec3.ZERO, List.of());
+        public static final Launcher NONE =
+                new Launcher(Optional.empty(), Vec3.ZERO, List.of(), Optional.empty());
 
         public static final Codec<Launcher> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("missile").forGetter(Launcher::missile),
                 Vec3.CODEC.optionalFieldOf("rail", Vec3.ZERO).forGetter(Launcher::rail),
                 ResourceLocation.CODEC.listOf().optionalFieldOf("ammunition", List.of())
-                        .forGetter(Launcher::ammunition)
+                        .forGetter(Launcher::ammunition),
+                Backblast.CODEC.optionalFieldOf("backblast").forGetter(Launcher::backblast)
         ).apply(instance, Launcher::new));
 
         /** Whether there are any tubes at all. */
         public boolean exists() {
             return this.missile.isPresent();
+        }
+
+        /**
+         * The exhaust out of the open end of the tubes.
+         *
+         * <p>A rocket in a tube lights its motor while it is still in the tube, so the same gas that
+         * throws the rocket forward leaves the other end going the other way — faster, since nothing
+         * is in its way. On an MLRS that plume is aimed down and back by the elevation of the tubes
+         * themselves, so it reaches the ground a few blocks behind the vehicle and takes the ground
+         * with it. Most of what is seen when a BM-21 or a TOS-1 fires is that, not the rocket.
+         *
+         * <p>Only tubes open at the back have it. A missile in a sealed canister that is thrown clear
+         * before its motor lights has none, and neither does a gun — so this is left out of every
+         * file that does not mean it, rather than defaulted on.
+         *
+         * @param length how far behind the rail the open end of the tube sits, in blocks. The plume
+         *               starts there, which is what puts it behind and below the vehicle when the
+         *               tubes are elevated
+         * @param power how big the plume is, on the same scale explosions use. A 122mm tube is worth
+         *              a couple; a 220mm one is worth rather more. It also sets how far the plume
+         *              reaches and how wide the dust stands, so this is the only knob most files need
+         */
+        public record Backblast(float length, float power) {
+            public static final Codec<Backblast> CODEC = RecordCodecBuilder.create(instance ->
+                    instance.group(
+                            Codec.FLOAT.optionalFieldOf("length", 3.0F).forGetter(Backblast::length),
+                            Codec.FLOAT.optionalFieldOf("power", 2.4F).forGetter(Backblast::power)
+                    ).apply(instance, Backblast::new));
         }
     }
 
@@ -533,9 +726,21 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      *              front — in blocks. The first is the driver's, and the driver is who drives. Each
      *              is a bare point or a block that also says where that crew member looks out from;
      *              see {@link VehicleChassis.Seat}
+     * @param crewed whether this is a gun the crew stand beside rather than a vehicle they get into.
+     *               A towed piece has no cab and nowhere to sit: the layer stands at the breech and
+     *               winds the handwheels, the loader hands a round in, and somebody pulls the
+     *               lanyard. So a vehicle that says this cannot be ridden at all, is laid from
+     *               outside — see {@code GroundVehicleEntity.tickCrewedTurret} — and holds one
+     *               loading rather than a magazine, because nothing on it stows rounds. Everything
+     *               else about it is a ground vehicle like any other. A file that leaves this out
+     *               is driven, which is what all but a couple of them are
+     * @param damageTaken 届いた打撃のうち実際に受け取る割合。1 が素通し
+     * @param handles where the two handwheels are, for a gun that is {@code crewed}. Left out, they
+     *                are taken from gearing the vehicle has already described — see {@link Handles}
      */
     public record Hull(float health, float explosionPower, int salvage, float armour,
-            List<VehicleChassis.Seat> seats) {
+            List<VehicleChassis.Seat> seats, boolean crewed, Optional<Handles> handles,
+            float damageTaken, int cost) {
         public static final float DEFAULT_HEALTH = 300.0F;
 
         public static final Codec<Hull> CODEC = RecordCodecBuilder.create(instance -> instance.group(
@@ -543,8 +748,62 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
                 Codec.FLOAT.optionalFieldOf("explosion_power", 4.0F).forGetter(Hull::explosionPower),
                 Codec.INT.optionalFieldOf("salvage", 0).forGetter(Hull::salvage),
                 Codec.FLOAT.optionalFieldOf("armour", 0.0F).forGetter(Hull::armour),
-                VehicleChassis.Seat.CODEC.listOf().fieldOf("seats").forGetter(Hull::seats)
+                VehicleChassis.Seat.CODEC.listOf().fieldOf("seats").forGetter(Hull::seats),
+                Codec.BOOL.optionalFieldOf("crewed", false).forGetter(Hull::crewed),
+                Handles.CODEC.optionalFieldOf("handles").forGetter(Hull::handles),
+                // 届いた打撃のうち、この車体が実際に受け取る割合。1 が素通し——同梱のほぼ全部がそれで、
+                // 耐久の点数がそのまま引かれる。
+                //
+                // <b>耐久を増やすのとは別の物だ。</b>耐久は「何発で壊れるか」であり、こちらは「1発が
+                // どれだけ効くか」。厚い装甲を持つ車体は、計器に出る点数を膨らませずにこちらで固くする
+                // ——読み手にとって 4000 のままの方が、16000 になるより「何発耐えるか」が読みやすい。
+                //
+                // 跳弾（{@code armour}）とも装甲厚（箱の {@code plate}）とも別。前者は弾を<em>弾く</em>
+                // 角度、後者は入った弾が板を<em>抜けたか</em>で、どちらも当たった場所で決まる。これは
+                // 車体のどこに届いた打撃にも一律に掛かる。
+                Codec.FLOAT.optionalFieldOf("damage_taken", 1.0F).forGetter(Hull::damageTaken),
+                // 試合で1両出すのに要る出撃ポイント。0 なら種別の既定（{@code match/Costs}）。
+                //
+                // <p><b>強い車両ほど高い。</b> チケットが陣営の残機なら、こちらは個人の財布だ。書くのは
+                // ここ——車両ごとの数値であり、車両ファイルは既にその類の数値を全部持っている。
+                Codec.INT.optionalFieldOf("cost", 0).forGetter(Hull::cost)
         ).apply(instance, Hull::new));
+    }
+
+    /**
+     * 車外の砲手が掴む2つのハンドル。旋回用と俯仰用で、片手が回せるのは一方だけ。
+     *
+     * <p><b>これは「点」であって当たり判定ではない。</b> 砲を指している十字線に近い方が掴まれるので、
+     * 2つが十分離れてさえいれば、小さな輪を正確に狙う必要はない。実際に効くのは「砲のどちら側を見ているか」
+     * であり、位置はそれを分ける基準と、計器がワールド上に置く印の場所を兼ねる。
+     *
+     * <p>書かなければ、車両が既に述べている歯車の位置から取る——旋回は砲塔リングの少し上、俯仰は砲耳。
+     * どちらもその軸を実際に回している場所であり、2つは上下に分かれる。模型に本物のハンドルが付いている
+     * 砲は、それを書いた方が読みやすい印になる。
+     */
+    public record Handles(Handle traverse, Handle elevate) {
+        public static final Codec<Handles> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Handle.CODEC.fieldOf("traverse").forGetter(Handles::traverse),
+                Handle.CODEC.fieldOf("elevate").forGetter(Handles::elevate)
+        ).apply(instance, Handles::new));
+    }
+
+    /**
+     * ハンドル1つ。車両自身の軸での位置と、何に取り付いているか。
+     *
+     * <p>取り付け先は当たり判定の箱とまったく同じ語彙で、同じ意味だ。砲塔に付いたハンドルは砲塔と一緒に
+     * 回り、砲に付いたハンドルは砲と一緒に上下する——模型のハンドルが実際にそう動くので、印もそう動く
+     * 必要がある。
+     *
+     * @param at 車両自身の軸での位置（x 右、y 上、z 前）、ブロック
+     * @param mount 取り付け先。既定は砲塔
+     */
+    public record Handle(Vec3 at, VehicleShape.Mount mount) {
+        public static final Codec<Handle> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Vec3.CODEC.fieldOf("at").forGetter(Handle::at),
+                VehicleShape.Mount.CODEC.optionalFieldOf("mount", VehicleShape.Mount.TURRET)
+                        .forGetter(Handle::mount)
+        ).apply(instance, Handle::new));
     }
 
     /**

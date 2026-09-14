@@ -57,7 +57,9 @@ public final class PodDisplay {
 
         boresight(graphics, centreX, centreY, mark == null ? WHITE : DIM);
 
-        if (mark != null) {
+        // 枠は捕捉対象がボアサイトに乗っている間だけ。ジンバルの端で止まっているポッドは対象を中心に据えて
+        // いないので、そこに枠を描けば「そこに居る」という嘘になる。PodCamera.isGimbalLimited 参照。
+        if (mark != null && !PodCamera.isGimbalLimited()) {
             held(graphics, centreX, centreY);
         }
 
@@ -121,8 +123,11 @@ public final class PodDisplay {
 
         Vec3 at = mark.position().add(0.0, mark.getBbHeight() * 0.5, 0.0);
         double range = aircraft.position().distanceTo(at);
+        boolean limited = PodCamera.isGimbalLimited();
 
-        line(graphics, font, "DESIGNATED", left, y, GREEN);
+        // 捕捉は続いているが、ボールがもう対象を向けていない。機体が目標の上を通り過ぎたということで、実物でも
+        // 同じ表示が出る。解くのはパイロットの仕事なので、こちらからは黙って落とさない。
+        line(graphics, font, limited ? "GIMBAL" : "DESIGNATED", left, y, limited ? AMBER : GREEN);
         y += 10;
         line(graphics, font, String.format(Locale.ROOT, "RNG %.0f", range), left, y, GREEN);
         y += 10;

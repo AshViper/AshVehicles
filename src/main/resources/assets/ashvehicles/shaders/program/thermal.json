@@ -16,10 +16,12 @@
         { "name": "OutSize",  "type": "float", "count": 2, "values": [ 1.0, 1.0 ] },
         { "name": "Time",     "type": "float", "count": 1, "values": [ 0.0 ] },
         { "name": "Polarity", "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "Gain",     "type": "float", "count": 1, "values": [ 1.45 ] },
-        { "name": "Bias",     "type": "float", "count": 1, "values": [ 0.02 ] },
+        { "name": "Gain",     "type": "float", "count": 1, "values": [ 1.0 ] },
+        { "name": "Bias",     "type": "float", "count": 1, "values": [ 0.0 ] },
         { "name": "Bloom",    "type": "float", "count": 1, "values": [ 0.08 ] },
-        { "name": "Grain",    "type": "float", "count": 1, "values": [ 0.05 ] },
-        { "name": "Vignette", "type": "float", "count": 1, "values": [ 0.5 ] }
+        { "name": "Grain",    "type": "float", "count": 1, "values": [ 0.04 ] },
+        { "name": "Vignette", "type": "float", "count": 1, "values": [ 0.35 ] },
+        { "name": "Floor",    "type": "float", "count": 1, "values": [ 0.18 ] },
+        { "name": "Span",     "type": "float", "count": 1, "values": [ 0.62 ] }
     ]
 }

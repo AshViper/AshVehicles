@@ -20,6 +20,7 @@ import com.ashvehicles.weapon.BuiltInGun;
 import com.ashvehicles.weapon.Magazine;
 import com.ashvehicles.weapon.TargetLock;
 import com.ashvehicles.weapon.TurretLauncher;
+import com.ashvehicles.weapon.TurretStations;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 
@@ -140,6 +141,15 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final EntityDataAccessor<CompoundTag> DATA_MAGAZINE =
             SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.COMPOUND_TAG);
     /**
+     * 独立砲塔の向きと弾。砲塔ごとに方位・仰角・残弾・装填カウンタの4つ。
+     *
+     * <p>弾倉と同じ理由でタグ1つに畳む——数える対象が車両ファイル次第で0個から任意個になる。据えるのが
+     * サーバーなので（{@link TurretStations} 参照）、全クライアントはここからしか砲塔の向きを知らない。
+     * 砲塔を1つも持たない車両では一度も書かれない。
+     */
+    private static final EntityDataAccessor<CompoundTag> DATA_TURRETS =
+            SynchedEntityData.defineId(GroundVehicleEntity.class, EntityDataSerializers.COMPOUND_TAG);
+    /**
      * トリガーがどちらの兵装を撃つか。
      *
      * <p>計器がこれを元に描かれ、決めるのがサーバーなので同期する。キー入力はパケットで届き、他の全クライアント
@@ -175,15 +185,21 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final int LAY_SETTLE_TICKS = 20;
 
     /**
-     * 砲塔が残差のどれだけを1tickで詰めようとするか。上限は機体ファイルの旋回速度。
+     * 砲塔が停止から全速へ達するまでの tick 数。動き出しと止まりの重さがここで決まる。
      *
-     * <p>0.12 だと上限に張り付くのは残差がおよそ8度より大きい間で、そこから内側は滑らかに減速して止まる。
-     * つまり「遠い角へは全速、目標角へはそっと」になる。
+     * <p>1tickあたりの加速度はこれと車両ファイルの旋回速度から出る（{@code 旋回速度 / SLEW_RAMP}）ので、速い
+     * 砲塔も遅い砲塔も、自分の全速に達するまでに同じだけの tick を使う。3 なら 0.15 秒——数トンの架台が動き
+     * 出したと分かる長さで、狙いを詰める操作に遅れが乗るほどではない。
+     *
+     * <p><b>残差に比例した速度で近付いてはいけない。</b>比例させると、残差が小さいほど遅くなる——止まるのに
+     * 掛かる時間が残差によらず一定になり、最後の数度が延々と縮まらない。砲手が実際にしているのはその最後の
+     * 数度なので、それでは操作の全部が鈍く感じられる。頭が一定の速度で振られている間も、砲は速度に比例した
+     * 角度だけ後ろに居続けて決して追い付かない——照準環が画面中央から離れたまま泳ぐ。
+     *
+     * <p>代わりに「今から一定の加速度で減速してちょうど目標角で止まれる速度」を出す。遠い角へは全速、近い
+     * 角へはその角で止まれるだけの速度、そして<em>止まる</em>。追い付ける限り残差は残らない。
      */
-    private static final float SLEW_GAIN = 0.12F;
-
-    /** 砲塔の速度が命令に追い付く速さ（1tickあたりの割合）。動き出しと止まりの重さがここで決まる。 */
-    private static final float SLEW_SMOOTH = 0.15F;
+    private static final float SLEW_RAMP = 3.0F;
 
     /**
      * 運転していない側が、報告された砲塔角へ1tickで詰める割合。
@@ -305,6 +321,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private final BuiltInGun coax = new BuiltInGun(this, BuiltInGun.Mount.COAXIAL);
     /** 発射筒のミサイル（あれば）。常時捜索するシーカーもここ。 */
     private final TurretLauncher launcher = new TurretLauncher(this);
+    /**
+     * 主砲塔以外の砲塔（あれば）。1つ1つが自分の席の乗員に据えられ、自分の弾倉を数える。砲塔を書かない
+     * 車両——同梱のほぼ全部——では、このオブジェクトは毎tick何もしない。
+     */
+    private final TurretStations turrets = new TurretStations(this);
     /** 据えた点に立たせているマーカー。サーバー側だけが持つ。{@link #designate} 参照。 */
     @Nullable
     private DesignationEntity marker;
@@ -350,7 +371,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      *
      * <p>{@code RocketEntity.beamRate} と同じ考え方で、理由も同じだ。命令された速度をその tick で出せば、
      * 架台は止まっている状態から全速へ1tickで飛び移り、目標角で同じだけ唐突に止まる——動いてはいるが、
-     * 質量を持った物には見えない。1次遅れで追わせれば、動き出しと止まりに数tickかかる。数トンの架台が
+     * 質量を持った物には見えない。加速度に上限を掛ければ、動き出しと止まりに数tickかかる。数トンの架台が
      * 実際にすることであり、垂直に起き上がる発射機ではそこが一番目に付く。
      *
      * <p>同期しない。運転側が自分で回し、他の側は報告された角へ寄せるだけなので（{@link #tick} 参照）、
@@ -404,6 +425,26 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     private GroundVehicleInput input = GroundVehicleInput.NONE;
 
+    /**
+     * 砲の脇に立って操作している者。乗員ではない——{@code hull.crewed} の砲には座る場所が無い——ので、
+     * 搭乗者一覧にも {@link #getControllingPassenger} にも現れない。サーバーだけが持つ。
+     *
+     * <p><b>報告が途切れたら手が離れたと見なす。</b> 操作者は毎tick要求を送る（{@code GunCrewHandler} 参照）
+     * ので、届かなくなったということは、ハンドルから手を離したか、離れたか、切断したかのいずれかだ。どれで
+     * あっても砲がすべきことは同じで、そこで止まる。降車のような明示的な離脱経路を持たないのは、そもそも
+     * 乗っていないからである。
+     */
+    @Nullable
+    private Player crew;
+    /** ハンドルをどちら向きに回しているか。右／上げが +1、左／下げが -1、回していなければ 0。 */
+    private int crewDirection;
+    /** 今回している方のハンドル。手が離れていれば {@link Crank#NONE}。 */
+    private Crank crewCrank = Crank.NONE;
+    /** 操作者が引き金（左クリック）を引いているか。 */
+    private boolean crewTrigger;
+    /** 操作者の報告が途切れてから、手を離したと見なすまでの残りtick。 */
+    private int crewTicks;
+
     // 自分でこの車両をシミュレートしていない側のための補間状態。
     private int lerpSteps;
     private double lerpX;
@@ -431,6 +472,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 重力は driveTick() で自前で適用しており、それが下り坂へ車体を押し付ける力にもなっている。
         // サーバーへそう伝えることで、浮遊エンティティ扱いされずに済む。
         this.setNoGravity(true);
+    }
+
+    /** この車両の独立砲塔。持たない車両でも null にはならない——空の砲塔一覧を持つだけだ。 */
+    public TurretStations getTurrets() {
+        return this.turrets;
     }
 
     public GroundVehicleDefinition getStats() {
@@ -463,6 +509,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         builder.define(DATA_MISSILES, 0);
         builder.define(DATA_MISSILE_RELOAD, 0);
         builder.define(DATA_MAGAZINE, new CompoundTag());
+        builder.define(DATA_TURRETS, new CompoundTag());
         builder.define(DATA_ARMAMENT, Armament.MAIN.ordinal());
         builder.define(DATA_LOCK_TARGET, -1);
         builder.define(DATA_LOCK_PROGRESS, 0.0F);
@@ -548,6 +595,175 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
             return MAIN;
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 車外に立って操作する砲
+    // ------------------------------------------------------------------
+
+    /**
+     * 砲手が回している方のハンドル。
+     *
+     * <p>牽引砲に操縦席は無く、砲を向ける物は2つのハンドルしかない——旋回と俯仰で、1人が同時に回せるのは
+     * 片方だけだ。だから「どこを狙うか」は1つの方向ではなく2つの操作になり、そのどちらを今しているかが
+     * この値になる。乗って照準する車両ではこれに相当する物が存在しない。乗員は頭を向けるだけで、旋回も
+     * 俯仰も同時に付いてくるからだ。
+     */
+    public enum Crank {
+        /** ハンドルから手が離れている。砲はそのままの角度で止まっている。 */
+        NONE,
+        /** 旋回ハンドル。右クリックで右へ、シフト+右クリックで左へ。 */
+        TRAVERSE,
+        /** 俯仰ハンドル。右クリックで上げ、シフト+右クリックで下げ。 */
+        ELEVATE;
+
+        public static final Crank[] VALUES = values();
+
+        /** 同期用の添字から。範囲外なら「手が離れている」。 */
+        public static Crank byIndex(int index) {
+            return index >= 0 && index < VALUES.length ? VALUES[index] : NONE;
+        }
+    }
+
+    /** 操作者の報告が途切れてから手が離れたと見なすまでのtick数。往復1回ぶんの取りこぼしを許す長さ。 */
+    private static final int CREW_LAPSE = 3;
+
+    /** 砲の中心から、ハンドルに手が届くと見なす距離（ブロック）。当たり判定の幅に足す。 */
+    private static final double CREW_REACH = 4.0;
+
+    /**
+     * 車両ファイルがハンドルを書いていないとき、旋回ハンドルを砲塔リングからどれだけ持ち上げるか
+     * （ブロック）。リングは床の高さにあるので、そのままでは俯仰ハンドル（砲耳）と上下に分かれない。
+     */
+    private static final double DERIVED_HANDLE_LIFT = 0.6;
+
+    /**
+     * 乗る物ではなく、脇に立って操作する砲か。
+     *
+     * <p>これが真である車両は乗車を断り、砲は {@link #tickCrewedTurret} が据え、弾倉は1回の装填分しか
+     * 持たない。{@code hull.crewed} 参照。
+     */
+    public boolean isCrewed() {
+        return this.getStats().hull().crewed();
+    }
+
+    /** その者がハンドルに手を届かせられる位置に立っているか。 */
+    public boolean isWithinCrewReach(Entity operator) {
+        double reach = this.hitbox().width() * 0.5 + CREW_REACH;
+
+        return operator.level() == this.level() && operator.distanceToSqr(this) <= reach * reach;
+    }
+
+    /** 今この砲を操作している者。サーバー側のみ。 */
+    @Nullable
+    public Player getCrew() {
+        return this.crew;
+    }
+
+    /**
+     * 車外の操作者からの1tick分の要求。どちらのハンドルをどちら向きに回しているか、引き金を引いているか。
+     *
+     * <p><b>操作者の視線は要求に含まれない。</b> 乗っている砲手は頭を向ければ砲がそこへ寄るが、ハンドルを
+     * 回す者が要求できるのは「回す向き」だけだ。だから狙いを付けるとは、砲を見ながら止まるまで回すこと
+     * であり、それが牽引砲の照準そのものになる。
+     *
+     * <p><b>先に取り付いた者が持つ。</b> 2人が同じ砲を別の方へ回せば砲はどちらへも行かない。操作者が手を
+     * 離すか離れるかすれば次の者が取れるので、奪い合いは起きても数tickで終わる。
+     *
+     * <p>何も要求していない報告は「手を離した」であり、それを送ってくるのは他でもない操作者自身なので、
+     * 掴んだままの状態がその場に残ることはない。届かなくなった場合は {@link #CREW_LAPSE} が同じ後始末を
+     * する。
+     */
+    public void crank(Player operator, Crank handle, int direction, boolean trigger) {
+        if (this.crew != null && this.crew != operator && this.crewTicks > 0) {
+            return;
+        }
+
+        int turn = handle == Crank.NONE ? 0 : Mth.clamp(direction, -1, 1);
+
+        if (turn == 0 && !trigger) {
+            if (this.crew == operator) {
+                this.releaseCrew();
+            }
+
+            return;
+        }
+
+        this.crew = operator;
+        this.crewCrank = turn == 0 ? Crank.NONE : handle;
+        this.crewDirection = turn;
+        this.crewTrigger = trigger;
+        this.crewTicks = CREW_LAPSE;
+    }
+
+    /**
+     * そのハンドルが今どこにあるか、ワールド座標で。
+     *
+     * <p>ハンドルは砲塔や砲に付いているので、砲が振られれば一緒に運ばれる。掴む判定も、計器がワールド上に
+     * 置く印も、どちらもここから取る——2つが同じ点であることが、「見ている輪を掴んでいる」という体験の
+     * 全部だ。
+     *
+     * <p>車両ファイルが書いていなければ、その軸を実際に回している場所を使う——旋回は砲塔リングの少し上、
+     * 俯仰は砲耳。書かなくても2つは上下に分かれるので、掴み分けは成立する。
+     */
+    public Vec3 getHandle(Crank which, float partialTick) {
+        GroundVehicleDefinition stats = this.getStats();
+        GroundVehicleDefinition.Handle handle = stats.hull().handles()
+                .map(pair -> which == Crank.ELEVATE ? pair.elevate() : pair.traverse())
+                .orElse(null);
+
+        if (handle == null) {
+            return which == Crank.ELEVATE
+                    ? this.gunToWorld(stats.armament().trunnion(), partialTick)
+                    : this.turretToWorld(stats.turret().ring().add(0.0, DERIVED_HANDLE_LIFT, 0.0),
+                            partialTick);
+        }
+
+        return switch (handle.mount()) {
+            case GUN -> this.gunToWorld(handle.at(), partialTick);
+            case TURRET -> this.turretToWorld(handle.at(), partialTick);
+            default -> this.toWorld(handle.at(), partialTick);
+        };
+    }
+
+    /** 手が離れた。砲は今いる角度に残る。 */
+    private void releaseCrew() {
+        this.crew = null;
+        this.crewCrank = Crank.NONE;
+        this.crewDirection = 0;
+        this.crewTrigger = false;
+        this.crewTicks = 0;
+    }
+
+    /**
+     * 操作者がまだそこに居るか確かめ、居なければ手を離させる。サーバー側で毎tick。
+     *
+     * <p>報告の途切れだけでなく、死亡・退出・離れすぎ・残骸化も同じ1つの出口へ集める。
+     */
+    private void tickCrew() {
+        if (this.crew == null) {
+            return;
+        }
+
+        if (!this.crew.isAlive() || this.crew.isRemoved() || this.isWrecked()
+                || !this.isWithinCrewReach(this.crew) || --this.crewTicks <= 0) {
+            this.releaseCrew();
+        }
+    }
+
+    /**
+     * 席の乗員、いなければ砲の脇に立っている者。
+     *
+     * <p>撃った弾の持ち主も、命中報告の宛先も、撃破の帰属もここから取る。牽引砲を撃った者は乗員一覧の
+     * どこにも現れないが、引き金を引いたのは間違いなくその者だ。記憶ノート
+     * {@code a-drone-is-an-aircraft-with-no-seats} が言うとおり、席ではなくこちらが「誰が操作しているか」
+     * に答える。
+     */
+    @Override
+    public LivingEntity getAviator() {
+        LivingEntity seated = this.getControllingPassenger();
+
+        return seated != null ? seated : this.crew;
     }
 
     /** この車両が機関銃を積んでいるか。 */
@@ -702,16 +918,63 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * その架台を選択中にする。積んでいない物は選ばない。
+     *
+     * <p>人は {@link #cycleWeapon} で順に送るが、AI は選びたい物を名指しできる——巡っている途中の状態を
+     * 1tickだけ通る必要が無いし、送りの向きを気にする理由も無い。
+     */
+    public void selectWeapon(Armament armament) {
+        if (!this.level().isClientSide && armament.exists(this)) {
+            this.entityData.set(DATA_ARMAMENT, armament.ordinal());
+        }
+    }
+
+    /** AI の砲手が狙っている一点。人が動かしている車両では常に null。 */
+    @Nullable
+    private Vec3 botAim;
+
+    /**
+     * AI の砲手に狙い点を渡す。null で手を離す。
+     *
+     * <p>渡すのは<b>角度ではなく点</b>だ。人の砲手が視線という点を持つのと同じで、そこから角度を出すのは
+     * 砲塔の側の仕事——見越しも弾道の落ちも AI が点に織り込んでおり、機械の限界と制動はここから下が掛ける。
+     */
+    public void aimAt(@Nullable Vec3 point) {
+        this.botAim = point;
+    }
+
+    /**
      * 積んでいる兵装を順に切り替える。積んでいない物は飛ばす。
      *
      * <p>1種しか積まない車両では1周して同じ物に戻るので、何も起きない。
      */
-    public void cycleWeapon() {
+    public void cycleWeapon(int step) {
+        int direction = Integer.signum(step);
+
+        // ホイールは1tick に複数段を報告しうる。1段ずつ同じ処理を繰り返すのは、送りが「弾種の中を進み、
+        // 尽きたら次の架台へ」という入れ子だからだ。まとめて飛ばす式にすると、架台をまたぐ瞬間の
+        // 弾種の着地点が段数によって変わる。
+        for (int taken = Math.abs(step); taken > 0 && direction != 0; taken--) {
+            this.cycleOnce(direction);
+        }
+    }
+
+    /**
+     * 切り替えを1段だけ動かす。
+     *
+     * <p>同じ架台にまだ次の弾種があるなら、切り替えはそこへ行く。実際の砲手が最も頻繁に行う切り替えは
+     * 「主砲から機銃へ」ではなく「徹甲弾から榴弾へ」であり、どちらも同じ操作で済むべきだ。弾種を並べて
+     * いない車両では次の弾種が常に null になり、架台の送りだけが残る。
+     *
+     * <p>逆送りは各段の鏡になっている。弾種を1つ戻し、先頭まで来ていたら前の架台へ移って<em>末尾</em>の
+     * 弾種に着く。前の架台で先頭に着地すると、送りと戻しで通る順序が変わり、同じ回数だけ戻しても元の
+     * 場所に帰ってこない。
+     */
+    private void cycleOnce(int direction) {
         Armament now = this.selected();
-        // 同じ架台にまだ次の弾種があるなら、切り替えはそこへ行く。実際の砲手が最も頻繁に行う切り替えは
-        // 「主砲から機銃へ」ではなく「徹甲弾から榴弾へ」であり、どちらも同じ1つのキーで済むべきだ。
-        // 弾種を並べていない車両では next が常に null になり、以下は以前とまったく同じ処理になる。
-        ResourceLocation nextRound = Magazine.next(this, now);
+        ResourceLocation nextRound = direction > 0
+                ? Magazine.next(this, now)
+                : Magazine.previous(this, now);
 
         if (nextRound != null) {
             Magazine.select(this, now, nextRound);
@@ -720,13 +983,18 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         }
 
         for (int step = 1; step <= Armament.VALUES.length; step++) {
-            Armament next = Armament.VALUES[(now.ordinal() + step) % Armament.VALUES.length];
+            Armament next = Armament.VALUES[Math.floorMod(
+                    now.ordinal() + step * direction, Armament.VALUES.length)];
 
             if (next.exists(this)) {
                 this.entityData.set(DATA_ARMAMENT, next.ordinal());
-                // 架台へ入り直したら先頭の弾種から。そうしないと、一度末尾まで送った架台は二度と先頭を
-                // 通らず、切り替えが一巡しても戻ってこない弾種が残る。
-                Magazine.rewind(this, next);
+                // 架台へ入り直したら、送りなら先頭の弾種から、戻しなら末尾から。そうしないと、一度端まで
+                // 送った架台は二度と反対の端を通らず、切り替えが一巡しても戻ってこない弾種が残る。
+                if (direction > 0) {
+                    Magazine.rewind(this, next);
+                } else {
+                    Magazine.wind(this, next);
+                }
 
                 return;
             }
@@ -1163,6 +1431,33 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * 架台が今出している速さ。その車両の全速を1とした割合（0〜1）で、旋回と俯仰の大きい方。
+     *
+     * <p>音のためにある（{@link com.ashvehicles.client.sound.TurretSounds}）。<b>命令ではなく効きを問う。</b>
+     * 命令を持っているのは架台を回している1者だけ——運転席のクライアント、あるいは牽引砲ならサーバー——で、
+     * 他の全員は報告された角へ寄せているだけだ（{@link #tick} 参照）。どのクライアントでも同じ答えが出せる
+     * のは「前tickから何度動いたか」の方であり、そして架台の音を聞く価値があるのは主に外に立っている者だ。
+     *
+     * <p>寄せは指数的なので、他人の車両では振り終わりに短い尾が残る。音としてはフェードアウトそのもので、
+     * ちょうど惰性のように聞こえるので直していない。
+     *
+     * <p><b>割合にしてあるのは、この値が音量と音程の両方になるからだ。</b>度/tick のままでは、旋回の遅い
+     * 榴弾砲が常に小さく、パーンツィリが常に全開になる——どちらもその架台にとっては同じ「全速」である。
+     */
+    public float getSlewEffort() {
+        GroundVehicleDefinition.Turret turret = this.getStats().turret();
+
+        return Math.min(1.0F, Math.max(
+                slewEffort(Mth.wrapDegrees(this.turretYaw - this.turretYawO), turret.traverseRate()),
+                slewEffort(this.gunPitch - this.gunPitchO, turret.elevationRate())));
+    }
+
+    /** 1tickで動いた角を、その軸の全速に対する割合へ。振れない軸は常に0。 */
+    private static float slewEffort(float moved, float limit) {
+        return limit > 0.0F ? Math.abs(moved) / limit : 0.0F;
+    }
+
+    /**
      * ワールド座標での砲身の指向。
      *
      * <p>組み付け順に3つの回転を重ねる。車体は地面が決める姿勢で寝て、砲塔は車体上で旋回し、砲は砲塔内で
@@ -1174,16 +1469,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return Attitude.nose(this.aim(partialTick));
     }
 
-    /**
-     * 同じ物を、方向ではなく回転として。
-     *
-     * <p>{@link #getAimDirection} が答えるのと同じ向きだが、こちらは水平線の傾きも持っている。砲腔線に沿って
-     * 覗く視界——砲手照準——に要るのは3角なので、方向だけでは足りない。{@code TurretSight} 参照。
-     */
-    public Quaternionf getAimAttitude(float partialTick) {
-        return this.aim(partialTick);
-    }
-
     private Quaternionf aim(float partialTick) {
         return new Quaternionf(this.getAttitude(partialTick))
                 .rotateY(-this.getTurretYaw(partialTick) * DEG_TO_RAD)
@@ -1191,30 +1476,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
-     * 乗員の仰角を、砲が実際に取れる範囲へ収めた値。
-     *
-     * <p>砲手照準を覗いている間、乗員には自分の頭がどこを向いているか映らない。映っているのは砲だ。だから
-     * 可動端の外まで見下ろせるようにしておくと、俯角の尽きた砲の前で入力だけが溜まり、戻す時に同じ角度分の
-     * 空振りが要る——操作が遅れているようにしか感じられない不感帯だ。頭を砲の範囲に縛れば、マウスを動かした
-     * 分は必ず砲が動いた分になる。
-     *
-     * <p>{@link #tickTurret} が砲を据えるのと同じ式を逆に解いた物。両者が違う角を「範囲内」と呼べば、砲手の
-     * 画面と実際に撃つ方向が食い違う。照準を覗いている間は視界が倒されていない（{@code sightTilt} は0）ので、
-     * ここでもそれは勘定に入れない。
-     */
-    public float clampSightPitch(float xRot) {
-        GroundVehicleDefinition.Turret turret = this.getStats().turret();
-
-        if (!turret.exists()) {
-            return xRot;
-        }
-
-        return Mth.clamp(xRot, -turret.elevation() - this.hullPitch, turret.depression() - this.hullPitch);
-    }
-
-    /**
-     * ワールド座標での銃口位置。点が1つで足りる用途のために第1砲身を返す——とりわけ砲手照準は1本の砲腔に
-     * 沿って据えるもので、2本には据えられない。
+     * ワールド座標での銃口位置。点が1つで足りる用途のために第1砲身を返す——弾着マークのように「どこから
+     * 出るか」を1点で言えば済む物には、2本目を渡す先が無い。
      */
     public Vec3 getMuzzle(float partialTick) {
         return this.getMuzzle(0, partialTick);
@@ -1239,13 +1502,24 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     public Vec3 getMuzzle(int barrel, float partialTick) {
         GroundVehicleDefinition.Armament armament = this.getStats().armament();
-        GroundVehicleDefinition.Barrel one = armament.barrel(barrel);
+
+        return this.getBreech(barrel, partialTick).add(this.getAimDirection(partialTick)
+                .scale(armament.barrel(barrel).lengthOr(armament.barrelLength())));
+    }
+
+    /**
+     * ワールド座標での、この砲身の付け根——砲身の線が始まる点。銃口はここから指向の向きへ砲身長だけ先にある。
+     *
+     * <p>砲を「ある点へ向ける」なら、角はここから測る（AI の砲手、{@link #tickTurret}）。車両の原点から測った
+     * 角へ据えると、砲身は耳軸の高さぶん平行にずれた線を向き、狙った点の上を通る。
+     */
+    public Vec3 getBreech(int barrel, float partialTick) {
+        GroundVehicleDefinition.Barrel one = this.getStats().armament().barrel(barrel);
         Vec3 seat = one.ring().isPresent() ? one.trunnion() : this.onGun(one.trunnion(), partialTick);
         Vec3 ring = one.ringOr(this.getStats().turret().ring());
-        Vec3 trunnion = this.position().add(Attitude.toWorld(this.getAttitude(partialTick),
-                this.onRing(seat, ring, partialTick)));
 
-        return trunnion.add(this.getAimDirection(partialTick).scale(one.lengthOr(armament.barrelLength())));
+        return this.position().add(Attitude.toWorld(this.getAttitude(partialTick),
+                this.onRing(seat, ring, partialTick)));
     }
 
     /** 主兵装が持つ砲身数。1本ずつ順に撃つ。 */
@@ -1370,6 +1644,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return this.getStats().sound();
     }
 
+    /** 音のうえでの推進方式。車両と艦はディーゼル1種で足りる。 */
+    @Override
+    public String engineClass() {
+        return "tank";
+    }
+
     /**
      * 車両の索敵手段。ほぼ全ての車両では無し。
      *
@@ -1407,6 +1687,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     @Override
     public float armour() {
         return this.getStats().hull().armour();
+    }
+
+    @Override
+    protected float damageTaken() {
+        return this.getStats().hull().damageTaken();
     }
 
     @Override
@@ -1471,16 +1756,33 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     @Override
     protected Quaternionf boxRotation(VehicleShape.Box box) {
         Quaternionf rotation = new Quaternionf(this.attitude);
+        // 独立砲塔の箱は、車両自身の砲塔ではなくその砲塔の角で振れる。番号を書かない箱——単砲塔の車両では
+        // 全部——は今までどおり車両自身の砲塔に乗る。
+        int station = this.stationOf(box);
+        float yaw = station < 0 ? this.turretYaw : this.turrets.yawOf(station, 1.0F);
+        float pitch = station < 0 ? this.gunPitch : this.turrets.pitchOf(station, 1.0F);
 
         if (box.mount() == VehicleShape.Mount.TURRET || box.mount() == VehicleShape.Mount.GUN) {
-            rotation.rotateY(-this.turretYaw * DEG_TO_RAD);
+            rotation.rotateY(-yaw * DEG_TO_RAD);
         }
 
         if (box.mount() == VehicleShape.Mount.GUN) {
-            rotation.rotateX(-this.gunPitch * DEG_TO_RAD);
+            rotation.rotateX(-pitch * DEG_TO_RAD);
         }
 
         return rotation.mul(box.orientation());
+    }
+
+    /**
+     * その箱が乗っている独立砲塔の番号。車両自身の砲塔なら −1。
+     *
+     * <p>ファイルが存在しない番号を書いていても −1 に落ちる。車両自身の砲塔に乗った箱になるだけで、
+     * 箱が消えたり車両が止まったりはしない。
+     */
+    private int stationOf(VehicleShape.Box box) {
+        int station = box.stationIndex();
+
+        return station >= 0 && station < this.turrets.count() ? station : -1;
     }
 
     /** 設置面積は箱から算出するので、鮮度は箱と同じ。 */
@@ -1494,10 +1796,24 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 周りに回した位置、砲上の箱はまず俯仰量だけ耳軸周りに揺らし、その後は他の砲塔箱と同様に砲塔と共に回す。
      */
     private Vec3 mountOffset(VehicleShape.Box box) {
+        int station = this.stationOf(box);
+
+        if (station >= 0) {
+            return switch (box.mount()) {
+                case GUN -> this.turrets.carryGun(station, box.offset(),
+                        this.turrets.trunnionOf(station), 1.0F);
+                case TURRET -> this.turrets.carry(station, box.offset(), 1.0F);
+                default -> box.offset();
+            };
+        }
+
         return switch (box.mount()) {
             case GUN -> this.onTurret(this.onGun(box.offset(), 1.0F), 1.0F);
             case TURRET -> this.onTurret(box.offset(), 1.0F);
-            case HULL -> box.offset();
+            // 機体側の可動部——後部ハッチ、倉の扉、ノズル、可変翼——は車両には無いので、車体上の箱として
+            // 扱う。APC の後部扉を開けたくなったら、ここが実装を書く場所だ——AircraftEntity.swingOf と
+            // 同じ計算で足りる。
+            default -> box.offset();
         };
     }
 
@@ -1548,11 +1864,40 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.trackLeftO = this.trackLeft;
         this.trackRightO = this.trackRight;
 
-        if (this.isControlledByLocalInstance()) {
+        // 独立砲塔は描く側全部で寄せる。据えるのはサーバーだけ（下の分岐）で、運転しているクライアントも
+        // 例外ではない——砲手の視線を読めるのはサーバーしかないからだ。{@link TurretStations} 参照。
+        if (this.level().isClientSide) {
+            this.turrets.clientTick();
+        }
+
+        // AI が動かしている車両は、この tick の操作をここで決める。人の操作がパケットで届くのと同じ位置
+        // ——走る前、据える前、撃つ前——であり、これより下は人が運転している時とまったく同じ経路を通る。
+        // 積まれている車両は走らないので、運ばれている間は手を離す。
+        //
+        // <b>運転席に人が座れば AI は手を離す。</b> 乗り込んだ者が舵を取り、降りればまた AI が走らせる
+        // ——同じ車両を2人で奪い合う形にはしない。砲の狙い点も一緒に手放す。座っている砲手の視線より
+        // 優先される狙い点があっては、砲塔が言うことを聞かない。
+        if (!this.level().isClientSide && !this.isCargo() && this.getPilot() != null) {
+            if (this.getControllingPassenger() instanceof Player) {
+                this.botAim = null;
+            } else {
+                this.getPilot().tick();
+            }
+        }
+
+        if (this.isCargo()) {
+            // 積まれている間は走らないし、地面も読まない。位置を決めているのは運んでいる側であり、ここで
+            // 自分の接地判定を回せば、毎tick機内の床と喧嘩したうえで負ける——運んでいる側は搭乗者を
+            // 置き直す方の側だからだ。AircraftEntity.tickHold 参照。
+            this.stowed();
+        } else if (this.isControlledByLocalInstance()) {
             // 座席が空: ブレーキが掛かり惰性で停止する。運転手が降りた時点の動きを引き継ぎ、足元で急停止
             // したりはしない。残骸も同じ扱いが恒久化した物で——座る席がもう無い——被弾地点ではなく自分の
             // 履帯の上で止まる。
-            if (this.isWrecked() || !(this.getControllingPassenger() instanceof Player)) {
+            //
+            // AI が乗っている車両は席が空でも「空」ではない。運転しているのは上で tick したそちらであって、
+            // ここで消せば AI は毎tick自分の操作を打ち消されることになる。
+            if (this.isWrecked() || (!(this.getControllingPassenger() instanceof Player) && !this.isBot())) {
                 this.input = GroundVehicleInput.PARKED;
             }
 
@@ -1593,10 +1938,15 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // しまう。クライアントが送るのはトリガー、返ってくるのは装填カウンタ。
         if (!this.level().isClientSide) {
             // 無人車両はトリガーを引き続けない。入力は最後の運転手の報告値のまま届かなくなるので、押しっ放し
-            // で降りた者がいると、そのままでは戦車が置かれている限り自動で撃ち続けてしまう。
-            if (this.getControllingPassenger() == null || this.isWrecked()) {
+            // で降りた者がいると、そのままでは戦車が置かれている限り自動で撃ち続けてしまう。AI の車両は
+            // 毎tick自分で置き直しているので、この心配が無い側にいる。
+            if ((this.getControllingPassenger() == null && !this.isBot()) || this.isWrecked()) {
                 this.input = GroundVehicleInput.PARKED;
             }
+
+            // 車外の操作者も同じ理由で確かめる。あちらは降車という区切りを持たないので、居なくなったことに
+            // 気付く手段は報告が途切れたことしかない。
+            this.tickCrew();
 
             // 焼け落ちた車体には装填する砲も、捜索するシーカーも、それらを向ける対象も無い。
             if (!this.isWrecked()) {
@@ -1604,16 +1954,22 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 // かかわらず装填を進めるし、シーカーは発射筒が選択されていなくても捜索を続ける——それが
                 // 航空機へ「追尾されている」と警告する仕組みだ。TurretLauncher 参照。
                 Armament selected = this.selected();
+                // 引き金は2箇所から来る。乗員の操作入力と、車外に立っている操作者の左クリックだ。どちらで
+                // あろうと砲にとっては同じ1つの引き金なので、ここで1つにまとめてから架台へ配る。
+                boolean trigger = this.input.fire() || this.crewTrigger;
 
-                this.gun.tick(this.input.fire() && selected == Armament.MAIN);
-                this.launcher.tick(this.input.fire() && selected == Armament.MISSILE, this.input.lock());
+                this.gun.tick(trigger && selected == Armament.MAIN);
+                this.launcher.tick(trigger && selected == Armament.MISSILE, this.input.lock());
                 // 同軸機銃は2択のどちらでもない。独自のトリガーを持ち同じ砲架で据えられるので、既に目標へ
                 // 照準している砲手は主兵装を仕舞わずに掃射できる——同軸機銃の存在理由そのものだ。
                 // 選択されていれば主トリガーでも撃つ。専用の引き金は残したままなので、機関銃を選んで
                 // いない砲手も今まで通り掃射できる——同軸機銃の存在理由はそのままにして、切り替えでも
                 // 選べるようにした形。
                 this.coax.tick(this.input.coax()
-                        || (this.input.fire() && selected == Armament.COAX));
+                        || (trigger && selected == Armament.COAX));
+                // 独立砲塔。据えるのも撃つのもここ1箇所で、運転手の引き金と砲手のパケットの両方が
+                // 内側で解かれる。
+                this.turrets.tick();
                 this.reportSeeker();
                 this.tickDesignation();
                 this.getSensors().tick();
@@ -1624,6 +1980,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 公開するので、全側が同一の値で動く。
         if (!this.level().isClientSide) {
             this.entityData.set(DATA_STEER, this.input.steer());
+
+            // 砲塔が動いた分・撃った分だけ写しを送る。持たない車両では一度も真にならない。
+            if (this.turrets.consumeDirty()) {
+                this.entityData.set(DATA_TURRETS, this.turrets.save());
+            }
         }
 
         this.windSteering();
@@ -1632,9 +1993,51 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.springs.tick(this.getStats(), this.speed, this.heading, this.getY(), this.onGround());
 
         // 車体を動かしうる全処理の後に置くことで、壊すのは1tick前ではなく今めり込んでいる物になる。
-        this.crushBlocks();
+        //
+        // 積まれている間は壊さない。土手を割るのは自分で踏み込んだ車両の権利であって、輸送機の腹の中を
+        // 運ばれている車両の物ではない——そのままでは、戦車を1台積んだ輸送機が超低空で山を掘り進む。
+        if (!this.isCargo()) {
+            this.crushBlocks();
+        }
         this.tickParts();
         this.checkInsideBlocks();
+    }
+
+    /**
+     * 貨物として積まれている1tick分。走行の代わりに置かれる。
+     *
+     * <p>やることは3つしかない。止まっていること、落ちていないこと、そして運んでいる機体と同じ姿勢で
+     * 寝ていること。車体が水平のまま輸送機と一緒に上昇すると、機首上げの機内で戦車だけが水平に浮いて見える。
+     *
+     * <p>砲塔はここでは触らない。積まれた車両の砲は動いてよい——運ばれる戦車の砲手には、外を見て砲を向ける
+     * 以外にすることが無いからだ。撃てるかどうかは砲の側の判断で、ここの話ではない。
+     */
+    private void stowed() {
+        this.input = GroundVehicleInput.PARKED;
+        this.speed = 0.0F;
+        this.fallSpeed = 0.0;
+        this.setOnGround(true);
+        this.setDeltaMovement(Vec3.ZERO);
+        this.resetFallDistance();
+
+        if (this.getVehicle() instanceof VehicleEntityBase carrier) {
+            Quaternionf riding = carrier.getAttitude();
+            this.hullPitch = -Attitude.elevation(riding);
+            this.hullBank = Attitude.bank(riding);
+        }
+
+        // ヨーは運んでいる側が置き直すたびに回してくれる（{@code AircraftEntity.positionRider}）ので、
+        // そこから読む。ここで自分の方位を積み上げると、機体の旋回に対して二重に回る。
+        this.heading = this.getYRot();
+        this.setXRot(-this.hullPitch);
+        this.attitude = this.buildAttitude();
+        // 砲塔だけは動かす。運ばれている戦車の砲手には、外を見て砲を向ける以外にすることが無い。
+        this.tickTurret(this.getStats().turret());
+
+        if (!this.level().isClientSide) {
+            this.entityData.set(DATA_ATTITUDE, new Quaternionf(this.attitude));
+            this.entityData.set(DATA_SPEED, this.speed);
+        }
     }
 
     /**
@@ -1903,6 +2306,15 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             }
 
             if (!Double.isNaN(before[i]) && ground - before[i] > climb + CLIMB_SLACK) {
+                // 立ちはだかっているのが機体なら、そこで終わり。押し通れるかを問うのは
+                // {@link BlockCrusher} でありブロックの話なので、船体の前で問えば「その空間に硬い
+                // ブロックは無い」——空気は柔らかい——と答えて、戦車を輸送機の胴体へ通してしまう。
+                double deck = this.deckUnder(to);
+
+                if (!Double.isNaN(deck) && deck - before[i] > climb + CLIMB_SLACK) {
+                    return false;
+                }
+
                 return this.crushesThrough(step);
             }
 
@@ -2088,6 +2500,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * 原点から車体の後ろ端までの距離（ブロック）。形が無ければ 0。
+     *
+     * <p>AI が後ろへ下がる前に、車体の後ろに地面があるかを確かめるため（{@code ai/navigation/Navigator}）。
+     */
+    public double getRearReach() {
+        Footprint current = this.footprint();
+
+        return current.isEmpty() ? 0.0 : -current.back();
+    }
+
+    /**
      * バニラを含め、何もこの車両を素の直方体で動かさない。戦車を押す物は全て、駆動系と同様に実際の構成箱に
      * 対して解決される。
      *
@@ -2195,13 +2618,42 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 長く進み、着地するはずだった床をプローブが一度も触れないまま突き抜ける。
      */
     private double groundUnder(Vec3 where) {
-        double below = PROBE_BELOW + Math.abs(this.fallSpeed);
-        Vec3 from = new Vec3(where.x, this.getY() + PROBE_ABOVE, where.z);
-        Vec3 to = new Vec3(where.x, this.getY() - below, where.z);
-        BlockHitResult hit = this.level().clip(
-                new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
+        double blocks = this.blocksUnder(where);
+        double deck = this.deckUnder(where);
+
+        if (Double.isNaN(deck)) {
+            return blocks;
+        }
+
+        return Double.isNaN(blocks) ? deck : Math.max(blocks, deck);
+    }
+
+    /** 同じプローブをブロックにだけ投げた物。 */
+    private double blocksUnder(Vec3 where) {
+        BlockHitResult hit = this.level().clip(new ClipContext(this.probeFrom(where), this.probeTo(where),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
 
         return hit.getType() == HitResult.Type.MISS ? Double.NaN : hit.getLocation().y;
+    }
+
+    /**
+     * 同じプローブを、この MOD の他の機体の箱にだけ投げた物。
+     *
+     * <p>これが車両を甲板の上に立たせている全部だ。高さは下から読むので、答えられる物が増えれば立てる場所が
+     * 増える——輸送機のランプ、船の甲板、他の戦車の車体。ブロックの読みと同じ線分を同じ向きに投げるので、
+     * 段差・坂・壁の区別（{@link #rest} と {@link #canStep}）はそのまま効く。ランプは坂として登り、船体は
+     * 登坂能力を超える段差として車両を止める。
+     */
+    private double deckUnder(Vec3 where) {
+        return Hitboxes.deckUnder(this, this.probeFrom(where), this.probeTo(where));
+    }
+
+    private Vec3 probeFrom(Vec3 where) {
+        return new Vec3(where.x, this.getY() + PROBE_ABOVE, where.z);
+    }
+
+    private Vec3 probeTo(Vec3 where) {
+        return new Vec3(where.x, this.getY() - (PROBE_BELOW + Math.abs(this.fallSpeed)), where.z);
     }
 
     // ------------------------------------------------------------------
@@ -2340,6 +2792,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * 運転手の視界が自分の目線からどれだけ下へ倒されているか（度）。
+     *
+     * <p>主砲塔は運転しているクライアントが自分で読むが、独立砲塔を据えているのはサーバーなので、そちらへは
+     * 操縦入力と一緒に届く（{@link com.ashvehicles.network.GroundVehicleInputPayload}）。
+     */
+    public float getSightTilt() {
+        return this.sightTilt;
+    }
+
+    /**
      * 乗員が見ている方向へ、可能な最大速度で砲塔を回す。
      *
      * <p>2つの角度は車体座標系で保持されワールド座標系で照準されるので、ここで求めるのはその差——砲手の視線
@@ -2347,9 +2809,48 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 車体自身のピッチを除いた後に適用する。前ではない。
      *
      * <p>据える先は乗員の視線ではなく画面中央。三人称視点ではこの2つは別方向だ。{@link #setSightTilt} 参照。
+     *
+     * <p><b>方位は乗員の {@code yRot} から取る。{@code getYHeadRot} ではない。</b>あれは<em>他人の</em>頭を描く
+     * ために同期される値で、自分のクライアントでは誰も書かない——バニラがそれを {@code yRot} へ合わせるのは
+     * {@code Player.serverAiStep} だけであり、あれはサーバー側でしか走らない。そして砲塔を据えているのは運転
+     * している本人のクライアントだ（{@link #tick} 参照）。つまり読んでいたのは乗車した時の向きのまま凍った値で、
+     * 砲塔はマウスを無視し、その固定方位へ回って止まっていた。仰角は {@code getXRot} なので正しく付いてくる
+     * ——「砲は上下するのに旋回だけ言うことを聞かない」の正体はこれだ。機体の砲座が視線ベクトルから取っている
+     * のと同じ理由で（{@code GunStations.aim}）、視線は乗員自身の角度から取らねばならない。
      */
     private void tickTurret(GroundVehicleDefinition.Turret turret) {
         if (!turret.exists()) {
+            return;
+        }
+
+        // 乗る物ではない砲は、乗員の視線ではなくハンドルから据わる。据えているのは砲の脇に立っている者で、
+        // 席に居ないのだから下の分岐はどう書いても偽になる。
+        if (this.isCrewed()) {
+            this.tickCrewedTurret(turret);
+
+            return;
+        }
+
+        // AI の砲手。人の視線の代わりに、狙っている一点が渡される。据わり方はここから下と同じ——
+        // 同じ制限角、同じ制動（{@link #slewYaw}）で、AI だから速く回るということは無い。
+        //
+        // <b>角は砲尾（{@link #getBreech}）から測る。車両の原点からではない。</b> 砲身の線は砲尾を通るので、原点
+        // から測った角へ据えると、砲は耳軸の高さぶん平行にずれた線を向いて狙った点の上を通る——レオパルト 2A4
+        // では 55 ブロック先で2度上。AI の引き金は砲口から見て0.5度の内を求めるので、交戦距離のどこでも一発も
+        // 撃てなかった（2026-09-13）。そして角は車体の座標系で読む（{@link Attitude#mountAngles}）。車首方位と
+        // 車体の仰角を引くだけでは、斜面で砲塔を横へ回したときに車体のバンクが俯仰へ漏れる。
+        if (this.botAim != null) {
+            Vec3 want = this.botAim.subtract(this.getBreech(0, 1.0F));
+
+            if (want.lengthSqr() > 1.0E-6) {
+                float[] angles = Attitude.mountAngles(this.getAttitude(1.0F), want);
+
+                this.setTurret(
+                        this.slewYaw(angles[0], turret.traverseRate()),
+                        this.slewPitch(Mth.clamp(angles[1], -turret.depression(), turret.elevation()),
+                                turret.elevationRate()));
+            }
+
             return;
         }
 
@@ -2357,7 +2858,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return;
         }
 
-        float wantYaw = Mth.wrapDegrees(crew.getYHeadRot() - this.heading);
+        float wantYaw = Mth.wrapDegrees(crew.getYRot() - this.heading);
         float wantPitch = Mth.clamp(-(crew.getXRot() + this.sightTilt) - this.hullPitch,
                 -turret.depression(), turret.elevation());
 
@@ -2379,10 +2880,65 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * ハンドルを回している間だけ、その向きへ砲を送る。乗る物ではない砲の照準はこれが全部。
+     *
+     * <p><b>要求は「向き」であって「角度」ではない。</b> 乗っている砲手は頭を向ければ砲がそこへ寄るが、
+     * ハンドルにできるのは回すことだけだ。だから照準とは、砲を見ながら止まるまで回すことになる——
+     * 実際に牽引砲を据える手順そのもので、方位を合わせてから高さを合わせる2段階になる理由でもある。
+     *
+     * <p><b>1度に動くのは1軸だけ。</b> 回しているハンドルの軸だけが動き、もう一方はそのままの角度で残る。
+     * 片手が回せるハンドルは1つだからで、乗員照準との違いはそこに尽きる。
+     *
+     * <p><b>止まる場所は行き過ぎではなく手の側にある。</b> 目標角が無いので制動距離の計算（{@link #slewRate}）
+     * は要らない。要るのは重さだけで、速度は {@link #SLEW_RAMP} tick かけて全速へ乗る——短く押せば僅かに
+     * 送れるので、最後の微調整はそれで行う。手を離せばその場で止まる。ウォームギヤの架台は惰性で回らない
+     * し、惰性で回れば据え終わりが毎回行き過ぎる。
+     *
+     * <p>サーバーで走る。操作者は乗っていないので、この車両を回しているクライアントは存在しない
+     * ——{@code isControlledByLocalInstance} はパイロット無しの車両をサーバーへ落とす。全クライアントは
+     * 他人の戦車の砲塔と同じように、報告された角へ寄っていく（{@link #tick} 参照）。
+     */
+    private void tickCrewedTurret(GroundVehicleDefinition.Turret turret) {
+        if (this.crewCrank == Crank.NONE || this.crewDirection == 0) {
+            // 手が離れている。回そうとしている速度も一緒に置いていく。さもないと次に掴んだ瞬間、砲は
+            // 前回の振り終わりの速度で動き出す。
+            this.turretRate = 0.0F;
+            this.pitchRate = 0.0F;
+
+            return;
+        }
+
+        if (this.crewCrank == Crank.TRAVERSE) {
+            this.turretRate = this.wind(this.turretRate, this.crewDirection * turret.traverseRate(),
+                    turret.traverseRate());
+            this.pitchRate = 0.0F;
+            this.setTurret(this.turretYaw + this.turretRate, this.gunPitch);
+
+            return;
+        }
+
+        this.pitchRate = this.wind(this.pitchRate, this.crewDirection * turret.elevationRate(),
+                turret.elevationRate());
+        this.turretRate = 0.0F;
+
+        float pitch = Mth.clamp(this.gunPitch + this.pitchRate, -turret.depression(),
+                turret.elevation());
+
+        // 止めに当たった。速度を残すと、押し続けている間ずっと歯車が食い込み続けたことになり、逆へ回した
+        // 瞬間に貯めた分だけ跳ねる。
+        if (pitch == this.gunPitch) {
+            this.pitchRate = 0.0F;
+        }
+
+        this.setTurret(this.turretYaw, pitch);
+    }
+
+    /**
      * 砲塔を目標方位へ、質量のある物として回す。{@link #turretRate} 参照。
      *
-     * <p>最短経路で回すのは従来通り。変わったのは速度の出し方だけで、残差に比例した速度を上限で頭打ちにし、
-     * それを1次遅れで追う。だから遠い角へは全速で振れるのに、動き出しと止まりには数tickかかる。
+     * <p>最短経路で回すのは従来通り。変わったのは速度の出し方だけで、目標角で止まれる速度を上限で頭打ちにし、
+     * そこへ一定の加速度で寄せる。だから遠い角へは全速で振れるのに、動き出しと止まりには数tickかかり、しかも
+     * 追い付ける速さの目標には遅れずに付いていく。
      */
     private float slewYaw(float target, float limit) {
         float error = Mth.wrapDegrees(target - this.turretYaw);
@@ -2413,11 +2969,38 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return this.gunPitch + this.step(this.pitchRate, error);
     }
 
-    /** 今の速度を、残差の求める速度へ1tick分近づけた値。 */
+    /**
+     * 今の速度を、残差の求める速度へ1tick分近づけた値。
+     *
+     * <p>求める速度は「今から一定の加速度で減速して、ちょうど目標角で止まれる速度」——制動距離が残差に等しく
+     * なる速度だ。それを超えていれば行き過ぎるし、下回っていれば急ぐ余地がある。上限は車両ファイルの旋回速度。
+     * 加速度は1tickあたりの変化量の上限としてそのまま効く。{@link #SLEW_RAMP} 参照。
+     *
+     * <p>制動距離はtick単位で数える。20分の1秒を刻む物に連続時間の式を当てれば、その刻み分だけ足りない。
+     */
     private float slewRate(float rate, float error, float limit) {
-        float demand = Mth.clamp(error * SLEW_GAIN, -limit, limit);
+        float accel = limit / SLEW_RAMP;
+        // 制動距離は連続時間の v²/2a ではない。1tickは丸ごと今の速度で進むので、そこへ v/2 だけ余分に乗る。
+        // v²/2a + v/2 = 残差 を解いた物がこれだ。連続時間の式のまま使うと毎tick僅かに行き過ぎ、step が位置を
+        // 頭打ちにして辻褄を合わせる——砲塔は残った速度のまま唐突に止まる。振り終わりの度に出る小さな衝きが
+        // それで、砲塔が速いほど、そして照準で覗いているほど目に付く。
+        float brake = (float) (Math.sqrt(accel * accel + 8.0F * accel * Math.abs(error)) - accel) / 2.0F;
 
-        return rate + (demand - rate) * SLEW_SMOOTH;
+        return this.wind(rate, Math.signum(error) * Math.min(limit, brake), limit);
+    }
+
+    /**
+     * 今の速度を、求められた速度へ1tick分だけ近づける。架台の重さはここにしかない。
+     *
+     * <p>加速度の上限は「全速へ乗るまで {@link #SLEW_RAMP} tick」から出るので、速い架台も遅い架台も
+     * 同じ時間だけかけて自分の全速へ達する。目標角へ据える {@link #slewRate} と、向きだけを要求される
+     * ハンドル（{@link #tickCrewedTurret}）が共有する——どちらも「命令された速度」の出どころが違うだけで、
+     * 架台がそれにどう追いつくかは同じ物だ。
+     */
+    private float wind(float rate, float demand, float limit) {
+        float accel = limit / SLEW_RAMP;
+
+        return rate + Mth.clamp(demand - rate, -accel, accel);
     }
 
     /** その速度で実際に動く量。残差を超えて回して行き過ぎることはしない。 */
@@ -2717,6 +3300,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return this.dismantle(player);
         }
 
+        // 牽引砲には乗り込む場所が無い。ここまで来たクリックには装填でもなく給油でもない意味しか残って
+        // おらず、それはハンドルを掴むことだ——そしてそれは押している間の操作なので、クリック1回として
+        // ここへは届かない。{@code GunCrewHandler} が押下そのものを読む。
+        if (this.isCrewed()) {
+            return InteractionResult.PASS;
+        }
+
         if (!this.canAddPassenger(player)) {
             return InteractionResult.PASS;
         }
@@ -2760,12 +3350,35 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             }
 
             held.consume(taken, player);
+            // 人力装填の砲では、今込めた弾がそのまま薬室の弾になる。弾倉は1回の装填分しか無く
+            // （{@code BuiltInGun.capacity} 参照）、そこに入っている物以外を選べる余地が無いからだ。
+            // 選び直さないと、榴弾を込めた砲が「徹甲弾を選択中・残弾0」のまま撃てなくなる——弾種を切り
+            // 替える手段は乗員のホイールしかなく、乗る場所が無い。
+            if (this.isCrewed()) {
+                Magazine.select(this, station, round);
+            }
+
             WeaponMounts.playLoadSound(this, true);
             // 何がどこへ入ったかを言う。弾種を積む車両では「どの架台か」だけでは足りない——同じ架台が
             // 3種類を持っているので、入ったのがどれかこそ知りたいことだ。
             player.displayClientMessage(Component.translatable("message.ashvehicles.loaded_round",
                     Component.translatable("item." + round.getNamespace() + "." + round.getPath()),
                     Magazine.rounds(this, station, round), Magazine.total(this, station), capacity), true);
+
+            return InteractionResult.CONSUME;
+        }
+
+        // 独立砲塔は最後。固定の3架台のどれも受け取らなかった弾だけがここへ来る。砲塔は種類ごとの内訳を
+        // 持たないので、言えるのは「どの砲塔に何発入ったか」だけだ。{@link TurretStations#load} 参照。
+        TurretStations.Loaded loaded = this.turrets.load(round, offered);
+
+        if (loaded.happened()) {
+            held.consume(loaded.taken(), player);
+            WeaponMounts.playLoadSound(this, true);
+            player.displayClientMessage(Component.translatable("message.ashvehicles.loaded_round",
+                    Component.translatable("item." + round.getNamespace() + "." + round.getPath()),
+                    this.turrets.roundsOf(loaded.station()), this.turrets.roundsOf(loaded.station()),
+                    this.turrets.capacityOf(loaded.station())), true);
 
             return InteractionResult.CONSUME;
         }
@@ -2789,6 +3402,67 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      *
      * @return 何か入ったなら CONSUME。入らなければ PASS で、クリックは乗車などの本来の意味へ流れる
      */
+    /**
+     * 出撃整備。燃料を満たしたうえで、主砲・同軸・発射筒・独立砲塔の弾倉を満たす。
+     *
+     * <p><b>弾種を並べた架台は種類で割る。</b> 収容40発の砲に徹甲弾40発を積んで出すのは、選べる物を
+     * 全部持たせることにならない。均等に割り、割り切れない分は先頭——車両ファイルが最初に書いた弾種、
+     * つまりその砲の常用弾——へ回す。
+     */
+    @Override
+    public void rearm() {
+        super.rearm();
+
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        for (Armament station : Armament.VALUES) {
+            if (!station.exists(this)) {
+                continue;
+            }
+
+            int capacity = switch (station) {
+                case MAIN -> this.gun.capacity();
+                case COAX -> this.coax.capacity();
+                case MISSILE -> this.launcher.capacity();
+            };
+            List<ResourceLocation> types = Magazine.types(this, station);
+
+            if (types.isEmpty()) {
+                AmmoKind kind = switch (station) {
+                    case MAIN -> this.gun.ammoKind();
+                    case COAX -> this.coax.ammoKind();
+                    case MISSILE -> this.launcher.ammoKind();
+                };
+
+                switch (station) {
+                    case MAIN -> this.gun.load(kind, capacity);
+                    case COAX -> this.coax.load(kind, capacity);
+                    case MISSILE -> this.launcher.load(kind, capacity);
+                }
+
+                continue;
+            }
+
+            for (int at = 0; at < types.size(); at++) {
+                ResourceLocation type = types.get(at);
+                int perItem = Math.max(1, Definitions.ammunition(type).perItem());
+                int share = capacity / types.size() / perItem;
+
+                Magazine.load(this, station, type, capacity, at == 0 ? share + capacity % types.size() : share);
+            }
+
+            Magazine.select(this, station, types.get(0));
+        }
+
+        for (int index = 0; index < this.turrets.count(); index++) {
+            for (ResourceLocation round : this.turrets.station(index).ammunition()) {
+                this.turrets.load(round, this.turrets.capacityOf(index));
+            }
+        }
+    }
+
     private InteractionResult loadAmmo(Player player, ItemStack held, AmmoKind kind) {
         if (this.isWrecked() || Math.abs(this.speed) > STANDSTILL) {
             return InteractionResult.PASS;
@@ -2796,6 +3470,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         int offered = held.getCount();
         int taken = this.gun.load(kind, offered);
+        // 3つの固定架台は翻訳キーを持ち、独立砲塔はファイルに書かれた自分の名前で名乗る。訳す物を持た
+        // ないのは、名前を決めるのが MOD ではなく車両ファイルだからだ。
+        Component where = Component.translatable("station.ashvehicles.main");
         String station = "main";
         int rounds = this.gun.rounds();
         int capacity = this.gun.capacity();
@@ -2803,6 +3480,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         if (taken == 0) {
             taken = this.coax.load(kind, offered);
             station = "coaxial";
+            where = Component.translatable("station.ashvehicles.coaxial");
             rounds = this.getCoaxRounds();
             capacity = this.coax.capacity();
         }
@@ -2810,6 +3488,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         if (taken == 0) {
             taken = this.launcher.load(kind, offered);
             station = "launcher";
+            where = Component.translatable("station.ashvehicles.launcher");
             rounds = this.getMissiles();
             capacity = this.launcher.capacity();
         }
@@ -2823,7 +3502,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 弾倉は車両の同期データにあるので、乗っていない者の画面には何も出ない。装填したことが分かる手段は
         // 音とこの1行しかなく、行為の結果——どこへ何発入り、満載まであとどれだけか——はここでしか言えない。
         player.displayClientMessage(Component.translatable("message.ashvehicles.loaded",
-                Component.translatable("station.ashvehicles." + station), rounds, capacity), true);
+                where, rounds, capacity), true);
 
         return InteractionResult.CONSUME;
     }
@@ -2874,6 +3553,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     // 永続化と GeckoLib
     // ------------------------------------------------------------------
 
+    /**
+     * 届いた独立砲塔の写しを取り込む。据えるのはサーバーなので、クライアントにとってはこれが唯一の
+     * 入手経路だ。{@link TurretStations} 参照。
+     */
+    @Override
+    public void onSyncedDataUpdated(EntityDataAccessor<?> key) {
+        super.onSyncedDataUpdated(key);
+
+        if (DATA_TURRETS.equals(key) && this.level().isClientSide) {
+            this.turrets.load(this.entityData.get(DATA_TURRETS));
+        }
+    }
+
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
@@ -2887,6 +3579,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.gun.load(tag);
         this.coax.load(tag);
         this.launcher.load(tag);
+        this.turrets.load(tag.getCompound("Turrets"));
         // 弾種の内訳は、上の3つが残弾カウンタを埋めた後で。弾種を持つ車両では内訳の方が正しく、
         // カウンタはそこから改めて書き直される。内訳を持たない古いセーブの分もここで振り分ける。
         Magazine.restore(this, tag);
@@ -2908,6 +3601,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.gun.save(tag);
         this.coax.save(tag);
         this.launcher.save(tag);
+        tag.put("Turrets", this.turrets.save());
         Magazine.save(this, tag);
         tag.putString("Armament", this.selected().name());
     }

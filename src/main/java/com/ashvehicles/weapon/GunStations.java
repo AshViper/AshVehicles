@@ -257,10 +257,12 @@ public final class GunStations {
     /**
      * 引き金1つが選ぶ物を1つ進める。パイロンの兵装と、パイロットが持っている砲座を一続きに巡る。
      *
-     * @return ここで処理したか。砲座を1つも持たないパイロットでは false を返し、キーは従来通りパイロンの
-     *         兵装選択だけを進める
+     * @param step 進める数。負なら逆へ。ホイールが戻せるようにするための向きで、詳しくは
+     *             {@code WeaponMounts.selectStep}
+     * @return ここで処理したか。砲座を1つも持たないパイロットでは false を返し、選択は従来通りパイロンの
+     *         兵装だけを進める
      */
-    public boolean cycle() {
+    public boolean cycle(int step) {
         List<Integer> mine = this.stationsOf(this.aircraft.getAviator());
 
         if (mine.isEmpty()) {
@@ -272,7 +274,7 @@ public final class GunStations {
         int at = this.selected != NONE && mine.contains(this.selected)
                 ? carried.size() + mine.indexOf(this.selected)
                 : Math.max(0, carried.indexOf(weapons.selected()));
-        int next = (at + 1) % (carried.size() + mine.size());
+        int next = Math.floorMod(at + step, carried.size() + mine.size());
 
         if (next < carried.size()) {
             this.selected = NONE;

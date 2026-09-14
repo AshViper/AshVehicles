@@ -1,0 +1,25 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 60,
+  "gun_class": "tank_gun",
+  "firing": {
+    "rounds_per_second": 0.17,
+    "automatic": false,
+    "spread": 0.16
+  },
+  "projectile": {
+    "damage": 240.0,
+    "speed": 46.0,
+    "gravity": 0.0245,
+    "drag": 4e-05,
+    "range": 5000.0,
+    "ricochet": 60.0,
+    "tracer": "FFE9B0"
+  },
+  "sound": {
+    "fire": "ashvehicles:weapon.tank",
+    "volume": 2.8,
+    "pitch": 0.72
+  }
+}

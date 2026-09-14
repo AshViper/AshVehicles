@@ -21,7 +21,14 @@
       "colour": "E4E0D6",
       "exhaust": "6E6860",
       "density": 3,
-      "size": 2
+      "size": 2,
+      "flame": {
+        "colour": "FFA23C",
+        "size": 2.2,
+        "length": 7.0,
+        "glow": 34.0,
+        "wash": 1.0
+      }
     }
   },
   "guidance": {
@@ -39,7 +46,7 @@
     "submunition": "ashvehicles:bomblet",
     "count": 18,
     "spread": 0.3,
-    "inherit": 0.05
+    "inherit": 0.0
   },
   "sound": {
     "volume": 3,

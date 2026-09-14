@@ -1,0 +1,26 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 1500,
+  "gun_class": "autocannon",
+  "firing": {
+    "rounds_per_second": 65.0,
+    "spread": 0.3
+  },
+  "projectile": {
+    "damage": 13.0,
+    "speed": 50.5,
+    "gravity": 0.0245,
+    "drag": 0.00025,
+    "range": 1800.0,
+    "explosion": 0.7,
+    "ricochet": 35.0,
+    "tracer": "FFC864"
+  },
+  "sound": {
+    "fire": "ashvehicles:weapon.gau8",
+    "volume": 3.0,
+    "pitch": 1.0,
+    "interval": 35
+  }
+}

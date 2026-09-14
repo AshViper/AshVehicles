@@ -50,8 +50,19 @@ public final class EngineSounds {
     }
 
     /**
-     * 機体のエンジン録音。ファイルが要求する物、無ければ機体名の物、無ければ既定。音を鳴らすたびに解決し直す
-     * ので、リソースパックの変更は再起動なしで反映される。
+     * 機体のエンジン録音。音を鳴らすたびに解決し直すので、リソースパックの変更は再起動なしで反映される。
+     *
+     * <p>探す順は 4 段。<b>ファイルが要求する物 → 機体名の物 → 推進方式の物 → 既定。</b>
+     *
+     * <p><b>3 段目が 2026-09-06 に入った。</b>それまでは MOD 内でファイルに録音を書いているのが
+     * 地上車両だけだったので、戦闘機もヘリも輸送機も無人機も同じ {@code engine.default} を鳴らして
+     * いた——ジェットとローターが同じ音であることに理由は無く、録音が 1 本しか無かったというだけだ。
+     * {@code engine.jet} {@code engine.rotor} {@code engine.prop} {@code engine.tank} を提供すれば
+     * 推進方式ごとに分かれ、提供しなければ従来どおり既定へ落ちる。**録音を増やすのではなく、
+     * 増やせる場所を作っている。**
+     *
+     * <p>機体名の段が推進方式より先なのは変えていない。1 機だけ別の音にしたい要求は、その機体が
+     * ジェットであることより細かい指定だからだ。
      */
     public static SoundEvent engineSound(SoundManager sounds, VehicleEntityBase vehicle) {
         VehicleChassis.Sound setup = vehicle.soundSetup();
@@ -70,8 +81,15 @@ public final class EngineSounds {
 
         ResourceLocation byName = ModSounds.named(vehicle.getVehicleId(), ModSounds.ENGINE_PREFIX);
 
+        if (ModSounds.exists(sounds, byName)) {
+            return SoundEvent.createVariableRangeEvent(byName);
+        }
+
+        ResourceLocation byClass = ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID,
+                ModSounds.ENGINE_PREFIX + vehicle.engineClass());
+
         return SoundEvent.createVariableRangeEvent(
-                ModSounds.exists(sounds, byName) ? byName : ModSounds.ENGINE);
+                ModSounds.exists(sounds, byClass) ? byClass : ModSounds.ENGINE);
     }
 
     private EngineSounds() {

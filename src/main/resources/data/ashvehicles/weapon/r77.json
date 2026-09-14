@@ -1,0 +1,39 @@
+{
+  "type": "missile",
+  "nation": "ru",
+  "item": true,
+  "ammo": 1,
+  "mass": 175,
+  "firing": {
+    "rounds_per_second": 1.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 205.0,
+    "speed": 1.75,
+    "thrust": 0.22,
+    "burn_ticks": 460,
+    "spool_ticks": 80,
+    "top_speed": 72.0,
+    "gravity": 0.000188,
+    "range": 0,
+    "explosion": 3.9,
+    "tracer": "FFEFC0",
+    "trail": {
+      "colour": "DCDAD4",
+      "exhaust": "8E887E",
+      "density": 1.8,
+      "size": 1.1
+    }
+  },
+  "guidance": {
+    "turn_rate": 6.2,
+    "lock_angle": 15.0,
+    "lock_range": 5000.0,
+    "lock_ticks": 10,
+    "track_angle": 70.0,
+    "proximity": 4.0,
+    "seeker": "radar"
+  }
+}

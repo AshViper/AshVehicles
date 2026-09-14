@@ -11,14 +11,15 @@ import net.minecraft.util.Mth;
  * {@code flare} と {@code chaff} は2つの対抗手段レバー。別々なのは応じる脅威が違うから
  * （{@link com.ashvehicles.weapon.Dispenser} 参照）。{@code lock} はシーカー専用の引き金で、押している間
  * だけ新しい目標を取ってよいという意味。既に捉えている目標の保持とは無関係。
- * {@link com.ashvehicles.weapon.TargetLock#tick} 参照。
+ * {@link com.ashvehicles.weapon.TargetLock#tick} 参照。{@code hover} は回転翼機だけが読む——押している間、
+ * サイクリックを機体ではなくその場に留まる方へ預ける（{@code AircraftEntity.hoverStop}）。
  */
 public record AircraftInput(float pitch, float roll, float yaw, float throttle, boolean brake, boolean fire,
-        boolean flare, boolean chaff, boolean lock) {
+        boolean flare, boolean chaff, boolean lock, boolean hover) {
 
     /** 操縦桿中立、エンジンはそのまま。無人のコックピットもこれを出す。 */
     public static final AircraftInput NONE =
-            new AircraftInput(0.0F, 0.0F, 0.0F, 0.0F, false, false, false, false, false);
+            new AircraftInput(0.0F, 0.0F, 0.0F, 0.0F, false, false, false, false, false, false);
 
     public AircraftInput {
         pitch = Mth.clamp(pitch, -1.0F, 1.0F);
@@ -37,10 +38,12 @@ public record AircraftInput(float pitch, float roll, float yaw, float throttle, 
         buf.writeBoolean(this.flare);
         buf.writeBoolean(this.chaff);
         buf.writeBoolean(this.lock);
+        buf.writeBoolean(this.hover);
     }
 
     public static AircraftInput read(FriendlyByteBuf buf) {
         return new AircraftInput(buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
-                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean());
+                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
+                buf.readBoolean());
     }
 }

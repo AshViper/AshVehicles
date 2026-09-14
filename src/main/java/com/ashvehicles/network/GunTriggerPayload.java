@@ -2,6 +2,7 @@ package com.ashvehicles.network;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.GroundVehicleEntity;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -38,6 +39,13 @@ public record GunTriggerPayload(boolean pressed) implements CustomPacketPayload 
         context.enqueueWork(() -> {
             if (context.player().getVehicle() instanceof AircraftEntity aircraft) {
                 aircraft.getStations().setTrigger(context.player(), payload.pressed());
+            }
+
+            // 地上車両の独立砲塔もまったく同じ1ビットで撃つ。砲手席の乗員が運転入力を送らないことも、
+            // どの砲塔を持っているかをサーバーが決めることも、機体と1つも違わない。
+            // {@link com.ashvehicles.weapon.TurretStations} 参照。
+            if (context.player().getVehicle() instanceof GroundVehicleEntity vehicle) {
+                vehicle.getTurrets().setTrigger(context.player(), payload.pressed());
             }
         });
     }

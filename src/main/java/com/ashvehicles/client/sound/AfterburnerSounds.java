@@ -10,11 +10,10 @@ import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.AircraftEntity;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.sounds.SoundEvent;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -40,6 +39,11 @@ import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
  *
  * <p>音量とピッチは、置き換えられる音ではなく {@link AircraftEntity} から取る。そうするほかない。このイベントは
  * サウンドエンジンが録音を引く前に発火するので、インスタンスはまだ音量を答えられず、問えば例外になる。
+ *
+ * <p><b>録音があってもここを通る。</b>サーバーが volume 欄へ入れているのは音量ではなく到達距離
+ * （{@link AircraftEntity#AFTERBURNER_CARRY}）なので、送られたまま鳴らすと 700 ブロック先の点火が
+ * コックピット内と同じ大きさで鳴る。距離から本当の大きさと鋭さを組み直し、音速で渡ってから鳴らすのは
+ * {@link Arrivals}——兵器の発砲音とまったく同じ扱いで、同じ空気を渡ってくるのだから同じでなければならない。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class AfterburnerSounds {
@@ -49,6 +53,12 @@ public final class AfterburnerSounds {
      */
     private static final ResourceLocation FALLBACK =
             ResourceLocation.withDefaultNamespace("item.firecharge.use");
+
+    /**
+     * 点火音が距離で失う鋭さ。発砲音（0.45）より控えめだ。破裂ではなく、火が一気に広がる音なので、
+     * 高い成分に頼っている割合が小さい。
+     */
+    private static final float DULLING = 0.30F;
 
     /** この種のイベント名に共通する末尾。{@link ModSounds#AFTERBURNER_ROLE} 参照。 */
     private static final String SUFFIX = "." + ModSounds.AFTERBURNER_ROLE;
@@ -83,6 +93,12 @@ public final class AfterburnerSounds {
             return;
         }
 
+        // 既に空を渡り終えた音。ここで組み直した物がもう一度ここへ来ているだけなので、素通しする。
+        // Arrivals.arrived 参照。
+        if (Arrivals.arrived(sound)) {
+            return;
+        }
+
         ResourceLocation id = sound.getLocation();
 
         if (!isAfterburner(id)) {
@@ -90,23 +106,24 @@ public final class AfterburnerSounds {
         }
 
         SoundManager sounds = Minecraft.getInstance().getSoundManager();
+        ResourceLocation recording = id;
 
-        // パックが持っている。ここで決めることは無い。サーバーの数値は機体自身の物だ。
-        if (ModSounds.exists(sounds, id)) {
-            return;
+        // パックが持っていなければ代役を探す。持っていれば録音はそのままで、直すのは距離の扱いだけだ。
+        if (!ModSounds.exists(sounds, id)) {
+            ResourceLocation shipped = ModSounds.firstPresent(sounds, ModSounds.AFTERBURNER);
+
+            recording = shipped == null ? FALLBACK : shipped;
+
+            if (WARNED.add(id)) {
+                AshVehicles.LOGGER.info("No resource pack provides {}; falling back on {}", id, recording);
+            }
         }
 
-        ResourceLocation shipped = ModSounds.firstPresent(sounds, ModSounds.AFTERBURNER);
-        ResourceLocation recording = shipped == null ? FALLBACK : shipped;
-
-        if (WARNED.add(id)) {
-            AshVehicles.LOGGER.info("No resource pack provides {}; falling back on {}", id, recording);
-        }
-
-        // 位置も数値も同じ。変わるのは録音だけ。
-        event.setSound(new SimpleSoundInstance(SoundEvent.createVariableRangeEvent(recording),
-                sound.getSource(), AircraftEntity.AFTERBURNER_VOLUME, AircraftEntity.AFTERBURNER_LIGHT_PITCH,
-                SoundInstance.createUnseededRandom(), sound.getX(), sound.getY(), sound.getZ()));
+        // 着くまで待つ必要があれば Arrivals が預かり、ここへは null が返る（＝この音を今は鳴らすな）。
+        event.setSound(Arrivals.send(recording, sound.getSource(),
+                new Vec3(sound.getX(), sound.getY(), sound.getZ()),
+                AircraftEntity.AFTERBURNER_VOLUME, AircraftEntity.AFTERBURNER_LIGHT_PITCH,
+                AircraftEntity.AFTERBURNER_CARRY, DULLING));
     }
 
     /** MOD のバーナーイベントか。{@code engine.afterburner} か、機体名を冠した物。 */

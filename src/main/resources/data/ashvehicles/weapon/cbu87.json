@@ -1,0 +1,32 @@
+{
+  "type": "bomb",
+  "nation": "us",
+  "item": true,
+  "ammo": 1,
+  "mass": 430,
+  "firing": {
+    "rounds_per_second": 2.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 20.0,
+    "speed": 0.15,
+    "gravity": 0.0245,
+    "range": 4000.0,
+    "explosion": 1.0,
+    "tracer": "8F9482",
+    "trail": false
+  },
+  "cluster": {
+    "submunition": "ashvehicles:bomblet",
+    "count": 28,
+    "spread": 0.22,
+    "inherit": 0.15,
+    "open": 34.0
+  },
+  "sound": {
+    "volume": 1.0,
+    "pitch": 0.8
+  }
+}

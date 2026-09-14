@@ -182,12 +182,27 @@ neoForge {
             // 大量のクラスと mixin を持ち込み、開発起動はさらにその上を行く。
             //
             // -Xlog:gc は証拠のため。確保レートも停止も、これが無ければ推測にしかならなかった。
+            //
+            // ヒープは16G（2026-09-06、6G から）。物理48G のうち24G が空いているので取れる。買う物が
+            // 2つある。
+            //
+            // 1つは ZGC の余裕だ。ZGC の停止時間はヒープの大きさに依らないが、「確保が回収を追い越す」
+            // 局面——allocation stall——は別で、そこは余裕そのものが効く。この MOD の確保レートは
+            // -Xlog:gc の実測で毎秒1GB あり、6G のヒープはその6秒分でしかない。原因不明のまま残って
+            // いる「8秒の停止」（getChunk を通っていないので [stall] に出ない）の候補の1つがこれで、
+            // ServerFreezeWatch が [freeze] 行にその間の GC 時間を併記するので、次の飛行で切り分けが付く。
+            //
+            // もう1つが c2me のワーカー数。あちらの既定の並列度は
+            // min(cpus/1.6 - 1, (maxMemory_GB - 1)/0.6) で、16論理コアなら CPU 側は9、ヒープ側は6G だと
+            // 8.33——メモリで縛られて8本だった。8G 以上でヒープ側が外れ、CPU 側の9本になる。つまり
+            // 16G が9本を買っているのではなく、6G が1本捨てていた。16G にしてもワーカーはそれ以上
+            // 増えない（記憶ノート c2me-rewrites-the-chunk-rules 参照）。
             jvmArguments.addAll(
                     '-XX:+UseZGC',
                     '-XX:+ZGenerational',
                     '-XX:+ExplicitGCInvokesConcurrent',
                     '-XX:ReservedCodeCacheSize=512m',
-                    '-Xmx6G',
+                    '-Xmx16G',
                     '-Xlog:gc',
                     // 一時的。確保レートが毎秒1GBに達していることは -Xlog:gc が示したが、誰が確保して
                     // いるかは示さない。JFR の profile 設定には jdk.ObjectAllocationSample が入っている

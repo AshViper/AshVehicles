@@ -1,5 +1,7 @@
 package com.ashvehicles.weapon;
 
+import java.util.Optional;
+
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
@@ -15,10 +17,14 @@ import net.minecraft.world.phys.Vec3;
  * ラックは兵装を吊る物であり、ポッドは兵装ではないから。選択されず、撃たれず、減らない。積んでいる限り
  * ずっと仕事をする。
  *
- * <p><b>ポッドがすることは全部が倍率。</b> 5つあり、それぞれ機体が既に持っていた数値1つに掛かる。何も
+ * <p><b>ポッドがすることのほとんどは倍率。</b> 5つあり、それぞれ機体が既に持っていた数値1つに掛かる。何も
  * 言わないファイルではそれぞれ1のまま。これは意図的で、ポッドは独自の規則ではなく機体に取り付ける物だ。
  * 「シーカーを良くし排気を冷やす」ファイルは、2つの新機構ではなく2つの数値でそう言えばいい。複数積めば
  * 掛け合わされるので、ジャマー2個は1個より良く、2倍よりはっきり劣る。
+ *
+ * <p><b>対抗手段の発数だけは加算である。</b>倍率では、フレアを1発も積んでいない機体——MQ-9 がそうだ——に
+ * 何を吊っても0発のままだからで、外付けの投射機とはまさに「持っていない物を持たせる」物だ。だから
+ * {@code flares} と {@code chaff} は機体の弾倉に<em>足される</em>。2個吊れば2倍ではなく2個分になる。
  *
  * @param kind ポッドの種別。読むのはツールチップだけで、規則ではなくラベル。ポッドが<em>すること</em>は
  *             下の4つの数値
@@ -37,9 +43,15 @@ import net.minecraft.world.phys.Vec3;
  * @param mass ポッドの重さ（kg）。実物の重量をそのまま書く——照準ポッドが200、ジャマーが300あたり。
  *             専用ステーションは兵装パイロンと場所を奪い合わないが、重さは奪い合う。翼下に何を吊ろうと
  *             機体は1つで、持ち上げるのは同じ主翼だからだ
+ * @param flares このポッドが機体の弾倉に<em>足す</em>フレアの数。上の倍率と違って加算で、積んでいない
+ *               機体にも持たせられる。増えた分は満載量が増えるだけなので、実際に手に入るのは駐機して
+ *               地上要員が補充してからになる（{@code countermeasures.reload_ticks}）
+ * @param chaff もう一方の同じ物
+ * @param nation このポッドの国籍。兵装の {@code nation} と同じ。書かなければどの機体にとっても自国の物
  */
 public record EquipmentDefinition(Kind kind, boolean item, float seekerRange, float lockRate,
-        float radarGain, float heatGain, float lockDelay, Vec3 camera, float mass) {
+        float radarGain, float heatGain, float lockDelay, Vec3 camera, float mass,
+        int flares, int chaff, Optional<String> nation) {
 
     public static final Codec<EquipmentDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Kind.CODEC.optionalFieldOf("type", Kind.TARGETING).forGetter(EquipmentDefinition::kind),
@@ -50,7 +62,10 @@ public record EquipmentDefinition(Kind kind, boolean item, float seekerRange, fl
             Codec.FLOAT.optionalFieldOf("heat_gain", 1.0F).forGetter(EquipmentDefinition::heatGain),
             Codec.FLOAT.optionalFieldOf("lock_delay", 1.0F).forGetter(EquipmentDefinition::lockDelay),
             Vec3.CODEC.optionalFieldOf("camera", Vec3.ZERO).forGetter(EquipmentDefinition::camera),
-            Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(EquipmentDefinition::mass)
+            Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(EquipmentDefinition::mass),
+            Codec.INT.optionalFieldOf("flares", 0).forGetter(EquipmentDefinition::flares),
+            Codec.INT.optionalFieldOf("chaff", 0).forGetter(EquipmentDefinition::chaff),
+            Codec.STRING.optionalFieldOf("nation").forGetter(EquipmentDefinition::nation)
     ).apply(instance, EquipmentDefinition::new));
 
     /**
@@ -58,7 +73,8 @@ public record EquipmentDefinition(Kind kind, boolean item, float seekerRange, fl
      * 動き続け、ステーションが穴を抱えないようにする。
      */
     public static final EquipmentDefinition FALLBACK =
-            new EquipmentDefinition(Kind.TARGETING, true, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, Vec3.ZERO, 0.0F);
+            new EquipmentDefinition(Kind.TARGETING, true, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, Vec3.ZERO, 0.0F,
+                    0, 0, Optional.empty());
 
     /**
      * 吊られているステーションを与えたときの、このポッドのレンズの位置。

@@ -13,12 +13,14 @@ import com.ashvehicles.item.AircraftItem;
 import com.ashvehicles.item.AmmoItem;
 import com.ashvehicles.item.AmmunitionItem;
 import com.ashvehicles.item.BlastWandItem;
+import com.ashvehicles.item.CapturePointItem;
 import com.ashvehicles.item.DroneTerminalItem;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.GroundVehicleItem;
 import com.ashvehicles.item.RackItem;
 import com.ashvehicles.item.TargetDroneItem;
+import com.ashvehicles.item.TeamSpawnItem;
 import com.ashvehicles.item.VehicleWorkbenchItem;
 import com.ashvehicles.item.WeaponItem;
 import com.ashvehicles.item.WrenchItem;
@@ -83,6 +85,19 @@ public final class ModItems {
             ITEMS.registerItem("blast_wand", BlastWandItem::new, new Item.Properties().stacksTo(1));
 
     /**
+     * クリエイティブタブの仕切り。持って何かをする物ではなく、棚の枠を1つ占めるためだけのアイテム。
+     *
+     * <p>テクスチャは全面透明で、モデルも上書きを持たない。ジャンルの見出しに使われた枠には
+     * {@code client/CreativeTabHeadings} が帯と題を描き、行末を埋めるのに使われた枠には何も描かない
+     * ので空きスロットに見える。{@link ModCreativeTabs} 参照。
+     *
+     * <p>並ぶのは親タブだけなので、検索タブにも JEI の一覧にも出ない。掴んで持ち出せば見えないアイテム
+     * が1つ手に入るが、それだけで、置くことも使うこともできない。
+     */
+    public static final DeferredItem<Item> TAB_DIVIDER =
+            ITEMS.registerSimpleItem("tab_divider", new Item.Properties().stacksTo(1));
+
+    /**
      * 中間素材。機体も車両も兵装も、鉄と赤石と TNT を卓に積み上げれば出てくる物ではなくなった。
      *
      * <p>前半の7種が機体の側。板と部品と基板が土台で、そこから装甲板・エンジン・ジェットエンジン・
@@ -127,6 +142,18 @@ public final class ModItems {
                     properties -> new VehicleWorkbenchItem(ModBlocks.VEHICLE_WORKBENCH.get(), properties),
                     new Item.Properties());
 
+    /** 出撃地点を置くためのアイテム。試合の運営が置き、コマンドで陣営に結び付ける。 */
+    public static final DeferredItem<TeamSpawnItem> TEAM_SPAWN =
+            ITEMS.registerItem("team_spawn",
+                    properties -> new TeamSpawnItem(ModBlocks.TEAM_SPAWN.get(), properties),
+                    new Item.Properties());
+
+    /** 拠点の旗竿を置くためのアイテム。制圧戦の的であり、握った側の前線の出撃地点になる。 */
+    public static final DeferredItem<CapturePointItem> CAPTURE_POINT =
+            ITEMS.registerItem("capture_point",
+                    properties -> new CapturePointItem(ModBlocks.CAPTURE_POINT.get(), properties),
+                    new Item.Properties());
+
     /**
      * ここまでに名前を取った、ファイル由来でないアイテム。
      *
@@ -134,7 +161,7 @@ public final class ModItems {
      * こちらは登録が先に済んでいるので、防がないと名前の二重登録でゲームが上がらなくなる。
      */
     private static final Set<String> FIXED_NAMES = Set.of("wrench", "fuel_can", "target_drone",
-            "blast_wand", "vehicle_workbench",
+            "blast_wand", "tab_divider", "vehicle_workbench", "team_spawn", "capture_point",
             "steel_plate", "machine_parts", "circuit_board", "armor_plate", "engine", "jet_engine", "avionics",
             "seeker", "rocket_motor", "fuze", "high_explosive");
 

@@ -6,6 +6,7 @@ import com.ashvehicles.client.ghost.GhostConfig;
 import com.ashvehicles.client.ghost.adapter.AircraftGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.BulletGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.GroundVehicleGhostAdapter;
+import com.ashvehicles.client.ghost.adapter.PlayerGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.RocketGhostAdapter;
 import com.ashvehicles.client.ghost.adapter.TargetDroneGhostAdapter;
 import com.ashvehicles.client.particle.BlastParticle;
@@ -13,11 +14,13 @@ import com.ashvehicles.client.particle.BlastStageParticle;
 import com.ashvehicles.client.particle.CinderParticle;
 import com.ashvehicles.client.particle.CloudLayerParticle;
 import com.ashvehicles.client.particle.FlameParticle;
+import com.ashvehicles.client.particle.MotorFlameParticle;
 import com.ashvehicles.client.particle.SmokeParticle;
 import com.ashvehicles.client.particle.ShockwaveParticle;
 import com.ashvehicles.client.particle.SparkParticle;
+import com.ashvehicles.client.item.GeneratedItemModels;
+import com.ashvehicles.client.item.StoreItemRenderer;
 import com.ashvehicles.client.item.VehicleIcons;
-import com.ashvehicles.client.item.VehicleItemModels;
 import com.ashvehicles.client.item.VehicleItemRenderer;
 import com.ashvehicles.client.model.WeaponModel;
 import com.ashvehicles.client.renderer.AircraftRenderer;
@@ -40,6 +43,7 @@ import java.util.List;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.RecipeBookCategories;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer;
 import net.minecraft.world.item.Item;
 import net.neoforged.api.distmarker.Dist;
@@ -92,6 +96,11 @@ public class AshVehiclesClient {
         EntityGhostRegistry.register(ModEntities.BULLET.get(), new BulletGhostAdapter());
         EntityGhostRegistry.register(ModEntities.ROCKET.get(), new RocketGhostAdapter());
         EntityGhostRegistry.register(ModEntities.TARGET_DRONE.get(), new TargetDroneGhostAdapter());
+        // 人も同じ扱いにする。ゲーム自身がプレイヤーを描くのをやめる距離は PlayerDrawDistanceMixin が
+        // 引き継ぎ距離へ合わせてあるので、そこから先はこのアダプタの担当になる。届く距離を決めるのは
+        // こちら側ではなくサーバーの playerGhostRange で、そこを 0 にすれば送られてこなくなり、
+        // 参加イベントが来ないのでゴーストも作られない。
+        EntityGhostRegistry.register(EntityType.PLAYER, new PlayerGhostAdapter());
     }
 
     /** ゴーストの距離は毎フレームではなくここで一度だけ二乗しておく。 */
@@ -132,6 +141,7 @@ public class AshVehiclesClient {
     static void onRegisterParticleProviders(RegisterParticleProvidersEvent event) {
         event.registerSpriteSet(ModParticles.MOTOR_SMOKE.get(),
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.MOTOR));
+        event.registerSpriteSet(ModParticles.MOTOR_FLAME.get(), MotorFlameParticle::provider);
         event.registerSpriteSet(ModParticles.CONTRAIL.get(),
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.CONTRAIL));
         event.registerSpriteSet(ModParticles.BLAST_SMOKE.get(),
@@ -159,7 +169,7 @@ public class AshVehiclesClient {
     }
 
     /**
-     * 全機体分のアイテムモデルを、1機1ファイル書く代わりに生成する。{@link VehicleItemModels} 参照:
+     * 全機体分のアイテムモデルを、1機1ファイル書く代わりに生成する。{@link GeneratedItemModels} 参照:
      * その手のファイルの中身はどれも同じで、機体固有の情報は一つも無い。
      */
     /** 工廠の盤面を開いたときに出す画面。盤面の種類1つに画面1つ。 */
@@ -183,19 +193,27 @@ public class AshVehiclesClient {
 
     @SubscribeEvent
     static void onAddPackFinders(AddPackFindersEvent event) {
-        VehicleItemModels.addTo(event);
+        GeneratedItemModels.addTo(event);
     }
 
     /**
-     * 機体アイテムの見た目。誰かが描いたテクスチャではなく、機体自身のジオメトリから撮った絵。
-     * {@link VehicleIcons} 参照。
+     * 自分自身のジオメトリから見た目を得る2種のアイテム。どちらも誰かが描いたアイテム用テクスチャは使わない。
+     *
+     * <p>機体は写真1枚（{@link VehicleIcons} 参照）。パイロンに吊る物は立体そのもの
+     * （{@link StoreItemRenderer} 参照）。分かれ道の理由は後者に書いてある。
      */
     @SubscribeEvent
     static void onRegisterClientExtensions(RegisterClientExtensionsEvent event) {
-        IClientItemExtensions drawing = new IClientItemExtensions() {
+        IClientItemExtensions photograph = new IClientItemExtensions() {
             @Override
             public BlockEntityWithoutLevelRenderer getCustomRenderer() {
                 return VehicleItemRenderer.instance();
+            }
+        };
+        IClientItemExtensions geometry = new IClientItemExtensions() {
+            @Override
+            public BlockEntityWithoutLevelRenderer getCustomRenderer() {
+                return StoreItemRenderer.instance();
             }
         };
 
@@ -203,7 +221,13 @@ public class AshVehiclesClient {
         ModItems.aircraft().values().forEach(item -> machines.add(item.get()));
         ModItems.vehicles().values().forEach(item -> machines.add(item.get()));
 
-        event.registerItem(drawing, machines.toArray(Item[]::new));
+        List<Item> stores = new ArrayList<>();
+        ModItems.weapons().values().forEach(item -> stores.add(item.get()));
+        ModItems.racks().values().forEach(item -> stores.add(item.get()));
+        ModItems.equipment().values().forEach(item -> stores.add(item.get()));
+
+        event.registerItem(photograph, machines.toArray(Item[]::new));
+        event.registerItem(geometry, stores.toArray(Item[]::new));
     }
 
     /**
@@ -231,6 +255,7 @@ public class AshVehiclesClient {
         event.registerReloadListener(
                 (net.minecraft.server.packs.resources.ResourceManagerReloadListener) manager -> {
                     WeaponModel.clearCache();
+                    StoreItemRenderer.forget();
                     VehicleIcons.forget();
                 });
     }

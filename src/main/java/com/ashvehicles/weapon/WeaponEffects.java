@@ -24,6 +24,32 @@ public final class WeaponEffects {
     /** 発射炎を砲口のどれだけ前に置くか。威力1あたり。砲身と重ならない位置。 */
     private static final double MUZZLE_STANDOFF = 0.22;
 
+    /**
+     * 発射筒の後端から噴流を伸ばす長さ。規模1あたりブロック。
+     *
+     * <p>筒の長さではなく、筒を出たガスが読める形で残っている距離。実物のこれは筒の長さの何倍もあり、
+     * 「後ろに炎が出た」ではなく「後ろへ吹いている」に見せているのがその長さだ。
+     */
+    private static final double BACKBLAST_REACH = 2.2;
+    /**
+     * その噴流を作る粒の数。<b>1発あたり</b>。
+     *
+     * <p>控えめなのは意図的だ。これを持つのは斉射する発射機で、mo_1_01 なら毎秒4発——1発分を「1発で
+     * 十分に見える量」にすると、斉射の2秒目には画面がそれだけになる。1発は薄く、重なって濃くなる。
+     * 実物の斉射もそう見える。
+     */
+    private static final int BACKBLAST_PUFFS = 6;
+    /** 噴流が後ろへ吹き出す速さ（1tickあたりブロック）。 */
+    private static final double BACKBLAST_THROW = 0.85;
+    /** 筒口そのものの火の大きさ。前の発射炎と同じ尺度で。 */
+    private static final float BACKBLAST_FLAME = 0.42F;
+    /** 土煙を筒の後端の真下から、さらにどれだけ後ろへ置くか。規模1あたりブロック。 */
+    private static final double BACKBLAST_HEEL = 0.9;
+    /** 巻き上がる土煙の粒数。 */
+    private static final int BACKBLAST_DUST = 8;
+    /** そのうち、吹き上がった後もその場に残る分。{@link ModParticles#CLOUD} は長生きする。 */
+    private static final int BACKBLAST_BANK = 2;
+
     /** 跳弾が装甲板で散らす火花の大きさ。{@link Effects#sparks} の尺度で。 */
     private static final float RICOCHET_SPARKS = 1.6F;
     /** そのうち、散らすのではなく新しい進行方向へ投げる本数。 */
@@ -111,6 +137,64 @@ public final class WeaponEffects {
                 ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, power * 0.22F),
                 2 + (int) power, power * 0.08, power * 0.05);
         Effects.sparks(level, ahead, Effects.EMBER, power * 0.5F);
+    }
+
+    /**
+     * 発射筒の後ろから出る物。
+     *
+     * <p><b>これは砲の後座ではなくロケットの排気だ。</b> 筒は後ろが開いていて、モーターは弾がまだ筒の
+     * 中にいる間に点火する。だから出ていくのは弾だけではない——同じ量のガスが反対側から、弾よりずっと
+     * 速く出てくる。TOS-1 や BM-21 の発射がああ見えるのはそれが理由で、見えている物のほとんどは
+     * ロケットではなく<em>ロケットが押しのけた空気と地面</em>である。
+     *
+     * <p>だから3つある。筒口の火、後ろへ伸びる噴流、そしてその噴流が地面に当たって巻き上げる土煙。
+     * 3つめが一番大きい。仰角の付いた筒から斜め下後方へ吹くので、噴流は必ず地面に届く。
+     *
+     * <p><b>地面を訊かない。</b> 土煙は車両自身の足元の高さに置く。車両は地面の上に立っているので
+     * それが地面の高さであり、ブロックを1つも引かずに済む——毎秒4発の斉射の途中で、飛んでいる弾の
+     * ために既に忙しい tick スレッドに、これ以上の問い合わせを足す理由は無い。
+     *
+     * @param vent 筒の開いている後端
+     * @param along 筒が向いている方向。単位ベクトルで、前向き
+     * @param groundY 車両が立っている高さ
+     * @param power 噴流の規模。爆発と同じ尺度で
+     * @param tracer 筒口の火の色。モーター自身の色
+     */
+    public static void backblast(ServerLevel level, Vec3 vent, Vec3 along, double groundY,
+            float power, int tracer) {
+        Vec3 back = along.scale(-1.0);
+        RandomSource random = level.getRandom();
+        double reach = power * BACKBLAST_REACH;
+
+        // 筒口の火。前の発射炎より小さいが、こちらは筒の後ろで起きる。
+        Effects.send(level, vent, ModParticles.BLAST.get().of(tracer, power * BACKBLAST_FLAME),
+                2 + (int) power, power * 0.08, power * 0.03);
+
+        // 後ろへ伸びる噴流。1点に撒くのではなく線に沿って置く——散布では「筒の後ろに煙の球がある」に
+        // しかならず、噴流に見えるのは長さの方だ。ミサイルの航跡と同じ理由で同じ形にしてある
+        // （{@code VehicleProjectile.spawnTrail} 参照）。
+        for (int i = 0; i < BACKBLAST_PUFFS; i++) {
+            double out = (i + random.nextDouble()) / BACKBLAST_PUFFS;
+            Vec3 at = vent.add(back.scale(out * reach));
+
+            // 筒に近いほど速く、離れるほど失速している。噴流が「押し出されている」ように見えるのは
+            // 濃さではなくこの速度差による。
+            Effects.aimed(level, at,
+                    ModParticles.MOTOR_SMOKE.get().of(Effects.SOOT, power * (0.35F + 0.4F * (float) out)),
+                    back.scale(BACKBLAST_THROW * (1.0 - out * 0.7)));
+        }
+
+        // 噴流が地面に当たる所。水平成分だけを見る——仰角が何度だろうと土煙は車両の後ろに立つ。
+        Vec3 sweep = new Vec3(back.x, 0.0, back.z);
+        Vec3 heel = sweep.lengthSqr() < 1.0E-8 ? Vec3.ZERO : sweep.normalize();
+        Vec3 ground = new Vec3(vent.x, groundY, vent.z).add(heel.scale(power * BACKBLAST_HEEL));
+
+        Effects.send(level, ground, ModParticles.BLAST_SMOKE.get().of(Effects.DUST, power * 0.75F),
+                BACKBLAST_DUST, new Vec3(power * 0.55, power * 0.14, power * 0.55), power * 0.05);
+        // そして立った土煙はすぐには消えない。実物の斉射が終わる頃に車両が自分の埃の中にいるのは、
+        // 1発ごとのこれが積み上がるからだ。
+        Effects.send(level, ground, ModParticles.CLOUD.get().of(Effects.DUST, power * 0.9F),
+                BACKBLAST_BANK, new Vec3(power * 0.7, power * 0.12, power * 0.7), power * 0.02);
     }
 
     /**

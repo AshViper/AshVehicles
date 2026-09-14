@@ -1,5 +1,6 @@
 package com.ashvehicles.client.renderer;
 
+import com.ashvehicles.client.ThermalTargets;
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -48,6 +49,22 @@ public abstract class VehicleRenderer<T extends VehicleEntityBase & GeoEntity> e
     @Override
     public Color getRenderColor(T animatable, float partialTick, int packedLight) {
         Color colour = super.getRenderColor(animatable, partialTick, packedLight);
+
+        // サーマル映像の中では、機械は熱い物として描かれる。
+        //
+        // <p>塗る色を変えるだけで、描くのは今まで通りその機体のモデルだ。だから熱はモデルの形をしている
+        // ——主翼は主翼の形に、砲塔は砲塔の形に光る。箱で塗っていた時のような、大きさしか分からない塊に
+        // ならない。追加の描画パスも無いので、代金は色を1つ差し替えることだけである。
+        //
+        // <p>赤なのは {@code thermal.fsh} の {@code heat()} が赤橙を強く持ち上げるからで、この赤は
+        // 画面にそのまま出ない——サーマルが掛かっている時にしか返さず、その時この赤はシェーダーを通って
+        // 白（黒熱なら黒）になる。{@code ThermalTargets} 参照。
+        //
+        // <p>テクスチャは今まで通り掛かるので、明るい面ほど熱く写る。均一な白板ではなく、熱い所ほど白い
+        // 塊として見える——実際の赤外線像がそうである通りだ。
+        if (ThermalTargets.hot(animatable)) {
+            return Color.ofRGBA(255, 0, 0, colour.getAlpha());
+        }
 
         if (!animatable.isWrecked()) {
             return colour;

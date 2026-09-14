@@ -4,7 +4,7 @@
   "ammo": 24,
   "ammo_item": "rocket",
   "firing": {
-    "rounds_per_second": 1.6,
+    "rounds_per_second": 4,
     "automatic": true,
     "spread": 1.2,
     "salvo_spread": 0.0

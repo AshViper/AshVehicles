@@ -3,7 +3,7 @@
   "item": false,
   "ammo": 12,
   "firing": {
-    "rounds_per_second": 1.5,
+    "rounds_per_second": 0.67,
     "spread": 0.2
   },
   "projectile": {
@@ -25,11 +25,11 @@
     }
   },
   "guidance": {
-    "turn_rate": 5.0,
+    "turn_rate": 3.2,
     "lock_angle": 30.0,
     "lock_range": 2400.0,
     "lock_ticks": 8,
-    "track_angle": 85.0,
+    "track_angle": 60.0,
     "proximity": 6.0,
     "seeker": "radar"
   },

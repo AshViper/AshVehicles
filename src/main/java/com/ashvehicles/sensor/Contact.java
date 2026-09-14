@@ -22,14 +22,31 @@ import io.netty.buffer.ByteBuf;
  * @param locked これがシーカーの捉えている相手か
  * @param aircraft 徒歩の相手ではなく航空機か
  * @param iff 味方か、敵か、判定が付かないか
+ * @param emitter レーダーを積んだ地上車両か。{@link #emitter()} 参照
  */
 public record Contact(int id, float bearing, float range, float altitude, boolean locked, boolean aircraft,
-        Iff iff) {
+        Iff iff, boolean emitter) {
     /**
-     * 手書きなのはフィールドが7つあるから。{@code StreamCodec.composite} は6つまでしか取らない。
+     * 手書きなのはフィールドが8つあるから。{@code StreamCodec.composite} は6つまでしか取らない。
      */
     public static final StreamCodec<ByteBuf, Contact> STREAM_CODEC =
             StreamCodec.of(Contact::write, Contact::read);
+
+    /**
+     * この接触がレーダーを積んだ地上車両か。つまり対空陣地か。
+     *
+     * <p><b>HMD が世界に印を置く唯一の相手。</b> スコープ（{@code client/RadarDisplay}）は見つけた物を
+     * 全部並べるが、風防越しの視界に重なる印は別の物だ——パイロットが首を振って探すべき相手は、こちらを
+     * 撃てる位置で電波を出している物であって、牧場の羊でも、地面に落ちたアイテムでも、通り過ぎる僚機でも
+     * ない。{@code client/AircraftHud.drawHMDCues} 参照。
+     *
+     * <p>クライアントでは出せない。接触の大半はそのクライアントに存在すら知らされていないので
+     * （このレコードが存在する理由そのもの）、判定は相手を実体として持っているサーバー側で押す。
+     * 艦は浮く地上車両なので、レーダーを積んだ艦もここに入る。
+     */
+    public boolean emitter() {
+        return this.emitter;
+    }
 
     private static void write(ByteBuf buf, Contact contact) {
         ByteBufCodecs.VAR_INT.encode(buf, contact.id());
@@ -39,6 +56,7 @@ public record Contact(int id, float bearing, float range, float altitude, boolea
         buf.writeBoolean(contact.locked());
         buf.writeBoolean(contact.aircraft());
         Iff.STREAM_CODEC.encode(buf, contact.iff());
+        buf.writeBoolean(contact.emitter());
     }
 
     private static Contact read(ByteBuf buf) {
@@ -49,6 +67,7 @@ public record Contact(int id, float bearing, float range, float altitude, boolea
                 buf.readFloat(),
                 buf.readBoolean(),
                 buf.readBoolean(),
-                Iff.STREAM_CODEC.decode(buf));
+                Iff.STREAM_CODEC.decode(buf),
+                buf.readBoolean());
     }
 }

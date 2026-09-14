@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top": "ashvehicles:block/capture_point_top",
+    "side": "ashvehicles:block/capture_point_side",
+    "bottom": "ashvehicles:block/capture_point_bottom"
+  }
+}

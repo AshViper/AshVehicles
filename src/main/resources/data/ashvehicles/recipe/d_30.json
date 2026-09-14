@@ -1,0 +1,22 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_vehicle",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:machine_parts",
+      "count": 3
+    },
+    {
+      "item": "ashvehicles:high_explosive",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:d_30"
+  }
+}

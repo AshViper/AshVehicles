@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top": "ashvehicles:block/team_spawn_top",
+    "side": "ashvehicles:block/team_spawn_side",
+    "bottom": "ashvehicles:block/team_spawn_bottom"
+  }
+}

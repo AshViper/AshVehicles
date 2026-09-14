@@ -1,6 +1,6 @@
 {
-  "mass": 100,
   "type": "decoy",
   "radar_gain": 0.85,
-  "heat_gain": 0.65
+  "heat_gain": 0.65,
+  "mass": 100
 }

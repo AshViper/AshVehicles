@@ -20,6 +20,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -35,9 +36,15 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
  * <p><b>位置は空間座標ではなく箱に対して持たせる。</b> 世界座標では描く頃には古くなっている——目標は
  * まだ走っており砲塔もまだ旋回している——ので、通信に載せるのは「機体のどの箱に入ったか」と「その箱の
  * 中のどこか」（各半長に対する比率）。{@link HitReadout} が今の位置に箱を戻し、その上にマークを戻す。
+ *
+ * <p><b>撃破もここに乗る。</b>「当たった」「弾かれた」「倒した」は撃った者にとって同じ1つの問いへの3つの
+ * 答えであり、同じ弾の同じ着弾から出る。倒したかどうかをクライアントが自分で判定することはできない
+ * ——遠方の目標は大抵そこに存在しないし（{@code HitReadout.copyOf} 参照）、存在しても全損フラグが届く
+ * 頃には次の弾が出ている。だから damage と同じ場所でサーバーが述べる。{@link #isDown} 参照。
  */
 public record HitReportPayload(int target, ResourceLocation vehicle, int box, Vec3 within, Vec3 line,
-        float traverse, float gunPitch, float damage, boolean bounced) implements CustomPacketPayload {
+        float traverse, float gunPitch, float damage, boolean bounced, boolean held, boolean killed)
+        implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<HitReportPayload> TYPE =
             new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "hit_report"));
 
@@ -54,10 +61,12 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
                 buf.writeFloat(payload.gunPitch());
                 buf.writeFloat(payload.damage());
                 buf.writeBoolean(payload.bounced());
+                buf.writeBoolean(payload.held());
+                buf.writeBoolean(payload.killed());
             },
             buf -> new HitReportPayload(buf.readVarInt(), buf.readResourceLocation(), buf.readVarInt() - 1,
                     read(buf), read(buf), buf.readFloat(), buf.readFloat(), buf.readFloat(),
-                    buf.readBoolean()));
+                    buf.readBoolean(), buf.readBoolean(), buf.readBoolean()));
 
     private static void write(FriendlyByteBuf buf, Vec3 vector) {
         buf.writeFloat((float) vector.x);
@@ -85,9 +94,12 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
      * @param at 世界座標での着弾点
      * @param travel 着弾時の進行方向
      * @param damage 与えた損害。装甲に弾かれた弾では 0
+     * @param held 板に入ったが抜けなかったか。損害は半分になっている。{@code weapon.Penetration} 参照
+     * @param killed この打撃で相手が終わったか。既に残骸だった物への追撃は偽（呼ぶ側が打撃の前後で
+     *     {@link #isDown} を比べる）
      */
     public static void report(@Nullable Entity shooter, Entity struck, Vec3 at, Vec3 travel,
-            float damage, boolean bounced) {
+            float damage, boolean bounced, boolean held, boolean killed) {
         if (!(shooter instanceof ServerPlayer crew)) {
             return;
         }
@@ -120,7 +132,7 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
             PacketDistributor.sendToPlayer(crew, new HitReportPayload(missile.getId(),
                     missile.getWeaponId(), -1, Vec3.ZERO,
                     travel.lengthSqr() < 1.0E-6 ? new Vec3(0.0, 0.0, 1.0) : travel.normalize(),
-                    0.0F, 0.0F, damage, bounced));
+                    0.0F, 0.0F, damage, bounced, held, killed));
 
             return;
         } else if (struck instanceof TargetDroneEntity drone) {
@@ -130,7 +142,7 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
             PacketDistributor.sendToPlayer(crew, new HitReportPayload(drone.getId(),
                     BuiltInRegistries.ENTITY_TYPE.getKey(drone.getType()), -1, Vec3.ZERO,
                     travel.lengthSqr() < 1.0E-6 ? new Vec3(0.0, 0.0, 1.0) : travel.normalize(),
-                    0.0F, 0.0F, damage, bounced));
+                    0.0F, 0.0F, damage, bounced, held, killed));
 
             return;
         } else {
@@ -149,7 +161,33 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
                 : Attitude.toBody(machine.getAttitude(), travel.normalize());
 
         PacketDistributor.sendToPlayer(crew, new HitReportPayload(machine.getId(), machine.getVehicleId(),
-                slot, within, line, traverse, gunPitch, damage, bounced));
+                slot, within, line, traverse, gunPitch, damage, bounced, held, killed));
+    }
+
+    /**
+     * この相手はもう終わっているか。<b>打撃の前と後で比べるために呼ぶ。</b>
+     *
+     * <p>「今そうなっている」だけでは撃破にならない。残骸は世界に立ち続けるので（{@code VehicleEntityBase.wreck}
+     * 参照）、燃えている車体へ撃ち込む2発目3発目が全部「撃破」を名乗ってしまう。だから呼ぶ側は打撃の直前に
+     * 一度、直後にもう一度これを問い、偽から真へ変わった1発だけが撃破を報告する。
+     *
+     * <p>箱ではなく機体について答える。当たったのは砲塔や主翼でも、終わったかどうかを持っているのは機体だ。
+     */
+    public static boolean isDown(Entity struck) {
+        Entity subject = struck instanceof VehiclePart part && part.getParent() != null
+                ? part.getParent() : struck;
+
+        if (subject instanceof VehicleEntityBase machine) {
+            // 除去ではなく全損フラグ。機体は倒れても残骸として残るので、消えるのを待っていたら誰も撃破を
+            // 報告しない。
+            return machine.isWrecked();
+        }
+
+        if (subject instanceof LivingEntity living) {
+            return living.isDeadOrDying();
+        }
+
+        return subject.isRemoved();
     }
 
     private static Vec3 clamp(Vec3 within) {
@@ -164,6 +202,6 @@ public record HitReportPayload(int target, ResourceLocation vehicle, int box, Ve
     public static void handle(HitReportPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> HitReadout.report(payload.target(), payload.vehicle(), payload.box(),
                 payload.within(), payload.line(), payload.traverse(), payload.gunPitch(),
-                payload.damage(), payload.bounced()));
+                payload.damage(), payload.bounced(), payload.held(), payload.killed()));
     }
 }

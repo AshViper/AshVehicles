@@ -47,6 +47,7 @@
     --hull: #3be86a; --turret: #2fc6ff; --pylon: #ff5252; --seat: #c07dff;
     --special: #ffa03b; --pod: #4de0c0;
     --ring: #ff9f43; --gun: #ffcf5c; --eye: #7fd7ff; --chase: #ff7ad9; --aabb: #6a7f52;
+    --vapour: #9fe8ff; --coax: #ffe08a;
     --warn: #ffb454;
 
     /* -- the canvases -- */
@@ -94,6 +95,7 @@
     --hull: #0f9c41; --turret: #0577b2; --pylon: #cf2020; --seat: #7132d2;
     --special: #b06000; --pod: #0a7f6c;
     --ring: #bd6108; --gun: #7d6a05; --eye: #0c7ba9; --chase: #ba278c; --aabb: #6f7f57;
+    --vapour: #1d7f9e; --coax: #8a6a05;
     --warn: #8a6205;
 
     --model-ink: light;
@@ -340,6 +342,10 @@
         <button id="b-reread" title="R &mdash; read the folder again, and whatever is open out of it" data-t>Re-read</button>
       </div>
 
+      <!-- The folder that was open last time. Filled in on load when there was one, and it goes
+           away the moment it is pressed. See offerLastFolder. -->
+      <div id="lastfolder" class="row" style="display:none;margin-top:6px"></div>
+
       <div id="library" hidden>
         <div class="sp"></div>
         <input id="libfind" placeholder="filter…">
@@ -374,6 +380,31 @@
         <button id="m-wire" class="grow" data-t>Wire</button>
         <button id="m-off" class="grow" data-t>Off</button>
       </div>
+
+      <!-- The section. Everything of the model on the far side of one plane is not drawn, which is
+           the only way to put a seat inside a hull you can see. See clipped(). -->
+      <div class="sp"></div>
+      <label data-t>section &mdash; the model cut away in front of a plane</label>
+      <div class="row">
+        <button id="c-off" class="on grow" data-t="none|section">None</button>
+        <button data-clip="0" class="grow">x</button>
+        <button data-clip="1" class="grow">y</button>
+        <button data-clip="2" class="grow">z</button>
+        <button id="c-flip" title="which side of the plane is kept" data-t>Flip</button>
+      </div>
+      <div class="row" id="cliprow" style="display:none;margin-top:5px">
+        <input id="c-at" type="range" class="grow" step="0.05">
+        <input id="c-num" type="number" step="0.05" style="width:84px">
+      </div>
+
+      <!-- Snapping to the model itself. The corners of its cubes are the places a seat, a station
+           or a muzzle actually wants to be, and they are not on any round number. -->
+      <div class="sp"></div>
+      <div class="row">
+        <button id="b-osnap" title="J &mdash; drag onto the model's own corners and face middles" data-t>Snap to model</button>
+        <span class="muted grow" id="osnapnote"></span>
+      </div>
+
       <div class="sp"></div>
       <div class="muted" id="modelinfo">no model loaded</div>
     </div>
@@ -410,6 +441,8 @@
       <input id="bonefind" placeholder="filter…">
       <div class="sp"></div>
       <div class="list tall" id="bonelist"></div>
+      <!-- What the picked bone's own numbers are, in the machine's frame. See renderBoneNums. -->
+      <div id="bonenums"></div>
       <div class="sp"></div>
       <div class="row">
         <button id="b-bonebox" class="grow" title="Shift+F" data-t>Box round this bone</button>
@@ -425,6 +458,7 @@
     <div class="pad">
       <div class="muted" style="margin-bottom:8px" data-t>A set of boxes built off the model's own cubes: grouped by bone, cut wherever there is daylight straight through a group, and merged back together while merging is all but free. A draft to fit by hand &mdash; not a finished set.</div>
       <div class="muted" style="margin-bottom:8px" id="a-how" data-t><b>Follow the model</b> works the other way about: every cube starts as its own box and the cheapest pair is joined, over and over, until only the budget is left. It takes no notice of where one bone ends and the next begins, so it suits a machine whose bones are coarse. <b>Trace the outline</b> goes further: the model is burnt into cells, the cells are swept up into fine boxes, and the boxes are joined back together at whichever size and angle holds each pair tightest &mdash; the angles read off the outline itself, seen square-on from the six sides, and off the cubes' own edges. Each finished box is then fitted to the cubes it owns, whole, so a wing comes out a plate at its own sweep and thickness rather than a slab of cells.</div>
+      <div class="muted" style="margin-bottom:8px" data-t><b>Every cube</b> merges nothing at all: one box per cube, at the cube's own angle. It is the model exactly, and the least usable draft there is &mdash; a T-64 is 1303 cubes, and every box is a part the game carries. Cut it down by hand from here, or throw cubes away before it runs with <i>ignore cubes under</i>.</div>
       <div class="row">
         <div class="grow"><label data-t>ignore cubes under</label>
           <input id="a-min" type="number" step="0.05" min="0" value="0.25"></div>
@@ -443,6 +477,7 @@
         <button id="a-model" title="start from every cube and join the cheapest pair until the budget is reached, bones or no bones" data-t>Follow the model</button>
         <button id="a-trace" title="burn the model into cells, sweep the cells up into boxes, and join the boxes along the angles the outline is drawn at" data-t>Trace the outline</button>
         <button id="a-cube" title="start from the model exactly &mdash; every cube the box it already is &mdash; and merge boxes away at their own angles, free ones first" data-t>Keep the shape</button>
+        <button id="a-raw" title="one box per cube, at the cube's own angle, merged with nothing &mdash; the model exactly, and as many boxes as it has cubes" data-t>Every cube</button>
       </div>
       <div class="sp"></div>
       <div class="row">
@@ -819,6 +854,13 @@ const JA = {
     "、%s ブロックのセルでなぞり、%s 個の箱から統合。",
   "Trace the outline": "輪郭をなぞる",
 
+  /* ---- one box per cube ---- */
+  "Every cube": "キューブそのまま",
+  "one box per cube, at the cube's own angle, merged with nothing &mdash; the model exactly, and as many boxes as it has cubes":
+    "1キューブにつき1箱を、キューブ自身の角度で。統合は一切しません — モデルそのままで、箱の数はキューブの数になります",
+  "<b>Every cube</b> merges nothing at all: one box per cube, at the cube's own angle. It is the model exactly, and the least usable draft there is &mdash; a T-64 is 1303 cubes, and every box is a part the game carries. Cut it down by hand from here, or throw cubes away before it runs with <i>ignore cubes under</i>.":
+    "<b>キューブそのまま</b> は統合を一切しません。1キューブにつき1箱を、キューブ自身の角度で。モデルそのものであり、同時に最も使えない下書きです — T-64 は 1303 キューブあり、箱1つ1つがゲームの抱えるパーツになります。ここから手で削るか、<i>無視するキューブ</i> で走らせる前にキューブを落としてください。",
+
   /* ---- keeping the model's own shape ---- */
   "Keep the shape": "形を保つ",
   "start from the model exactly &mdash; every cube the box it already is &mdash; and merge boxes away at their own angles, free ones first":
@@ -1148,6 +1190,13 @@ const JA = {
   "size": "サイズ",
   "rotation &mdash; x nose up, y yaw right, z right side down": "回転 — x は機首上げ、y は右ヨー、z は右舷下げ",
   "mount": "取り付け先",
+  "armour plate, mm &mdash; each face as the box itself faces": "装甲厚 mm — 箱自身の向きで見た各面",
+  "front|plate": "前",
+  "rear|plate": "後",
+  "left|plate": "左",
+  "right|plate": "右",
+  "top|plate": "上",
+  "bottom|plate": "下",
   "hull": "車体",
   "turret &mdash; swung about the ring": "砲塔 — リングを中心に旋回",
   "gun &mdash; and rocked about the trunnion": "砲身 — 旋回に加え、砲耳を中心に俯仰",
@@ -1268,6 +1317,73 @@ const JA = {
   "Pick a bone in the list first": "先にリストからボーンを選んでください",
   "That bone has no cubes": "そのボーンにはキューブがありません",
   "Box round %s": "%s を囲む箱",
+
+  /* ---- what the picked bone's own numbers are ---- */
+  "&mdash; in the machine's own blocks": "— 機体座標・ブロック",
+  "pivot": "回転中心",
+  "middle": "中心",
+  "extent": "寸法",
+  "no cubes on this bone": "このボーンにキューブはありません",
+  "Put the selected here": "選択中をここへ",
+  "On its pivot": "回転中心へ",
+  "Nothing selected to move": "動かす物が選択されていません",
+  "%s put on %s": "%s を %s に合わせました",
+  "it": "選択中の物",
+
+  /* ---- the section, and snapping to the model ---- */
+  "section &mdash; the model cut away in front of a plane": "断面 — 平面の手前を切り落として描く",
+  "none|section": "なし",
+  "Flip": "反転",
+  "Snap to model": "モデルに吸着",
+  "corners and face middles of the model itself": "モデルの角と面の中心に吸着",
+  "the grid only": "グリッドのみ",
+  "Snapping to the model": "モデルに吸着します",
+  "Snapping to the grid only": "グリッドのみに吸着します",
+  "the section": "断面",
+  "under Machine: one plane, and the model in front of it not drawn &mdash; the way to place anything inside a hull or under a canopy":
+    "「機体」パネル。平面を1枚置き、その手前のモデルを描かない — 車内やキャノピー内に物を置く唯一の方法",
+  "snap to the model itself &mdash; the corners of its cubes and the middles of their faces":
+    "モデル自体に吸着 — キューブの角と面の中心",
+
+  /* ---- the folder, remembered ---- */
+  "Open %s again": "%s をもう一度開く",
+  "That folder cannot be read any more — choose it again": "そのフォルダーはもう読めません。選び直してください",
+
+  /* ---- the crew, seated ---- */
+  "facing &mdash; drawn only, never written to the file": "向き — 表示のみ。ファイルには書かれません",
+  "nose": "機首",
+  "tail": "機尾",
+  "left|facing": "左",
+  "right|facing": "右",
+
+  /* ---- the places the figures table owns ---- */
+  "Back to the machine's own": "既定に戻す",
+  "Written to the file where it stands.": "この位置がファイルに書かれます。",
+  "Not in the file: this is what the mod works out for this machine. Move it, or type into a field above, and it becomes a figure of its own.":
+    "ファイルには書かれていません。これは MOD がこの機体について導く位置です。動かすか上の欄に打ち込むと、この機体の値になります。",
+  "coaxial muzzle": "同軸機銃の銃口",
+  "vapour cone": "ベイパーコーン",
+  "wingtip vapour": "翼端ベイパー",
+  "Where the coaxial's rounds leave, written with the turret dead ahead. It is bolted to the mantlet, so traverse (<kbd>Q</kbd> <kbd>E</kbd>) and elevate (<kbd>[</kbd> <kbd>]</kbd>) and the bore should stay along the barrel.":
+    "同軸機銃の弾が出る位置。砲塔正面での値を書きます。防盾に固定されているので、旋回（<kbd>Q</kbd> <kbd>E</kbd>）と俯仰（<kbd>[</kbd> <kbd>]</kbd>）をしても銃身線が砲身に沿ったままなら正しい位置です。",
+  "Where the shock collar forms at speed. The ring drawn round it is the radius the file gives, which is the other half of placing one: a cone the size of a fighter on a bomber is not a figure anybody notices until it is drawn.":
+    "高速時に凝結が起きる位置。周りの円はファイルの半径そのもので、位置と同じくらい重要です。爆撃機に戦闘機サイズのコーンが出ていても、描いてみるまで誰も気付きません。",
+  "Where the wingtip ropes come off under load. One tip is written down and the other is its mirror, so put this one on the right-hand tip and the left follows.":
+    "高G時に翼端から曳く渦の位置。書くのは片翼だけで、反対側は左右反転で付いてきます。右翼端に合わせてください。",
+  "where the coaxial's rounds leave, and its line of fire (ground)": "同軸機銃の銃口と銃身線（地上車両）",
+  "the vapour cone at speed, and the wingtips under load (aircraft)": "高速時のベイパーコーンと翼端渦（航空機）",
+  "effects|group": "凝結効果",
+  "cone_radius|effects": "コーン半径",
+  "cone_speed|effects": "発生速度（最大速度比）",
+  "vortex_load|effects": "翼端渦の発生G",
+  "Condensation, and nothing else: none of it touches how the machine flies. Where the cone and the wingtips are is under Points.":
+    "水蒸気の凝結だけを決めます。飛び方には一切関わりません。コーンと翼端の位置は「点」にあります。",
+  "The machine gun beside the main one, fired on its own key. Left out there is none. Where its rounds leave is a point under Points, dragged against the mantlet like everything else.":
+    "主砲の隣の機銃。専用キーで撃ちます。書かなければ機銃はありません。銃口の位置は「点」にあり、他と同じようにドラッグで置きます。",
+
+  /* ---- a crew gun's bones ---- */
+  "the bones it swings &mdash; blank for a gun the model does not move": "振れるボーン — モデルが動かない砲は空欄",
+  "and the bone that elevates, where that is a different one": "俯仰するボーンが別ならそれ",
 
   /* ---- the model ---- */
   "no model loaded": "モデル未読込",
@@ -1693,6 +1809,7 @@ const state = {
     model: false,          // build from every cube rather than from the bones
     trace: false,          // burn the model into cells, sweep them up, and join along the outline's angles
     cube: false,           // start from every cube as it lies and merge away at the cubes' own angles
+    raw: false,            // one box per cube, at the cube's own angle, and no merging at all
   },
 
   chassis: {
@@ -1744,6 +1861,34 @@ const state = {
 
   pose: { turret: 0, gun: 0 },
   snap: 0.05,
+
+  /**
+   * The section: everything of the model on one side of a plane is not drawn.
+   *
+   * <p>The one thing the tool could not do was put something <em>inside</em> a shape. A seat is
+   * under a canopy, an eye is behind a vision block, a muzzle is in a mantlet — and every one of
+   * those is a point you place by looking at geometry that is in the way of looking at it. Wireframe
+   * was the answer and it is a poor one: five hundred cubes of outline is a haze, and the shape you
+   * are placing against is the one line in it you cannot pick out.
+   *
+   * <p>{@code axis} is −1 for no section at all, otherwise 0, 1 or 2; {@code at} is where along that
+   * axis the plane stands, in the machine's own blocks; {@code side} is which half is kept. A cube
+   * is kept when it has a corner on the kept side, so a part the plane goes through stays drawn —
+   * cutting them off at the plane would need the cubes split, and what is wanted here is to see
+   * into the hull, not a section drawing of it.
+   */
+  clip: { axis: -1, at: 0, side: 1 },
+
+  /**
+   * Snapping to the model rather than to a round number.
+   *
+   * <p>The grid snap is for laying boxes out; this is for putting a point exactly where the model
+   * already has something. A seat goes on the seat pan the modeller drew, a muzzle at the end of
+   * the barrel they drew, a station on the pylon they drew — and not one of those is at a multiple
+   * of 0.05. What it snaps to is the corners of the model's own cubes and the middles of their
+   * faces, which between them is every place anybody points at.
+   */
+  osnap: false,
   // Off to begin with. A machine with forty boxes is forty names written across the very shape
   // they are being fitted to, and the name of the box you are dragging is in the panel anyway.
   // L, or the button, puts them back when it is the naming rather than the fitting that matters.
@@ -1891,61 +2036,64 @@ const muzzle = () => add(onTurret(trunnion()), scale(aimDir(), state.chassis.bar
  * ================================================================== */
 
 /**
- * The six faces of a cube, as the corners of {@code loadGeo} number them.
+ * The four corners of each face, in the order GeckoLib itself builds them.
  *
  * <p>A corner's number is a bit per axis in the model's own units — 1 is the +x side, 2 the +y, 4
- * the +z — and each face is written here as three of them: where the texture's top-left corner
- * goes, where its top-right goes, and where its bottom-left goes. Three corners is all a flat
- * picture needs, because whatever the model has been turned by, a square face of a box comes out
- * of an orthographic or a turntable projection as a parallelogram and nothing more.
- */
-/**
- * The six faces of a cube, as the corners of {@link loadGeo} number them.
+ * the +z — and {@code loadGeo} numbers its eight points the same way. Each line here is
+ * {@code BakedModelFactory.VertexSet}'s own quad for that face, vertex for vertex: {@code quadWest}
+ * is {@code topRightBack, topLeftBack, bottomLeftBack, bottomRightBack}, and back is the +x end
+ * because the loader bakes a cube's origin as {@code −(origin.x + size.x)}.
  *
- * <p>A corner's number is a bit per axis in the model's own units — 1 is the +x side, 2 the +y, 4
- * the +z — and each face is written here as three of them: where the texture's top-left corner
- * goes, where its top-right goes, and where its bottom-left goes. Three corners is all a flat
- * picture needs, because whatever the model has been turned by, a square face of a box comes out
- * of an orthographic or a turntable projection as a parallelogram and nothing more.
- *
- * <p>These are not guesses about the format. They are read off GeckoLib's own cube builder, which
- * is what actually puts these models on the screen in the game — {@code BakedModelFactory} picks
- * the four corners of each quad and {@code GeoQuad.build} pins the patch to them, and two things
- * about it are worth writing down because they are not what anyone would assume. The u axis runs
- * from the second corner of the quad to the first, not the other way, so every face is laid on
- * from the right; and {@code east} is the −x side of the cube and {@code west} the +x, because the
- * loader has already turned the model half round by the time the faces are named. Getting either
- * of them the wrong way about paints a mirror image on every face of the machine, and a mirror
- * image of a panel line looks enough like a panel line to be missed.
+ * <p>So {@code east} is the −x side of the cube in the model and the +x side in the file, which is
+ * the machine's right, and {@code west} the other. Getting that the wrong way about paints a mirror
+ * image on every face of the machine, and a mirror image of a panel line looks enough like a panel
+ * line to be missed.
  */
-const QUAD = {
-  north: { a: 2, u: 3, v: 0 },   // −z, the nose end once the model is turned round
-  south: { a: 7, u: 6, v: 5 },   // +z
-  east:  { a: 6, u: 2, v: 4 },   // −x in the file, which is the machine's right
-  west:  { a: 3, u: 7, v: 1 },   // +x in the file, which is the machine's left
-  up:    { a: 6, u: 7, v: 2 },
-  down:  { a: 0, u: 1, v: 4 },
+const QUAD_VERTS = {
+  north: [3, 2, 0, 1],   // −z in the model, the nose end once it is turned round
+  south: [6, 7, 5, 4],   // +z
+  east:  [2, 6, 4, 0],   // −x in the model: +x in the file, the machine's right
+  west:  [7, 3, 1, 5],   // +x in the model: −x in the file, the machine's left
+  up:    [7, 6, 2, 3],
+  down:  [1, 0, 4, 5],
 };
 
-const FACE_KEYS = ["north", "south", "east", "west", "up", "down"];
-
 /**
- * Which corners a face's patch is actually laid on.
+ * Which corner of a face the patch's top-left, top-right and bottom-left land on.
  *
- * <p>A mirrored cube is one drawn once and used on both sides, and it is not the patch that moves
- * but the face it goes on: the two sides trade, and — for a cube that names its faces rather than
- * taking the net — so do the lid and the floor. GeckoLib does exactly this and no more, so a
- * mirrored cube's patches are read from the same places as anyone else's.
+ * <p>Two things about this are not what anyone would assume, and both are read off
+ * {@code GeoQuad.build} rather than guessed.
+ *
+ * <p><b>The u axis runs from the second corner of the quad to the first</b>, not the other way:
+ * {@code build} swaps {@code u} and {@code uWidth} before pinning them on, so vertex 0 wears the
+ * right-hand edge of the patch and vertex 1 the left. Every face is laid on from the right.
+ *
+ * <p><b>Unless the cube is mirrored, when it does not swap them.</b> That is the whole of what
+ * {@code mirror} does to a patch — {@code build} skips the swap and turns the normal round instead
+ * — and it is easy to miss, because the other half of mirroring (the two sides trading faces, and
+ * the lid and floor with them for a cube that names its faces) is done somewhere else entirely, in
+ * {@code verticesForQuad}. Miss it and every mirrored cube on the machine wears its patch back to
+ * front: a wing drawn once and used on both sides comes out with its panel lines running the wrong
+ * way, on one side only, which reads as a texture and not as a fault.
  */
 function quadFor(key, mirrored, boxUv) {
+  // Which quad. The two sides trade, and so do the lid and the floor for a cube that names its
+  // faces rather than taking the net. GeckoLib's verticesForQuad does exactly this and no more.
+  let k = key;
   if (mirrored) {
-    if (key === "east") return QUAD.west;
-    if (key === "west") return QUAD.east;
-    if (!boxUv && key === "up") return QUAD.down;
-    if (!boxUv && key === "down") return QUAD.up;
+    if (key === "east") k = "west";
+    else if (key === "west") k = "east";
+    else if (!boxUv && key === "up") k = "down";
+    else if (!boxUv && key === "down") k = "up";
   }
-  return QUAD[key];
+
+  const q = QUAD_VERTS[k];
+  return mirrored
+    ? { a: q[0], u: q[1], v: q[3] }
+    : { a: q[1], u: q[0], v: q[2] };
 }
+
+const FACE_KEYS = ["north", "south", "east", "west", "up", "down"];
 
 /**
  * The patch of texture each face of a cube is painted with.
@@ -2054,8 +2202,21 @@ function buildGeo(doc, k, roles) {
     // nothing else, so a machine gun on the roof comes round with the turret and stays level.
     const turretBone = parts.turret;
     const elevating = [parts.gun, parts.mantlet].filter(Boolean);
+    // The aircraft's moving parts, the same question asked of the roles the aeroplane files use.
+    // Only the ones that swing far enough to move the box somewhere else are here: the ramp, the
+    // bay doors, the nozzles and a swing wing. A control surface deflects twenty degrees about its
+    // own leading edge and the box it needs is the box it already has.
+    const swinging = MOVING_MOUNTS.find(([role]) => {
+      const named = parts[role];
+      return named && under(bone, named);
+    });
     const part = elevating.some(g => under(bone, g)) ? "gun"
-      : turretBone && under(bone, turretBone) ? "turret" : "";
+      : turretBone && under(bone, turretBone) ? "turret"
+      : swinging ? swinging[1] : "";
+    // Where that part turns. The bone's own pivot is the hinge — a box turned about its own centre
+    // instead would leave the ramp nine blocks from the plate it is meant to be.
+    const hinge = part && !["gun", "turret"].includes(part)
+      ? pivotOf(swinging ? byName.get(parts[swinging[0]]) || bone : bone) : null;
     let count = 0;
 
     for (const cube of bone.cubes || []) {
@@ -2077,7 +2238,7 @@ function buildGeo(doc, k, roles) {
         for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], a[j]); hi[j] = Math.max(hi[j], a[j]); }
       }
 
-      cubes.push({ pts: corners, hue, bone: bone.name, part, faces: uvFaces(cube, s) });
+      cubes.push({ pts: corners, hue, bone: bone.name, part, hinge, faces: uvFaces(cube, s) });
       count++;
     }
 
@@ -2108,6 +2269,7 @@ function loadGeo(text) {
   state.bounds = built.bounds;
   state.texSize = built.texSize;
   modelInfo();
+  renderClip();
   autoButtons();
 }
 
@@ -2506,6 +2668,12 @@ const COLOURS = {
   // apart by the game: a missile will not hang on one and a pod will not hang on the other.
   special: "#ffa03b", pod: "#4de0c0",
   ring: "#ff9f43", trunnion: "#ffcf5c", cockpit: "#7fd7ff", chase: "#ff7ad9",
+  // Condensation, both sorts: the cone off the wing at speed and the pair of ropes off the tips
+  // under load. One colour for the two because they are the same water in the same air.
+  cone: "#9fe8ff", vortex: "#9fe8ff",
+  // The coaxial's muzzle. The main gun's yellow, paled: it is a gun on the same mounting, and what
+  // has to be told apart on screen is which of the two barrels, not gun from not-gun.
+  coax: "#ffe08a",
   // A box on the barrel takes the trunnion's own colour, because the trunnion is the point it turns
   // about: the two are one assembly, and telling them apart on screen is not what anybody needs.
   // What does need telling apart is the barrel from the turret roof, and cyan against yellow is that.
@@ -2517,6 +2685,7 @@ const COLOUR_VARS = {
   hull: "--hull", turret: "--turret", pylon: "--pylon", seat: "--seat",
   special: "--special", pod: "--pod",
   ring: "--ring", trunnion: "--gun", cockpit: "--eye", chase: "--chase",
+  cone: "--vapour", vortex: "--vapour", coax: "--coax",
   gun: "--gun",
 };
 
@@ -2584,8 +2753,31 @@ const nextTheme = () => THEMES[(THEMES.findIndex(t => t.id === THEME) + 1) % THE
  * ================================================================== */
 
 const newBox = (name, offset, size) => ({
-  id: uid(), kind: "box", name, offset, size, rotation: [0,0,0], mount: "hull", twin: 0,
+  id: uid(), kind: "box", name, offset, size, rotation: [0,0,0], mount: "hull", pivot: null, twin: 0,
+  // Which of the machine's own turrets carries it, for a machine with more than one. Null is the
+  // vehicle's own turret, which is every single-turreted machine. Carried rather than edited here:
+  // the tool has no opinion about it, and a file that has it must still have it afterwards.
+  station: null,
+  // Armour thickness in millimetres, six figures in PLATE_FACES order, or null for a box with none.
+  // The faces are the box's own, turned with it — the front of a turret box is where the turret faces.
+  plate: null,
 });
+/** The faces a box's armour is written for, in the order the panel lists them. */
+const PLATE_FACES = ["front", "rear", "left", "right", "top", "bottom"];
+/** A file's plate — one figure for every face, or a block naming the faces it has — as six figures. */
+const plateFrom = p => typeof p === "number" ? PLATE_FACES.map(() => p)
+  : p && typeof p === "object" ? PLATE_FACES.map(face => Number(p[face]) || 0) : null;
+/**
+ * Six figures back as the file writes them: nothing at all for a box with no armour, one figure when
+ * every face agrees, and otherwise only the faces that have some. The game reads all three.
+ */
+const plateJson = p => {
+  if (!p || p.every(n => !n)) return undefined;
+  if (p.every(n => n === p[0])) return round3(p[0]);
+  const o = {};
+  PLATE_FACES.forEach((face, i) => { if (p[i]) o[face] = round3(p[i]); });
+  return o;
+};
 // rack is not edited here — it is the several places a multiple ejector rack puts stores, and this
 // tool has no opinion about one. It is carried so that a file which has one still has it afterwards.
 /**
@@ -2596,8 +2788,15 @@ const newBox = (name, offset, size) => ({
  * — it is built into the airframe — and the game ignores the kind on one.
  */
 const newPylon = (name, pos) => ({ id: uid(), kind: "pylon", name, pos, fixed: "",
-  internal: false, wingtip: false, station: "weapon", twin: 0 });
-const newSeat = pos => ({ id: uid(), kind: "seat", name: "seat", pos, twin: 0 });
+  // What a built-in gun may be loaded with. The tool has no field for it — nobody picks shell types
+  // by dragging a model about — but it has to survive the round trip, because a fixed gun that lost
+  // its list is a gun the player can no longer load. Kept as it came and written back as it came.
+  ammo: [], internal: false, wingtip: false, station: "weapon", twin: 0 });
+/**
+ * A crew place. {@code yaw} is which way the figure is drawn facing and is <b>the tool's own</b> —
+ * it is never written to the file, because the game does not turn a rider. See {@link crew}.
+ */
+const newSeat = pos => ({ id: uid(), kind: "seat", name: "seat", pos, yaw: 0, twin: 0 });
 
 /**
  * A seat's own first-person eye.
@@ -2621,7 +2820,36 @@ const isShip = () => !!(state.doc && state.doc.type === "ship");
  */
 const eyeRides = it => it.mount === "turret"
   || (it.mount === "" && state.kind === "ground" && !isShip());
-const newPoint = (key, name, pos) => ({ id: uid(), kind: "point", key, name, pos, twin: 0 });
+const newPoint = (key, name, pos, spec) => ({ id: uid(), kind: "point", key, name, pos, twin: 0,
+  // Which field of the figures table this point is the picture of, for the ones that have one.
+  // See SPEC_POINTS: those are dragged here and written by the table, and are never in both.
+  spec: spec || null });
+
+/**
+ * The points backed by a field of the figures table rather than by a line of {@code exportMachine}.
+ *
+ * <p>Four of the points — the ring, the trunnion, the eye and the chase camera — are written out by
+ * hand, because the file has to have them and they sit inside blocks the table does not own. These
+ * three do not: a coaxial muzzle, a vapour cone and a wingtip are ordinary optional fields of
+ * ordinary blocks, and the table already knows how to leave one out when it is what the mod would
+ * have assumed. So they stay in the table — hidden from the panel, so that no figure is typed in two
+ * places — and the point is copied in when a file is read and back out when one is written.
+ *
+ * <p><b>All three read zero as "not said".</b> That is the mod's own reading of them: a coaxial
+ * muzzle of {@code 0 0 0} is what a vehicle with no machine gun has, and a vapour cone left out is
+ * worked out from the airframe rather than put at the aircraft's own origin. So a point sitting at
+ * the origin is drawn where the mod would put it and written nowhere, and one that has been moved
+ * is written where it was moved to. Dragging it back to the origin gives the machine its default
+ * again.
+ */
+const SPEC_POINTS = {
+  coax: ["coaxial", "muzzle"],
+  cone: ["effects", "cone"],
+  vortex: ["effects", "vortex"],
+};
+
+/** Whether a spec-backed point has been given a place of its own, or is sitting at the default. */
+const placed = it => !it.spec || it.pos.some(n => n);
 
 /** The points every machine has one of, wherever they are relevant. */
 function resetPoints() {
@@ -2629,8 +2857,37 @@ function resetPoints() {
   state.items.push(
     newPoint("ring", "turret ring", [0, 1.5, 0]),
     newPoint("trunnion", "trunnion", [0, 1.8, 1]),
+    newPoint("coax", "coaxial muzzle", [0, 0, 0], SPEC_POINTS.coax),
     newPoint("cockpit", "cockpit eye", [0, 2, 2]),
-    newPoint("chase", "chase camera", [0, 2.5, -12]));
+    newPoint("chase", "chase camera", [0, 2.5, -12]),
+    newPoint("cone", "vapour cone", [0, 0, 0], SPEC_POINTS.cone),
+    newPoint("vortex", "wingtip vapour", [0, 0, 0], SPEC_POINTS.vortex));
+}
+
+/**
+ * Where a spec-backed point is drawn while it is still at the origin: what the mod itself would work
+ * out for this machine. Not written anywhere — it is only so that the thing can be seen and taken
+ * hold of, rather than being a cross buried in the middle of the hull.
+ */
+function derived(key) {
+  if (key === "cone") return [0, VAPOUR_HEIGHT, VAPOUR_AHEAD];
+  if (key === "vortex") return [modelSpan(), VAPOUR_HEIGHT, 0];
+  if (key === "coax") return trunnion();
+  return [0, 0, 0];
+}
+
+/** How high above the machine's origin the mod puts condensation when the file does not say. */
+const VAPOUR_HEIGHT = 1.5, VAPOUR_AHEAD = 2.0;
+
+/**
+ * Half the machine's width, out of the collision boxes and the plain hitbox — the same figure
+ * {@code AircraftEntity.getWingSpan} takes, off the same two things, so the tips are drawn where
+ * the game would put them.
+ */
+function modelSpan() {
+  let span = state.chassis.width / 2;
+  for (const b of ofKind("box")) span = Math.max(span, Math.abs(b.offset[0]) + b.size[0] / 2);
+  return round3(span);
 }
 
 const byId = id => state.items.find(i => i.id === id) || null;
@@ -2651,6 +2908,12 @@ const point = key => state.items.find(i => i.kind === "point" && i.key === key);
 function relevant(it) {
   if (it.kind === "pylon") return state.kind === "aircraft";
   if (it.kind === "point" && (it.key === "ring" || it.key === "trunnion")) return state.kind === "ground";
+  // The coaxial's muzzle is a place on a machine that has a coaxial. Switch the block off under
+  // Performance and the point goes with it, exactly as the block does.
+  if (it.kind === "point" && it.key === "coax") return state.kind === "ground" && state.specOn.coaxial;
+  // Condensation is an aeroplane's. Nothing that drives goes fast enough to make any, and the mod
+  // does not look for it on one.
+  if (it.kind === "point" && (it.key === "cone" || it.key === "vortex")) return state.kind === "aircraft";
   if (it.kind === "box" && it.mount === "turret") return true;
   return true;
 }
@@ -2680,7 +2943,7 @@ const LINKS = [[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6]
 /** Whether the turret carries this item round with it, so that it is not drawn where it is written. */
 const rides = it => (it.kind === "box" && (it.mount === "turret" || it.mount === "gun"))
   || (it.kind === "eye" && eyeRides(it))
-  || (it.kind === "point" && it.key === "trunnion");
+  || (it.kind === "point" && (it.key === "trunnion" || it.key === "coax"));
 
 /** Whether this item also rocks with the gun, which only a box on the barrel does. */
 const elevates = it => it.kind === "box" && it.mount === "gun";
@@ -2714,6 +2977,9 @@ const writtenBack = (it, at) => {
  * order it was folded in.
  */
 function shift(it, delta) {
+  // Nudging a point that was showing the machine's default makes it real first, from where it was
+  // drawn. Otherwise one press of an arrow key moves it from the origin, half an aeroplane away.
+  if (it.kind === "point" && it.spec && !placed(it)) it.pos = derived(it.key).slice();
   const p = posOf(it);
 
   if (displaced(it)) {
@@ -2732,7 +2998,13 @@ function shift(it, delta) {
 
 /** Where a point item really is once the turret has carried it. */
 function pointAt(it) {
-  if (it.kind === "point" && it.key === "trunnion") return onTurret(it.pos);
+  // Still at the origin: drawn where the machine would put it anyway, so that it can be seen and
+  // taken hold of. Nothing is written until it has been moved. See SPEC_POINTS.
+  if (it.kind === "point" && it.spec && !placed(it)) {
+    const at = derived(it.key);
+    return it.key === "coax" ? onTurret(at) : at;
+  }
+  if (it.kind === "point" && (it.key === "trunnion" || it.key === "coax")) return onTurret(it.pos);
   if (it.kind === "point" && it.key === "chase") return chasePos();
   // An eye bolted to the turret goes round with it, so traversing shows where that crew member is
   // actually looking from once the gun is laid — which is the whole point of putting it on the
@@ -2784,9 +3056,25 @@ const cam = { yaw: -35, pitch: 22, zoom: 34, px: 0, py: 0, at: [0, 0, 0] };
  * plane you are placing in, an edge of a box something you can take hold of anywhere along its
  * length — so nothing that the panes were for has been given up.
  *
- * <p>They are named for the side of the machine you are looking at, and those sides are the file's:
- * inside it +x points to the machine's *left* (see the note on coordinates above), so the eye out
- * at −x is off its starboard side and that is the one called right.
+ * <p>They are named for the side of the machine you are looking at, and those sides are the file's.
+ *
+ * <p><b>A file's +x is the machine's right.</b> This was the other way round here until 2026-09-08,
+ * and the whole pane was mirrored by it: the view called <i>right</i> stood off the port side, the
+ * top view put the starboard wing on the left of the screen, and anything written off the centreline
+ * — a crew place above all — was drawn on the side opposite to the one the game puts it.
+ *
+ * <p>Three things say which way it goes, and they agree. {@code Attitude.right} is
+ * {@code −att·(1,0,0)}, and {@code Attitude.toWorld} negates x on the way in, so a file offset
+ * {@code (fx,fy,fz)} lands at {@code fx·right + fy·up + fz·nose} — {@code VehicleShapeRenderer}
+ * translates a box by {@code −offset.x} through the very same attitude, so a box and a seat are
+ * carried by one rule. {@code Attitude.rotate} turns the nose toward −x for a positive yaw, and its
+ * own note says a positive yaw is <i>nose right</i>. And the AC-130 in this repository — the one
+ * aeroplane whose asymmetry everybody knows — carries its guns at x −3.6 and −4.4, on the port side,
+ * where an AC-130's guns are.
+ *
+ * <p>Nothing in any file had to move for this. The model is read into the file's own frame and
+ * everything is placed in that frame, so both were mirrored together and a box fitted to a wing was
+ * always written correctly. It was only ever the reader who was told the wrong side.
  */
 const VIEWPOINTS = [
   { key: "front",  yaw:   0, pitch:   0, hint: "looking at the nose" },
@@ -2813,10 +3101,16 @@ function basis() {
   if (BASIS) return BASIS;
   const cy = Math.cos(deg(cam.yaw)), sy = Math.sin(deg(cam.yaw));
   const cp = Math.cos(deg(cam.pitch)), sp = Math.sin(deg(cam.pitch));
+  // The x column is negated because a file's +x is the machine's *right*, and this pane used to
+  // draw it on the left — see the note on which side is which under VIEWPOINTS. Only the picture
+  // moved: the model and everything placed on it are both written in the file's own frame and are
+  // both turned by this, so no figure changed and no file changed. What changed is that the view
+  // called `right` is now the starboard side, and a crew member written to one side of the
+  // centreline is drawn on the side the game will put them.
   return (BASIS = {
-    R: [cy, 0, -sy],
-    U: [-sy * sp, cp, -cy * sp],
-    E: [sy * cp, sp, cy * cp],
+    R: [-cy, 0, -sy],
+    U: [sy * sp, cp, -cy * sp],
+    E: [-sy * cp, sp, cy * cp],
   });
 }
 
@@ -2887,6 +3181,60 @@ function planeDelta(dsx, dsy, ia, ib) {
   return [(dsx * m11 - m01 * dsy) / det, (m00 * dsy - dsx * m10) / det];
 }
 
+/**
+ * The places on the model worth landing on: every corner of every cube, and the middle of every
+ * face of every one.
+ *
+ * <p>Worked out once a drag and not once a frame. Five hundred cubes is four thousand corners and
+ * three thousand face middles, and a mousemove has a frame to do everything else in as well.
+ *
+ * <p>The section is honoured, so a plane that has taken the roof off is a plane whose corners are
+ * not snapped to: the whole point of cutting one is that the roof is not what is being worked on.
+ */
+function modelPoints() {
+  const out = [];
+  for (const c of clipped(posedCubes())) {
+    for (const p of c.pts) out.push(p);
+    // The middles: of each of the three pairs of opposite faces, both of them. A cube's corners are
+    // where two parts meet and its face middles are where a thing sits on one, and a seat wants the
+    // second far more often than the first.
+    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+    for (const p of c.pts) for (let j = 0; j < 3; j++) {
+      lo[j] = Math.min(lo[j], p[j]); hi[j] = Math.max(hi[j], p[j]);
+    }
+    const mid = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+    for (let j = 0; j < 3; j++) {
+      for (const end of [lo[j], hi[j]]) { const q = [...mid]; q[j] = end; out.push(q); }
+    }
+  }
+  return out;
+}
+
+/** How near, in blocks, a drag has to come to a place on the model before it lands on it. */
+const OSNAP_PIXELS = 9;
+
+/**
+ * A dragged point pulled onto the model, in the two axes the drag is working in.
+ *
+ * <p>Only those two. The third is whatever the point already had, and moving it would be moving
+ * something the user cannot see happening — the same rule the grid snap follows, and the reason
+ * placing anything here is two drags from two sides rather than one from a corner.
+ *
+ * <p>The reach is in screen pixels rather than in blocks, so it is the same reach at every zoom: a
+ * model filling the pane snaps finely and one the size of a thumbnail does not fight you.
+ */
+function onModel(to, ax, ay) {
+  if (!state.osnap || !state.cubes.length) return;
+  const reach = OSNAP_PIXELS / cam.zoom;
+  let best = null, near = reach;
+
+  for (const p of drag.points || (drag.points = modelPoints())) {
+    const d = Math.hypot(p[ax] - to[ax], p[ay] - to[ay]);
+    if (d < near) { near = d; best = p; }
+  }
+  if (best) { to[ax] = round3(best[ax]); to[ay] = round3(best[ay]); }
+}
+
 /** How far the cursor has travelled along one single axis of the machine, in blocks. */
 function axisDelta(dsx, dsy, axis) {
   const b = basis(), z = cam.zoom;
@@ -2925,6 +3273,28 @@ function draw() {
 /* ---- the model ---- */
 
 /**
+ * The model with whatever is in front of the section plane taken out of it.
+ *
+ * <p><b>By the middle of a cube and not by its corners.</b> Keeping every cube with a corner on the
+ * near side sounds tidier — the plane would then cut between parts rather than through them — and
+ * on a machine it does nothing at all: a hull is one long cube through the centreline, so a section
+ * down the centreline keeps it, and the inside anybody wanted to see is still shut. Judged by the
+ * middle, a part is either in front of the plane or behind it, and cutting down a fuselage opens it.
+ *
+ * <p>Nothing here changes what is written, or which cubes a box is fitted to, or what can be picked.
+ * It is one plane and the ink in front of it, which is the whole of what a section is for.
+ */
+function clipped(cubes) {
+  const c = state.clip;
+  if (c.axis < 0) return cubes;
+  return cubes.filter(cube => {
+    let lo = 1e9, hi = -1e9;
+    for (const p of cube.pts) { lo = Math.min(lo, p[c.axis]); hi = Math.max(hi, p[c.axis]); }
+    return ((lo + hi) / 2 - c.at) * c.side <= 0;
+  });
+}
+
+/**
  * Draws the model as solid shapes rather than a thicket of lines.
  *
  * <p>Five hundred cubes of wireframe on top of each other is a haze you cannot read a shape out of,
@@ -2939,6 +3309,8 @@ function draw() {
 function drawModel(g, cubes, project, depth) {
   if (state.model === "off" || !cubes.length) return;
   const iso = state.isolate;
+  cubes = clipped(cubes);
+  if (!cubes.length) return;
 
   if (state.model === "wire") {
     g.lineWidth = 1;
@@ -3480,21 +3852,7 @@ function drawItems(g, P) {
   for (const it of state.shown.marks ? ofKind("seat") : []) {
     const on = it.id === sel, over = it.id === hov;
     const col = on ? TH.sel : over ? TH.hover : COLOURS.seat;
-    const p = it.pos;
-    const body = [];
-    for (let i = 0; i < 8; i++) body.push([
-      p[0] + (i & 1 ? 0.3 : -0.3), p[1] + (i & 2 ? 1.8 : 0), p[2] + (i & 4 ? 0.3 : -0.3)]);
-    const b = body.map(P);
-    g.strokeStyle = col; g.lineWidth = on ? 2 : 1;
-    g.globalAlpha = 0.85;
-    g.beginPath();
-    for (const [x, y] of LINKS) { g.moveTo(b[x][0], b[x][1]); g.lineTo(b[y][0], b[y][1]); }
-    g.stroke();
-    g.globalAlpha = 1;
-    const eye = P([p[0], p[1] + 1.62, p[2]]);
-    g.beginPath(); g.arc(eye[0], eye[1], 3, 0, Math.PI * 2); g.stroke();
-    marker(g, P(p), col, on, "x");
-    if (state.labels) label(g, P([p[0], p[1] + 1.8, p[2]]), it.name, col);
+    crew(g, P, it, col, on);
   }
 
   // The eyes, each tied back to the seat it belongs to by a hairline. Without the line a machine
@@ -3572,10 +3930,156 @@ function drawItems(g, P) {
     if (it.key === "trunnion") barrel(g, P, col, on);
     if (it.key === "cockpit") sight(g, P, at, col);
     if (it.key === "chase") frustum(g, P, at, col);
+    if (it.key === "coax") bore(g, P, at, col, on);
+    if (it.key === "cone") collar(g, P, at, col);
+    if (it.key === "vortex") tips(g, P, it, col, on);
 
+    // A point still at the origin is the machine's default rather than anything the file says, so
+    // it is drawn at a whisper: there, to be found and taken hold of, without reading as a figure
+    // somebody chose.
+    if (!placed(it)) g.globalAlpha = 0.55;
     marker(g, P(at), col, on, it.key === "ring" ? "ring" : "cross");
+    g.globalAlpha = 1;
     if (state.labels) label(g, P(at), shownName(it), col, n);
   }
+}
+
+/**
+ * The player model's own parts, in Minecraft's model units, posed as a rider.
+ *
+ * <p>Copied off {@code HumanoidModel} rather than sketched, because the whole use of the figure is
+ * to answer whether a crew member fits, and a sketch answers that about a sketch. The pivots and the
+ * cubes are {@code PlayerModel}'s; the angles are the ones {@code setupAnim} puts on when
+ * {@code riding} is set — the legs forward by 1.4137 radians with a little splay, the arms down by
+ * 0.6283 onto the controls — and the game sets that on every passenger of everything.
+ *
+ * <p>Model units are sixteenths of a block with <b>y pointing down</b> and the face at −z, which is
+ * why {@link crewPoint} looks the way it does rather than being a plain divide.
+ */
+const CREW_PARTS = [
+  { pivot: [0, 0, 0], from: [-4, -8, -4], size: [8, 8, 8], rot: [0, 0, 0] },                          // head
+  { pivot: [0, 0, 0], from: [-4, 0, -2], size: [8, 12, 4], rot: [0, 0, 0] },                          // body
+  { pivot: [-5, 2, 0], from: [-3, -2, -2], size: [4, 12, 4], rot: [-0.62831855, 0, 0] },              // right arm
+  { pivot: [5, 2, 0], from: [-1, -2, -2], size: [4, 12, 4], rot: [-0.62831855, 0, 0] },               // left arm
+  { pivot: [-1.9, 12, 0], from: [-2, 0, -2], size: [4, 12, 4], rot: [-1.4137167, 0.31415927, 0.07853982] },   // right leg
+  { pivot: [1.9, 12, 0], from: [-2, 0, -2], size: [4, 12, 4], rot: [-1.4137167, -0.31415927, -0.07853982] },  // left leg
+];
+
+/** Where the game hangs the model off the entity: {@code LivingEntityRenderer} translates by this. */
+const CREW_HANG = 1.501;
+
+/**
+ * How far below the seat the rider actually ends up.
+ *
+ * <p><b>The point in the file is not where their feet go.</b> That is what it looks like from the
+ * mod's side — {@code getPassengerAttachmentPoint} hands back the seat offset and nothing else — but
+ * vanilla takes the passenger's <i>own</i> vehicle attachment off it again:
+ * {@code Entity.positionRider} places the rider at {@code ridingPosition − passenger.vehicleAttachment},
+ * and a player's is {@code Player.DEFAULT_VEHICLE_ATTACHMENT}, which is {@code (0, 0.6, 0)}. So the
+ * feet land six tenths of a block <em>under</em> the figure the file gives.
+ *
+ * <p>Which turns the rule of thumb round, and makes it a better one: the hip is 12/16 above the feet,
+ * so <b>the seat point is 0.15 below the seat pan</b> — near enough the place a crew member's weight
+ * rests, rather than a figure three quarters of a block away from anything you can see on a model.
+ *
+ * <p>It is taken off in world Y and not along the machine's own up, because the attachment is only
+ * ever turned about Y and {@code (0, 0.6, 0)} does not care. On a machine standing level — which is
+ * the only way this pane draws one — the two are the same thing.
+ */
+const CREW_DROP = 0.6;
+
+/** A radian angle as the degrees {@link Rx} and its two friends want. */
+const rad = r => r * 180 / Math.PI;
+
+/**
+ * One point of the player model, in the machine's own frame, at a seat.
+ *
+ * <p>Three flips, and every one of them is the game's. {@code LivingEntityRenderer} scales the whole
+ * model by {@code (−1, −1, 1)} and translates it down by {@code 1.501}, and {@code setupRotations}
+ * turns it half round; putting those together, a model point {@code (mx, my, mz)} lands at
+ * {@code (−mx, 1.501·16 − my, −mz) / 16} above the rider's feet, in their own frame of right, up and
+ * forward. The right arm at model x −5 comes out on the right, and the face at −z comes out forward,
+ * which is the check that it is the right way round.
+ *
+ * <p>And the feet are {@link CREW_DROP} below the seat, which is the whole of why this figure used
+ * to sit too high.
+ */
+function crewPoint(m, yaw, seat) {
+  const r = -m[0] / 16, u = CREW_HANG - m[1] / 16, f = -m[2] / 16;
+  const t = apply(Ry(yaw), [r, 0, f]);
+  return [seat[0] + t[0], seat[1] + u - CREW_DROP, seat[2] + t[2]];
+}
+
+/**
+ * A crew member in the seat, sitting.
+ *
+ * <p>They were a standing box until now, and a standing box answers the wrong question. Nobody
+ * stands in an aeroplane: the game puts a passenger's model into its riding pose and it is those
+ * forward legs that decide whether a seat is in the cockpit or through the instrument panel. A box
+ * 1.8 tall over the point says the seat fits when the model's own knees do not.
+ *
+ * <p>Which puts the thing the box was hiding in plain sight. <b>The point in the file is where their
+ * feet would be if they stood up, three quarters of a block below where they are actually
+ * sitting</b> — riding rocks the legs forward about a hip that stays at 12/16, and everything above
+ * the hip stays exactly where a standing figure has it. A seat pan drawn at 1.75 wants its seat at
+ * 1.0.
+ *
+ * <p>The eye is drawn at 1.62, which is where the mod puts it for a seat with none of its own:
+ * Minecraft has no sitting pose, so a rider is still {@code Pose.STANDING} and still measures its
+ * eye from the feet.
+ *
+ * <p><b>{@code yaw} is not in the file and never goes into one.</b> The game does not turn a rider:
+ * they face wherever they are looking, freely, all the way round. It is here because a door gunner
+ * and a bench down the side of a hold are placed by asking whether the crew fit facing <em>out</em>,
+ * and there is no way to ask that of a figure that only ever faces the nose.
+ */
+function crew(g, P, it, col, on) {
+  const p = pointAt(it);
+  const yaw = it.yaw || 0;
+
+  g.strokeStyle = col; g.lineWidth = on ? 1.8 : 1; g.globalAlpha = on ? 0.95 : 0.75;
+
+  for (const part of CREW_PARTS) {
+    // Z then Y then X, which is the order ModelPart builds its quaternion in and therefore the
+    // order a leg's splay lands in. Getting it round the other way leaves the knees crossed.
+    const m = matMul(Rz(rad(part.rot[2])), matMul(Ry(rad(part.rot[1])), Rx(rad(part.rot[0]))));
+    const corners = [];
+
+    for (let i = 0; i < 8; i++) {
+      const local = [
+        part.from[0] + (i & 1 ? part.size[0] : 0),
+        part.from[1] + (i & 2 ? part.size[1] : 0),
+        part.from[2] + (i & 4 ? part.size[2] : 0),
+      ];
+      const turned = apply(m, local);
+      corners.push(P(crewPoint(
+        [turned[0] + part.pivot[0], turned[1] + part.pivot[1], turned[2] + part.pivot[2]], yaw, p)));
+    }
+
+    g.beginPath();
+    for (const [a, b] of LINKS) { g.moveTo(corners[a][0], corners[a][1]); g.lineTo(corners[b][0], corners[b][1]); }
+    g.stroke();
+  }
+
+  g.globalAlpha = 1;
+
+  // Where their eyes actually are, and which way they are facing. 1.62 above the *feet* — Minecraft
+  // has no sitting pose, so a rider is still Pose.STANDING and still measures its eye from there —
+  // which is 1.02 above the seat once the drop is taken off.
+  //
+  // Not to be read as the first-person view: this mod does not use a rider's own eye height for
+  // that. It looks out of the seat's own eye if it has one and the machine's `camera.cockpit` if it
+  // has not, both of which are their own points under Points.
+  const dir = apply(Ry(yaw), [0, 0, 1]);
+  const eye = [p[0], p[1] + 1.62 - CREW_DROP, p[2]];
+  const a = P(eye), b = P([eye[0] + dir[0] * 0.9, eye[1], eye[2] + dir[2] * 0.9]);
+  g.beginPath(); g.arc(a[0], a[1], 3, 0, Math.PI * 2); g.stroke();
+  g.globalAlpha = 0.6;
+  g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  g.globalAlpha = 1;
+
+  marker(g, P(p), col, on, "x");
+  if (state.labels) label(g, P([p[0], p[1] + 1.5, p[2]]), it.name, col);
 }
 
 /** A marker big enough to grab and to see, whatever else is on the screen behind it. */
@@ -3677,6 +4181,56 @@ function barrel(g, P, col, on) {
   g.strokeStyle = col; g.lineWidth = on ? 3 : 2;
   g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
   g.beginPath(); g.arc(b[0], b[1], 3.5, 0, Math.PI * 2); g.stroke();
+}
+
+/**
+ * The coaxial's line of fire: a short bore forward from the muzzle, laid the way the gun is laid.
+ *
+ * <p>Short on purpose. The main gun's barrel is drawn from the trunnion because that is where it
+ * starts and its length is a figure in the file; a coaxial's is one point and nothing else, so what
+ * there is to see is which way it is pointing and whether it is clear of the mantlet.
+ */
+function bore(g, P, at, col, on) {
+  const dir = apply(matMul(Ry(state.pose.turret), Rx(-state.pose.gun)), [0, 0, 1]);
+  const a = P(at), b = P(add(at, scale(dir, 2.5)));
+  g.strokeStyle = col; g.lineWidth = on ? 2.5 : 1.5; g.globalAlpha = 0.9;
+  g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  g.globalAlpha = 1;
+}
+
+/**
+ * The shock collar: a ring of the radius the file gives, standing square across the nose.
+ *
+ * <p>A ring and not a dot because the radius is half of what is being placed. A cone the size of a
+ * fighter on a B-52 is not wrong by a figure anybody would notice in a field, and is obvious the
+ * moment it is drawn round the aeroplane.
+ */
+function collar(g, P, at, col) {
+  const r = Math.max(state.spec.effects ? state.spec.effects.cone_radius : 3, 0.05);
+  const pts = [];
+  // In the plane the mod puts it in: across the machine and up it, which is square to the nose.
+  for (let a = 0; a <= 360; a += 6) {
+    pts.push(P([at[0] + r * Math.cos(deg(a)), at[1] + r * Math.sin(deg(a)), at[2]]));
+  }
+  g.strokeStyle = col; g.globalAlpha = 0.65; g.lineWidth = 1.4;
+  g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+  for (const q of pts) g.lineTo(q[0], q[1]);
+  g.stroke(); g.globalAlpha = 1;
+}
+
+/**
+ * Both wingtips. The file gives one and the other is its mirror, because a wing is symmetric and
+ * writing the second point down would only be a way of getting the two out of step.
+ */
+function tips(g, P, it, col, on) {
+  const at = pointAt(it);
+  const other = [-at[0], at[1], at[2]];
+  const a = P(at), b = P(other);
+  g.setLineDash([2, 4]); g.strokeStyle = col; g.globalAlpha = 0.45; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  g.setLineDash([]); g.globalAlpha = on ? 0.9 : 0.7;
+  marker(g, b, col, false, "cross");
+  g.globalAlpha = 1;
 }
 
 /** Where the crew are looking from the cockpit: forward, in the machine's own frame. */
@@ -3891,6 +4445,9 @@ function bindView() {
     const target = selected();
     if (!target) return;
     snapshot();
+    // A point that was showing the machine's own default becomes a figure of the file the moment it
+    // is taken hold of, and it starts from where it was being drawn rather than from the origin.
+    if (target.kind === "point" && target.spec && !placed(target)) target.pos = derived(target.key).slice();
     // Where it is drawn, which for anything on a traversed turret — or on an elevated gun — is not
     // where it is written. The axes are taken now and held for the whole drag: worked out afresh
     // every frame, a machine dragged past the diagonal would change axis under the cursor.
@@ -3970,6 +4527,7 @@ function bindView() {
     const to = [...drag.start];
     to[v.ax] = snap(drag.start[v.ax] + d[0]);
     to[v.ay] = snap(drag.start[v.ay] + d[1]);
+    onModel(to, v.ax, v.ay);
     const p = posOf(drag.item);
 
     if (displaced(drag.item)) {
@@ -4050,6 +4608,8 @@ function mirrorOf(it) {
   const p = copy.kind === "box" ? copy.offset : copy.pos;
   p[0] = -p[0];
   if (copy.kind === "box") { copy.rotation[1] = -copy.rotation[1]; copy.rotation[2] = -copy.rotation[2]; }
+  // The armour comes across with its sides changed over, as mirrorTwin keeps it afterwards.
+  if (copy.kind === "box" && copy.plate) [copy.plate[2], copy.plate[3]] = [copy.plate[3], copy.plate[2]];
   return copy;
 }
 
@@ -4063,7 +4623,13 @@ function mirrorTwin(it) {
     twin.size = [...it.size];
     twin.rotation = [it.rotation[0], -it.rotation[1], -it.rotation[2]];
     twin.mount = it.mount;
+    // The same armour, with the two sides changed over: the outer face of the left track guard is
+    // the left face, and on its twin it is the right one.
+    twin.plate = it.plate ? [it.plate[0], it.plate[1], it.plate[3], it.plate[2], it.plate[4], it.plate[5]] : null;
   }
+  // The crew member on the other side is facing the other way. A gunner leaning out of the right
+  // door and their twin leaning out of the left are the same pose mirrored, not the same angle.
+  if (it.kind === "seat") twin.yaw = -(it.yaw || 0);
 }
 
 /* ================================================================== *
@@ -4179,7 +4745,10 @@ function renderList() {
   list.forEach((it, i) => {
     const d = document.createElement("div");
     d.className = "item" + (it.id === state.sel ? " sel" : "");
-    const where = posOf(it);
+    // A spec-backed point that has not been placed reads three zeros in the file and is drawn where
+    // the mod would put it, so the list says that place and not the zeros. See SPEC_POINTS.
+    const bare = it.kind === "point" && it.spec && !placed(it);
+    const where = bare ? derived(it.key) : posOf(it);
     const note = tr(it.kind === "seat" && driver && it.id === driver.id ? " driver"
       : it.kind === "eye" ? (it.mount === "turret" ? " on the turret"
           : it.mount === "hull" ? " on the hull" : "")
@@ -4188,7 +4757,7 @@ function renderList() {
     const shown = it.kind === "eye" ? "↳ " + tr("eye") : (shownName(it) || tr("(unnamed)"));
     d.innerHTML = `<span class="dot" style="background:${colourOf(it)}"></span>`
       + `<span class="nm grow">${escapeHtml(shown)}<span class="muted">${note}</span></span>`
-      + `<span class="sub">${where.map(n => fixed(n)).join(" ")}</span>`;
+      + `<span class="sub"${bare ? ' style="opacity:.5"' : ""}>${where.map(n => fixed(n)).join(" ")}</span>`;
     d.onclick = () => { state.sel = it.id; refresh(); };
     d.onmouseenter = () => { state.hover = it.id; draw(); };
     d.onmouseleave = () => { state.hover = 0; draw(); };
@@ -4393,6 +4962,12 @@ function renderEditor() {
       <div class="triple">${num("sx","x",it.size[0])}${num("sy","y",it.size[1])}${num("sz","z",it.size[2])}</div>
       <label>${tr("rotation &mdash; x nose up, y yaw right, z right side down")}</label>
       <div class="triple">${num("rx","x",it.rotation[0],1)}${num("ry","y",it.rotation[1],1)}${num("rz","z",it.rotation[2],1)}</div>`;
+    // The faces are the box's own: the front is where the box faces once its rotation and whatever
+    // carries it have turned it, which for a turret box is where the turret is pointing.
+    const faces = it.plate || [0, 0, 0, 0, 0, 0];
+    html += `<label>${tr("armour plate, mm &mdash; each face as the box itself faces")}</label>
+      <div class="triple">${num("plate0","front|plate",faces[0],5)}${num("plate1","rear|plate",faces[1],5)}${num("plate4","top|plate",faces[4],5)}</div>
+      <div class="triple">${num("plate2","left|plate",faces[2],5)}${num("plate3","right|plate",faces[3],5)}${num("plate5","bottom|plate",faces[5],5)}</div>`;
     if (state.kind === "ground") {
       html += `<label>${tr("mount")}</label><select id="f-mount">
           <option value="hull"${it.mount === "hull" ? " selected" : ""}>${tr("hull")}</option>
@@ -4434,8 +5009,31 @@ function renderEditor() {
     html += `<button id="f-noeye" style="width:100%">${tr("Take this eye away")}</button>
       <div class="muted" style="margin-top:6px">${tr("Without one, this seat falls back to the machine’s own first-person eye under Points.")}</div>`;
   } else {
+    // A spec-backed point still at the origin is showing the machine's own default, so the fields
+    // show that rather than three zeros: type into one and it becomes a figure of the file.
+    const shownPos = it.kind === "point" && it.spec && !placed(it) ? derived(it.key) : it.pos;
     html += `<label>${tr("pos")}${it.key === "chase" ? tr(" &mdash; along the view: x right, y up, z back") : ""}</label>
-      <div class="triple">${num("px","x",it.pos[0])}${num("py","y",it.pos[1])}${num("pz","z",it.pos[2])}</div>`;
+      <div class="triple">${num("px","x",shownPos[0])}${num("py","y",shownPos[1])}${num("pz","z",shownPos[2])}</div>`;
+    if (it.kind === "point" && it.spec) {
+      html += placed(it)
+        ? `<button id="f-unset" style="width:100%">${tr("Back to the machine's own")}</button>`
+          + `<div class="muted" style="margin-top:6px">${tr("Written to the file where it stands.")}</div>`
+        : `<div class="muted" style="margin-top:2px">`
+          + tr("Not in the file: this is what the mod works out for this machine. Move it, or type "
+             + "into a field above, and it becomes a figure of its own.") + `</div>`;
+    }
+    if (it.kind === "seat") {
+      // Which way this crew member is facing. Drawn only -- the game lets a rider look wherever they
+      // like -- and it is here because a door gunner and a bench down the side of a hold cannot be
+      // judged at all against a figure that only ever faces the nose.
+      html += `<label>${tr("facing &mdash; drawn only, never written to the file")}</label>`
+        + `<div class="row">`
+        + `<input id="f-yaw" type="number" step="15" value="${round3(it.yaw || 0)}" class="grow">`
+        + [0, 90, 180, -90].map(a =>
+            `<button data-yaw="${a}"${(it.yaw || 0) === a ? ' class="on"' : ""}>${tr(
+              a === 0 ? "nose" : a === 180 ? "tail" : a === 90 ? "right|facing" : "left|facing")}</button>`).join("")
+        + `</div><div class="sp"></div>`;
+    }
     if (it.kind === "seat") {
       const eye = eyeOf(it);
       html += `<div class="sp"></div>`
@@ -4482,9 +5080,10 @@ function renderEditor() {
   const addEye = document.getElementById("f-addeye");
   if (addEye) addEye.onclick = () => {
     snapshot();
-    // A head over the feet, roughly where a sitting crew member’s is, so it starts somewhere
-    // sensible and is dragged from there rather than from the floor.
-    const eye = newEye(it.id, [it.pos[0], round3(it.pos[1] + 1.6), it.pos[2]]);
+    // Where this crew member's head actually is: 1.62 above their feet, and their feet are
+    // CREW_DROP under the seat. So it starts on the head drawn in the pane rather than a little
+    // above it, and is dragged from there to wherever the hatch is.
+    const eye = newEye(it.id, [it.pos[0], round3(it.pos[1] + 1.62 - CREW_DROP), it.pos[2]]);
     state.items.push(eye);
     state.sel = eye.id;
     refresh();
@@ -4499,11 +5098,36 @@ function renderEditor() {
     refresh();
   };
 
+  // Which way this crew member faces. Redrawn and the panel built again, because the row of four
+  // buttons has to show which of them is on.
+  const setYaw = a => { it.yaw = wrapDeg(a); mirrorTwin(it); refreshLive(); renderEditor(); };
+  const yaw = document.getElementById("f-yaw");
+  if (yaw) {
+    yaw.onfocus = () => snapshot();
+    yaw.oninput = () => { const n = parseFloat(yaw.value); if (!Number.isNaN(n)) { it.yaw = n; mirrorTwin(it); refreshLive(); } };
+  }
+  el.querySelectorAll("[data-yaw]").forEach(b => b.onclick = () => {
+    snapshot();
+    setYaw(parseFloat(b.dataset.yaw));
+  });
+
+  // Back to what the mod works out for itself: the origin is how a file says nothing, so putting it
+  // there is the whole of taking the figure out again.
+  const unset = document.getElementById("f-unset");
+  if (unset) unset.onclick = () => {
+    snapshot();
+    it.pos = [0, 0, 0];
+    refreshLive();
+    renderEditor();
+  };
+
   const MAP = {
     ox:["offset",0], oy:["offset",1], oz:["offset",2],
     sx:["size",0], sy:["size",1], sz:["size",2],
     rx:["rotation",0], ry:["rotation",1], rz:["rotation",2],
     px:["pos",0], py:["pos",1], pz:["pos",2],
+    plate0:["plate",0], plate1:["plate",1], plate2:["plate",2],
+    plate3:["plate",3], plate4:["plate",4], plate5:["plate",5],
   };
   el.querySelectorAll("input[data-k]").forEach(inp => {
     inp.onfocus = () => snapshot();
@@ -4511,6 +5135,11 @@ function renderEditor() {
       const n = parseFloat(inp.value);
       if (Number.isNaN(n)) return;
       const [prop, idx] = MAP[inp.dataset.k];
+      // Typing one figure into a point that was showing the machine's default has to take the other
+      // two with it, or the point jumps to a place nobody asked for the moment it becomes real.
+      if (prop === "pos" && it.kind === "point" && it.spec && !placed(it)) it.pos = derived(it.key).slice();
+      // A box with no armour has no figures to write one into until the first is typed.
+      if (prop === "plate" && !it.plate) it.plate = [0, 0, 0, 0, 0, 0];
       it[prop][idx] = n;
       mirrorTwin(it);
       refreshLive();
@@ -4531,6 +5160,14 @@ function pointBlurb(key) {
     chase: "The third-person camera, measured along the <b>viewing</b> axes and hung off the middle "
       + "of the plain hitbox &mdash; not the machine's own axes, which is what keeps the machine "
       + "still in frame while it turns. Negative z is behind.",
+    coax: "Where the coaxial's rounds leave, written with the turret dead ahead. It is bolted to the "
+      + "mantlet, so traverse (<kbd>Q</kbd> <kbd>E</kbd>) and elevate (<kbd>[</kbd> <kbd>]</kbd>) "
+      + "and the bore should stay along the barrel.",
+    cone: "Where the shock collar forms at speed. The ring drawn round it is the radius the file "
+      + "gives, which is the other half of placing one: a cone the size of a fighter on a bomber is "
+      + "not a figure anybody notices until it is drawn.",
+    vortex: "Where the wingtip ropes come off under load. One tip is written down and the other is "
+      + "its mirror, so put this one on the right-hand tip and the left follows.",
   }[key];
 
   return blurb ? tr(blurb) : "";
@@ -4691,6 +5328,15 @@ const I = (k, d) => ({ k, d, step: 1, kind: "int" });
 const B = (k, d) => ({ k, d, kind: "bool" });
 const ID = (k, hint) => ({ k, d: "", hint, kind: "id" });
 const V = (k, d) => ({ k, d: d || [0, 0, 0], kind: "vec3" });
+/**
+ * A field the table owns but does not show.
+ *
+ * <p>For the three places that are dragged rather than typed: the coaxial's muzzle and the two
+ * points condensation comes off. They stay in the table so that reading, writing and the rule about
+ * leaving a default out all go on working on them unchanged, and they are kept out of the panel so
+ * that no figure is typed in two places at once. See SPEC_POINTS.
+ */
+const H = f => Object.assign({}, f, { hide: true });
 const VL = (k) => ({ k, d: [], kind: "vec3list" });
 /** A list of bone names, typed as a list because that is how a modeller reads one. */
 const BONES = (k) => ({ k, d: "", kind: "bones" });
@@ -4758,6 +5404,13 @@ const GROUPS = [
     RI("cycle_ticks", 30), R("drag_penalty", 0.25, 0.05), N("lift_bonus", 0.3, 0.05)] },
   { k: "signature", when: "aircraft", f: [
     N("radar", 1.0, 0.05), N("store", 0.2, 0.05), N("heat", 1.0, 0.05)] },
+  // The two places are points under Points; what is left here is how big and how fast, which
+  // nothing can be dragged to show.
+  { k: "effects", when: "aircraft",
+    note: "Condensation, and nothing else: none of it touches how the machine flies. Where the cone "
+        + "and the wingtips are is under Points.", f: [
+    N("cone_radius", 3.0, 0.25), N("cone_speed", 0.88, 0.01), N("vortex_load", 2.5, 0.1),
+    H(V("cone", [0, 0, 0])), H(V("vortex", [0, 0, 0]))] },
   { k: "countermeasures", when: "aircraft", f: [
     I("flares", 30), I("chaff", 30), I("interval_ticks", 6), I("reload_ticks", 300),
     N("speed", 0.35, 0.05)] },
@@ -4781,8 +5434,9 @@ const GROUPS = [
   { k: "launcher", when: "ground", optional: true, showIf: () => state.specOn.launcher, f: [
     ID("missile", "ashvehicles:9m311"), V("rail", [0, 0, 0])] },
   { k: "coaxial", when: "ground", optional: true, showIf: () => state.specOn.coaxial,
-    note: "The machine gun beside the main one, fired on its own key. Left out there is none.", f: [
-    ID("gun", "ashvehicles:mg3"), V("muzzle", [0, 0, 0])] },
+    note: "The machine gun beside the main one, fired on its own key. Left out there is none. Where "
+        + "its rounds leave is a point under Points, dragged against the mantlet like everything else.", f: [
+    ID("gun", "ashvehicles:mg3"), H(V("muzzle", [0, 0, 0]))] },
   { k: "hull", when: "ground", f: [
     N("health", 300.0, 25), N("explosion_power", 4.0, 0.5), I("salvage", 0),
     N("armour", 0.0, 0.5)] },
@@ -4843,6 +5497,31 @@ function resetSpec() {
   state.lift = "none";
 }
 
+/**
+ * The places the figures table owns and the viewport draws, copied one way and the other.
+ *
+ * <p>They live in the table because everything about how a figure is read and written — the
+ * default left out, the figure the file already said kept where it was — is the table's, and
+ * writing that a second time for three fields would be three chances to get it subtly different.
+ * They are dragged because they are places. So the table holds them and the point is the picture of
+ * one, copied in when a file is read and back out when one is written, and never edited in both
+ * places at once: the panel does not show them. See SPEC_POINTS.
+ */
+function pointsFromSpec() {
+  for (const [key, [g, f]] of Object.entries(SPEC_POINTS)) {
+    const it = point(key);
+    const held = state.spec[g] && state.spec[g][f];
+    if (it && Array.isArray(held)) it.pos = held.map(Number);
+  }
+}
+
+function specFromPoints() {
+  for (const [key, [g, f]] of Object.entries(SPEC_POINTS)) {
+    const it = point(key);
+    if (it && state.spec[g]) state.spec[g][f] = it.pos.map(round3);
+  }
+}
+
 /* ---- the panel ---- */
 
 const groupName = g => {
@@ -4900,7 +5579,7 @@ function renderSpec() {
       + (g.optional ? `<button data-on="${g.k}">${on ? tr("on") : tr("off|a block of the file")}</button>` : "")
       + `</div>`;
     const note = g.note ? `<div class="muted" style="margin:-2px 0 5px">${tr(g.note)}</div>` : "";
-    return head + note + (on ? `<div class="pair">${g.f.map(f => specField(g, f)).join("")}</div>`
+    return head + note + (on ? `<div class="pair">${g.f.filter(f => !f.hide).map(f => specField(g, f)).join("")}</div>`
       : `<div class="muted" style="margin-bottom:6px">${tr("not written to the file")}</div>`);
   }).join("");
 
@@ -4916,6 +5595,9 @@ function renderSpec() {
     const key = b.dataset.on.split(".").pop();
     state.specOn[key] = !state.specOn[key];
     renderSpec();
+    // A block switched off takes its place on the machine with it: the coaxial's muzzle is a point,
+    // and a point for a gun that is not there is one more cross in the way. See relevant().
+    if (key === "coaxial") refresh();
   });
   el.querySelectorAll("[data-g]").forEach(inp => {
     inp.onfocus = () => snapshot();
@@ -5049,7 +5731,7 @@ function ordered(obj, keys) {
 
 const FILE_ORDER = {
   aircraft: ["type", "hitbox", "model", "engine", "wing", "handling", "airframe", "vtol", "rotor",
-    "landing_gear", "flaps", "camera", "sound", "radar", "signature", "countermeasures",
+    "landing_gear", "flaps", "camera", "sound", "radar", "signature", "effects", "countermeasures",
     "hardpoints", "stations", "sync"],
   ground: ["type", "hitbox", "model", "powertrain", "suspension", "turret", "armament", "coaxial",
     "launcher", "hull", "buoyancy", "crush", "camera", "sound", "radar"],
@@ -5058,6 +5740,57 @@ const MODEL_ORDER = ["scale", "bones", "road_wheels", "steered_wheels", "steer_l
   "slaved_turrets", "propellers", "propeller_axis", "nozzle_rest"];
 
 /* ---- bones ---- */
+
+/**
+ * The picked bone's own figures, in the machine's frame.
+ *
+ * <p>The tool could always <em>show</em> you the model and never tell you where any of it was, so
+ * lining a point up with a part of it was a drag from two sides and a squint. These are the same
+ * numbers the boxes are written in — the bone's pivot, and the extent and the middle of everything
+ * on it — and beside them are the two things anybody wants to do with one: put the selected item at
+ * that middle, or at that pivot.
+ *
+ * <p>Which is the missing half of <b>Box round this bone</b>. That button has always been able to
+ * put a <em>box</em> on a bone; a seat, a station, an eye or a muzzle had nothing of the kind.
+ */
+function renderBoneNums() {
+  const el = $("bonenums");
+  if (!el) return;
+  const bone = state.isolate ? boneNamed(state.isolate) : null;
+  if (!bone) { el.innerHTML = ""; return; }
+
+  const box = extentOf(boneCubes(bone.name));
+  const mid = box ? [0, 1, 2].map(j => round3((box.lo[j] + box.hi[j]) / 2)) : null;
+  const size = box ? [0, 1, 2].map(j => round3(box.hi[j] - box.lo[j])) : null;
+  const row = (label, v) => `<div class="row"><span class="muted" style="width:64px">${tr(label)}</span>`
+    + `<span class="grow" style="font-variant-numeric:tabular-nums">${v.map(n => fixed(n)).join("  ")}</span></div>`;
+
+  el.innerHTML = `<div class="sp"></div>`
+    + `<label>${escapeHtml(bone.name)} ${tr("&mdash; in the machine's own blocks")}</label>`
+    + row("pivot", bone.pivot)
+    + (mid ? row("middle", mid) + row("extent", size) : `<div class="muted">${tr("no cubes on this bone")}</div>`)
+    + `<div class="sp"></div><div class="row">`
+    + `<button id="b-tomid" class="grow"${mid ? "" : " disabled"}>${tr("Put the selected here")}</button>`
+    + `<button id="b-topivot" class="grow">${tr("On its pivot")}</button></div>`;
+
+  const move = to => {
+    const it = selected();
+    if (!it) return say("Nothing selected to move");
+    snapshot();
+    // Written back through whatever carries it, so that a point on a traversed turret lands where
+    // the bone is now rather than where the figure would put it once the turret came back.
+    const at = displaced(it) ? writtenBack(it, to) : to;
+    if (it.kind === "box") it.offset = at.map(round3);
+    else it.pos = at.map(round3);
+    mirrorTwin(it);
+    refresh();
+    say(tr("%s put on %s", shownName(it) || tr("it"), bone.name));
+  };
+  const toMid = $("b-tomid");
+  if (toMid && mid) toMid.onclick = () => move(mid);
+  const toPivot = $("b-topivot");
+  if (toPivot) toPivot.onclick = () => move(bone.pivot.map(round3));
+}
 
 function renderBones() {
   const el = document.getElementById("bonelist");
@@ -5079,6 +5812,8 @@ function renderBones() {
     d.onclick = () => { state.isolate = state.isolate === b.name ? "" : b.name; renderBones(); draw(); };
     el.appendChild(d);
   }
+
+  renderBoneNums();
 
   const roles = document.getElementById("roles");
   const names = ["", ...state.bones.map(b => b.name)];
@@ -5199,6 +5934,26 @@ const TURN_GAIN_DEFAULT = 0.95;
 const SKIP_ROLES = ["rotor", "tail_rotor", "nose_gear", "left_gear", "right_gear",
   "nose_gear_door", "left_gear_door", "right_gear_door"];
 
+/**
+ * The bone roles a box can be carried by, and the mount the mod knows them as.
+ *
+ * <p>Only the parts that swing far enough to put the box somewhere else are here. A rudder deflects
+ * eighteen degrees about its own leading edge: the box it needs is the box it already has, and
+ * following it would cost every aeroplane a few hundred rotations a tick to move a thin plate by a
+ * handspan. The ramp, by contrast, is nine blocks long and ends on the ground.
+ *
+ * <p>The bay doors of the second and third bays are the same door as the first, as far as the box
+ * is concerned — the index is in the role's name so that the file can tell them apart, and the
+ * angle they swing through is one figure for all of them.
+ */
+const MOVING_MOUNTS = [
+  ["ramp", "ramp"], ["ramp_door", "ramp"],
+  ["bay_left", "bay_left"], ["bay_left_2", "bay_left"], ["bay_left_3", "bay_left"],
+  ["bay_right", "bay_right"], ["bay_right_2", "bay_right"], ["bay_right_3", "bay_right"],
+  ["nozzle", "nozzle"], ["nozzle_left", "nozzle"], ["nozzle_right", "nozzle"],
+  ["wing_left", "wing_left"], ["wing_right", "wing_right"],
+];
+
 const transpose = m => [
   [m[0][0], m[1][0], m[2][0]], [m[0][1], m[1][1], m[2][1]], [m[0][2], m[1][2], m[2][2]],
 ];
@@ -5217,6 +5972,15 @@ function skippedBones() {
   };
   for (const role of SKIP_ROLES) {
     const root = state.roles[role];
+    if (!root) continue;
+    for (const b of state.bones) if (under(b.name, root)) out.add(b.name);
+  }
+  // Propellers go out with the rotors, and for the same reason: a disc that comes round a thousand
+  // times a minute is not a shape anything can be stopped by. The mod spins them by name rather
+  // than by role, so they are a list in the machine's own file rather than one of SKIP_ROLES.
+  const spun = (state.doc && state.doc.model && state.doc.model.propellers) || [];
+
+  for (const root of spun) {
     if (!root) continue;
     for (const b of state.bones) if (under(b.name, root)) out.add(b.name);
   }
@@ -5252,7 +6016,7 @@ function autoCubes() {
       lo[j] = Math.min(lo[j], p[j]); hi[j] = Math.max(hi[j], p[j]);
     }
     out.push({
-      pts: c.pts, bone: c.bone, mount: c.part === "gun" ? "gun" : c.part ? "turret" : "hull",
+      pts: c.pts, bone: c.bone, mount: c.part || "hull", hinge: c.hinge || null,
       lo, hi, mid: [0,1,2].map(j => (lo[j] + hi[j]) / 2),
       vol: edges[0] * edges[1] * edges[2],
     });
@@ -5583,10 +6347,10 @@ function symmetrise(boxes) {
 
     if (mate >= 0) {
       const b = boxes[mate];
-      // +x is the left-hand side, as the tracks in t_80bv.json are named. The left-hand box keeps
-      // its angles and the right-hand one takes their mirror, which is what Mirror does and what
-      // every pair in the data files looks like.
-      const left = a.offset[0] >= b.offset[0] ? a : b, right = left === a ? b : a;
+      // +x is the machine's right (see VIEWPOINTS). The one at +x keeps its angles and the one at
+      // −x takes their mirror, which is what Mirror does and what every pair in the data files
+      // looks like.
+      const right = a.offset[0] >= b.offset[0] ? a : b, left = right === a ? b : a;
       const flat = !a.rotation.some(r => r) && !b.rotation.some(r => r);
       const centre = [0, 0, 0], size = [0, 0, 0];
 
@@ -5608,11 +6372,11 @@ function symmetrise(boxes) {
       const mid = k => round3(centre[k]);
       size.forEach((s, k) => size[k] = round3(Math.max(0.05, s)));
 
-      left.offset = [x, mid(1), mid(2)];
-      right.offset = [-x, mid(1), mid(2)];
-      left.size = size; right.size = size.slice();
-      right.rotation = [left.rotation[0], -left.rotation[1], -left.rotation[2]];
-      left.side = "left"; right.side = "right"; left.mate = right; right.mate = left;
+      right.offset = [x, mid(1), mid(2)];
+      left.offset = [-x, mid(1), mid(2)];
+      right.size = size; left.size = size.slice();
+      left.rotation = [right.rotation[0], -right.rotation[1], -right.rotation[2]];
+      right.side = "right"; left.side = "left"; right.mate = left; left.mate = right;
       done.add(i); done.add(mate);
       continue;
     }
@@ -6416,7 +7180,10 @@ function planTracing(want) {
           vol: put.vol, mount: cl.mount,
           cl: { cubes: twin.held, mount: cl.mount, lo: ma, hi: mb, full: -1, stuck: true },
         };
-        main.side = "left"; other.side = "right";
+        // `other` is the reflection of `main` across the centreline, so it is on whichever side
+        // `main` is not. +x is the machine's right.
+        main.side = put.offset[0] >= 0 ? "right" : "left";
+        other.side = main.side === "right" ? "left" : "right";
         main.mate = other; other.mate = main;
         boxes.push(other);
         vol += put.vol;
@@ -6703,7 +7470,10 @@ function planPerCube() {
   const boxes = [];
   for (const c of cubes) {
     const b = state.auto.turn ? boxOfCube(c) : null;
-    boxes.push(b || fitBox(cluster([c], c.mount)));
+    const box = b || fitBox(cluster([c], c.mount));
+    // Where this box turns, if it turns: its own bone's pivot, carried through from the model.
+    box.hinge = c.hinge || null;
+    boxes.push(box);
   }
   return {
     boxes: boxes.filter(Boolean), dropped, kept: cubes.length,
@@ -6950,7 +7720,8 @@ function planByBone(want) {
  */
 function planBoxes() {
   const want = Math.max(1, Math.round(state.auto.maxBoxes));
-  const plan = state.auto.cube ? planShape(want)
+  const plan = state.auto.raw ? planPerCube()
+    : state.auto.cube ? planShape(want)
     : state.auto.trace ? planTracing(want)
     : state.auto.model ? planFollowing(want)
     : planByBone(want);
@@ -6999,6 +7770,7 @@ function planBoxes() {
       [0,1,2].map(j => round3(Math.max(0.05, b.size[j]))));
     it.rotation = b.rotation.map(r => round3(r));
     it.mount = b.mount;
+    it.pivot = b.hinge || null;
     b.item = it;
     return it;
   });
@@ -7032,13 +7804,18 @@ function autoButtons() {
   $("a-apply").disabled = !on;
   $("a-drop").disabled = !on;
   for (const [id, key] of [["a-turn", "turn"], ["a-symm", "symmetric"], ["a-skip", "skip"],
-      ["a-model", "model"], ["a-trace", "trace"], ["a-cube", "cube"]]) {
+      ["a-model", "model"], ["a-trace", "trace"], ["a-cube", "cube"], ["a-raw", "raw"]]) {
     $(id).classList.toggle("on", !!state.auto[key]);
   }
   // Keeping the shape squares nothing up with the centreline — it merges what the modeller drew,
-  // and a machine drawn symmetric comes out symmetric on its own.
-  $("a-fill").disabled = state.auto.cube || state.auto.trace || state.auto.model;
-  $("a-symm").disabled = state.auto.cube;
+  // and a machine drawn symmetric comes out symmetric on its own. Cube for cube is the same, more
+  // so: it does not merge at all.
+  $("a-fill").disabled = state.auto.cube || state.auto.trace || state.auto.model || state.auto.raw;
+  $("a-symm").disabled = state.auto.cube || state.auto.raw;
+  // Cube for cube has no budget to spend. The dials that bear on it are the two that throw cubes
+  // away before it runs: ignore-under, and skip rotor & gear.
+  $("a-max").disabled = state.auto.raw;
+  $("a-turngain").disabled = state.auto.raw;
 }
 
 function dropPreview(quiet) {
@@ -7156,10 +7933,10 @@ $("a-apply").onclick = () => {
   say(tr("%s boxes — Ctrl+Z puts the old ones back", boxes.length));
 };
 /** The passes, which are alternatives to each other: by bone is none of them being on. */
-const AUTO_PASSES = ["model", "trace", "cube"];
+const AUTO_PASSES = ["model", "trace", "cube", "raw"];
 
 for (const [id, key] of [["a-turn", "turn"], ["a-symm", "symmetric"], ["a-skip", "skip"],
-    ["a-model", "model"], ["a-trace", "trace"], ["a-cube", "cube"]]) {
+    ["a-model", "model"], ["a-trace", "trace"], ["a-cube", "cube"], ["a-raw", "raw"]]) {
   $(id).onclick = () => {
     state.auto[key] = !state.auto[key];
     // The ways of not going by bone are ways, not several at once.
@@ -7197,6 +7974,8 @@ function renderLegend() {
     ["trunnion", "the trunnion, the barrel and its arc"],
     ["cockpit", "the first-person eye"],
     ["chase", "the chase camera and roughly what it sees"],
+    ["coax", "where the coaxial's rounds leave, and its line of fire (ground)"],
+    ["cone", "the vapour cone at speed, and the wingtips under load (aircraft)"],
   ];
   const line = (colour, text) => `<div class="row" style="margin-bottom:3px">`
     + `<span class="dot" style="background:${colour}"></span><span class="muted">${tr(text)}</span></div>`;
@@ -7225,6 +8004,63 @@ function setModel(mode) {
   draw();
 }
 MODEL_MODES.forEach(m => $("m-" + m).onclick = () => setModel(m));
+
+/* ---- the section, and snapping to the model ---- */
+
+/**
+ * The plane put on an axis, or taken off.
+ *
+ * <p>It starts in the middle of whatever there is to look at, which is the one place it is always
+ * worth starting: on the centreline of a fuselage, at waist height in a hull, across the middle of
+ * a turret. Anywhere else and the first thing anybody does is drag the slider back to here.
+ */
+function setClip(axis) {
+  const c = state.clip;
+  c.axis = c.axis === axis ? -1 : axis;
+  if (c.axis >= 0) {
+    const b = state.bounds || { lo: [-4, 0, -6], hi: [4, 4, 6] };
+    c.at = round3((b.lo[c.axis] + b.hi[c.axis]) / 2);
+  }
+  renderClip();
+  draw();
+}
+
+function renderClip() {
+  const c = state.clip;
+  const on = c.axis >= 0;
+  $("c-off").classList.toggle("on", !on);
+  document.querySelectorAll("[data-clip]").forEach(b =>
+    b.classList.toggle("on", on && +b.dataset.clip === c.axis));
+  $("cliprow").style.display = on ? "" : "none";
+  if (!on) return;
+
+  // The slider runs the length of what there is, with a little either side so that the plane can be
+  // taken clear of the model at both ends rather than stopping on its last cube.
+  const b = state.bounds || { lo: [-4, 0, -6], hi: [4, 4, 6] };
+  const lo = round3(b.lo[c.axis] - 0.5), hi = round3(b.hi[c.axis] + 0.5);
+  const at = $("c-at"), num = $("c-num");
+  at.min = lo; at.max = hi; at.value = c.at;
+  num.min = lo; num.max = hi; num.value = round3(c.at);
+}
+
+$("c-off").onclick = () => { state.clip.axis = -1; renderClip(); draw(); };
+document.querySelectorAll("[data-clip]").forEach(b => b.onclick = () => setClip(+b.dataset.clip));
+$("c-flip").onclick = () => { state.clip.side = -state.clip.side; draw(); };
+$("c-at").oninput = () => { state.clip.at = parseFloat($("c-at").value); $("c-num").value = round3(state.clip.at); draw(); };
+$("c-num").oninput = () => {
+  const n = parseFloat($("c-num").value);
+  if (Number.isNaN(n)) return;
+  state.clip.at = n; $("c-at").value = n; draw();
+};
+
+function setOsnap(on) {
+  state.osnap = on;
+  $("b-osnap").classList.toggle("on", on);
+  $("osnapnote").textContent = on
+    ? tr("corners and face middles of the model itself")
+    : tr("the grid only");
+}
+$("b-osnap").onclick = () => { setOsnap(!state.osnap); say(tr(state.osnap ? "Snapping to the model" : "Snapping to the grid only")); };
 
 $("b-add").onclick = () => {
   snapshot();
@@ -7454,7 +8290,14 @@ function boxesJson() {
   return state.items.filter(i => i.kind === "box").map(b => {
     const o = { name: b.name || "part", offset: b.offset.map(round3), size: b.size.map(round3) };
     if (b.rotation.some(n => n)) o.rotation = b.rotation.map(round3);
-    if (b.mount === "turret" || b.mount === "gun") o.mount = b.mount;
+    if (b.mount && b.mount !== "hull") o.mount = b.mount;
+    // The turret and the gun turn about the ring and the trunnion, which the file already carries
+    // once for the whole machine. Everything else turns about its own bone's pivot, so the box has
+    // to bring it: there is no one hinge an aeroplane's ramp and its bay doors could share.
+    if (b.pivot && !["turret", "gun"].includes(b.mount)) o.pivot = b.pivot.map(round3);
+    if (Number.isInteger(b.station)) o.station = b.station;
+    const plate = plateJson(b.plate);
+    if (plate !== undefined) o.plate = plate;
     return o;
   });
 }
@@ -7469,6 +8312,11 @@ function boxesJson() {
 function exportMachine() {
   const doc = state.doc ? JSON.parse(JSON.stringify(state.doc)) : {};
   const c = state.chassis;
+
+  // The three places that are dragged but written by the table go back into it first, so that
+  // specJson sees them and applies its own rules — a default left out, and a figure the file
+  // already said kept where it was. See SPEC_POINTS.
+  specFromPoints();
 
   // The figures first, and everything with a place on the machine over the top of them: a block is
   // written by one or the other and never by both.
@@ -7523,6 +8371,7 @@ function exportMachine() {
     if (pylons.length) doc.hardpoints = pylons.map(p => {
       const o = { name: p.name || "pylon", pos: p.pos.map(round3) };
       if (p.fixed) o.fixed = p.fixed;
+      if (p.ammo && p.ammo.length) o.ammunition = p.ammo.slice();
       if (p.internal) o.internal = true;
       if (p.wingtip) o.wingtip = true;
       // Written on every station a player loads, and never on one with a weapon built into it: the
@@ -8409,7 +9258,19 @@ function takeJson(doc, name) {
     for (const b of boxes) {
       const box = newBox(b.name || "part", vec(b.offset, [0,0,0]), vec(b.size, [1,1,1]));
       box.rotation = vec(b.rotation, [0,0,0]);
-      box.mount = b.mount === "turret" || b.mount === "gun" ? b.mount : "hull";
+      // Whatever the file says it is carried by, as it says it. Naming the two the tool draws in
+      // its own colours and calling everything else the hull was enough while the hull and the
+      // turret were all there was; the moment an aeroplane's ramp came along, reading it that way
+      // meant a machine went through the tool and came out with its moving parts nailed down.
+      box.mount = b.mount || "hull";
+      box.pivot = Array.isArray(b.pivot) ? b.pivot.slice(0, 3).map(Number) : null;
+      // A machine with several turrets says which one each box rides. Read and written back
+      // untouched — dropping it would nail the sub-turrets' boxes to the hull, which is exactly
+      // the silent loss this import is written to avoid.
+      box.station = Number.isInteger(b.station) ? b.station : null;
+      // The armour on each face. Read here as well as written, because an import that skips a field is
+      // an export that deletes it — every plate in the file would go on the next save.
+      box.plate = plateFrom(b.plate);
       state.items.push(box);
     }
     took.push(tr("%s boxes", boxes.length));
@@ -8429,6 +9290,7 @@ function takeJson(doc, name) {
   // opinion about — the turret's rates, the armament — can overwrite what the table took.
   if (isGround || isAir) {
     takeSpec(doc);
+    pointsFromSpec();
     took.push(tr("its figures"));
   }
 
@@ -8497,6 +9359,7 @@ function takeJson(doc, name) {
     doc.hardpoints.forEach((p, i) => {
       const py = newPylon(p.name || "pylon" + (i + 1), vec(p.pos, [0,1,0]));
       py.fixed = p.fixed || "";
+      py.ammo = Array.isArray(p.ammunition) ? p.ammunition.slice() : [];
       py.internal = !!p.internal;
       py.wingtip = !!p.wingtip;
       py.station = p.kind === "special" ? "special" : "weapon";
@@ -8718,6 +9581,7 @@ async function openMachine(id) {
   const e = library.entries.find(x => x.id === id);
   if (!e) return;
   library.pick = id;
+  rememberMachine(id);
   state.editing = "machine";
   forgetMachine();
 
@@ -8844,11 +9708,124 @@ async function pickFolder() {
     $("dir").click(); return;                            // and anything else falls back to reading
   }
 
+  await openFolder(dir);
+}
+
+/** A folder handle, walked and taken, and remembered for the next time the page is opened. */
+async function openFolder(dir, quiet) {
   say(tr("Reading %s…", dir.name));
   const out = [];
   library.capped = false;
   await walkHandles(dir, dir.name, out, 0);
-  takeFolder(out.filter(r => !skipped(r.path)), dir.name, dir);
+  keepFolder(dir);
+  takeFolder(out.filter(r => !skipped(r.path)), dir.name, dir, quiet);
+}
+
+/* ================================================================== *
+ * The folder, remembered
+ *
+ * Choosing the folder is four clicks through a directory tree, and it is
+ * the same folder every time. Worse, it is four clicks *again* after every
+ * reload — and reloading is not rare here: it is how you pick up a change
+ * made to this file, and it is what a browser does on its own when the tab
+ * has been left long enough.
+ *
+ * So the handle is kept. A directory handle is a structured-cloneable
+ * object, which means it can go into IndexedDB and come back out of it in
+ * a later session still pointing at the same folder — localStorage cannot
+ * hold one, because localStorage holds strings.
+ *
+ * What does *not* survive is the right to read it. That is the browser's
+ * to give and it asks the user, and it will only ask during a gesture the
+ * user made — so the page cannot quietly re-open the folder on load, and
+ * should not: a page that reaches into a folder on the disk the moment it
+ * is opened is a page nobody should trust. What it does instead is offer:
+ * the button says the folder's name, and one click on it is the gesture,
+ * the permission and the read.
+ *
+ * Chrome remembers an allowed handle for the site, so in practice that
+ * click is usually silent — no dialog at all, straight into the folder.
+ * ================================================================== */
+
+const KEEP_DB = "ashvehicles.tool", KEEP_STORE = "handles", KEEP_KEY = "folder";
+
+/** The one store, opened on demand. Nothing else in the tool uses IndexedDB. */
+function keepDb() {
+  return new Promise((res, rej) => {
+    if (!window.indexedDB) return rej(new Error("no indexedDB"));
+    const req = indexedDB.open(KEEP_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(KEEP_STORE);
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+function keepPut(key, value) {
+  return keepDb().then(db => new Promise((res, rej) => {
+    const t = db.transaction(KEEP_STORE, "readwrite");
+    t.objectStore(KEEP_STORE).put(value, key);
+    t.oncomplete = () => res();
+    t.onerror = () => rej(t.error);
+  }));
+}
+
+function keepGet(key) {
+  return keepDb().then(db => new Promise((res, rej) => {
+    const req = db.transaction(KEEP_STORE, "readonly").objectStore(KEEP_STORE).get(key);
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  }));
+}
+
+/** The folder that is open, put away for next time. Failing at it is not worth a word to anybody. */
+function keepFolder(dir) {
+  keepPut(KEEP_KEY, dir).catch(() => { /* a browser that will not keep it is one that asks again */ });
+}
+
+/**
+ * Which machine was open, kept beside the folder.
+ *
+ * <p>Only the name, in localStorage: it is a string, and it means nothing without the folder anyway.
+ * Reopening the folder reopens the machine, which is the whole of what "carry on where I was" means
+ * here — the tool is one machine at a time.
+ */
+const LAST_MACHINE = "ashvehicles.machine";
+const rememberMachine = id => { try { localStorage.setItem(LAST_MACHINE, id || ""); } catch (err) { /* private mode */ } };
+const lastMachine = () => { try { return localStorage.getItem(LAST_MACHINE) || ""; } catch (err) { return ""; } };
+
+/**
+ * The offer, on the button that opens a folder: the name of the last one, so that the usual thing —
+ * the same folder again — is one click and no dialog.
+ *
+ * <p>Nothing is read here. The handle is only asked for its name, which needs no permission, and
+ * the button carries the handle until it is pressed.
+ */
+async function offerLastFolder() {
+  if (!window.showDirectoryPicker) return;
+
+  let dir;
+  try { dir = await keepGet(KEEP_KEY); } catch (err) { return; }
+  if (!dir || typeof dir.values !== "function") return;
+
+  const row = $("lastfolder");
+  if (!row) return;
+  row.innerHTML = `<button id="lastfolder-go" class="grow">`
+    + tr("Open %s again", `<b>${escapeHtml(dir.name)}</b>`) + `</button>`;
+  row.style.display = "";
+
+  $("lastfolder-go").onclick = async () => {
+    // The gesture the browser wants. Granted once for the site, this asks nothing at all.
+    if (!(await mayWrite(dir))) return say("That folder cannot be read any more — choose it again");
+    row.style.display = "none";
+    try { await openFolder(dir, true); }
+    catch (err) { return say(tr("Could not read it: %s", err.message)); }
+
+    const was = lastMachine();
+    if (was && library.entries.some(e => e.id === was)) await openMachine(was);
+    else if (library.entries.length === 1) await openMachine(library.entries[0].id);
+    renderLibrary();
+    say(tr("%s machines in that folder — pick one", library.entries.length));
+  };
 }
 
 /** The same walk as {@link walk}, over handles: the name and the handle are kept, nothing is read. */
@@ -9190,6 +10167,7 @@ function helpRows() {
       [K("A"), "frame the model"],
       [K("Shift", "A"), "frame everything, the camera included"],
       [K("V"), "model: skin → solid → ghost → wire → off"],
+      [K(tr("the section")), "under Machine: one plane, and the model in front of it not drawn &mdash; the way to place anything inside a hull or under a canopy"],
       [K("L"), "the name beside every box, seat, station and point"],
       [K("W"), "the racks and the stores hung on the stations"],
       [K("X"), "the collision boxes, drawn or not &mdash; %s the crosses. Nothing is forgotten either way", K("Shift", "X")],
@@ -9212,6 +10190,7 @@ function helpRows() {
       [K(tr("arrows")), "nudge &mdash; %s ten times as far, %s a tenth", K("Shift"), K("Alt")],
       [K(",", "."), "nudge along the axis the view cannot show you"],
       [K("G"), "snap: 0.05 → 0.1 → 0.25 → 0.5 → 1 → off"],
+      [K("J"), "snap to the model itself &mdash; the corners of its cubes and the middles of their faces"],
       [K("N"), "add &mdash; %s copy, %s removes", K("Shift", "D"), K("Delete")],
       [K("F"), "shrink the box onto the geometry inside it"],
       [K("Shift", "F"), "a box round the bone picked out under Bones"],
@@ -9366,6 +10345,7 @@ window.addEventListener("keydown", e => {
       say(tr("snap %s", state.snap || tr("off")));
       break;
     }
+    case "j": $("b-osnap").onclick(); break;
     case "h": renderHelp(); $("help").classList.toggle("on"); break;
     case "q": setPose(state.pose.turret - (e.shiftKey ? 15 : 5), state.pose.gun); break;
     case "e": setPose(state.pose.turret + (e.shiftKey ? 15 : 5), state.pose.gun); break;
@@ -9447,9 +10427,21 @@ $("grip").addEventListener("dblclick", () => setSideWidth(SIDE_DEFAULT, true));
 const newStation = (name) => ({
   name: name || "", pylons: [], seat: 1, bearing: 0, traverse: 15,
   elevation: 5, depression: 60, traverse_rate: 3, elevation_rate: 3,
+  // Which bones of the model this gun swings, and which of them elevates if that is a different one.
+  // Names and not places, so they are typed rather than dragged — but they have to be here, because
+  // a station read without them is written back without them, and the gun stops moving on a machine
+  // whose file said it moved. The AH-64's chin turret was losing its bone on every round trip.
+  bone: [], barrel: [],
   // What the file this came off actually spelt out, so that it can be written back saying the same.
   said: {},
 });
+
+/** A bone list read from the file, which is allowed to be one name or a list of them. */
+const boneList = v => typeof v === "string" ? (v ? [v] : [])
+  : Array.isArray(v) ? v.map(String).filter(Boolean) : [];
+
+/** And written back the way it came: one name where there is one, a list where there are more. */
+const boneJson = list => list.length === 1 ? list[0] : list.slice();
 
 /** A barrel at the mount's own length and the vehicle's own ring, which is what "not said" means. */
 const newBarrel = () => ({ trunnion: [0, 1, 0], length: "", ring: null });
@@ -9500,6 +10492,11 @@ function gunsAircraftHtml() {
       <div class="sp"></div>
       <div class="pair">${STATION_FIELDS.map(([k, label, step]) =>
         `<div><label>${tr(label)}</label><input data-gk="${k}" type="number" step="${step}" value="${s[k]}"></div>`).join("")}</div>
+      <div class="sp"></div>
+      <label>${tr("the bones it swings &mdash; blank for a gun the model does not move")}</label>
+      <input data-gk="bone" value="${escapeHtml(s.bone.join(" "))}" placeholder="turret_bone">
+      <label>${tr("and the bone that elevates, where that is a different one")}</label>
+      <input data-gk="barrel" value="${escapeHtml(s.barrel.join(" "))}" placeholder="barrel_bone">
     </div>`).join("")
     + `<div class="sp"></div><button id="g-add" style="width:100%">${tr("Add a crew gun")}</button>`;
 }
@@ -9571,6 +10568,10 @@ function wireGuns(el, air) {
       const held = list()[+inp.closest("[data-gi]").dataset.gi];
       const key = inp.dataset.gk;
       if (key === "name") { held.name = inp.value; return; }
+      if (key === "bone" || key === "barrel") {
+        held[key] = inp.value.split(/[,\s]+/).filter(Boolean);
+        return;
+      }
       if (key === "length") { held.length = inp.value.trim() === "" ? "" : parseFloat(inp.value); return; }
       const n = parseFloat(inp.value);
       if (Number.isNaN(n)) return;
@@ -9601,8 +10602,10 @@ function writeStations(doc) {
     for (const [k, , , d] of STATION_ALL) {
       if (s[k] !== d || s.said[k] !== undefined) o[k] = k === "seat" ? Math.round(s[k]) : exact(s[k]);
     }
+    if (s.bone.length) o.bone = boneJson(s.bone);
+    if (s.barrel.length) o.barrel = boneJson(s.barrel);
     return ordered(o, ["name", "pylons", "seat", "bearing", "traverse", "elevation", "depression",
-      "traverse_rate", "elevation_rate"]);
+      "traverse_rate", "elevation_rate", "bone", "barrel"]);
   });
   if (out.length) doc.stations = out; else delete doc.stations;
 }
@@ -9628,6 +10631,8 @@ function takeGuns(doc) {
       "traverse_rate", "elevation_rate"]) {
       if (typeof s[key] === "number") { station[key] = s[key]; station.said[key] = true; }
     }
+    station.bone = boneList(s.bone);
+    station.barrel = boneList(s.barrel);
     return station;
   }) : [];
 
@@ -10213,7 +11218,12 @@ autoReport();
 modelInfo();
 renderHelp();
 refresh();
+renderClip();
+setOsnap(false);
 frameWhenSized();
+// The folder that was open last time, offered on a button. Nothing is read until it is pressed:
+// see offerLastFolder for why that is the browser's rule and not a choice made here.
+offerLastFolder();
 say("Drop a folder in, or a .geo.json and its data files — H for the shortcuts");
 </script>
 </body>

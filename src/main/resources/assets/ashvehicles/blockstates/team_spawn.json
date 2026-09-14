@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "ashvehicles:block/team_spawn" },
+    "facing=east": { "model": "ashvehicles:block/team_spawn", "y": 90 },
+    "facing=south": { "model": "ashvehicles:block/team_spawn", "y": 180 },
+    "facing=west": { "model": "ashvehicles:block/team_spawn", "y": 270 }
+  }
+}
