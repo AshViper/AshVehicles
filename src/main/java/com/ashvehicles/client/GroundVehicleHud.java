@@ -11,6 +11,7 @@ import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.weapon.Magazine;
+import com.ashvehicles.weapon.TurretStations;
 import com.ashvehicles.weapon.WeaponDefinition;
 
 import net.minecraft.client.DeltaTracker;
@@ -42,9 +43,10 @@ import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
  * 照準器に砲塔について問い合わせた物だ。ミサイルはそもそも照準しない。<em>与えられる</em>のだから、描くのはシーカー
  * の円錐と捕捉対象を囲む枠になる。
  *
- * <p><b>砲のマークは環であり、画面上で唯一のマークだ。</b>誰かが搭乗している間バニラの十字線は外される——
- * {@link CrewHudSuppressor} 参照——2つのマークは、乗員が発している1つの問いへの2つの答えであり、乗員は砲が乗っている
- * 方かどうかに関わらず、画面中央にある方で照準してしまうからだ。
+ * <p><b>環は2つあり、別々の問いに答える。</b>バニラの十字線は搭乗中ずっと外してある——{@link CrewHudSuppressor}
+ * 参照。あれは砲について何も知らないのに画面中央に居座るので、残せば誤った方に砲を据えろという誘いになる。
+ * 代わりに置くのがこの2つだ。明るい方は<em>弾がどこへ落ちるか</em>、暗く小さい中央の方は<em>乗員が今どこを
+ * 見ているか</em>——砲塔が追っている先そのもの。{@link #drawAimPoint} 参照。
  *
  * <p><b>それでも画面上のマークではなくワールド上のマークである。</b>砲は視界の中央へ据えられるので環もそこへ落ち着き
  * 両者は一致する——ただし砲塔が追い付いてからだ。乗員は好きな方を見るが砲塔は毎tick数度で追うので、旋回の最初の1秒
@@ -77,6 +79,14 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     /** 残弾表示が琥珀色に変わる閾値。交戦2回分。 */
     private static final int LOW_ROUNDS = 6;
 
+    /**
+     * 画面中央の環の半径。
+     *
+     * <p>砲の環（9）より内側に収まる大きさにしてある。砲塔が追い付いて2つが重なった時に入れ子になるのが
+     * 狙った絵で、「砲が来た」を形1つで言う。
+     */
+    private static final int AIM_RING = 4;
+
     @SubscribeEvent
     public static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
         event.registerAbove(VanillaGuiLayers.CROSSHAIR, ID, new GroundVehicleHud());
@@ -98,9 +108,17 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         int centreX = graphics.guiWidth() / 2;
         int centreY = graphics.guiHeight() / 2;
 
+        drawAimPoint(graphics, centreX, centreY);
+
+        // 独立砲塔の砲手は、車両の主砲ではなく自分の砲塔の照準を覗く。運転手はそうならない——1人で乗って
+        // いれば全砲塔が自分の物だが、覗いているのは主砲の照準器だ。{@link #gunnedStation} 参照。
+        int station = gunnedStation(minecraft, vehicle);
+
         // どちらか一方で、両方は無い。トリガーがどの兵装を撃つかが、乗員がどの照準を覗いているかだ。1画面に2つの
         // マークは、1つの問いへの2つの答えになってしまう。
-        if (vehicle.isMissileMode()) {
+        if (station >= 0) {
+            drawStationMark(graphics, minecraft, vehicle, station, partialTick, centreX, centreY);
+        } else if (vehicle.isMissileMode()) {
             drawSeeker(graphics, minecraft, vehicle, partialTick, centreX, centreY);
         } else {
             drawGunMark(graphics, minecraft, vehicle, partialTick, centreX, centreY);
@@ -128,12 +146,81 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     }
 
     /**
+     * この画面の持ち主が回している独立砲塔。運転手と、砲塔を持たない乗員では {@code -1}。
+     *
+     * <p>運転手を外すのは、あの席が主砲の砲手席でもあるからだ。1人で乗っていれば全砲塔がその人の物に
+     * なる（{@link com.ashvehicles.weapon.TurretStations} 参照）が、覗いている照準は主砲の物であり、
+     * 画面中央のマークもそれでなければならない。
+     */
+    private static int gunnedStation(Minecraft minecraft, GroundVehicleEntity vehicle) {
+        if (vehicle.getControllingPassenger() == minecraft.player) {
+            return -1;
+        }
+
+        return vehicle.getTurrets().liveStationOf(minecraft.player);
+    }
+
+    /**
+     * 独立砲塔の弾の落着点。車両の主砲に対する {@link #drawGunMark} とまったく同じ物で、解く砲が違うだけ。
+     *
+     * <p>山なりに撃つ砲の分岐（{@link #drawFallMark}）はここには無い。あれは車両の主砲について解く物で、
+     * 独立砲塔に榴弾砲を積んだ車両はまだ無い。
+     */
+    private static void drawStationMark(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
+            int station, float partialTick, int centreX, int centreY) {
+        GunSight.Solution sight = GunSight.solve(vehicle, station);
+
+        if (sight == null) {
+            return;
+        }
+
+        float focal = AircraftHud.focalLength(minecraft, graphics);
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        Vec3 point = sight.bore().muzzle(partialTick)
+                .add(sight.bore().direction(partialTick).scale(sight.pipperRange()))
+                .add(sight.pipperDrop());
+        int colour = vehicle.getTurrets().roundsOf(station) > 0 ? AircraftHud.GREEN : AircraftHud.WARNING;
+        int[] mark = AircraftHud.project(minecraft, point.subtract(camera).normalize(), focal, centreX,
+                centreY);
+
+        if (mark != null) {
+            gunMark(graphics, minecraft.font, mark[0], mark[1], colour,
+                    sight.struck() ? Math.round(sight.pipperRange()) + " m" : null);
+        }
+
+        drawLead(graphics, minecraft, sight, partialTick, focal, camera, centreX, centreY);
+    }
+
+    /**
+     * 乗員自身の視線を、画面のちょうど中央に。
+     *
+     * <p>兵装のマークがどれもワールド上にあるということは、画面上に「今どこを向いているか」を言う物が何も無い
+     * ということでもある。砲のマークが中央へ来るのは砲塔が追い付いてからで、旋回の最初の1秒——照準を詰めている
+     * まさにその間——乗員は自分が何を注文したのかを見られない。バニラの十字線は外してあるので、他に手掛かりも無い。
+     *
+     * <p>砲手照準を覗いている間も同じ物が同じ場所にある。あれは視界を砲へ預ける装置ではなく、接眼部へ寄って
+     * 倍率を掛けるだけの物だからだ——{@link TurretSight} 参照。照準の中と外で読み方が変わらないのは、そもそも
+     * 操作が同じだからで、この環はその「同じ操作」の側に属している。
+     *
+     * <p><b>撃つ時に見る物ではない。</b>だから小さく、暗い。弾がどこへ落ちるかを言えるのは砲のマークだけで、
+     * 砲塔が振れている間と俯角の尽きた斜面では、2つは意図的に別の場所にある。同じ明るさで並べれば、乗員は近い方
+     * ——つまり中央——で照準してしまう。
+     */
+    private static void drawAimPoint(GuiGraphics graphics, int centreX, int centreY) {
+        AircraftHud.circle(graphics, centreX, centreY, AIM_RING, AircraftHud.DIM);
+    }
+
+    /**
      * 弾の落着点を、画面中央ではなくワールド上に描く。動く目標に対しては、そこへ届かせるために砲身がどこにあるべきかも
      * 描く。
      *
      * <p>薬室に弾があれば緑、無ければ琥珀。撃てるかどうかと、どこを向いているかが一目で分かる。
+     *
+     * <p><b>山なりに撃つ砲だけは、照準器ではなく {@link GunReach} が点を出す。</b>榴弾は照準器が世界へ問い合わせる
+     * 512 ブロックの遥か先へ落ちるので、あちらに答えを求めれば基準距離 300 ブロックの印しか返らない。見越しは
+     * どちらでも同じように描く——あれが要求するのは飛翔時間だけで、それは照準器が持っている。
      */
-    private static void drawGunMark(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
+    static void drawGunMark(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
             float partialTick, int centreX, int centreY) {
         GunSight.Solution sight = GunSight.solve(vehicle);
 
@@ -143,36 +230,107 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
 
         float focal = AircraftHud.focalLength(minecraft, graphics);
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
-        // 前tickの値を読むのではなく、このフレームの砲腔方向から組み直す。1tick古いのはマークまでの距離だけであり、
-        // マークは砲身の動きと同じなめらかさで追従する。
-        Vec3 muzzle = sight.bore().muzzle(partialTick);
-        Vec3 bore = sight.bore().direction(partialTick);
-        Vec3 point = muzzle.add(bore.scale(sight.pipperRange())).add(sight.pipperDrop());
-        int colour = vehicle.isLoaded() ? AircraftHud.GREEN : AircraftHud.WARNING;
-        int[] mark = AircraftHud.project(minecraft, point.subtract(camera).normalize(), focal, centreX, centreY);
 
-        if (mark != null) {
-            int x = mark[0];
-            int y = mark[1];
+        if (!drawFallMark(graphics, minecraft, vehicle, partialTick, focal, camera, centreX, centreY)) {
+            // 前tickの値を読むのではなく、このフレームの砲腔方向から組み直す。1tick古いのはマークまでの距離だけであり、
+            // マークは砲身の動きと同じなめらかさで追従する。
+            Vec3 muzzle = sight.bore().muzzle(partialTick);
+            Vec3 bore = sight.bore().direction(partialTick);
+            Vec3 point = muzzle.add(bore.scale(sight.pipperRange())).add(sight.pipperDrop());
+            int colour = vehicle.isLoaded() ? AircraftHud.GREEN : AircraftHud.WARNING;
+            int[] mark = AircraftHud.project(minecraft, point.subtract(camera).normalize(), focal, centreX,
+                    centreY);
 
-            // 照準点を囲む環と、その中央の点。機体の機関砲と同じマークだ——AircraftHud.drawGunSight 参照。中央は
-            // 点を除いて開けてあるので、撃たれる対象が、それを指すマークに隠れない。
-            AircraftHud.circle(graphics, x, y, 9, colour);
-            graphics.fill(x - 1, y - 1, x + 1, y + 1, colour);
-
-            // 環の両脇のスタジア線。用途はまさにそれで、既知の幅を持つ地上の物がその間に収まれば、距離が分かる。
-            graphics.fill(x - 15, y - 3, x - 14, y + 4, colour);
-            graphics.fill(x + 15, y - 3, x + 16, y + 4, colour);
-
-            if (sight.struck()) {
-                String text = Math.round(sight.pipperRange()) + " m";
-
-                graphics.drawString(minecraft.font, text, x - minecraft.font.width(text) / 2, y + 18,
-                        AircraftHud.DIM, true);
+            if (mark != null) {
+                gunMark(graphics, minecraft.font, mark[0], mark[1], colour,
+                        sight.struck() ? Math.round(sight.pipperRange()) + " m" : null);
             }
         }
 
         drawLead(graphics, minecraft, sight, partialTick, focal, camera, centreX, centreY);
+    }
+
+    /**
+     * 山なりに撃つ砲の着弾点。この砲がそうでなければ何も描かず false を返し、呼び手は照準器のピッパーへ落ちる。
+     *
+     * <p>乗員も、砲の脇に立つ者（{@link GunCrewHud}）も同じ物を見る。砲が同じなら弾は同じ場所へ落ちるので、
+     * 乗り込んだかどうかでマークが動いてよい理由は無い。
+     */
+    static boolean drawFallMark(GuiGraphics graphics, Minecraft minecraft, GroundVehicleEntity vehicle,
+            float partialTick, float focal, Vec3 camera, int centreX, int centreY) {
+        GunReach.Shot shot = GunReach.lobs(vehicle) ? GunReach.solve(vehicle) : null;
+
+        if (shot == null) {
+            return false;
+        }
+
+        // ピッパーと同じく、1tick 古いのは「どれだけ先か」だけ。マークはこのフレームの砲身から組み直す。
+        Vec3 point = vehicle.getMuzzle(partialTick)
+                .add(vehicle.getAimDirection(partialTick).scale(shot.alongBore()))
+                .add(shot.drop());
+        int[] mark = AircraftHud.project(minecraft, point.subtract(camera).normalize(), focal, centreX,
+                centreY);
+
+        if (mark == null) {
+            return true;
+        }
+
+        // 色は薬室が言う——弾があれば緑、無ければ琥珀。地面に届かない弾はどちらでもないので暗い。地面が推測かどうかは
+        // 色ではなく距離のチルダで言う。2つの事実を1つの色に重ねれば、どちらも読めなくなる。
+        int colour = !shot.lands() ? AircraftHud.DIM
+                : vehicle.isLoaded() ? AircraftHud.GREEN : AircraftHud.WARNING;
+
+        gunMark(graphics, minecraft.font, mark[0], mark[1], colour, shot.label());
+
+        return true;
+    }
+
+    /**
+     * 山なりに撃つ砲の射距離と飛翔時間。直射砲では何も足さない——あちらは砲身を目標へ向ければ当たるので、
+     * 距離は読む物ではなくマークが指している物だ。
+     *
+     * <p>榴弾砲では逆で、仰角は「何ブロック先か」を言わない。155mm は 15 度で 724 m、45 度で 1388 m、70 度で
+     * 889 m——同じ距離へ届く据えが 2 つあり、どちらも仰角の数字からは読めない。だから射距離は推し量る物では
+     * なく読む物でなければならない。
+     */
+    static void reach(HudPanel panel, GroundVehicleEntity vehicle) {
+        GunReach.Shot shot = GunReach.lobs(vehicle) ? GunReach.solve(vehicle) : null;
+
+        if (shot == null) {
+            return;
+        }
+
+        // 見えている地面に落ちる弾だけが緑。推測した地面の上と、そもそも落ちない弾は暗い——読み手が、確かな数字と
+        // そうでない数字を色で見分けられる。
+        panel.pair("RNG", AircraftHud.DIM, shot.label(),
+                shot.lands() && !shot.estimated() ? AircraftHud.GREEN : AircraftHud.DIM);
+
+        // 飛翔時間は届く弾にだけ。落ちない弾のそれは「消えるまでの時間」であって、待つ意味のある数字ではない。
+        if (shot.lands()) {
+            panel.pair("TOF", AircraftHud.DIM, String.format(Locale.ROOT, "%.1f s", shot.seconds()),
+                    AircraftHud.DIM);
+        }
+    }
+
+    /**
+     * 砲のマークそのもの。環、中央の点、両脇のスタジア線、そしてその下の距離。
+     *
+     * <p>乗員の照準器と、砲の脇に立つ者の照準（{@link GunCrewHud}）が同じ絵を描く。答えているのは同じ問い——弾が
+     * どこへ落ちるか——であり、乗り込んだ瞬間にマークの読み方が変わってよい理由は無い。距離をどこから得るかだけが
+     * 違う。乗員のそれは照準器の弾道で、牽引砲のそれは {@link GunReach} だ。
+     *
+     * <p>中央は点を除いて開けてある。撃たれる対象が、それを指すマークに隠れないためだ。スタジア線の用途はまさに
+     * それで、既知の幅を持つ地上の物がその間に収まれば距離が分かる。
+     */
+    static void gunMark(GuiGraphics graphics, Font font, int x, int y, int colour, @Nullable String range) {
+        AircraftHud.circle(graphics, x, y, 9, colour);
+        graphics.fill(x - 1, y - 1, x + 1, y + 1, colour);
+        graphics.fill(x - 15, y - 3, x - 14, y + 4, colour);
+        graphics.fill(x + 15, y - 3, x + 16, y + 4, colour);
+
+        if (range != null) {
+            graphics.drawString(font, range, x - font.width(range) / 2, y + 18, AircraftHud.DIM, true);
+        }
     }
 
     /**
@@ -535,6 +693,8 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             // 無駄にするかの違いになる。
             panel.pair("ELV", AircraftHud.DIM,
                     String.format("%+d°", Math.round(vehicle.getGunPitch(partialTick))), AircraftHud.GREEN);
+            // 山なりに撃つ砲では、その仰角が何ブロック先を意味するかが仰角自身からは読めない。reach 参照。
+            reach(panel, vehicle);
         }
 
         // 機関銃。選択されていてもいなくても常に表示する——専用の引き金を持ち続けているので、トリガーが
@@ -550,6 +710,10 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
             }
         }
 
+        // 独立砲塔。この画面の持ち主が回している物だけを並べる——1人で乗っている運転手には全部が並び、
+        // 砲手席の乗員には自分の1つだけが出る。
+        stations(panel, vehicle);
+
         float health = vehicle.getHealth();
 
         panel.divider();
@@ -558,6 +722,38 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
                 vehicle.getHealthFraction() <= LOW_HEALTH ? AircraftHud.WARNING : AircraftHud.GREEN);
 
         return panel;
+    }
+
+    /**
+     * 自分が回している独立砲塔を1行ずつ。残弾と、装填中かどうか。
+     *
+     * <p>持っていない砲塔は出さない。他人が回している砲塔の弾数は、読み手が何かできる数字ではないからだ
+     * ——1人で乗っていれば全部が自分の物になるので、そのときは全部出る。
+     */
+    private static void stations(HudPanel panel, GroundVehicleEntity vehicle) {
+        TurretStations turrets = vehicle.getTurrets();
+
+        if (!turrets.exists()) {
+            return;
+        }
+
+        List<Integer> mine = turrets.stationsOf(Minecraft.getInstance().player);
+
+        if (mine.isEmpty()) {
+            return;
+        }
+
+        panel.divider();
+
+        for (int index : mine) {
+            int rounds = turrets.roundsOf(index);
+            String label = turrets.station(index).label().toUpperCase(Locale.ROOT);
+
+            panel.pair(label, AircraftHud.DIM,
+                    String.format("%d / %d", rounds, turrets.capacityOf(index))
+                            + (turrets.reloadOf(index) > 0 ? " …" : ""),
+                    rounds > 0 ? AircraftHud.GREEN : AircraftHud.WARNING);
+        }
     }
 
     /**
@@ -577,9 +773,18 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     }
 
     /**
-     * 積んでいる弾種を1行ずつ。選択中の物が緑、残りは沈める。
+     * <b>積んでいる</b>弾種を1行ずつ。選択中の物が緑、残りは沈める。
      *
      * <p>弾種を並べていない車両では1行も出ない。MOD 内の大半がそれで、そこでは何も変わらない。
+     *
+     * <p><b>出すのは弾倉の中身であって、その架台が受け付ける一覧ではない。</b>
+     * {@link Magazine#types} が答えるのは「この砲に入りうる弾種」——車両ファイルに並んでいる物すべて——で
+     * あり、そのまま並べていたので、榴弾しか積んでいない戦車の計器にも徹甲弾と対戦車榴弾の行が 0 発で
+     * 並んでいた。乗員が問うのは今何を撃てるかであり、積んでいない弾種の名前は、切り替えキーで回せる
+     * 選択肢に見えるぶん邪魔ですらある。補給に要る名前は下の NEED 行が別に出す。
+     *
+     * <p>薬室の1発だけは残す。選択中の弾種が尽きても行ごと消えれば、乗員には「何が入っていたか」も
+     * 「なぜ撃てないか」も画面から消えることになる。0 発の琥珀はそれ自体が知らせだ。
      */
     private static void rounds(HudPanel panel, GroundVehicleEntity vehicle,
             GroundVehicleEntity.Armament station) {
@@ -594,6 +799,10 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         for (ResourceLocation type : types) {
             int left = Magazine.rounds(vehicle, station, type);
             boolean chambered = type.equals(loaded);
+
+            if (left <= 0 && !chambered) {
+                continue;
+            }
 
             panel.pair(roundName(type), chambered ? AircraftHud.GREEN : AircraftHud.DIM,
                     String.valueOf(left),
@@ -616,7 +825,7 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
     }
 
     /** 砲。残弾と装填の進行。 */
-    private static void gun(HudPanel panel, GroundVehicleEntity vehicle) {
+    static void gun(HudPanel panel, GroundVehicleEntity vehicle) {
         int rounds = vehicle.getRounds();
 
         panel.pair("RDS", AircraftHud.DIM, String.format("%d / %d", rounds, vehicle.getRoundCapacity()),

@@ -1,6 +1,8 @@
 {
   "replace": false,
   "values": [
-    "ashvehicles:vehicle_workbench"
+    "ashvehicles:vehicle_workbench",
+    "ashvehicles:team_spawn",
+    "ashvehicles:capture_point"
   ]
 }

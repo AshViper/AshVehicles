@@ -74,6 +74,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -138,6 +139,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private static final EntityDataAccessor<Boolean> DATA_BAY_OPEN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
+    /**
+     * 後部ハッチが開いているか。
+     *
+     * <p>兵装倉の扉とまったく同じ形——サーバーが持つ真偽値1つと、両側が自分で進める作動量。倉と分けて
+     * あるのは、この2つが同じ機体の別の物だからだ。倉の扉は開けばレーダーに映り、機内の兵装の門番を
+     * する。後部ハッチはどちらもしない。積んだ物を出し入れする口であって、兵装倉ではない。
+     */
+    private static final EntityDataAccessor<Boolean> DATA_RAMP_OPEN =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /**
@@ -199,6 +209,93 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 下げておけば、流れは収まり、意図的な加速は歩行速度に達した時点で干渉を受けなくなる。
      */
     private static final double HOVER_BAND = 0.25;
+    /**
+     * シフトとコントロールが要求する昇降率（ブロック/tick）。{@link #trimCollective} 参照。
+     *
+     * <p>上げ側の 0.5 は 10 m/s。<b>要求であって能力ではない</b>——空荷の UH-60 が海面高度で出せる上昇率が
+     * ちょうどこの辺りなので、実際には吊り物・高度・気温のどれかで必ず下回る。つまりシフトは常に「出せるだけ
+     * 上がれ」を意味し、どれだけ上がるかはローターとディスク抗力が決める。実際に出せる値を書くと、そこだけ
+     * 機体が急に頭打ちになったように感じられる。
+     *
+     * <p>下げ側の 0.3（6 m/s）は逆に、<b>常に達成できるので本物の制限になる</b>。重力は無料であり、
+     * コレクティブを抜けばディスク抗力の許す 19 m/s まで落ちられる。降下を制限にしておくと、コントロールは
+     * 「落ちる」ではなく「降りる」になり、着陸のたびに機体を掴み直さずに済む。
+     */
+    private static final double CLIMB_RATE = 0.5;
+    private static final double SINK_RATE = 0.3;
+    /**
+     * 手を離した高度へ戻る強さ（ブロック/tickの昇降率、高度1ブロックあたり）と、その上限。
+     *
+     * <p>10ブロック外れて 0.1 blocks/tick（2 m/s）。ゆっくりだ。ここを強くすると、機体は保持というより
+     * レールに吊られているように動き、旋回のたびに引き戻される手応えが出る。守っているのは「置いた高度」で
+     * あって「1ブロックの誤差」ではない。
+     */
+    private static final double HOLD_GAIN = 0.01;
+    private static final double HOLD_RATE = 0.12;
+    /**
+     * 昇降率の誤差1（ブロック/tick）に対して、ホバリングのコレクティブへ足す量。
+     *
+     * <p>2.0 は「0.5 blocks/tick ずれたらレバーを端まで」という強さ。要求と実速度の差は最大でも
+     * {@link #CLIMB_RATE} 程度なので、キーを押している間レバーはほぼ端に張り付き、目標昇降率へ近づくにつれて
+     * 緩む。緩めるとキーへの応答が鈍り、上げると釣り合いの周りで上下に振れ始める。
+     */
+    private static final double TRIM_GAIN = 2.0;
+    /**
+     * 地上滑走の上限速度（ブロック/tick）。30 km/h。
+     *
+     * <p>実機の駐機場での上限とだいたい同じ。これは「押している間に出る速さ」であって性能ではない——
+     * 離陸滑走はスロットルの仕事であり、そちらに上限は無い。
+     */
+    private static final double TAXI_SPEED = 0.42;
+    /** 目標速度へ寄せる強さ（ブロック/tick^2）。上限まで約2.5秒。 */
+    private static final double TAXI_ACCEL = 0.008;
+    /**
+     * スロットルのうち、地上では<b>速度</b>として読む範囲。
+     *
+     * <p>下から 1/4。ここに入っている間、接地した固定翼機は推力ではなくレバーの位置に比例した速度で転がる
+     * ——レバー 1/8 で 15 km/h、1/4 で 30 km/h。それを超えたレバーは従来どおりの推力で、機体は加速を始める。
+     *
+     * <p><b>なぜレバーを速度として読むのか。</b>推力のままだと、地上に釣り合う速度が無い。転がり抵抗は
+     * 0.999 なので、スロットル 5% でも最後には 80 km/h に達する——つまり駐機場を 20 km/h で流す設定が
+     * レバー上に存在しない。実機のパイロットはアイドル推力とブレーキを交互に使ってそこを作るが、キーボードで
+     * その往復はやれない。だからこの範囲だけ、レバーは「どれだけ押すか」ではなく「どれだけの速さで行くか」
+     * を意味する。
+     */
+    private static final float TAXI_BAND = 0.25F;
+    /**
+     * 操舵ハンドルが効かなくなる速度の下限（ブロック/tick）。
+     *
+     * <p>{@link #TAXI_SPEED} の2.5倍。地上移動の上限で切れてしまわない値であり、固定翼機がファイルに書いて
+     * いる {@code steer_fade}（1.1〜1.3）とほぼ同じなので、そちらの手応えは何も変わらない。
+     */
+    private static final double TAXI_GRIP = TAXI_SPEED * 2.5;
+
+    /** ディスクの上向き成分の下限。真横を向いたディスクでコレクティブを無限大にしないための床。 */
+    private static final double LEAST_UPRIGHT = 0.25;
+    /**
+     * ホバリングのキーが、残っている速度1（ブロック/tick）に対して要求する傾き（度）。{@link #hoverStop} 参照。
+     *
+     * <p>80 は「7 km/h の流れに 8 度」。機体の {@code max_tilt}（20〜25度）で頭打ちになるので、30 km/h 以上で
+     * 押せば最初は目一杯傾き、速度が抜けるにつれて自分で浅くなる。上げると止まりが速くなる代わりに、行き過ぎて
+     * 反対へ振れ始める——止めているのは傾いたディスクであり、傾け直すには機体の旋回率ぶんの時間が要るからだ。
+     */
+    private static final double STOP_TILT = 80.0;
+    /**
+     * その姿勢へ向かう強さ。姿勢の誤差1度あたりの角速度（度/tick）。
+     *
+     * <p>0.2 なら5度の誤差で UH-60 のピッチ率（1.1度/tick）に達する。つまりほぼ常に機体の最大角速度で動き、
+     * 実際の速さを決めているのは {@code handling} の旋回率の方だ。ここは「どれだけ強く」ではなく「どこで
+     * 緩めるか」を決めている。
+     */
+    private static final float STOP_GAIN = 0.2F;
+    /**
+     * 接地中、ホバリングに要るコレクティブの何割に置くか。
+     *
+     * <p>浮かない値であること。ここを1にすると駐機中のヘリが自分で飛び立つ。0にしないのは、レバーを抜いた
+     * 機体は尾輪を回す力も失う（地上操向はコレクティブから取っている）上に、離陸のたびに下限から釣り合いまで
+     * レバーを上げ直す数秒を払うことになるからだ。
+     */
+    private static final double ON_WHEELS = 0.75;
     /** これを超えると主翼が機体を支えていることにならないノズル角（度）。 */
     private static final float HOVERING_ANGLE = 30.0F;
     /**
@@ -237,10 +334,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
     /** 機体の設計耐G を超えた1G あたり、1tick に受ける機体損傷。 */
     private static final float OVER_G_DAMAGE = 4.0F;
-    /** これを超えると翼端が蒸気を曳き始める荷重倍数。 */
-    private static final float VORTEX_LOAD = 2.5F;
     /** 機体原点から主翼までの高さ。パーティクル用の概算値。 */
     private static final double WING_HEIGHT = 1.5;
+    /**
+     * ベイパーコーンの中心。{@code effects.cone} を書いていない機体用で、書いた機体はこれを使わない。
+     * {@link AircraftDefinition.Effects} 参照。
+     */
+    private static final Vec3 DEFAULT_CONE = new Vec3(0.0, WING_HEIGHT, 2.0);
     /** 凝結は水と光なので、翼のどこにできても同じ淡い塊になる。 */
     private static final int VAPOUR_COLOUR = 0xF2F5F7;
 
@@ -301,10 +401,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 機体の後ろには何も出ないのが正しい。
      */
     private static final float CONTRAIL_THROTTLE = 0.15F;
-    /** ベイパーコーンが発生する最高速度に対する割合。 */
-    private static final double VAPOUR_SPEED = 0.88;
-    private static final double VAPOUR_RADIUS = 3.0;
-    private static final double VAPOUR_AHEAD = 2.0;
 
     /**
      * レバーが既にストッパーに当たった状態でスロットルを開き続け、バーナーが点火するまでのtick数。
@@ -335,12 +431,25 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     /**
      * バーナー点火音の、発生地点での音量とピッチ。
      *
-     * <p>兵器の発射音と違い、volume 欄を到達距離として使うのではなく本来の音量として使う。これは機体が出す音で
-     * あり、機体には既にファイルが指定する距離まで届くエンジン音がある。クライアントが代替録音を同じ音量で鳴らす
-     * ために値を知る必要があるので public。{@code AfterburnerSounds} 参照。
+     * <p>ここが述べるのは<em>点火地点での大きさ</em>で、どこまで届くかは {@link #AFTERBURNER_CARRY} が別に
+     * 持つ。兵器の発射音と同じ分け方であり、同じ理由による（{@code WeaponDefinition.SoundSetup.gain()}）。
+     * クライアントが距離から本当の音量を組み直すために値を知る必要があるので public。
+     * {@code AfterburnerSounds} 参照。
      */
     public static final float AFTERBURNER_VOLUME = 1.0F;
     public static final float AFTERBURNER_LIGHT_PITCH = 1.0F;
+    /**
+     * バーナーの点火音が聞こえる距離（ブロック）。
+     *
+     * <p>大量の燃料が一度に着火する音は、機体のエンジン音（{@code sound.range} は戦闘機で 1024）と同じ
+     * 空にある。それが 64 ブロックで消えていたのは、ゲームが音を送る距離が {@code max(volume,1) * 16} で
+     * 決まるからだ——つまり「聞こえない」のではなく<b>パケットが出ていなかった</b>。兵器と同じ手で、
+     * volume 欄に距離を入れて送る（{@link #playAfterburnerLight}）。
+     *
+     * <p>エンジン音より短いのは、点火が一瞬だからだ。連続音は遠くでも「そこに何かがいる」と分かるが、
+     * 一瞬の破裂音はある距離から先で風景の音に紛れる。
+     */
+    public static final float AFTERBURNER_CARRY = 700.0F;
     /**
      * {@code engine.<aircraft>.afterburner}: バーナーの点火音。
      *
@@ -485,6 +594,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private AircraftInput input = AircraftInput.NONE;
     private float throttle;
     /**
+     * 回転翼機が守っている高度。パイロットが昇降のキーを離した所で決まり、押している間は {@code NaN}
+     * ——つまり「今は守っていない」。{@link #trimCollective} 参照。
+     *
+     * <p>同期しない。飛ばしている側が決めてコレクティブとして送ってくる物であり、受け取る側はレバーの
+     * 位置だけ知っていればよい（{@link com.ashvehicles.network.AircraftInputPayload} 参照）。
+     */
+    private double holdAltitude = Double.NaN;
+    /**
      * レバーの要求値に対し、エンジンが実際に出している出力。一致させず追従させる。エンジンはスプールするからだ。
      * レバーを一気に前へ倒して始めた離陸滑走は、飛び出すのではなくゆっくり始まって伸びるべきだ。
      */
@@ -583,6 +700,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     /** 兵装倉の扉の開き量。0が閉、1が全開。 */
     private float bayProgress;
     private float bayProgressO;
+    /** 後部ハッチの開き量。0が閉、1が全開。 */
+    private float rampProgress;
+    private float rampProgressO;
     /** ノズルの振れ量。0が格納、1が完全下向き。 */
     private float vtolProgress;
     private float vtolProgressO;
@@ -921,16 +1041,155 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.getStats().camera();
     }
 
-    /** 機体上の物は全て機体構造に固定されており、ファイルが示す位置にある。 */
+    /**
+     * 箱の中心位置。ファイルが置いた場所を、後部ハッチの箱ならヒンジ回りに振り、機体姿勢を通してワールドへ出す。
+     *
+     * <p>機体構造から離れて動く箱はこれ1種類だけだ。舵面もプロペラもローターも箱を持たない——描くだけで、
+     * 当たり判定には現れない。ハッチだけが違うのは、開いたランプが「歩ける床」であり「弾の当たる板」でも
+     * あるからで、それは箱でしか表せない。
+     */
     @Override
     protected Vec3 boxCentre(VehicleShape.Box box) {
-        return this.position().add(Attitude.toWorld(this.attitude, box.offset()));
+        return this.position().subtract(0.0, this.stanceSink(1.0F), 0.0)
+                .add(Attitude.toWorld(this.attitude, this.mountOffset(box)));
     }
 
-    /** 機体内での箱自身の角度、次にワールド内での機体の角度。 */
+    /**
+     * 尾輪式が主輪を軸に尻を下ろす分だけ、機体座標系の原点を沈める。前輪式では位置そのものを返す。
+     *
+     * <p>{@link #stanceSink} 参照。ここを通る物——当たり判定箱、座席、コクピットとカメラ、銃口、そして
+     * {@code AircraftRenderer} が描く模型——は全部同じ点の周りに回るので、絵と当たる場所が食い違わない。
+     */
+    @Override
+    protected Vec3 bodyOrigin(float partialTick) {
+        float sink = this.stanceSink(partialTick);
+
+        return sink == 0.0F ? super.bodyOrigin(partialTick)
+                : super.bodyOrigin(partialTick).subtract(0.0, sink, 0.0);
+    }
+
+    /**
+     * 車輪を地面へ着けるために機体を沈める量（ブロック）。前輪式では常に0。
+     *
+     * <p>模型は巡航姿勢——水平——で作られている。尾輪式はそのままでは尾輪が宙に浮くので
+     * {@code ground_stance} だけ機首を上げるのだが、姿勢が回るのは機体の原点であって主輪ではない。原点周りに
+     * 回すと主輪が {@code stance_pivot × sin(角)} だけ持ち上がり、機体ごと地面から浮く。その差を引く。
+     *
+     * <p><b>脚の作動量に比例する。</b>脚を上げた機体には高さを合わせるべき車輪が無く、空中で機体が 0.3
+     * ブロック下にあることは誰にも見えない。脚の作動量は既に両側で同期・補間されているので、状態を1つも
+     * 増やさずに、格納と同じ時間をかけて滑らかに抜ける。
+     */
+    public float stanceSink(float partialTick) {
+        float rise = this.getStats().landingGear().stanceRise();
+
+        return rise == 0.0F ? 0.0F : rise * this.getGearProgress(partialTick);
+    }
+
+    /** 機体内での箱自身の角度、後部ハッチの箱ならその開き角、次にワールド内での機体の角度。 */
     @Override
     protected Quaternionf boxRotation(VehicleShape.Box box) {
-        return new Quaternionf(this.attitude).mul(box.orientation());
+        Vec3 swing = this.swingOf(box, 1.0F);
+        Quaternionf rotation = new Quaternionf(this.attitude);
+
+        if (swing.lengthSqr() != 0.0) {
+            rotation.mul(swingOf(swing));
+        }
+
+        return rotation.mul(box.orientation());
+    }
+
+    /** 現時点での機体座標系における箱の位置。可動部の箱だけが自分のヒンジ回りに振れる。 */
+    private Vec3 mountOffset(VehicleShape.Box box) {
+        return swung(box, this.swingOf(box, 1.0F));
+    }
+
+    /**
+     * 可動部の今の振れ。単位は度で、箱自身の {@code rotation} とまったく同じ約束——x が機首上げ、
+     * y が右へのヨー、z が右舷下げ。動かない箱では {@link Vec3#ZERO}。
+     *
+     * <p><b>ここはモデル側の {@code AircraftModel.applyPose} の写しであって、別の判断ではない。</b>
+     * 同じ状態から同じ角度を出す2箇所であり、食い違えば「見えている場所と当たる場所が違う」になる。
+     * 片方を変えたらもう片方も変えること。
+     *
+     * <p>ここに無い可動部は意図的に無い。舵面は数度しか振れず、動くのは薄板の後縁だけなので箱の意味が
+     * 変わらない。プロペラとローターは毎tick一周するので、追従させるべき形ではなく、そもそも当たり判定に
+     * 含めない側（エディタの「ローターと脚を除く」）だ。
+     */
+    public Vec3 swingOf(VehicleShape.Box box, float partialTick) {
+        VehicleChassis.Model model = this.getStats().model();
+
+        return switch (box.mount()) {
+            case RAMP -> new Vec3(this.getRampAngle(partialTick), 0.0, 0.0);
+            // 倉の扉は腹の下で前後軸周りに、左右が逆へ割れる。模型が既に開いた姿勢で作られている分
+            // （bay_rest）を引くのはモデル側と同じ。
+            //
+            // 符号は導出ではなく実測で決めた。B-1 の扉のキューブの角 24 個は、この符号なら全開でも全部が
+            // 箱の中に留まり、逆符号では 6 個しか残らない。可変翼も同じ理由で反転している。
+            case BAY_LEFT -> new Vec3(0.0, 0.0, -this.bayAngle(model, partialTick));
+            case BAY_RIGHT -> new Vec3(0.0, 0.0, this.bayAngle(model, partialTick));
+            case NOZZLE -> new Vec3(this.getVtolProgress(partialTick) * VehicleChassis.NOZZLE_TRAVEL
+                    - model.nozzleRest(), 0.0, 0.0);
+            // 可変翼。符号は名前ではなくヒンジの位置から出す——VehicleGeoModel.sweepAboutY と同じ理屈だ。
+            //
+            // 向きは導出ではなく実測で決めた。B-1 の翼のキューブ 176 個の角は、この符号なら後退 40 度でも
+            // 全部が箱の中に留まり、逆符号では 76 個しか残らない。
+            case WING_LEFT, WING_RIGHT -> new Vec3(0.0,
+                    -Math.signum(box.hinge().x) * this.getWingSweep(partialTick), 0.0);
+            default -> Vec3.ZERO;
+        };
+    }
+
+    /** 兵装倉の扉が今開いている角度（度）。左側の値で、右側はその逆。 */
+    private float bayAngle(VehicleChassis.Model model, float partialTick) {
+        return this.getBayProgress(partialTick) * model.bayTravel() - model.bayRest();
+    }
+
+    /**
+     * その振れの分だけヒンジ回りに振った点。
+     *
+     * <p>戦車の砲が砲耳回りに揺れるのと同じ計算で、同じ理由だ（{@code GroundVehicleEntity.onGun} 参照）。
+     *
+     * <p>描く側（{@code VehicleShapeRenderer}）も同じここを通る。当たる箱と描く箱が別々の計算から出て
+     * きたら、形状を目で合わせている最中にどちらを信じてよいか分からなくなる。
+     */
+    public static Vec3 swung(VehicleShape.Box box, Vec3 swing) {
+        if (swing.lengthSqr() == 0.0) {
+            return box.offset();
+        }
+
+        Vec3 hinge = box.hinge();
+        Vector3f local = new Vector3f((float) -(box.offset().x - hinge.x),
+                (float) (box.offset().y - hinge.y), (float) (box.offset().z - hinge.z));
+        swingOf(swing).transform(local);
+
+        return new Vec3(hinge.x - local.x(), hinge.y + local.y(), hinge.z + local.z());
+    }
+
+    /** その振れを回転として。箱自身の {@code rotation} を組むのとまったく同じ順で組む。 */
+    public static Quaternionf swingOf(Vec3 swing) {
+        return Attitude.rotate(new Quaternionf(), (float) swing.z, (float) swing.x, (float) swing.y);
+    }
+
+    /** ハッチの開き角だけヒンジ回りに振った点。 */
+    public static Vec3 onRamp(Vec3 offset, Vec3 hinge, float angle) {
+        Vec3 local = offset.subtract(hinge);
+        float radians = -angle * Mth.DEG_TO_RAD;
+        double sin = Mth.sin(radians);
+        double cos = Mth.cos(radians);
+
+        return hinge.add(new Vec3(local.x,
+                local.y * cos - local.z * sin,
+                local.y * sin + local.z * cos));
+    }
+
+    /**
+     * ハッチが今開いている角度（度）。0で閉。
+     *
+     * <p>作動量そのものではなく角度を返すのは、これを受け取る側——箱と、それを描く形状表示——が角度で
+     * 考えるからだ。モデルを振る側は作動量のまま受け取る（{@code AircraftModel.Pose}）。
+     */
+    public float getRampAngle(float partialTick) {
+        return this.getRampProgress(partialTick) * this.getStats().model().rampTravel();
     }
 
     /**
@@ -985,6 +1244,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         builder.define(DATA_BODY_RATE, new Vector3f());
         builder.define(DATA_GEAR_DOWN, true);
         builder.define(DATA_BAY_OPEN, false);
+        builder.define(DATA_RAMP_OPEN, false);
         builder.define(DATA_FLAPS_DOWN, false);
         builder.define(DATA_VTOL, false);
         builder.define(DATA_WEAPONS, new CompoundTag());
@@ -1013,9 +1273,21 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return this.entityData.get(flare ? DATA_FLARES : DATA_CHAFF);
     }
 
+    /**
+     * 機体自身の弾倉に、積んでいる投射ポッドの分を足した搭載量。
+     *
+     * <p><b>ポッドを吊った瞬間に弾が増えるのではなく、増えるのは入る量である。</b>実際に手へ入るのは駐機
+     * して地上要員が補充してからで、機体自身の弾倉とまったく同じ扱いになる。降ろせば入る量が戻るので、
+     * 超過分は次に1発使った時点で切り落とされる。
+     */
+    public int countermeasureCapacity(boolean flare) {
+        return this.getStats().countermeasures().capacity(flare)
+                + this.weapons.podCountermeasures(flare);
+    }
+
     /** 0を下回らず、機体の搭載量を超えない。 */
     public void setCountermeasures(boolean flare, int left) {
-        int held = Mth.clamp(left, 0, this.getStats().countermeasures().capacity(flare));
+        int held = Mth.clamp(left, 0, this.countermeasureCapacity(flare));
 
         this.entityData.set(flare ? DATA_FLARES : DATA_CHAFF, held);
     }
@@ -1466,9 +1738,141 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return Math.max(this.getStats().model().bayCycleTicks(), 1);
     }
 
+    /** この機体が後部ハッチを持つか。ランプか上扉のボーンを1枚でも名指ししていればそう。 */
+    public boolean hasRamp() {
+        return this.getStats().model().hasRamp();
+    }
+
+    /** 後部ハッチが開いているか。開く途中も含めて、乗員が選んでいる状態。 */
+    public boolean isRampOpen() {
+        return this.entityData.get(DATA_RAMP_OPEN);
+    }
+
+    /**
+     * 後部ハッチを開閉する。
+     *
+     * <p>兵装倉と違って代償を課していない。開いたランプはレーダーに映る面積を変えないし、撃てる物も
+     * 変えない——後部ハッチは兵装倉ではなく、その先にあるのは搭載物ではなく貨物室だ。速度の制限も
+     * 置いていない。実物の輸送機は飛びながらこれを開ける。それがこの扉の用途そのものだからだ。
+     *
+     * <p>持たない機体では何も起きない。輸送機以外にレバーだけあっても意味が無い。
+     */
+    public void toggleRamp() {
+        if (this.level().isClientSide || !this.hasRamp()) {
+            return;
+        }
+
+        this.entityData.set(DATA_RAMP_OPEN, !this.isRampOpen());
+    }
+
+    /** ハッチが行き先まで動き終えたか。 */
+    public boolean isRampSettled() {
+        return this.rampProgress == (this.isRampOpen() ? 1.0F : 0.0F);
+    }
+
+    /** 描画用のハッチの開き量。0が閉、1が全開。 */
+    public float getRampProgress(float partialTick) {
+        return Mth.lerp(partialTick, this.rampProgressO, this.rampProgress);
+    }
+
+    /** ハッチが開ききるまでの時間（tick）。モデル設定から。 */
+    public int getRampCycleTicks() {
+        return Math.max(this.getStats().model().rampCycleTicks(), 1);
+    }
+
+    /** この機体が貨物室を持つか。持たない機体には何も積めない。 */
+    public boolean hasHold() {
+        return this.getStats().airframe().hold().isPresent();
+    }
+
+    /**
+     * 貨物が今自由か。
+     *
+     * <p><b>後部ハッチが全開で、かつ接地している間だけ。</b> それ以外——扉が動いている、閉まっている、
+     * 車輪が地面を離れている——では、貨物室にいる車両は機体に固定される。積み下ろしのキーを増やさなかった
+     * のはこの1行のためで、手順は「ランプを下ろす・乗り入れる・閉じる・飛ぶ」に落ちる。ハッチを持たない
+     * 輸送機（定義に {@code ramp} を書いていない機体）では、接地しているだけで自由になる。
+     */
+    public boolean isHoldOpen() {
+        if (!this.onGround()) {
+            return false;
+        }
+
+        return !this.hasRamp() || (this.isRampOpen() && this.isRampSettled());
+    }
+
+    /**
+     * 貨物室の中の車両を機体に固定し、また解放する。サーバー限定——搭乗は片側が決めることだ。
+     *
+     * <p>積むのは「貨物室の内側にいる」ことだけを条件にする。運転手が乗っているかも、動いているかも問わ
+     * ない。乗り入れて止めた車両がそこにあるなら、それは積み荷だ。
+     */
+    private void tickHold() {
+        if (this.level().isClientSide || !this.hasHold()) {
+            return;
+        }
+
+        AircraftDefinition.Hold hold = this.getStats().airframe().hold().get();
+
+        if (this.isHoldOpen() || this.isWrecked()) {
+            for (Entity aboard : List.copyOf(this.getPassengers())) {
+                if (aboard instanceof VehicleEntityBase) {
+                    aboard.stopRiding();
+                }
+            }
+
+            return;
+        }
+
+        AABB around = this.getBoundingBox().inflate(Math.max(hold.size().x,
+                Math.max(hold.size().y, hold.size().z)));
+
+        for (Entity nearby : this.level().getEntities(this, around,
+                found -> found instanceof VehicleEntityBase && !found.isPassenger())) {
+            Vec3 inside = Attitude.toBody(this.attitude, nearby.position().subtract(this.position()));
+
+            if (hold.contains(inside) && nearby.startRiding(this, true)) {
+                ((VehicleEntityBase) nearby).setHoldOffset(inside);
+            }
+        }
+    }
+
+    /** 貨物室を持つ機体だけが車両を積む。積める場所が無ければ何も積めない。 */
+    @Override
+    protected boolean canHold(VehicleEntityBase cargo) {
+        return this.hasHold() && !this.isWrecked() && cargo != this;
+    }
+
+    /**
+     * その物が貨物室の内側にいるか。積み荷の車両だけでなく、機内を歩いている乗客もここで真になる。
+     *
+     * <p>足元ではなく位置で問う。歩いている人も、跳ねた人も、床から離れた瞬間の人も、飛んでいる胴体の
+     * 中にいる限りその機体と一緒に動く場所にいる。
+     */
+    @Override
+    public boolean holdsInside(Entity rider) {
+        Optional<AircraftDefinition.Hold> hold = this.getStats().airframe().hold();
+
+        return hold.isPresent() && hold.get().contains(
+                Attitude.toBody(this.attitude, rider.position().subtract(this.position())));
+    }
+
     /** この機体が主翼ではなくローターで支えられているか。 */
     public boolean isRotorcraft() {
         return this.getStats().rotor().isPresent();
+    }
+
+    /**
+     * 音のうえでの推進方式。ローターを持てば回転翼、それ以外は固定翼。
+     *
+     * <p>プロペラ機を分けていない。分けるなら録音がもう1本要るし、依頼は車両・ヘリ・機体の3つだった
+     * ——C-130 と F-22 の違いは、戦車とヘリと機体の違いより小さい。分けたくなったら
+     * {@code engine.prop} を足してここで返せばよく、解決順（{@code EngineSounds.engineSound}）は
+     * 何も変わらない。
+     */
+    @Override
+    public String engineClass() {
+        return this.isRotorcraft() ? "rotor" : "jet";
     }
 
     /** ローターの回転数。0が停止、1が定格。ローターを持たない機体では0。 */
@@ -1734,6 +2138,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.tickGear();
         this.tickVtol();
         this.tickRotor();
+        // ハッチの作動量が今 tick の分まで進んだ後に問う。固定と解放を決めるのは「全開かどうか」であり、
+        // それは tickGear が進めた値だ。
+        this.tickHold();
         this.tickLerp();
 
         if (this.isControlledByLocalInstance()) {
@@ -1745,9 +2152,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             // 遠隔操作中の無人機はここを通る。サーバーが飛ばしているので「操縦者不在」だが、舵は不在では
             // ない——操作者が毎tick送ってくる。DroneInputPayload 参照。
             if (!(this.getControllingPassenger() instanceof Player) && !this.isRemotelyFlown()) {
-                // 操縦者不在: 舵は中立へ戻るが、スロットルは置かれたまま。機体は何かに落とされるまで飛び
-                // 続ける。無人機で操作者が切れた場合もこれで、繋ぎ直すまで最後の針路を保って飛ぶ。
-                this.input = AircraftInput.NONE;
+                if (!this.level().isClientSide && this.getPilot() != null && !this.isCargo()) {
+                    // AI が飛ばしている機体は、この tick の舵をここで決める。人の舵がパケットで届くのと同じ位置
+                    // ——飛ぶ前、撃つ前——であり、ここから下は人が飛ばしている時と同じ経路を通る
+                    // （[[bots-are-a-pilot-object-on-the-vehicle]]）。操縦席に人が座れば上の条件で手を離す。
+                    this.getPilot().tick();
+                } else {
+                    // 操縦者不在: 舵は中立へ戻るが、スロットルは置かれたまま。機体は何かに落とされるまで飛び
+                    // 続ける。無人機で操作者が切れた場合もこれで、繋ぎ直すまで最後の針路を保って飛ぶ。
+                    this.input = AircraftInput.NONE;
+                }
             }
 
             // 残骸は飛ばさない。落ちて、落ちた場所に横たわる。
@@ -1923,21 +2337,25 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
     }
 
-    /** 次の搭載兵装を選択する。パイロットの入力パケットから呼ばれるのでサーバー側。 */
-    public void cycleWeapon() {
+    /**
+     * 搭載兵装の選択を {@code step} 個ぶん送る。パイロットの入力パケットから呼ばれるのでサーバー側。
+     *
+     * @param step 進める数。負なら逆へ。マウスホイールが向きを持つため
+     */
+    public void cycleWeapon(int step) {
         if (this.level().isClientSide) {
             return;
         }
 
         // 砲座を持っているパイロットにとって、このキーが巡るのはパイロンの兵装と砲座の両方だ。砲座を
         // 持たない機体では選ぶ物が変わらないので、キーは従来通りパイロンだけを進める。
-        if (this.stations.cycle()) {
+        if (this.stations.cycle(step)) {
             this.entityData.set(DATA_STATIONS, this.stations.save());
 
             return;
         }
 
-        this.weapons.selectNext();
+        this.weapons.selectStep(step);
     }
 
     /**
@@ -2264,9 +2682,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         ResourceLocation event = id.withPath(
                 VehicleEntityBase.SOUND_PREFIX + id.getPath() + "." + AFTERBURNER_ROLE);
 
+        // volume 欄には音量ではなく「どこまで送るか」を入れる。ゲームはこの値でパケットの送り先を決め
+        // （max(volume,1) * 16 ブロック）、耳に届く大きさはクライアントが距離から組み直す。
+        // AFTERBURNER_CARRY と AfterburnerSounds 参照。
         this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
                 SoundEvent.createVariableRangeEvent(event), SoundSource.NEUTRAL,
-                AFTERBURNER_VOLUME, AFTERBURNER_LIGHT_PITCH);
+                AFTERBURNER_CARRY / 16.0F, AFTERBURNER_LIGHT_PITCH);
     }
 
     /**
@@ -2446,13 +2867,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // ただしエンジンは要る。前輪を動かすのは他の全てと同じエンジンから取る油圧か電力であり、スロットルを下限に
         // 置いた冷えきった機体には回す余裕が無い——なので飛行操縦系と同じスプール済み推力で拡縮する。何もして
         // いないスロットルでは、駐機中の機体はその場で向きを変えられない。
-        float nosewheel = 0.0F;
-
-        if (rolling) {
-            float grip = (float) Mth.clamp(1.0 - speed / Math.max(gear.steerFade(), 1.0E-3F), 0.0, 1.0);
-
-            nosewheel = this.input.yaw() * gear.steerRate() * grip * this.thrustLevel;
-        }
+        boolean taxiing = this.taxiing(rolling);
+        float nosewheel = this.nosewheel(gear, speed, this.wheeled(rolling));
 
         Vec3 nose = this.getNoseVector();
         Vec3 up = this.getLiftVector();
@@ -2462,7 +2878,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // ない。揚力系は取り付け元の巡航エンジンより大きな値を持つし、そうでなければならない。停止状態で機体を
         // 支える物はエンジンしか無く、エンジンはそれで重力に勝たねばならないからだ。
         Vec3 thrustAxis = lifting <= 0.0 ? nose : nose.scale(Math.cos(Math.asin(lifting))).add(up.scale(lifting));
-        double thrust = vtol == null
+        // 地上でレバーが下から 1/4 に収まっている間、その位置は推力ではなく速度を意味する。エンジンは
+        // ここでは何も押さず、押すのは groundTick の taxi だ。両方が働くと、速度指令が指したその上へ推力が
+        // 積まれて機体は結局加速していく——つまり速度指令が何も指せなくなる。
+        double thrust = taxiing ? 0.0 : vtol == null
                 ? definition.engine().maxThrust()
                 : Mth.lerp(lifting, definition.engine().maxThrust(), vtol.liftThrust());
 
@@ -2577,7 +2996,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         motion = motion.add(forces.scale(1.0 / burden)).add(0.0, -GRAVITY, 0.0);
 
         if (rolling) {
-            motion = this.groundTick(motion);
+            motion = this.groundTick(motion, taxiing);
         }
 
         // 暴走を止める最後の砦であり、ファイルが要求した場合のみ。最高速度は抗力が自ずと決める。
@@ -2595,6 +3014,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * だから機体を向けることが唯一の操縦になる。機首を下げれば前進し、バンクすれば横へ動き、水平なら留まる。
      * 以下のどこにも機首方向の推力は無い。ヘリはそれを持たないからだ。前へ運ぶのは支えているのと同じ力の一部で
      * あり、まさにそれが巡航中に機首下げになる理由であり、コレクティブを急に引くと加速ではなく上昇する理由だ。
+     *
+     * <p><b>そのコレクティブを動かすのは、もうパイロットの指ではない。</b> シフトとコントロールが要求するのは
+     * 昇降であって、レバーの位置ではない——手を離せば機体はその高度に留まる。レバーを直接上下させていた頃、
+     * ホバリングに要る値は重さと空気密度で動くので（UH-60 で地上63%、高度136で95%）、パイロットは高度を変える
+     * たびに新しい釣り合いを手探りしていた。{@link #trimCollective} 参照。飛行モデルは何も緩んでいない。
+     * そちらが出すのは 0〜1 のレバー位置だけで、その先の力は以下がそのまま計算する。
      *
      * <p>よってサイクリックはディスクを動かしてそのまま置き、キーを離した瞬間に水平へ戻したりしない。現代のヘリ
      * が全て備える姿勢保持装置の働きであり、キーボードで巡航を要求する唯一の方法でもある。キーは押し切りか非押下
@@ -2616,13 +3041,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         double speed = motion.length();
 
         // コレクティブ。固定翼機のスロットルと同じレバー・同じキーだが、仕事はまるで違う。機体の速さではなく
-        // ローターの引きの強さ、つまり上がるか下がるかを決める。
+        // ローターの引きの強さ、つまり上がるか下がるかを決める。そしてそのレバーを動かすのはパイロットの指
+        // ではなく機体自身だ——シフトとコントロールが要求するのは高度であって、レバーの位置ではない。
+        // trimCollective 参照。
         //
         // 燃料が尽きればレバーは何にも繋がっていない。ローターは tickRotor で回転を落としていき、揚力は
         // 回転数の2乗で消えるので、機体はオートローテーション——制御された降下——に入る。ローターが回って
         // いる間は操縦できるので、降りる場所を選ぶ余地は残る。
         if (!this.flameout()) {
-            this.setThrottle(this.throttle + this.input.throttle() * definition.engine().throttleRate());
+            this.trimCollective(definition, rotor, motion);
         }
 
         // ブレードピッチは即座に応える。ヘリで時間がかかるのはローター自体であり、それはここではなく
@@ -2671,6 +3098,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                         - overTilt(this.getRoll(), tilt) * rotor.stability(),
                 -handling.rollRate(), handling.rollRate()) * bite;
 
+        // ホバリングのキーを押している間、サイクリックはパイロットの手を離れ、機体を止める方へ預けられる。
+        // hoverStop 参照。
+        if (this.input.hover() && !rolling) {
+            Vec2 stop = this.hoverStop(handling, motion, tilt);
+
+            commandedPitch = stop.x * bite;
+            commandedRoll = stop.y * bite;
+        }
+
         // 接地中、サイクリックは降着装置と争って負ける。それでよい。駐機中のヘリを水平に保つのは車輪だ。
         // ローターが荷重を受け持つのと同時に効き始める。実機がスキッド上で軽くなり、飛ばされ始める瞬間だ。
         if (rolling) {
@@ -2691,13 +3127,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 操向可能な尾輪。前輪操舵と同じ物で、ここにある理由も同じだ。地上を転がっている間、ペダルはローター
         // ではなく車輪を回す。エンジンを必要とする理由も同じ。コレクティブを下限に置き出力がどこへも行っていない
         // 状態では何も操向しない。
-        float nosewheel = 0.0F;
-
-        if (rolling) {
-            float grip = (float) Mth.clamp(1.0 - speed / Math.max(gear.steerFade(), 1.0E-3F), 0.0, 1.0);
-
-            nosewheel = this.input.yaw() * gear.steerRate() * grip * this.thrustLevel;
-        }
+        float nosewheel = this.nosewheel(gear, speed, this.wheeled(rolling));
 
         Vec3 up = this.getLiftVector();
         Vec3 right = Attitude.right(this.attitude);
@@ -2707,7 +3137,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 最も分かりやすく効く——満載のガンシップがホバリングから上がらないのは、ローターが弱いのではなく
         // ローターが持ち上げる物が重いからだ。
         double burden = this.getBurden();
-        double disc = this.rotorLift(rotor, speed);
+        double disc = this.rotorLift(rotor, motion);
         Vec3 forces = up.scale(disc);
 
         // 上下から来る空気はローターとその下に吊られた全てに横腹から当たり、前から来る空気は胴体に当たる。
@@ -2779,10 +3209,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             // させられる壁になる。大きく取ると位置保持ではなく閾値になり、穏やかな前進操作ではまったく何も起き
             // ず、ある点を超えた途端ヘリが飛び出す。頂点を、誰かが意図的に使う最小の傾斜より下に保てば、壁は
             // 床下という本来あるべき場所に収まる。
+            //
+            // 帯域も力も水平だけで測る。位置保持が引き止めている物は横流れであり、上下は既に disc_drag が
+            // 受け持っているからだ。合成速度で測っていた頃、この2行はホバリングを壊す正のフィードバックの
+            // 半分だった——{@link #rotorLift} の注記参照。降下は毎回この帯域の何倍も速いので、進入中は位置
+            // 保持が丸ごと消えており、パイロットが最も欲しい所——着陸地点の真上——で機体は流れるに任された。
             double band = Math.max(rotor.translationalSpeed() * HOVER_BAND, 1.0E-4);
-            double slow = Mth.clamp(1.0 - speed / band, 0.0, 1.0);
+            double slow = Mth.clamp(1.0 - horizontalSpeed(motion) / band, 0.0, 1.0);
 
-            forces = forces.add(motion.scale(-rotor.hoverDrag() * turning * slow));
+            forces = forces.add(new Vec3(motion.x, 0.0, motion.z)
+                    .scale(-rotor.hoverDrag() * turning * slow));
         } else {
             this.angleOfAttack = 0.0F;
         }
@@ -2797,7 +3233,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         motion = motion.add(forces.scale(1.0 / burden)).add(0.0, -GRAVITY, 0.0);
 
         if (rolling) {
-            motion = this.groundTick(motion);
+            motion = this.groundTick(motion, false);
         }
 
         if (wing.maxSpeed() > 0.0F && motion.length() > wing.maxSpeed()) {
@@ -2805,6 +3241,51 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         this.setDeltaMovement(motion);
+    }
+
+    /**
+     * ホバリングのキーを押している間、サイクリックが要求する角速度（ピッチ, ロール）。
+     *
+     * <p>止めるという操作は、実機では2段階だ。流れている向きの逆へディスクを傾け、速度が抜けるのを待ち、
+     * 抜けきる前に水平へ戻す。戻すのが早ければ流れが残り、遅ければ逆へ動き出す。キーボードでは「少し戻して
+     * 待つ」が上手くやれない——キーは押し切りか非押下しかないからだ（サイクリックが離した位置に留まる理由と
+     * 同じ問題の裏側で、{@code rotorFlightTick} の注記参照）。だからここは、その一連を機体にやらせる。
+     *
+     * <p>やっていることは「速度を姿勢に写す」だけである。今の水平速度を機体の前後・左右成分に分け、その大きさ
+     * に比例した傾きを<em>逆向きに</em>要求する。速いほど深く傾き、遅くなるにつれ浅くなり、止まれば水平。
+     * だから戻すタイミングを誰も決めなくてよく、行き過ぎれば符号が反転して自分で引き戻す。
+     *
+     * <p><b>力を足していない。</b> ここが出すのは姿勢の要求だけで、機体を止めるのは今までどおり傾いた
+     * ディスクだ。だから見えている姿勢と減速は必ず一致する——止まるヘリは水平のまま滑るのではなく、ちゃんと
+     * 起こして止まる——し、傾けられない状況（接地中、ローターが回っていない、燃料切れ）では何も起きない。
+     *
+     * @param motion 今の速度。水平成分だけを読む
+     * @param tilt この機体が自分に許している傾き（度）。要求はここで頭打ちになる
+     */
+    private Vec2 hoverStop(AircraftDefinition.Handling handling, Vec3 motion, float tilt) {
+        Vec3 nose = this.getNoseVector();
+        Vec3 right = Attitude.right(this.attitude);
+        // 機首と右手を水平面へ落とす。傾いている機体でも「前」は水平の前だ——止めたい速度が水平なので。
+        double noseFlat = Math.sqrt(nose.x * nose.x + nose.z * nose.z);
+        double rightFlat = Math.sqrt(right.x * right.x + right.z * right.z);
+
+        if (noseFlat < 1.0E-4 || rightFlat < 1.0E-4) {
+            return Vec2.ZERO;
+        }
+
+        double forward = (motion.x * nose.x + motion.z * nose.z) / noseFlat;
+        double lateral = (motion.x * right.x + motion.z * right.z) / rightFlat;
+
+        // 前進していれば機首上げ、右へ流れていれば左バンク。Minecraft の仰角は機首下げが正なので、比較する
+        // 現在値は符号を反転する。バンクは右翼下げが既に正。
+        float wantPitch = (float) Mth.clamp(forward * STOP_TILT, -tilt, tilt);
+        float wantRoll = (float) Mth.clamp(-lateral * STOP_TILT, -tilt, tilt);
+
+        return new Vec2(
+                Mth.clamp((wantPitch + this.getXRot()) * STOP_GAIN,
+                        -handling.pitchRate(), handling.pitchRate()),
+                Mth.clamp((wantRoll - this.getRoll()) * STOP_GAIN,
+                        -handling.rollRate(), handling.rollRate()));
     }
 
     /**
@@ -2817,14 +3298,128 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 前進させれば各ブレードが手つかずの空気に届き、同じコレクティブでより多くの揚力が出る。垂直に浮けないほど
      * 重い機体でも地上滑走からなら飛び立てることが多い理由であり、離陸最初の数秒が「足場を見つけている」ように
      * 感じられる理由だ。
+     *
+     * <p><b>並進揚力は水平速度で測る。合成速度ではない。</b>ブレードが手つかずの空気へ届くのは機体が横へ
+     * 動いたときであって、上へ動いたときではない——吹き下ろしは上昇する機体に付いて来る。合成速度で測って
+     * いた頃、これはホバリングを壊す正のフィードバックの残り半分だった。わずかな流れが並進揚力を呼び、
+     * 揚力が上昇を呼び、その上昇速度が今度は自分で並進揚力を名乗り、同時に上の位置保持の帯域を追い出す。
+     * サイクリックを1tick叩いただけ（0.49度）の機体が、60秒で 9.5 km/h まで流れながら 83 ブロック上昇して
+     * いた。今は 0.8 km/h と 2 ブロックで落ち着く。前進飛行はどちらでも同じだ——並進項は 14 km/h で頭打ち
+     * になるので、飛んでいる機体は元から上限に張り付いている。
      */
-    private double rotorLift(AircraftDefinition.Rotor rotor, double speed) {
-        double translational = 1.0 + rotor.translationalLift()
-                * Mth.clamp(speed / Math.max(rotor.translationalSpeed(), 1.0E-4F), 0.0, 1.0);
+    private double rotorLift(AircraftDefinition.Rotor rotor, Vec3 motion) {
+        return this.discPerCollective(rotor, motion) * Mth.clamp(this.thrustLevel, 0.0F, 1.0F);
+    }
 
-        return rotor.lift() * Mth.clamp(this.thrustLevel, 0.0F, 1.0F)
-                * this.rotorSpeed * this.rotorSpeed
-                * this.airDensity() * translational * this.groundEffect();
+    /**
+     * コレクティブを動かす。要求されているのはレバーの位置ではなく<b>高度</b>だ。
+     *
+     * <p>シフトで上がり、コントロールで下がり、離せばその高度に留まる。以前は同じ2キーがレバーそのものを
+     * 上下させていたが、ヘリのレバーは「そこに置けば高度が決まる」物ではない——ホバリングに要るコレクティブは
+     * 重さと空気密度で動く。UH-60 は地上で 63%、高度136で 95%、高度237ではもう全開でも浮かない。つまり
+     * パイロットは、上がるたび下がるたびに新しい釣り合いを手探りすることになり、目を離した機体は必ず静かに
+     * 昇るか沈むかしていた。ヘリを飛ばす作業がその手探りで埋まっていた。
+     *
+     * <p>だから釣り合いはこちらで解く。上の {@link #discPerCollective} に「今の空気・回転数・地面効果で
+     * コレクティブ1あたりどれだけ引けるか」を訊けば、要るレバーの位置は重さを割るだけで出る（{@code hover}）。
+     * パイロットの指が乗るのはその上に足す<b>昇降率</b>の方だ。
+     *
+     * <p><b>飛行モデルは何も緩めていない。</b> ここが出すのは 0〜1 のレバー位置であり、その先は今までどおり
+     * ローターが引き、ディスク抗力が上昇率を頭打ちにし、空気が薄ければ全開でも足りない。高い所で全開のまま
+     * 沈んでいくヘリは、以前とまったく同じ理由で沈む——違いは、パイロットがその全開を自分で見つけなくて
+     * よくなったことだけだ。
+     *
+     * <p><b>接地中は下げる。</b> 車輪が支えている間は上下速度が常に0なので、釣り合いを解く相手がいない。
+     * ここでレバーを保持すると、着陸した機体が着陸時のコレクティブのまま飛び上がる。実機の着陸後と同じく、
+     * レバーは下がりきる。上げの指令があればそこから上がり、揚力が重さを超えた時点で浮く。
+     */
+    private void trimCollective(AircraftDefinition definition, AircraftDefinition.Rotor rotor, Vec3 motion) {
+        float rate = Mth.clamp(definition.engine().throttleRate(), 0.001F, 1.0F);
+        float command = this.input.throttle();
+
+        // 誰も操作していない機体のレバーは、置かれた場所に留まる。無人の機体が自分で高度を保つのは、
+        // 「操縦者不在の機体は最後のスロットルのまま進む」という他の全ての振る舞いと食い違う。AI は操作している。
+        if (this.getAviator() == null && !this.isBot()) {
+            this.holdAltitude = Double.NaN;
+
+            return;
+        }
+
+        double per = this.discAtFullRotor(rotor, motion);
+        // ディスクが傾いているぶん、上向きに使える分は減る。バンクしたまま高度を保つには引き起こす——実機で
+        // パイロットがやることであり、ここでは機体がやる。
+        double upward = Math.max(this.getLiftVector().y, LEAST_UPRIGHT);
+        double hover = per <= 1.0E-9 ? 1.0 : GRAVITY * this.getBurden() / upward / per;
+
+        // 接地中は釣り合いを解く相手がいない。車輪が支えている間、上下速度は指令が何であれ0だからだ。だから
+        // ここだけは高度ではなくレバーの位置を直接置く。
+        //
+        // 手を離していれば、浮く手前。0にしないのは2つ理由がある——尾輪はコレクティブから操向の力をもらうので
+        // レバーを抜いた機体は地上で向きを変えられないし、離陸のたびに下限から釣り合いまで数秒かけて上げ直す
+        // ことになる。浮かない値に置いておけば、車輪は荷重を持ったまま、シフト1つで即座に上がる。
+        //
+        // 下げのキーはそこからさらに抜き切る。地上でそれを押すのは「もっと降りたい」ではなく「畳みたい」だ。
+        if (this.onGround() && command <= 0.0F) {
+            double parked = command < 0.0F ? 0.0 : hover * ON_WHEELS;
+
+            this.holdAltitude = Double.NaN;
+            this.setThrottle(this.throttle + (float) Mth.clamp(parked - this.throttle, -rate, rate));
+
+            return;
+        }
+
+        double want;
+
+        if (command != 0.0F) {
+            // 指が乗っている間は高度を覚えない。離した所が新しい高度になる。
+            this.holdAltitude = Double.NaN;
+            want = command * (command > 0.0F ? CLIMB_RATE : SINK_RATE);
+        } else {
+            if (Double.isNaN(this.holdAltitude)) {
+                this.holdAltitude = this.getY();
+            }
+
+            // 保持は速度ではなく高度に対して掛ける。上下速度だけを0に保つと、風でも旋回でも押された分が
+            // そのまま残り、機体は「今の高度」ではなく「押された後の高度」を守ることになる。
+            want = Mth.clamp((this.holdAltitude - this.getY()) * HOLD_GAIN, -HOLD_RATE, HOLD_RATE);
+        }
+
+        double target = hover + (want - motion.y) * TRIM_GAIN;
+
+        // レバー自体の速さは機体の物のまま。目標へ跳ばず、実機のコレクティブと同じ速さで動く。
+        this.setThrottle(this.throttle + (float) Mth.clamp(target - this.throttle, -rate, rate));
+    }
+
+    /**
+     * コレクティブ全開1に対するローターの引き（ブロック/tick^2）。
+     *
+     * <p>{@link #rotorLift} からレバーの位置だけを抜いた物。分けてあるのは、レバーを<em>逆算</em>する側が
+     * あるからだ——{@link #trimCollective} は「今この空気・この回転数・この重さでホバリングするのに要る
+     * コレクティブ」を知る必要があり、それは重さをこの値で割れば出る。飛行モデルと逆算が同じ1本の式を読む
+     * ので、両者が食い違うことはない。
+     */
+    private double discPerCollective(AircraftDefinition.Rotor rotor, Vec3 motion) {
+        return this.discAtFullRotor(rotor, motion) * this.rotorSpeed * this.rotorSpeed;
+    }
+
+    /**
+     * 同じ物を、ローターが規定回転に達しているものとして。
+     *
+     * <p>{@link #trimCollective} が釣り合いを解くのに読むのはこちらだ。今の回転数で解くと、始動直後——
+     * まだ回転が上がりきっていない間——の「ホバリングに要るコレクティブ」は無限大に近い値になり、レバーは
+     * 端まで張り付く。そして回転が揃った瞬間、その端のレバーで機体が跳ね上がる。回転はどのみち数秒で揃うし、
+     * 揃うまでの間に機体が知りたいのは「回った後にどこへレバーを置くか」の方だ。
+     */
+    private double discAtFullRotor(AircraftDefinition.Rotor rotor, Vec3 motion) {
+        double translational = 1.0 + rotor.translationalLift() * Mth.clamp(
+                horizontalSpeed(motion) / Math.max(rotor.translationalSpeed(), 1.0E-4F), 0.0, 1.0);
+
+        return rotor.lift() * this.airDensity() * translational * this.groundEffect();
+    }
+
+    /** 速度の水平成分（ブロック/tick）。ローターが「どこかへ行っているか」を問う所はここを読む。 */
+    private static double horizontalSpeed(Vec3 motion) {
+        return Math.sqrt(motion.x * motion.x + motion.z * motion.z);
     }
 
     /**
@@ -2833,6 +3428,86 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private static float overTilt(float angle, float limit) {
         return angle - Mth.clamp(angle, -limit, limit);
+    }
+
+    /**
+     * この機体は今、飛ぶのではなく地上を転がっているか。
+     *
+     * <p>車輪が地面に着いていて、脚が出ていて、燃料があり、そして<b>レバーが地上の範囲にある</b>とき。
+     * レバーを開けた機体は滑走しているのであってタキシングしていない——{@link #TAXI_BAND} がその境目で、
+     * 越えた瞬間にレバーは速度ではなく推力に戻る。
+     *
+     * <p>回転翼機には無い。あちらのシフトは高度を要求するレバーであって出力の表明ではないし
+     * （{@link #trimCollective}）、車輪で転がるより浮いた方が速い。
+     */
+    private boolean taxiing(boolean rolling) {
+        return this.wheeled(rolling) && this.thrustLevel <= TAXI_BAND;
+    }
+
+    /**
+     * 車輪が地面を掴んでいるか。前輪操舵が効く条件で、こちらは出力を問わない。
+     *
+     * <p><b>スロットルを要求しない。</b>以前は前輪の切れ角にスプール済み推力を掛けており、レバーを下限に
+     * 置いた機体はその場で向きを変えられなかった——「油圧はエンジンから取る」という理屈だったが、実際に
+     * 起きるのは「アイドルでは曲がれない」であり、それは駐機場で最も曲がりたい状態そのものだ。回っている
+     * エンジンがあれば前輪は回る。燃料が尽きた機体だけが例外で、そこは {@code isOutOfFuel} が見る。
+     *
+     * <p>離陸滑走の間も曲がれる。前輪が仕事を手放すのは速度に対してであって、レバーの位置に対してでは
+     * ない——{@link #nosewheel} の {@code steer_fade} がそれを担う。
+     */
+    private boolean wheeled(boolean rolling) {
+        return rolling && this.gearProgress > 0.5F && !this.isOutOfFuel();
+    }
+
+    /**
+     * 前輪の切れ角（度/tick）。ペダルと操舵ハンドルの2つが同じ車輪を回す。
+     *
+     * <p>ペダル（Q/E）がそのまま前輪へ行く。飛んでいる間は方向舵を蹴るのと同じキーで、地面の上では車輪を
+     * 切る——空中と地上で意味が変わるが、同時に意味を持つことは無い。
+     *
+     * <p>速度で薄れる（{@code steer_fade}）。高速でも噛む前輪は、機体を滑走路に沿わせるどころか外へ放り
+     * 出してしまう。
+     */
+    private float nosewheel(AircraftDefinition.Undercarriage gear, double speed, boolean wheeled) {
+        if (!wheeled) {
+            return 0.0F;
+        }
+
+        // 速度で薄れるのは従来どおり。ただし薄れ始める速度には下限を置く。ファイルの steer_fade が語っている
+        // のは滑走路の高速域で、回転翼機はそこを 0.2（14 km/h）と書いている——ホバータキシーしか想定して
+        // いなかった頃の値だ。そのままでは、車輪で走り出したヘリが走り出した瞬間に曲がれなくなる。
+        return this.input.yaw() * gear.steerRate() * grip(speed, Math.max(gear.steerFade(), TAXI_GRIP));
+    }
+
+    /** その速度で前輪に残っている効き。速度とともに手放す——高速でも噛む前輪は機体を滑走路の外へ放り出す。 */
+    private static float grip(double speed, double fade) {
+        return (float) Mth.clamp(1.0 - speed / Math.max(fade, 1.0E-3), 0.0, 1.0);
+    }
+
+    /**
+     * 地上をスロットルで転がる。レバーの位置がそのまま速度になる。
+     *
+     * <p>キーは増えない。<b>進めるのはスロットル、曲げるのはペダル</b>——飛んでいる時と同じ2つで、意味だけが
+     * 地面の上では素直になる。レバー {@link #TAXI_BAND} までが 0〜30 km/h に対応し、そこを超えたレバーは
+     * 従来どおりの推力に戻るので、離陸滑走はレバーを開けるだけで始まる。
+     *
+     * <p><b>減速はしない。</b>ここが押すのは目標速度に足りない分だけで、超えている間は何もしない。走り過ぎた
+     * 機体を止めるのはブレーキ（{@code air_brake}）と車輪の転がり抵抗の仕事だ。レバーを絞れば目標は下がるが、
+     * そこへ引き戻す力は無い——地上の乗り物としてはそれが正しい手応えで、実機のパイロットも同じ理由で
+     * ブレーキを踏む。
+     *
+     * @param ground 摩擦を通した後の水平速度
+     * @param forwards 機首の水平方向（単位ベクトル）
+     */
+    private Vec3 taxi(Vec3 ground, Vec3 forwards) {
+        double want = TAXI_SPEED * Mth.clamp(this.thrustLevel / TAXI_BAND, 0.0F, 1.0F);
+        double gap = want - ground.dot(forwards);
+
+        if (gap <= 0.0) {
+            return ground;
+        }
+
+        return ground.add(forwards.scale(Math.min(TAXI_ACCEL, gap)));
     }
 
     /**
@@ -2967,7 +3642,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return;
         }
 
-        float load = this.getLoadFactor(velocity);
+        // 大きさで見る。主翼は押し込みでも同じだけ曲がる——実機の負側の制限が正側より小さいのは
+        // 構造ではなく人間の都合が先に来るからで、ここで区別する物は無い。符号は getLoadFactor 参照。
+        float load = Math.abs(this.getLoadFactor(velocity));
 
         // 十分強く十分長く引けば、撃ち落とされるのを待たずに空中で主翼が外れる。
         if (load > limit && this.wound((load - limit) * OVER_G_DAMAGE)) {
@@ -2991,16 +3668,26 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 持ち上げ、重力が地面へ落とし戻す。回転ではなくバウンドに見える。1秒ほどかけて機首が上がり、それに伴って
      * 主翼が荷重を受け持つ、というのが持つ価値のある効果の全てで、その両方はここで本物だ。
      */
-    private Vec3 groundTick(Vec3 motion) {
+    private Vec3 groundTick(Vec3 motion, boolean taxiing) {
         // 姿勢を決めるのはパイロットではなく車輪であり、車輪が載っているのは地面だ。翼は地面に沿い、機首はその
         // 線から尾部が許す最大の機首上げまでのどこかに収まる。
         Slope slope = this.groundSlope();
         float surface = -slope.pitch();
 
+        // 降着装置そのものが持っている機首上げ。前輪式は0で、車輪は模型の姿勢のまま地面に並ぶ。尾輪式は
+        // <em>立っているだけで</em>機首を上げており、水平に置けば尾輪が宙に浮く。地面の傾きに足すので、坂の
+        // 上でも三点が地面に着く。Undercarriage#groundStance 参照。
+        float stance = this.getStats().landingGear().groundStance();
+        float rest = surface - stance;
+
         // パイロットが保持している機首上げ。地面そのものの傾きではなく、そこからどれだけ引き起こしているかだ。
         // 差を取らないと、上り坂に立っているだけの機体が「もう引き起こし済み」と読まれ、坂の上では機首が上がら
         // なくなる。
-        float rotation = Mth.clamp(this.getXRot() - surface, -GROUND_PITCH_LIMIT, 0.0F);
+        //
+        // 上限は地面から測った尾部の余裕なので、既に機首を上げて立っている機体はその分だけ残りが少ない。下限は
+        // 逆に「尾を持ち上げて水平まで」——尾輪式が滑走中にやることで、前輪式（stance が0）では 0 のまま、
+        // つまり以前の範囲そのものになる。
+        float rotation = Mth.clamp(this.getXRot() - rest, -(GROUND_PITCH_LIMIT - stance), stance);
 
         // 機首上げを保持するのは、パイロットが実際に引いている間だけ。「入力がちょうど0か」ではなく「引いて
         // いるか」を問う。マウスで飛ばす機体の舵はちょうど0になることがほぼ無く、0との比較では一度上がった機首が
@@ -3010,7 +3697,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         this.setAttitude(new Quaternionf(this.attitude).slerp(
-                Attitude.of(this.getYRot(), surface + rotation)
+                Attitude.of(this.getYRot(), rest + rotation)
                         .rotateZ((float) Math.toRadians(slope.bank())),
                 GROUND_LEVELLING));
 
@@ -3035,6 +3722,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
             ground = forwards.scale(ground.dot(forwards) * along)
                     .add(sideways.scale(ground.dot(sideways) * across));
+
+            if (taxiing) {
+                ground = this.taxi(ground, forwards);
+            }
         } else {
             // 真上か真下を向いている。車輪が意見を持つ状況ではない。0で割らず、均等に減速させる方へ倒す。
             ground = ground.scale(along);
@@ -3301,6 +3992,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
     /**
      * 機体が現在何G を引いているか。1が水平飛行、0が無重量。設計耐Gを超えると機体が歪み始める。
+     *
+     * <p><b>符号を持つ。</b>正は座席へ押し付けられる向き（引き起こし）、負はベルトへ浮く向き
+     * （押し込み・背面飛行・急な機首下げ）。長らく {@code Math.abs} を通して返していたので、負の側は
+     * <em>一度も存在しなかった</em>——{@code PilotLoad} の赤化（負G の症状）は条件が成立しないまま
+     * 書かれており、計器の G 表示も押し込みで正の数を出していた。主翼の揚力係数は迎角の符号を素直に
+     * 引き継ぐので、絶対値を外すだけで正しい符号が出る。
+     *
+     * <p><b>大きさが欲しい所は自分で絶対値を取ること。</b>機体が壊れるのも翼端が蒸気を曳くのも
+     * 向きに依らないので、{@link #checkStructuralLoad} と翼端渦はそうしている。人間の側だけが向きを
+     * 区別する——上向きと下向きで、耐えられる量も症状も違うからだ（{@code PilotLoad}）。
      */
     public float getLoadFactor(Vec3 velocity) {
         double speed = velocity.length();
@@ -3311,7 +4012,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // も旋回中も同じ値だ。下の主翼の値と違って全側で正直でもある——ここには飛行モデルの実行に依存する物が
         // 無いので、サーバーも見物人もパイロットと同じ答えを得る。
         if (rotor != null) {
-            return (float) (this.rotorLift(rotor, speed) / GRAVITY);
+            return (float) (this.rotorLift(rotor, velocity) / GRAVITY);
         }
 
         if (speed < 1.0E-4) {
@@ -3324,7 +4025,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         double coefficient = wing.liftCoefficient(angle) * (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
                 * this.sweepLift();
 
-        return (float) Math.abs(wing.lift() * coefficient * speed * speed / GRAVITY);
+        return (float) (wing.lift() * coefficient * speed * speed / GRAVITY);
     }
 
     /**
@@ -3463,8 +4164,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         // 無人回転翼機のローターは操作者が繋がっている間回る。回すのはそこにいる乗員ではなく、そこに
-        // 誰かが繋がっているという事実だ。
-        boolean running = this.getControllingPassenger() != null || this.getOperator() != null;
+        // 誰かが繋がっているという事実だ。AI が飛ばしている機体も同じで、そちらは同期フラグで両側が知る。
+        boolean running = this.getControllingPassenger() != null || this.getOperator() != null
+                || this.isBotDriven();
 
         this.rotorSpeed = approach(this.rotorSpeed, running ? 1.0F : 0.0F,
                 1.0F / Math.max(rotor.spoolTicks(), 1));
@@ -3548,6 +4250,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.bayProgressO = this.bayProgress;
         this.bayProgress = approach(this.bayProgress, this.isBayOpen() ? 1.0F : 0.0F,
                 1.0F / this.getBayCycleTicks());
+        this.rampProgressO = this.rampProgress;
+        this.rampProgress = approach(this.rampProgress, this.isRampOpen() ? 1.0F : 0.0F,
+                1.0F / this.getRampCycleTicks());
     }
 
 
@@ -3731,7 +4436,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         Vec3 where = hardpoints.get(slot).pos();
-        Vec3 centre = this.position().add(Attitude.toWorld(this.attitude, where));
+        Vec3 centre = this.position().subtract(0.0, this.stanceSink(1.0F), 0.0)
+                .add(Attitude.toWorld(this.attitude, where));
         part.place(centre, pylonBox(where, hardpoints, slot));
     }
 
@@ -3796,15 +4502,22 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 可能なパーティクルタイプがまだ存在しない。
         TintedParticleOption vapour = ModParticles.VAPOUR.get().of(VAPOUR_COLOUR, 1.0F);
 
-        // 翼端。主翼が強く引いているほど見える量が増える。
-        float load = this.getLoadFactor(velocity);
+        AircraftDefinition.Effects effects = this.getStats().effects();
 
-        if (load > VORTEX_LOAD) {
-            double span = this.getWingSpan();
-            int puffs = Math.min((int) ((load - VORTEX_LOAD) * 2.0F) + 1, 4);
+        // 翼端。主翼が強く引いているほど見える量が増える。向きは問わない——背面で引いても渦は同じだけ
+        // 巻く。符号は getLoadFactor 参照。
+        float load = Math.abs(this.getLoadFactor(velocity));
+
+        if (load > effects.vortexLoad()) {
+            // 右翼端。ファイルが書いていなければ当たり判定形状の最も外側から。左は x を反転した鏡像で、
+            // Attitude.toWorld は x を右向きに測るので、そのまま両翼になる。
+            Vec3 tipOffset = effects.vortex()
+                    .orElseGet(() -> new Vec3(this.getWingSpan(), WING_HEIGHT, 0.0));
+            int puffs = Math.min((int) ((load - effects.vortexLoad()) * 2.0F) + 1, 4);
 
             for (int side = -1; side <= 1; side += 2) {
-                Vec3 tip = position.add(right.scale(span * side)).add(up.scale(WING_HEIGHT));
+                Vec3 tip = position.add(Attitude.toWorld(this.attitude,
+                        new Vec3(tipOffset.x * side, tipOffset.y, tipOffset.z)));
 
                 for (int i = 0; i < puffs; i++) {
                     this.level().addParticle(vapour,
@@ -3817,17 +4530,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         // そしてコーン。機体が前方の空気を、その空気が逃げるより速く押し始めたら発生する。
-        double onset = this.getStats().wing().maxSpeed() > 0.0F
-                ? this.getStats().wing().maxSpeed() * VAPOUR_SPEED
-                : this.topSpeed() * VAPOUR_SPEED;
+        double onset = (this.getStats().wing().maxSpeed() > 0.0F
+                ? this.getStats().wing().maxSpeed()
+                : this.topSpeed()) * effects.coneSpeed();
 
         if (speed > onset) {
             double thickness = Math.min((speed - onset) / Math.max(onset * 0.15, 1.0E-3), 1.0);
-            Vec3 centre = position.add(up.scale(WING_HEIGHT)).add(nose.scale(VAPOUR_AHEAD));
+            Vec3 centre = position.add(Attitude.toWorld(this.attitude,
+                    effects.cone().orElse(DEFAULT_CONE)));
 
             for (int i = 0; i < 1 + (int) (thickness * 6); i++) {
                 double angle = random.nextDouble() * Math.PI * 2.0;
-                double radius = VAPOUR_RADIUS * (0.7 + random.nextDouble() * 0.3);
+                double radius = effects.coneRadius() * (0.7 + random.nextDouble() * 0.3);
                 Vec3 rim = centre.add(right.scale(Math.cos(angle) * radius))
                         .add(up.scale(Math.sin(angle) * radius));
 
@@ -4295,8 +5009,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return this.salvage();
         }
 
-        // 地上作業であり、誰か座っている間は不可。
-        if (!this.getPassengers().isEmpty() || !this.isParked()) {
+        // 地上作業であり、誰か座っている間は不可。数えるのは乗員だけ——積み荷の車両は席に座っておらず、
+        // 翼の下のパイロンを外す作業の邪魔にもならない。
+        if (this.crewAboard() > 0 || !this.isParked()) {
             return InteractionResult.PASS;
         }
 
@@ -4481,6 +5196,49 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 loaded.rounds(), loaded.capacity());
 
         return InteractionResult.CONSUME;
+    }
+
+    /**
+     * 出撃整備。燃料を満たしたうえで、内蔵砲のベルトを満たす。
+     *
+     * <p>翼下の物には触れない。あちらはそれ自体がアイテムであり、何をいくつ吊るかは注文書
+     * （{@code match/Loadout}）が既に決めている。ここで満たすのは、ファイルが機体に与えていて誰も
+     * 選べない砲だけだ。
+     *
+     * <p>弾種を並べた砲には最初の1種を入れる。飛びながら替えられない以上、出撃時に選ばれた1本が
+     * その出撃のベルトになる（{@code AircraftDefinition.Hardpoint.ammunition} 参照）。
+     */
+    @Override
+    public void rearm() {
+        super.rearm();
+
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        List<AircraftDefinition.Hardpoint> hardpoints = this.getStats().hardpoints();
+
+        for (AircraftDefinition.Hardpoint hardpoint : hardpoints) {
+            if (!hardpoint.isFixed()) {
+                continue;
+            }
+
+            if (!hardpoint.ammunition().isEmpty()) {
+                while (this.weapons.loadRound(hardpoint.ammunition().get(0), Integer.MAX_VALUE) != null) {
+                    // 満ちた砲から次の砲へ。
+                }
+            }
+        }
+
+        // 弾種を持たない砲は種類で数える。1回の呼びで満ちるのは1門なので、同じ種類の砲を2門積む機体
+        // （AC-130 のような）のために、入らなくなるまで繰り返す。
+        for (AmmoKind kind : AmmoKind.values()) {
+            while (this.weapons.loadAmmo(kind, Integer.MAX_VALUE) != null) {
+                // 満ちた砲から次の砲へ。
+            }
+        }
+
+        this.entityData.set(DATA_WEAPONS, this.weapons.syncTag());
     }
 
     private InteractionResult loadAmmo(Player player, ItemStack held, AmmoKind kind) {
@@ -4927,6 +5685,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.entityData.set(DATA_BAY_OPEN, tag.getBoolean("BayOpen"));
         this.bayProgress = this.isBayOpen() ? 1.0F : 0.0F;
         this.bayProgressO = this.bayProgress;
+        this.entityData.set(DATA_RAMP_OPEN, tag.getBoolean("RampOpen"));
+        this.rampProgress = this.isRampOpen() ? 1.0F : 0.0F;
+        this.rampProgressO = this.rampProgress;
         this.entityData.set(DATA_FLAPS_DOWN, tag.getBoolean("FlapsDown"));
         this.flapsProgress = this.isFlapsDown() ? 1.0F : 0.0F;
         this.flapsProgressO = this.flapsProgress;
@@ -4968,6 +5729,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         tag.putBoolean("GearDown", this.isGearDown());
         tag.putBoolean("FlapsDown", this.isFlapsDown());
         tag.putBoolean("BayOpen", this.isBayOpen());
+        tag.putBoolean("RampOpen", this.isRampOpen());
         tag.putBoolean("Vtol", this.isVtolSelected());
         tag.put("Weapons", this.weapons.save());
         tag.put("Stations", this.stations.save());

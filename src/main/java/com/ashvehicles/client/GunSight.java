@@ -15,6 +15,7 @@ import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.weapon.GunStations;
+import com.ashvehicles.weapon.TurretStations;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 
@@ -58,8 +59,14 @@ import net.minecraft.world.phys.Vec3;
  * どの距離でもそれは目に見えない。{@link Solution} 参照。
  */
 public final class GunSight {
-    /** 追跡する価値のある最長飛翔時間（tick）。これを超えると弾は地平線の向こうだ。 */
-    private static final int MAX_FLIGHT = 400;
+    /**
+     * 追跡する価値のある最長飛翔時間（tick）。これを超えると弾は地平線の向こうだ。
+     *
+     * <p>35 秒。平らに飛ぶ弾には長すぎるが、榴弾砲は仰角 72 度で 460 tick 飛ぶ。ここで打ち切ると、
+     * 山なりに撃った砲のマークが弾道の途中——まだ上昇している空の一点——に立つ。世界へ問い合わせるのは
+     * {@link #TRACE_REACH} までなので、伸ばして増えるのはベクトル演算だけだ。
+     */
+    private static final int MAX_FLIGHT = 700;
     /**
      * 弾が何に当たるかを世界へ問う距離の上限（ブロック）。
      *
@@ -324,6 +331,53 @@ public final class GunSight {
         return solve(vehicle, selected, vehicle.getSelectedAmmunition(), weapon, bore);
     }
 
+    /**
+     * 独立砲塔向けの同じ処理。砲手が覗いているのは自分の砲塔の砲であって、車両の主砲ではない。
+     *
+     * <p>問いは車両の主砲とまったく同じで、答える相手が砲塔ごとに違うだけだ——銃口はその砲塔の耳軸と
+     * 砲身から、砲腔方向はその砲塔の角から出る。{@link com.ashvehicles.weapon.TurretStations} 参照。
+     */
+    @Nullable
+    public static Solution solve(GroundVehicleEntity vehicle, int station) {
+        TurretStations stations = vehicle.getTurrets();
+
+        if (station < 0 || station >= stations.count()) {
+            forget();
+
+            return null;
+        }
+
+        ResourceLocation selected = stations.station(station).weapon().orElse(null);
+
+        if (selected == null) {
+            forget();
+
+            return null;
+        }
+
+        WeaponDefinition weapon = Definitions.weapon(selected);
+
+        if (!aims(weapon)) {
+            forget();
+
+            return null;
+        }
+
+        Bore bore = new Bore() {
+            @Override
+            public Vec3 muzzle(float partialTick) {
+                return stations.muzzle(station, 0, partialTick);
+            }
+
+            @Override
+            public Vec3 direction(float partialTick) {
+                return stations.direction(station, partialTick);
+            }
+        };
+
+        return solve(vehicle, selected, null, weapon, bore);
+    }
+
     /** どの機体から要求されても、毎tick 1回求めてその間は記憶する。 */
     @Nullable
     private static Solution solve(VehicleEntityBase vehicle, ResourceLocation selected,
@@ -427,7 +481,7 @@ public final class GunSight {
 
     /**
      * 弾をtickごとに前進させる。{@code VehicleProjectile} が飛ばすのとまったく同じ順序で、モーターを持つ物はまず
-     * モーター、次に移動、次に次tickのための落下を差し引く。
+     * モーター、次に移動、次に次tickのための抗力と落下を差し引く。
      *
      * <p>何かにぶつかった後も飛ばし続ける。見越しの基準になるのはこの飛翔であり、尾根の向こうの目標も尾根を越えた
      * 瞬間には目標だ——尾根に乗るのはピッパーであって、消えるのが見越しではない。最初に当たった物だけを記録し、それ以降
@@ -471,6 +525,11 @@ public final class GunSight {
             }
 
             position = next;
+            // 弾が受ける物をそのまま受ける。空気が速さを削り、重力が下へ引く。VehicleProjectile.fly 参照。
+            // モーターを持つ物——無誘導ロケット——はここで抗力を受けない。あちらの抗力は RocketEntity.steer
+            // の中にあり、燃焼中は効かず、無誘導のまま燃え尽きた後は steer が手前で戻るので一度も効かない。
+            // 印が弾より手前に落ちないよう、鏡は同じ形をしていなければならない。
+            velocity = round.hasMotor() ? velocity : round.slowedByAir(velocity);
             velocity = velocity.subtract(0.0, round.gravity(), 0.0);
             samples.add(position);
         }

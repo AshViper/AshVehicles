@@ -1,0 +1,23 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_pod",
+  "tab": "equipment",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 5
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 1
+    },
+    {
+      "item": "minecraft:firework_star",
+      "count": 4
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:boz107"
+  }
+}

@@ -11,6 +11,7 @@
     "damage": 9.0,
     "speed": 45.0,
     "gravity": 0.0245,
+    "drag": 0.00039,
     "range": 1800.0,
     "ricochet": 55.0,
     "tracer": "FFD27A"

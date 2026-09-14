@@ -1,0 +1,24 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 120,
+  "gun_class": "autocannon",
+  "firing": {
+    "rounds_per_second": 13.3,
+    "spread": 0.35
+  },
+  "projectile": {
+    "damage": 6.0,
+    "speed": 37.5,
+    "gravity": 0.0245,
+    "drag": 0.0005,
+    "range": 1800.0,
+    "ricochet": 40.0,
+    "tracer": "FF9060"
+  },
+  "sound": {
+    "fire": "ashvehicles:weapon.gun",
+    "volume": 1.8,
+    "pitch": 0.95
+  }
+}

@@ -11,6 +11,7 @@
     "damage": 6.0,
     "speed": 43.0,
     "gravity": 0.0245,
+    "drag": 0.0004,
     "range": 1500.0,
     "ricochet": 14.0,
     "tracer": "FFD890"

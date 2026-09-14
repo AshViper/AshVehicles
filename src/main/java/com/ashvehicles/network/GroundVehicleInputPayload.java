@@ -19,7 +19,7 @@ import org.joml.Quaternionf;
  * 運転している車両に適用するので、他人の戦車を狙うことはできない。
  */
 public record GroundVehicleInputPayload(GroundVehicleInput input, Quaternionf attitude, float speed,
-        float turretYaw, float gunPitch, boolean cycleWeapon) implements CustomPacketPayload {
+        float turretYaw, float gunPitch, int cycleWeapon, float sightTilt) implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<GroundVehicleInputPayload> TYPE =
             new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "vehicle_input"));
@@ -34,11 +34,12 @@ public record GroundVehicleInputPayload(GroundVehicleInput input, Quaternionf at
                 buf.writeFloat(payload.speed());
                 buf.writeFloat(payload.turretYaw());
                 buf.writeFloat(payload.gunPitch());
-                buf.writeBoolean(payload.cycleWeapon());
+                buf.writeByte(payload.cycleWeapon());
+                buf.writeFloat(payload.sightTilt());
             },
             buf -> new GroundVehicleInputPayload(GroundVehicleInput.read(buf),
                     new Quaternionf(buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat()),
-                    buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readBoolean()));
+                    buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readByte(), buf.readFloat()));
 
     @Override
     public CustomPacketPayload.Type<GroundVehicleInputPayload> type() {
@@ -56,10 +57,14 @@ public record GroundVehicleInputPayload(GroundVehicleInput input, Quaternionf at
             }
 
             vehicle.setInput(payload.input());
+            // 運転手が覗いている視界の倒し角。主砲塔は運転しているクライアントが自分で使うが、独立砲塔を
+            // 据えているのはサーバーなので、こちらへ届かないと1人で乗っている運転手の砲塔だけが三人称の
+            // 倒し角の分だけ低く狙う。{@code TurretStations.aim} 参照。
+            vehicle.setSightTilt(payload.sightTilt());
             vehicle.reportState(payload.attitude(), payload.speed(), payload.turretYaw(), payload.gunPitch());
 
-            if (payload.cycleWeapon()) {
-                vehicle.cycleWeapon();
+            if (payload.cycleWeapon() != 0) {
+                vehicle.cycleWeapon(payload.cycleWeapon());
             }
         });
     }

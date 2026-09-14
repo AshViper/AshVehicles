@@ -118,7 +118,10 @@ public final class Dispenser {
             return;
         }
 
-        int biggest = Math.max(Math.max(setup.flares(), setup.chaff()), 1);
+        // 満載1回分の時間として数えるので、基準にするのは機体自身の弾倉ではなく今の搭載量——外付けの
+        // 投射機を吊った機体は入る量が増えるが、地上要員が満たすのに掛かる時間は変わらない。
+        int biggest = Math.max(Math.max(this.aircraft.countermeasureCapacity(true),
+                this.aircraft.countermeasureCapacity(false)), 1);
         int perRound = Math.max(setup.reloadTicks() / biggest, 1);
 
         if (++this.reloading < perRound) {
@@ -130,7 +133,7 @@ public final class Dispenser {
         for (boolean flare : new boolean[] {true, false}) {
             int carried = this.aircraft.getCountermeasures(flare);
 
-            if (carried < setup.capacity(flare)) {
+            if (carried < this.aircraft.countermeasureCapacity(flare)) {
                 this.aircraft.setCountermeasures(flare, carried + 1);
             }
         }

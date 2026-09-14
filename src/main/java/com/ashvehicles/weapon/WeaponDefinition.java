@@ -9,6 +9,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.StringRepresentable;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * 兵装1つを JSON だけで記述した物。{@code data/ashvehicles/weapon/} にファイルを置けば起動時に MOD が
@@ -29,12 +30,14 @@ import net.minecraft.util.StringRepresentable;
  * @param guidance 誘導方式。誘導する兵装のみ。無ければ誘導しない
  * @param requires これを撃つ前に機体が積んでいなければならないポッドの種別。{@link #requires()} 参照
  * @param sound 音
+ * @param nation この兵装の国籍。機体の {@code airframe.nation} と同じ書き方。書かなければ国籍を持たない
+ *               汎用品で、どの機体も自分の物として扱う（増槽がそう）
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
         Optional<GunClass> gunClass,
         Firing firing, Projectile projectile, Optional<Guidance> guidance,
         Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag, float mass,
-        Optional<Cluster> cluster) {
+        Optional<Cluster> cluster, Optional<String> nation) {
 
     /** {@code RRGGBB}。先頭の # は有っても無くてもよい。この種のファイルでの色表記はすべてこれ。 */
     static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
@@ -83,7 +86,10 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             // ので、そちらは投下した瞬間に軽くなる。空になった増槽が軽くならないのは正しく、だからこそ
             // 落とすことに意味がある。
             Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(WeaponDefinition::mass),
-            Cluster.CODEC.optionalFieldOf("cluster").forGetter(WeaponDefinition::cluster)
+            Cluster.CODEC.optionalFieldOf("cluster").forGetter(WeaponDefinition::cluster),
+            // 国籍。吊れるかどうかは決めず、出撃盤のプリセットが自国の物を先に選ぶのに使うだけ。
+            // {@code AircraftDefinition.Airframe#uses} 参照。
+            Codec.STRING.optionalFieldOf("nation").forGetter(WeaponDefinition::nation)
     ).apply(instance, WeaponDefinition::new));
 
     /**
@@ -97,20 +103,28 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      * {@code explosion} は小さいか0であるべきで、破壊力は子弾の数×子弾の規模から出る。同じ重さの単弾頭と
      * 比べた時の差がそれだ——1つの深い穴か、広い範囲の浅い穴か。
      *
-     * <p><b>撒く高さを決めるのは信管だ。</b>{@code guidance.proximity} が目標からどれだけ手前で炸裂するかで、
-     * 急角度で落ちてくる弾ではそれがそのまま散布高度になる。高いほど撒布界は広く、薄くなる。
+     * <p><b>撒く高さを決めるのは信管だ。</b>撒布界の広さは、子弾が落ちている間に横へ流れる距離——つまり
+     * {@code spread} と落下時間の積——なので、高さが無ければ何発撒いても1点に落ちる。高さの出どころは2つある。
+     *
+     * <p>目標を持つ弾は {@code guidance.proximity} が決める。目標からどれだけ手前で炸裂するかであり、急角度で
+     * 落ちてくる弾ではそれがそのまま散布高度になる。座標へ飛ぶ弾道弾がこれだ。
+     *
+     * <p>目標を持たない弾——投下されるだけのクラスター爆弾——は {@code open} が決める。地面までの高さがこれを
+     * 切った時に開く、実物の散弾筒に付いている近接信管そのものだ。0 なら開傘高度を持たず、触れた所で開く。
      *
      * @param submunition 子弾の兵装ID
      * @param count 何発撒くか
      * @param spread 1発ごとに横へ与える速度（1tickあたりブロック）。落下時間と掛かって撒布界の広さになる
      * @param inherit 親の速度をどれだけ引き継ぐか。0なら真下に落ち、1なら親と同じ勢いで前へ飛ぶ
+     * @param open 真下の地面までがこの高さ（ブロック）を切ったら開く。0 なら着弾まで開かない
      */
-    public record Cluster(ResourceLocation submunition, int count, float spread, float inherit) {
+    public record Cluster(ResourceLocation submunition, int count, float spread, float inherit, float open) {
         public static final Codec<Cluster> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.fieldOf("submunition").forGetter(Cluster::submunition),
                 Codec.INT.optionalFieldOf("count", 12).forGetter(Cluster::count),
                 Codec.FLOAT.optionalFieldOf("spread", 0.3F).forGetter(Cluster::spread),
-                Codec.FLOAT.optionalFieldOf("inherit", 0.25F).forGetter(Cluster::inherit)
+                Codec.FLOAT.optionalFieldOf("inherit", 0.25F).forGetter(Cluster::inherit),
+                Codec.FLOAT.optionalFieldOf("open", 0.0F).forGetter(Cluster::open)
         ).apply(instance, Cluster::new));
     }
 
@@ -121,7 +135,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
             Optional.empty(),
             new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(),
-            Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty());
+            Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty(), Optional.empty());
 
     /**
      * 引き金を押し続けている間撃ち続けるか、それとも1押し1発か。
@@ -330,30 +344,51 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      *              が無く、終わらせるのは何かに当たることだけ——当たる物が無ければ世界の底を抜けて落ちる。
      *              ミサイルの重力なら、射程が与える数秒ではなく1〜2分の飛翔になる
      * @param explosion 着弾点で起こす爆発。TNT の4と同じ単位。ただ当たるだけの物は0
+     * @param blast 爆風が機体に与える打撃（点）。爆心から {@code explosion} ブロックまでは全部、そこから2倍の距離で0。
+     *              0（書かない場合）はバニラの爆発の式に任せる。書いた弾のバニラの爆発は機体に効かなくなり、
+     *              人やモブには今まで通り効く。{@link #blastAt} と {@code VehicleProjectile.blastMachines} 参照
      * @param tracer 描画色。{@code RRGGBB}
      * @param ricochet 装甲が食い込ませず弾くのに必要な入射角。装甲板の法線からの度数で、0 が直角命中、
      *                 90 が表面に沿った掠り。長い侵徹体は掠り角近くまで食い込むので大きな値を、小さな弾は
      *                 傾斜を転がるので小さな値を取る。0（フィールドを書かない場合）は「決して弾かれない」
      *                 の意味で、成形炸薬や、貫通ではなく接触で炸裂する物には正しい。
      *                 {@link com.ashvehicles.weapon.Ricochet} 参照
+     * @param penetration 抜ける装甲の厚さ（mm）。当たった面の {@code plate} 以上なら威力をそのまま渡し、
+     *                    足りなければ半分。0（書かない場合）はどんな装甲にも止められ、装甲の無い面にだけ
+     *                    全部が効く。{@link com.ashvehicles.weapon.Penetration} 参照
      * @param trail 後ろに残す煙。残すなら
      */
     public record Projectile(float damage, float speed, float thrust, int burnTicks,
             int spoolTicks, float topSpeed,
-            float gravity, float range, float explosion, int tracer, float ricochet,
-            float drag, float turnDrag,
+            float gravity, float range, float explosion, float blast, int tracer, float ricochet,
+            float penetration, float drag, float turnDrag,
             Optional<Trail> trail) {
 
         /**
-         * モーターが切れた後に空気が奪う速さの係数。失う量は {@code drag × 速さ²}（1tickあたり）。
+         * 空気が奪う速さの係数。失う量は {@code drag × 速さ²}（1tickあたり）。
          *
-         * <p>2乗なのは実際にそうだからで、そこが効く。燃焼終了直後の最も速い瞬間に最も激しく削られ、
-         * 遅くなるほど緩む。既定値は、Mach 4 で燃え尽きたミサイルが20秒ほどで Mach 1.5 付近まで落ちる
-         * 値。惰性区間を持たない弾——モーターが目標まで燃え続ける短射程弾——では一度も効かない。
+         * <p>2乗なのは実際にそうだからで、そこが効く。最も速い瞬間に最も激しく削られ、遅くなるほど緩む。
          *
-         * <p><b>燃焼中は効かない。</b> ファイルの {@code thrust} と {@code top_speed} は既に「空気の中で
-         * その機体が出せる性能」として書かれた値であり、そこへさらに抗力を足せば全ミサイルの最高速が黙って
-         * 下がる。足りていなかったのは燃焼<em>後</em>で、そこだけを足す。
+         * <p><b>これは実在の量である。</b> 弾道学の減速度は {@code a = ρ·Cd·A/(2m) · v²} で、係数
+         * {@code ρ·Cd·A/(2m)} の単位は 1/m。1ブロック＝1mなので、その値をそのまま書けばよい——
+         * blocks/tick で測っても m/s で測っても同じ数になる（長さの単位が同じで、時間の単位が両辺で
+         * 打ち消し合うため）。だから兵装ファイルの {@code drag} は「調整用のつまみ」ではなく、
+         * 弾の直径・質量・抗力係数から出てくる1つの数値だ。例:
+         *
+         * <ul>
+         *   <li>7.62mm 弾（9.5g）— {@code 0.0009}。838 m/s が 500m で 0.75 秒</li>
+         *   <li>20mm 機関砲弾（100g）— {@code 0.00045}。1030 m/s が 1000m で 1.23 秒</li>
+         *   <li>120mm APFSDS（4.6kg の長棒）— {@code 0.000035}。1670 m/s が 2000m で 1.24 秒</li>
+         * </ul>
+         *
+         * <p>この係数が {@link #lifetime()} にも効く。遅くなっていく弾が {@code range} まで届くのに要る
+         * tick 数は距離÷初速ではない。
+         *
+         * <p><b>ミサイルでは燃焼中に効かない。</b> ファイルの {@code thrust} と {@code top_speed} は既に
+         * 「空気の中でその機体が出せる性能」として書かれた値であり、そこへさらに抗力を足せば全ミサイルの
+         * 最高速が黙って下がる。足りていなかったのは燃焼<em>後</em>で、そこだけを足す。既定値は Mach 4 で
+         * 燃え尽きたミサイルが20秒ほどで Mach 1.5 付近まで落ちる値であって、<b>弾の値ではない</b>——
+         * ミサイルの細長い機体が基準なので、書き忘れた砲はほぼ真空を飛ぶ。砲には必ず自分の値を書くこと。
          */
         public static final float DEFAULT_DRAG = 0.00006F;
 
@@ -380,7 +415,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
         public static final int UNBOUNDED_LIFETIME = 6000;
 
         public static final Projectile DEFAULT = new Projectile(2.0F, 20.0F, 0.0F, 0, 0,
-                0.0F, 0.02F, 200.0F, 0.0F, 0xFFC864, 0.0F, DEFAULT_DRAG, DEFAULT_TURN_DRAG,
+                0.0F, 0.02F, 200.0F, 0.0F, 0.0F, 0xFFC864, 0.0F, 0.0F, DEFAULT_DRAG, DEFAULT_TURN_DRAG,
                 Optional.empty());
 
         /**
@@ -405,8 +440,12 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 Codec.FLOAT.optionalFieldOf("gravity", 0.02F).forGetter(Projectile::gravity),
                 Codec.FLOAT.optionalFieldOf("range", 300.0F).forGetter(Projectile::range),
                 Codec.FLOAT.optionalFieldOf("explosion", 0.0F).forGetter(Projectile::explosion),
+                // この1行でグループが16項目——DFU の上限そのもの。次に何かを足すなら入れ子か mapPair にすること
+                // （[[fuel-system-shape]] と同じ穴）。
+                Codec.FLOAT.optionalFieldOf("blast", 0.0F).forGetter(Projectile::blast),
                 COLOUR.optionalFieldOf("tracer", 0xFFC864).forGetter(Projectile::tracer),
                 Codec.FLOAT.optionalFieldOf("ricochet", 0.0F).forGetter(Projectile::ricochet),
+                Codec.FLOAT.optionalFieldOf("penetration", 0.0F).forGetter(Projectile::penetration),
                 Codec.FLOAT.optionalFieldOf("drag", DEFAULT_DRAG).forGetter(Projectile::drag),
                 Codec.FLOAT.optionalFieldOf("turn_drag", DEFAULT_TURN_DRAG).forGetter(Projectile::turnDrag),
                 TRAIL.optionalFieldOf("trail", Optional.empty()).forGetter(Projectile::trail)
@@ -417,6 +456,100 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             return this.ricochet > 0.0F;
         }
 
+        /** この弾の爆風が、爆心から {@code distance} ブロックの機体に与える打撃。{@link #blastAt(double, double, double)}。 */
+        public double blastAt(double distance) {
+            return blastAt(this.blast, this.explosion, distance);
+        }
+
+        /**
+         * 爆風の打撃の法則。この MOD に1つだけ在る場所で、弾（{@code VehicleProjectile.blastMachines}）も AI の見込み
+         * （{@code ai/air/KillScore}）もここを通る。
+         *
+         * <p>爆心から {@code power} ブロックまでは {@code blast} のまま、そこから {@code power × 2}——バニラの爆発が人を
+         * 傷つける半径と同じ——で0まで直線で落ちる。<b>至近弾の値を「至近」の幅ごと保つための平らな芯</b>で、バニラの式の
+         * ように爆心から1ブロック外れただけで目減りしない。FAB-250（威力 8.3）なら 8.3 ブロックまで満額、16.6 で0。
+         *
+         * @param blast 満額（点）。0以下なら常に0
+         * @param power 爆発の威力（{@code explosion}）
+         * @param distance 爆心から機体の一番近い箱の表面まで（ブロック）
+         */
+        public static double blastAt(double blast, double power, double distance) {
+            if (blast <= 0.0 || power <= 0.0) {
+                return 0.0;
+            }
+
+            double reach = power * 2.0;
+
+            if (distance >= reach) {
+                return 0.0;
+            }
+
+            return distance <= power ? blast : blast * (reach - distance) / (reach - power);
+        }
+
+        /**
+         * この tick に空気が奪う速さ（1tickあたりブロック）。{@code drag × 速さ²}。
+         *
+         * <p>抗力の法則がこの MOD に1つだけ在る場所。弾も、ミサイルの惰性区間も、照準器の予測もここを
+         * 通る。同じ式が何箇所かに書き写されていると、印の位置と弾の行き先が静かにずれていく。
+         */
+        public double airLoss(double speed) {
+            return this.drag * speed * speed;
+        }
+
+        /**
+         * 1tick 空気の中を飛んだ後の速度。奪われるのは速さだけで、向きは変わらない。
+         *
+         * <p>落下はここに含まない。抗力は速度の線上に、重力は下向きに働く別々の力で、混ぜると
+         * 「速い弾ほど落ちない」という間違いになる。呼び手が続けて重力を引く。
+         */
+        public Vec3 slowedByAir(Vec3 velocity) {
+            double speed = velocity.length();
+            double lost = this.airLoss(speed);
+
+            if (lost <= 0.0 || speed < 1.0E-6) {
+                return velocity;
+            }
+
+            return velocity.scale(Math.max(0.0, speed - lost) / speed);
+        }
+
+        /**
+         * この弾が {@code flown} ブロック飛んだ後に残っている威力の割合。1.0 が砲口。
+         *
+         * <p><b>抗力から直接出る。</b> {@code v(x) = v0·e^(-k·x)} であり運動エネルギーは速さの2乗に
+         * 比例するので、残る割合は {@code e^(-2·k·x)}。弾を実際に飛ばして今の速度を測るのと同じ答えに
+         * なるが、こちらは跳弾でも撃った機体の速度でも重力でも動かない——<em>空気が取った分だけ</em>を
+         * 表す。だから装甲が取った分（{@link com.ashvehicles.weapon.Ricochet#energy}）と掛け合わせても
+         * 二重に数えない。
+         *
+         * <p>直線距離ではなく飛んだ距離を渡すこと。山なりに撃った砲弾では両者が大きく違い、空気が削るのは
+         * 通った長さの方だ。
+         *
+         * <p><b>炸薬を持つ弾は減衰しない。</b> 榴弾や成形炸薬の威力は自分の中の化学エネルギーで決まって
+         * おり、着弾時に何 m/s で飛んでいたかとは関係が無い——155mm 榴弾は 20km 先でも同じだけ効く。
+         * 距離で弱くなるのは、持っている物が速度しかない弾だけだ。{@link #losesPowerWithRange} 参照。
+         */
+        public float energyAfter(double flown) {
+            if (flown <= 0.0 || !this.losesPowerWithRange()) {
+                return 1.0F;
+            }
+
+            return (float) Math.exp(-2.0 * this.drag * flown);
+        }
+
+        /**
+         * この弾が距離で威力を失うか。
+         *
+         * <p><b>判定は {@code explosion} が持っている。</b> 炸薬を持つ弾は自分のエネルギーで効くので
+         * 減衰せず、持たない弾は速度そのものが威力なので減衰する。専用のフィールドを足さないのは、この
+         * 2つが実際に同じことだからだ——だが結び付いていることは知っておく必要がある。<b>運動弾に
+         * {@code explosion} を少しでも書くと、その弾は距離で弱くならなくなる。</b>
+         */
+        public boolean losesPowerWithRange() {
+            return this.drag > 0.0F && this.explosion <= 0.0F;
+        }
+
         /** 発射後にモーターが押し続けるか。 */
         public boolean hasMotor() {
             return this.burnTicks > 0 && this.thrust > 0.0F;
@@ -424,7 +557,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
 
         /**
          * 見捨てられるまでの生存 tick 数。到達すべき距離から求める。動力のある物は「モーターが達する速度」
-         * で射程を、惰性の物は「発射時の速度」で射程を進むものとして計算する。
+         * で射程を、惰性の物は「発射時の速度から抗力で落ちていく速度」で射程を進むものとして計算する。
          *
          * <p>射程が0以下なら決して見捨てず、tick カウントとしてはこれが上限になる。その種の弾を終わらせる
          * のは、何かに当たるか、モーター燃焼後に世界の底を抜けて落ちるか。後者は必ず来る（惰性の弾を支える
@@ -449,9 +582,24 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
                 return UNBOUNDED_LIFETIME;
             }
 
-            float pace = this.hasMotor() ? Math.max(this.topSpeed, this.speed) : this.speed;
+            double pace = Math.max(this.hasMotor() ? Math.max(this.topSpeed, this.speed) : this.speed,
+                    1.0E-3F);
 
-            return Math.max(1, Math.round(this.range / Math.max(pace, 1.0E-3F)));
+            // モーターを持つ物は燃焼中に抗力を受けないので、従来通り「射程÷速度」でよい。
+            if (this.hasMotor() || this.drag <= 0.0F) {
+                return Math.max(1, (int) Math.round(this.range / pace));
+            }
+
+            // <b>抗力を持つ弾は遅くなっていく。</b> だから射程まで飛ぶのに要る tick 数は距離÷初速では
+            // なく、それより多い。{@code dv/dt = -k·v²} を距離で読み直すと {@code dv/dx = -k·v} なので
+            // {@code v(x) = v0·e^(-k·x)}、そこから積分して {@code t = (e^(k·R) - 1) / (k·v0)}。
+            // {@code k → 0} で従来の {@code R/v0} に戻るので、抗力を書かないファイルは何も変わらない。
+            //
+            // これを直さないと、抗力を足した瞬間に全ての砲の実効射程が黙って縮む——弾はファイルに書いて
+            // ある距離のかなり手前で見捨てられ、なぜ届かないのかはどこにも出ない。
+            double ticks = Math.expm1(this.drag * this.range) / (this.drag * pace);
+
+            return (int) Math.max(1.0, Math.min(ticks, UNBOUNDED_LIFETIME));
         }
     }
 
@@ -467,17 +615,83 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      * @param exhaust ノズルの噴煙。より熱く、たいてい濃い
      * @param density 1ブロック飛ぶごとに置く煙の数。1未満なら意図的に隙間が空く
      * @param size 1つあたりの大きさ。標準に対する倍率
+     * @param flame ノズルの炎。書かなければ煙の大きさから引く。{@link Flame} 参照
      */
-    public record Trail(int colour, int exhaust, float density, float size) {
+    public record Trail(int colour, int exhaust, float density, float size, Optional<Flame> flame) {
         /** {@code "trail": true} としか書かない兵装ファイルが得る値。 */
-        public static final Trail DEFAULT = new Trail(0xD8D5CD, 0x9A958B, 2.0F, 1.0F);
+        public static final Trail DEFAULT =
+                new Trail(0xD8D5CD, 0x9A958B, 2.0F, 1.0F, Optional.empty());
 
         public static final Codec<Trail> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 COLOUR.optionalFieldOf("colour", DEFAULT.colour()).forGetter(Trail::colour),
                 COLOUR.optionalFieldOf("exhaust", DEFAULT.exhaust()).forGetter(Trail::exhaust),
                 Codec.FLOAT.optionalFieldOf("density", DEFAULT.density()).forGetter(Trail::density),
-                Codec.FLOAT.optionalFieldOf("size", DEFAULT.size()).forGetter(Trail::size)
+                Codec.FLOAT.optionalFieldOf("size", DEFAULT.size()).forGetter(Trail::size),
+                Flame.CODEC.optionalFieldOf("flame").forGetter(Trail::flame)
         ).apply(instance, Trail::new));
+
+        /**
+         * この煙を出しているモーターの炎。
+         *
+         * <p>書いてあればその値、無ければ<b>煙の大きさから引いた炎</b>。燃えているモーターには必ず火が
+         * あり、それを書き忘れた兵装ファイルというものは無い——書かれていないのは大きさだけで、それは
+         * 既にここにある。{@code size} は「このモーターがどれだけの物か」を各ファイルが既に述べた値なので、
+         * 炎の寸法をそこから引けば、どの兵装も自分の煙に見合った火を持つ。{@link Flame#matching} 参照。
+         *
+         * <p>名前が {@link #flame()} でないのは、そちらがコーデックの読み書きする「ファイルに書いてある
+         * 方」だからだ。撒く側・照らす側が見るのは常にこちら。
+         */
+        public Flame fire() {
+            return this.flame.orElseGet(() -> Flame.matching(this.size));
+        }
+    }
+
+    /**
+     * 燃えているモーターそのもの。煙ではなく火の方。
+     *
+     * <p>{@link Trail} と分けてあるのは、煙が「モーターが残した物」であるのに対しこちらは「モーターが今
+     * 出している物」だからだ。煙は空中に留まって航跡になり、火はノズルから数ブロックで終わる。そして火の
+     * 方だけが<b>光源</b>である——燃えている兵装は、飛びながら自分の煙を内側から照らす。
+     *
+     * <p><b>燃えているモーターは全部これを持つ。</b> 書かなければ煙の大きさから寸法を引く
+     * （{@link #matching}）。実物のモーターに「火の出ない物」は無いので、書かれていないのは値だけであって
+     * 現象ではない。ファイルに書くのは、既定から外したいときだけ。
+     *
+     * <p><b>ただし {@link #wash} だけは既定で0だ。</b> あれは見ている者の画面全体を染める物で、燃えている
+     * 事実ではなく規模の話になる——空対空ミサイルのモーターで風景の色が変わったら、それは光ではなく演出だ。
+     * 弾道弾のように「発射で周りが明るくなる」規模の物だけがファイルで書いて起こす。
+     *
+     * @param colour 炎の色。{@code RRGGBB}。芯は生まれた瞬間だけ白熱し、そこからこの色を通って落ちる
+     * @param size 炎1粒の大きさ。標準に対する倍率
+     * @param length 炎がノズルの後方どこまで届くか（ブロック）。ミサイルが1tickにそれ以上飛ぶなら、
+     *        飛んだ分まで伸ばして隙間を埋める。{@code spawnFlame} 参照
+     * @param glow 周囲の煙を照らす半径（ブロック）。{@link com.ashvehicles.client.MotorLight} 参照
+     * @param wash 見ている者の画面をどれだけ染めるか。0で染めない。1で既定の強さ。実際の濃さは距離と
+     *        その場の明るさが決めるので、ここは「そもそもそういう規模の物か」を述べる値
+     */
+    public record Flame(int colour, float size, float length, float glow, float wash) {
+        /** 何も書かなかったときの色と、煙の大きさ1に対する炎の寸法。 */
+        public static final Flame DEFAULT = new Flame(0xFFB25A, 1.0F, 2.5F, 12.0F, 0.0F);
+
+        public static final Codec<Flame> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                COLOUR.optionalFieldOf("colour", DEFAULT.colour()).forGetter(Flame::colour),
+                Codec.FLOAT.optionalFieldOf("size", DEFAULT.size()).forGetter(Flame::size),
+                Codec.FLOAT.optionalFieldOf("length", DEFAULT.length()).forGetter(Flame::length),
+                Codec.FLOAT.optionalFieldOf("glow", DEFAULT.glow()).forGetter(Flame::glow),
+                Codec.FLOAT.optionalFieldOf("wash", DEFAULT.wash()).forGetter(Flame::wash)
+        ).apply(instance, Flame::new));
+
+        /**
+         * その大きさの煙を出しているモーターの炎。
+         *
+         * <p>寸法を全部 {@code size} に比例させる。兵装ファイルの {@code trail.size} は既に「このモーターは
+         * どれだけの物か」を述べているので、そこから引けば TOW の 0.8 とグリム2の 2.0 が、同じ式で
+         * それぞれらしい火になる。比例定数は {@link #DEFAULT} が持っている。
+         */
+        public static Flame matching(float size) {
+            return new Flame(DEFAULT.colour(), DEFAULT.size() * size, DEFAULT.length() * size,
+                    DEFAULT.glow() * size, DEFAULT.wash());
+        }
     }
 
     /**
@@ -613,14 +827,16 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     /**
      * 発砲音の探し方はエンジン音と同じ。ここで指定したイベント、無ければ兵装名から作った名前
      * （{@code <namespace>:weapon.<name>}）、それも無ければ兵装の種類ごとの既定。発砲中は何発撃っていても
-     * 1tickに1回鳴らす。
+     * 1tickに1回鳴らす——{@code interval} を書いた兵装はその tick 数に1回。
      *
      * @param fire 音イベント。空なら兵装名から探す
-     * @param volume 兵装のすぐ横での音量
+     * @param volume その音がどこまで届くか。{@link #carry()} 参照——名前に反して音量ではない
      * @param pitch 再生速度
+     * @param gain 録音そのものの大きさに対する補正。{@link #gain()} 参照
+     * @param interval 撃ち続けている間に鳴らし直す間隔（tick）。{@link #interval()} 参照
      */
-    public record SoundSetup(Optional<ResourceLocation> fire, float volume, float pitch) {
-        public static final SoundSetup DEFAULT = new SoundSetup(Optional.empty(), 2.0F, 1.0F);
+    public record SoundSetup(Optional<ResourceLocation> fire, float volume, float pitch, float gain, int interval) {
+        public static final SoundSetup DEFAULT = new SoundSetup(Optional.empty(), 2.0F, 1.0F, 1.0F, 1);
 
         /**
          * 音量1点あたり、その兵装が聞こえる距離（ブロック）。
@@ -636,6 +852,11 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             return Math.max(this.volume, 0.0F) * CARRY_PER_VOLUME;
         }
 
+        /** その逆。届かせたい距離（ブロック）を volume 欄の値に直す。 */
+        public static float volumeForCarry(float blocks) {
+            return Math.max(blocks, 0.0F) / CARRY_PER_VOLUME;
+        }
+
         /**
          * 音の送信をゲームへ依頼する時に渡す「音量」。
          *
@@ -648,10 +869,42 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             return Math.max(this.carry() / 16.0F, 1.0F);
         }
 
+        /**
+         * 発生地点で聞いたときの音量。1.0 が「録音そのままの大きさ」。
+         *
+         * <p><b>{@link #volume} とは別の物であり、別でなければならない。</b>あちらは到達距離であって音量では
+         * ない。かつては耳に届く大きさもそこから求めていた——遠くまで届く音は近くでも大きい、という一本の
+         * 尺度だ。大抵は害が無かった。ほとんどの兵装は 1 を超える値を持ち、サウンドエンジンは音量を 1 で
+         * 頭打ちにするからだ。だが 10 ブロックしか届かせたくない音では破綻する。到達距離を切り詰めた瞬間、
+         * 手元での音量まで 16分の1 になり、聞こえるはずの範囲で何も聞こえなくなる。
+         *
+         * <p>だから距離は {@link #volume}、大きさはこちら。既定は 1.0。書かなければ録音のまま鳴る。
+         */
+        public float gain() {
+            return Math.max(this.gain, 0.0F);
+        }
+
+        /**
+         * 撃ち続けている間、発砲音を何 tick に1回鳴らすか。既定は 1——撃った tick ごと。
+         *
+         * <p><b>録音が1発ぶんか、連射ぶんかで決まる。</b>1発を録った 0.3 秒の音は、毎 tick 鳴らして初めて連射に
+         * 聞こえる。連射そのものを録った音（GAU-8 の 2 秒）を同じように鳴らすと、同じ連射が 40 本重なって
+         * 1 つの轟音に潰れ、音の枠も食い潰す。そういう録音には、減衰が始まるまでの長さを tick で書く——前の
+         * 1 本が消え始める所へ次の 1 本が入り、切れ目なく続く。
+         *
+         * <p>数えるのは撃ち続けている間だけで、引き金を引き直した最初の tick は間隔の途中でも鳴らす
+         * （{@link FireSoundPacing}）。離した後も録音は最後まで鳴るので、短く切った連射でも録音の長さぶん聞こえる。
+         */
+        public int interval() {
+            return Math.max(this.interval, 1);
+        }
+
         public static final Codec<SoundSetup> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("fire").forGetter(SoundSetup::fire),
                 Codec.FLOAT.optionalFieldOf("volume", DEFAULT.volume()).forGetter(SoundSetup::volume),
-                Codec.FLOAT.optionalFieldOf("pitch", DEFAULT.pitch()).forGetter(SoundSetup::pitch)
+                Codec.FLOAT.optionalFieldOf("pitch", DEFAULT.pitch()).forGetter(SoundSetup::pitch),
+                Codec.FLOAT.optionalFieldOf("gain", DEFAULT.gain()).forGetter(SoundSetup::gain),
+                Codec.INT.optionalFieldOf("interval", DEFAULT.interval()).forGetter(SoundSetup::interval)
         ).apply(instance, SoundSetup::new));
     }
 }

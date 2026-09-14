@@ -3,8 +3,6 @@ package com.ashvehicles.client;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.GroundVehicleEntity;
 
-import org.joml.Quaternionf;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.neoforged.api.distmarker.Dist;
@@ -15,23 +13,23 @@ import net.neoforged.neoforge.client.event.RenderLivingEvent;
 import javax.annotation.Nullable;
 
 /**
- * 戦車の砲手照準。使用ボタン——右クリック——を押している間、視界を砲腔線へ預ける。
+ * 戦車の砲手照準。使用ボタン——右クリック——を押している間、乗員を接眼部へ寄せ、視野を狭める。
  *
- * <p><b>離している間の視界は乗員の頭だ。</b>砲塔はその頭を追っており、旋回速度の分だけ遅れて、俯仰の可動端で
- * 止まる。だから画面中央と砲の線は「砲が追い付いている間だけ」一致する。据わっている車両では気にならないが、
- * 砲塔を振っている最中と、俯角の尽きた斜面ではまさに食い違う——照準を詰めたい場面がちょうどその2つだ。
+ * <p><b>視界は最後まで乗員の頭だ。</b>照準を上げても、マウスが動かすのは今まで通り頭であり、砲塔はその頭を
+ * 追う——旋回速度の分だけ遅れ、俯仰の可動端で止まる。{@code GroundVehicleEntity.tickTurret} 参照。つまり
+ * 照準の中と外で操作は同じ物であり、変わるのは「どこから、どれだけの倍率で見ているか」だけになる。
  *
- * <p><b>押している間は、映像の方を砲から取る。</b>画面中央が常に砲腔線になり、{@link GroundVehicleHud} が
- * 置く弾着マークもそこに重なる。砲塔が追い付くまで視界は遅れ、可動端では頭だけが先へ行って映像が止まる。
- * 実物の照準眼鏡と同じ関係で、AC-130 の砲手が覗いている物（{@link GunCamera}）とも同じだ。
+ * <p>視界を砲腔線へ預けることもできる——実物の照準眼鏡はそうだし、AC-130 の砲手が覗いている物
+ * （{@link GunCamera}）は今もそうだ——が、砲は乗員の頭より遅い。映像を砲から取ると、マウスを振った分と画面が
+ * 回った分が食い違い、砲が消化しきれない入力は「手を止めても回り続ける画面」として溜まる。撃つ物が1つしか
+ * 無く、その1つを乗員自身が振っている戦車では、素直に頭で見た方が扱える。
  *
- * <p><b>目の位置は変えない。</b>一人称視点が既にいる場所——{@code camera.cockpit}、砲塔上面のハッチ——が
- * そのまま照準の接眼部になる。砲身に括り付けた箱にすれば「ガンカメラ」の語には忠実だが、車体の2ブロック
- * 前方に浮かぶ視点は、地形へ潜り、遮蔽の陰から向こうを覗ける。実物の照準眼鏡も砲塔上にあって砲の俯仰に
- * 連動するだけだ。三人称で押した場合もここへ来る——覗いているのは装置であって、カメラの種類ではない。
+ * <p><b>変えるのは目の位置だ。</b>一人称視点が既にいる場所——{@code camera.cockpit}、砲塔上面のハッチ——が
+ * そのまま照準の接眼部になる。三人称で押した場合もここへ来る：覗くとは接眼部へ寄ることであり、押す前に
+ * どちらのカメラだったかは関係が無い。倍率を掛けるのは {@link AimZoom} で、こちらは何も倒さない。
  *
- * <p>視界の傾きは車体から来る。斜面に止まった戦車の照準は斜面の分だけ傾いており、それは砲手が知るべき
- * ことだ——傾いた車両の砲は、水平に構えたつもりでも横へずれる。
+ * <p>三人称から入る時だけ帳尻が要る。追跡カメラは車両の {@code camera.tilt} だけ下へ倒れており、砲はその分を
+ * 織り込んで据えられているからだ。{@link #follow} 参照。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class TurretSight {
@@ -52,8 +50,8 @@ public final class TurretSight {
      * 自分で読むのは、あちらもこれも同じ {@code ClientTickEvent.Pre} で走り、2つの実行順に定めが無いからだ。
      * 借りれば、キーを離したtickの答えが1tick古いことになる。
      *
-     * <p>砲塔を持たない車両では上がらない。振る物が無ければ砲腔線は車首方向そのものであり、それに視界を縛れば、
-     * 乗員は周りを見る手段を失うだけだ。
+     * <p>砲塔を持たない車両では上がらない。据える物が無ければ接眼部も無く、残るのは倍率だけになる——それは
+     * 照準ではなく単眼鏡だ。
      */
     public static boolean isShowing() {
         return vehicle() != null;
@@ -90,10 +88,6 @@ public final class TurretSight {
             player.setXRot(player.getXRot() + (want - lent));
             lent = want;
         }
-
-        if (sighted != null) {
-            rein(sighted);
-        }
     }
 
     /**
@@ -117,31 +111,6 @@ public final class TurretSight {
         return vehicle.getControllingPassenger() == player && vehicle.getStats().turret().exists()
                 ? vehicle
                 : null;
-    }
-
-    /** ワールドでの照準の向き。車体姿勢に砲塔の旋回と砲の俯仰を重ねた物、つまり砲腔線そのもの。 */
-    public static Quaternionf world(GroundVehicleEntity vehicle, float partialTick) {
-        return vehicle.getAimAttitude(partialTick);
-    }
-
-    /**
-     * 頭を砲の可動範囲へ収める。理由と式は {@code GroundVehicleEntity.clampSightPitch} に書いてある。
-     *
-     * <p>方位は縛らない。砲塔は一周するので、頭がどこを向いても砲はいつかそこへ着く。縛る意味があるのは
-     * 端のある俯仰だけだ。
-     */
-    private static void rein(GroundVehicleEntity vehicle) {
-        LocalPlayer player = Minecraft.getInstance().player;
-
-        if (player == null) {
-            return;
-        }
-
-        float held = vehicle.clampSightPitch(player.getXRot());
-
-        if (held != player.getXRot()) {
-            player.setXRot(held);
-        }
     }
 
     /**

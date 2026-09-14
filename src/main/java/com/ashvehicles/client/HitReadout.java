@@ -47,7 +47,8 @@ import org.joml.Vector3f;
  * <p><b>マークは、車両近くの空中の点ではなく、食い込んだ箱に対する割合として保持する。</b>だから弾と弾の間に旋回した
  * 砲塔は自分への命中痕を一緒に回して運ぶし、防盾のマークは防盾に留まる。
  *
- * <p>塗り潰したマークは貫通、中空のマークは装甲が弾いたことを意味する——この計器が伝える中で単独で最も有用な情報だ。
+ * <p>赤く塗り潰したマークは貫通、琥珀で塗り潰したマークは板に入ったが抜けなかった（損害は半分）、中空のマークは装甲が
+ * 弾いたことを意味する——この計器が伝える中で単独で最も有用な情報だ。
  * 「別の場所を狙う」か「同じ場所へもう一度撃つ」かの分かれ目だからである。
  *
  * <p>全体が1回の交戦のスナップショットだ。別の物に当てれば消えてやり直しになるし、最後の着弾から数秒でフェードアウト
@@ -93,7 +94,7 @@ public final class HitReadout {
      * <p>距離ではなく割合で保持するので、マークは箱自体を配置するのと同じ計算で配置され——{@link Silhouette} 参照——
      * 砲塔と共に回る。{@code box} が -1 の場合は箱を持たない機体で、{@code within} は中心からのブロック数で測る。
      */
-    private record Mark(int box, Vec3 within, boolean bounced) {
+    private record Mark(int box, Vec3 within, boolean bounced, boolean held) {
     }
 
     private static final List<Mark> MARKS = new ArrayList<>();
@@ -126,10 +127,15 @@ public final class HitReadout {
      * @param within その箱の中のどこか。各半長に対する割合
      * @param approach 弾の進行方向。機体座標系
      * @param damage 与えたダメージ。装甲が弾いたなら0
+     * @param held 板に入ったが抜けなかったか
+     * @param killed この1発で相手が終わったか
      */
     public static void report(int struck, ResourceLocation id, int box, Vec3 within, Vec3 approach,
-            float traverse, float gunPitch, float damage, boolean bounced) {
+            float traverse, float gunPitch, float damage, boolean bounced, boolean held, boolean killed) {
         long now = Util.getMillis();
+
+        // 同じ報告の読み上げ。絵とは寿命も並びも違うので別に持たせる。{@link HitCallout} 参照。
+        HitCallout.report(id, damage, bounced, held, killed);
 
         if (struck != target || !id.equals(machine) || now - arrived > LINGER) {
             MARKS.clear();
@@ -148,11 +154,17 @@ public final class HitReadout {
             MARKS.remove(0);
         }
 
-        MARKS.add(new Mark(box, within, bounced));
+        MARKS.add(new Mark(box, within, bounced, held));
     }
 
     /** 右上隅に描く。最近何にも当てていなければ何も描かない。 */
     static void draw(GuiGraphics graphics, Font font) {
+        // 読み上げは絵より先、そして絵の有無に関わらず。ここを通る呼び出しは4か所あり、そのどれからも
+        // 両方が出るべきなので、あちらを呼ぶ責任は呼ぶ側ではなくここが持つ。
+        HudScale.push(graphics);
+        HitCallout.draw(graphics, font, HudScale.width(graphics) - INSET, INSET + HEIGHT + 4);
+        HudScale.pop(graphics);
+
         ResourceLocation id = machine;
 
         if (id == null || MARKS.isEmpty()) {
@@ -193,12 +205,22 @@ public final class HitReadout {
         graphics.fill(right - 1, top, right, bottom, edge);
     }
 
+    /**
+     * 何に当てたか。ファイルのIDではなくゲームが与える名前で。
+     *
+     * <p>レジストリに無いIDはそのままパスを返す。ミサイルの報告が積んでいるのは兵装名であってエンティティ
+     * 型ではないからだ（{@code HitReportPayload} 参照）。
+     */
+    static String nameOf(ResourceLocation id) {
+        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null);
+
+        return type == null ? id.getPath() : type.getDescription().getString();
+    }
+
     /** 何に当てたか。ファイルのIDではなくゲームが与える名前で。 */
     private static void name(GuiGraphics graphics, Font font, ResourceLocation id, int left, int top,
             float alpha) {
-        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(id).orElse(null);
-        String name = type == null ? id.getPath() : type.getDescription().getString();
-        String text = font.plainSubstrByWidth(name.toUpperCase(Locale.ROOT), WIDTH - 8);
+        String text = font.plainSubstrByWidth(nameOf(id).toUpperCase(Locale.ROOT), WIDTH - 8);
 
         graphics.drawString(font, text, left + 4, top + 3, fade(AircraftHud.GREEN, alpha), true);
     }
@@ -294,7 +316,7 @@ public final class HitReadout {
                     new Vector3f((float) -on.x, (float) on.y, (float) on.z));
 
             mark(graphics, Math.round(at.x), Math.round(at.y), Math.round(at.z + scale * LIFT),
-                    spot.bounced(), alpha);
+                    spot.bounced(), spot.held(), alpha);
         }
 
         graphics.disableScissor();
@@ -340,11 +362,12 @@ public final class HitReadout {
     /**
      * マーク1つを、機体上でそれが位置する深度に描く。
      *
-     * <p>貫通なら塗り潰し、装甲が弾いたなら中空。色だけでなく形も変える。どちらが起きたかがこの計器の要点であり、赤と
-     * 琥珀の区別に頼るべきではないからだ。
+     * <p>板に入ったなら塗り潰し、装甲が弾いたなら中空。色だけでなく形も変える。どちらが起きたかがこの計器の要点であり、
+     * 赤と琥珀の区別に頼るべきではないからだ。入ったが抜けなかった弾は、形は入った側、色は届かなかった側の琥珀。
      */
-    private static void mark(GuiGraphics graphics, int x, int y, int z, boolean bounced, float alpha) {
-        int colour = fade(bounced ? BOUNCE : STRIKE, alpha);
+    private static void mark(GuiGraphics graphics, int x, int y, int z, boolean bounced, boolean held,
+            float alpha) {
+        int colour = fade(bounced || held ? BOUNCE : STRIKE, alpha);
 
         graphics.fill(RenderType.gui(), x - 3, y - 3, x + 3, y + 3, z, fade(BACKING, alpha));
 

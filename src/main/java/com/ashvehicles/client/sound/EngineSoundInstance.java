@@ -45,6 +45,8 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
         super(vehicle, sound, SoundSource.NEUTRAL, SILENT_TICKS_BEFORE_STOP);
         // 正しい音から始める。全開状態で可聴範囲に入ってきた機体が、まずアイドルから上がっていくのはおかしい。
         this.currentPitch = targetPitch(vehicle, vehicle.soundSetup());
+        this.note = this.currentPitch;
+        // 最初の tick が回るより先に、音響エンジンはこの値でチャンネルを開く。
         this.pitch = this.currentPitch;
     }
 
@@ -89,9 +91,13 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
         this.gain = approach(this.gain, targetGain, VOLUME_RATE);
         this.currentPitch = approach(this.currentPitch, targetPitch(vehicle, setup), PITCH_RATE);
 
-        float falloff = this.falloff(setup.range());
+        // 音量も出た場所から測る。機体の今の位置で測ると、遠くの機体では音の位置と音量の根拠が
+        // 食い違う——音は後ろに残っているのに、大きさだけが機体に追従してしまう。follow が既に
+        // 音の位置をそこへ置いているので、それに対して測る。
+        float falloff = this.carried(setup.range());
         this.volume = setup.volume() * this.gain * falloff;
-        this.pitch = this.currentPitch;
+        // ドップラーと空気の吸収は基底が掛ける。ここが述べるのはエンジンが出している音程だけだ。
+        this.note = this.currentPitch;
 
         // エンジンが止まりフェードアウトした後、あるいは車両が可聴範囲を出た後は聞くべき物が無い。状況が変われば
         // EngineSounds が別の音を開始する。

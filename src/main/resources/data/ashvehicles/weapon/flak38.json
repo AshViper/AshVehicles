@@ -1,0 +1,23 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 800,
+  "gun_class": "autocannon",
+  "firing": {
+    "rounds_per_second": 13.3,
+    "spread": 0.9
+  },
+  "projectile": {
+    "damage": 8.0,
+    "speed": 45.0,
+    "gravity": 0.0245,
+    "drag": 0.00045,
+    "range": 3000.0,
+    "ricochet": 25.0,
+    "tracer": "FFD27A"
+  },
+  "sound": {
+    "volume": 2.0,
+    "pitch": 1.3
+  }
+}

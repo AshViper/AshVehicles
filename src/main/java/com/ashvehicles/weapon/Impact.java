@@ -23,9 +23,10 @@ import net.minecraft.resources.ResourceLocation;
  * 参照）ので、その上に金属音を重ねても第2の情報ではなく同じ情報の二重奏になる。
  *
  * <p><b>どの音声を使うか。</b> 専用の音を持つ兵装は {@code <namespace>:weapon.<name>.impact}、無ければ
- * MOD の {@code ashvehicles:weapon.impact}、それも無ければゲーム本体の「金床を置く音」。重い物が金属に
- * 到達してそこに留まる音として最も近く、跳弾がフォールバックに使う「金床が落ちる音」より鈍い。選択と距離
- * 処理は {@link com.ashvehicles.client.sound.WeaponSounds} が行う。
+ * MOD 同梱の {@code ashvehicles:weapon.impact}（合成した装甲板の打撃音。{@code tool/make_effect_sounds.py}
+ * 参照）、それも無ければゲーム本体の金属音——機体を素手で叩いた時に鳴るのと同じ物
+ * （{@code VehicleEntityBase.clank}）。選択と距離処理は
+ * {@link com.ashvehicles.client.sound.WeaponSounds} が行う。
  */
 public final class Impact {
     /** 音イベント名の末尾。{@code weapon.<weapon>.impact} の形。 */
@@ -36,30 +37,44 @@ public final class Impact {
             AshVehicles.MODID, WeaponMounts.SOUND_PREFIX + SOUND_ROLE);
 
     /**
-     * 命中音が届く距離。兵装の発砲音と同じ尺度で、この数値は音量ではなく
-     * {@link WeaponDefinition.SoundSetup#carry()} における到達距離。
+     * 命中音が届く距離（ブロック）。
      *
-     * <p>跳弾より遠く、発砲音よりずっと近い。戦車戦は叫び声の届かない距離で行われ、引き金を引いた者に
-     * 聞こえない命中は当たっていないのと同じ。ただし発砲そのものは到着音よりはるかに大きな音なので、
-     * 両者が同じ重みで返ってきてはいけない。
+     * <p><b>これは近所の音だ。</b>装甲板を叩く音が谷を越えて聞こえることはない。かつては発砲音と同じ
+     * 尺度で数百ブロック届かせていたが、それは「射線の遠端にいる砲手へ命中を伝える」ためであって、
+     * 音でそれをやる必要は無かった——伝えるのは {@code HitReadout} と {@code HitCallout} の仕事で、
+     * あちらは距離を持たない。音は、当たった場所の近くに居る者のためだけに鳴る。
      */
-    public static final float VOLUME = 1.5F;
+    public static final float RANGE = 10.0F;
+
+    /** 上を {@code volume} 欄の値へ直した物。この欄は音量ではなく距離だ。 */
+    public static final float VOLUME = WeaponDefinition.SoundSetup.volumeForCarry(RANGE);
 
     /**
      * 低めのピッチ。耳で跳弾と区別する手がかりがこれ。
      *
      * <p>装甲板を滑る音は明るく硬い音なのでピッチを上げる。装甲で止まった弾は逆で、持っていた全部が一度に
-     * 金属へ入る。返ってくるのは低く短い音になる。
+     * 金属へ入る。返ってくるのは低く短い音になる。同梱の録音は実測周波数のまま切ってあり、この値と
+     * {@link Ricochet#PITCH} が両者の差を意図的に広げる。
      */
     public static final float PITCH = 0.85F;
 
     /**
-     * 上の2つを、音の送受信両側が読む1つのオブジェクトにまとめた物。サーバーは「どこまで届くか」を、
+     * 録音を鳴らす大きさ。到達距離とは別に持つ（{@link WeaponDefinition.SoundSetup#gain()} 参照）。
+     *
+     * <p>叩いた拳（{@code VehicleEntityBase} の 0.45）と同じ。当たっている物は同じ装甲板なので、
+     * 手元で聞いた時の大きさも揃える。録音は峰を 0.86 に正規化してあるので、ここが実際の大きさを決める
+     * 唯一の値だ。
+     */
+    public static final float GAIN = 0.45F;
+
+    /**
+     * 上の3つを、音の送受信両側が読む1つのオブジェクトにまとめた物。サーバーは「どこまで届くか」を、
      * クライアントは「聴き手の位置でどれだけの音量か」を訊く。同じ数値でなければ、音は間違った音量で届く
      * か、まったく届かない。
      */
     public static final WeaponDefinition.SoundSetup SOUND_SETUP =
-            new WeaponDefinition.SoundSetup(Optional.empty(), VOLUME, PITCH);
+            new WeaponDefinition.SoundSetup(Optional.empty(), VOLUME, PITCH, GAIN,
+                    WeaponDefinition.SoundSetup.DEFAULT.interval());
 
     private Impact() {
     }

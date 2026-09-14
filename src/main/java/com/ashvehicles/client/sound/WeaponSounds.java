@@ -22,7 +22,7 @@ import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
-import net.minecraft.util.Mth;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -84,31 +84,36 @@ public final class WeaponSounds {
             ResourceLocation.withDefaultNamespace("block.anvil.land");
 
     /**
-     * 食い込んだ命中のフォールバック。ゲーム自身の金床設置音で、重い物が金属へ到達しそこに留まる音に最も近い。2つある
-     * 金床音のうち意図的に鈍い方を選んでいる。命中音の用途の全てが跳弾と耳で区別できることだからだ。{@link Impact#PITCH}
-     * がさらに下げる。
+     * 食い込んだ命中のフォールバック。MOD 自身の録音（{@code ashvehicles:weapon.impact}）をパックが
+     * 消した場合にだけ鳴る。
+     *
+     * <p>機体を素手で叩いた時に鳴るのと同じ金属音（{@code VehicleEntityBase.clank} 参照）。同じ物が
+     * 同じ物に当たっているのだから代役としてはこれが最も近い——違うのは当てた物の重さだけで、それは
+     * {@link Impact#GAIN} と {@link Impact#PITCH} が言う。金床の設置音を使っていたが、あれは鍛冶場の
+     * 音であって装甲板の音ではなかった。
      */
-    private static final ResourceLocation IMPACT_FALLBACK =
-            ResourceLocation.withDefaultNamespace("block.anvil.place");
+    private static final ResourceLocation IMPACT_FALLBACK = SoundEvents.METAL_HIT.getLocation();
 
     /**
      * 地上員作業の音量。サーバーが要求したのと同じ値を、それを所有する唯一の場所から取る。この時点では音から読み戻せ
      * ないからだ。ピッチは兵装を吊るときの物を使う。パックが持たない音の代役を、取り外しの音と区別する価値は無い。
      */
     private static final WeaponDefinition.SoundSetup LOAD_SETUP = new WeaponDefinition.SoundSetup(
-            Optional.empty(), WeaponMounts.LOAD_VOLUME, WeaponMounts.LOAD_PITCH);
+            Optional.empty(), WeaponMounts.LOAD_VOLUME, WeaponMounts.LOAD_PITCH,
+            WeaponDefinition.SoundSetup.DEFAULT.gain(), WeaponDefinition.SoundSetup.DEFAULT.interval());
 
     /** ディスペンサー向けの同じ値。値はディスペンサー側にある。 */
     private static final WeaponDefinition.SoundSetup DECOY_SETUP = new WeaponDefinition.SoundSetup(
-            Optional.empty(), Dispenser.RELEASE_VOLUME, Dispenser.RELEASE_PITCH);
+            Optional.empty(), Dispenser.RELEASE_VOLUME, Dispenser.RELEASE_PITCH,
+            WeaponDefinition.SoundSetup.DEFAULT.gain(), WeaponDefinition.SoundSetup.DEFAULT.interval());
+
+    /** 失う鋭さの量。近くでの破裂音は1マイル先では鈍い音になる。距離の写像は {@link Air#dulled}。 */
+    private static final float DULLING = 0.45F;
 
     /**
-     * 発砲音が距離とともに小さくなる指数。1未満なので最初は急に落ちてから遠方まで粘る。耳に対する音量の振る舞いで
-     * あり、遠方まで届かせることに意味を持たせている要素でもある。
+     * 砲声が空を渡る時間は {@link Arrivals} が持つ。400ブロック先の戦車が撃った音は1.2秒遅れて届き、
+     * その間に聞き手が動いた分は着いた時に測り直される。
      */
-    private static final float FALLOFF = 0.85F;
-    /** 全到達距離で失う鋭さの量。近くでの破裂音は1マイル先では鈍い音になる。 */
-    private static final float DULLING = 0.45F;
 
     private static final Set<ResourceLocation> WARNED = new HashSet<>();
     /** この不具合の報告が既にログに1件あるか。 */
@@ -136,6 +141,12 @@ public final class WeaponSounds {
         SoundInstance sound = event.getSound();
 
         if (sound == null) {
+            return;
+        }
+
+        // 既に空を渡り終えた音。ここで組み直した物がもう一度ここへ来ているだけなので、素通しする。
+        // Arrivals.arrived 参照。
+        if (Arrivals.arrived(sound)) {
             return;
         }
 
@@ -188,25 +199,27 @@ public final class WeaponSounds {
      * 値をここで求める。曲線の形は爆発音と同じで、理由も同じだ。最初は急に小さくなってから遠方まで届き、進むにつれ鋭さ
      * を失う。空気は高周波から先に吸うので、谷を越えた破裂音は鈍い音になる。{@link BlastSounds} 参照。
      *
+     * <p><b>そして今は鳴らさない。</b>砲声は音速で渡ってくるので、400ブロック先の発砲は1.2秒遅れて着く。
+     * 預かって鳴らすのは {@link Arrivals} で、大きさを測るのもそこ——着く頃には聞き手は別の場所にいる。
+     *
      * <p>距離は既に音量へ織り込んであるので減衰は切るが、位置は発生地点に置いたままにして方向を正しく保つ。
      */
+    @Nullable
     private static SimpleSoundInstance instance(SoundEvent recording, SoundInstance sound,
             WeaponDefinition.SoundSetup setup, boolean carried) {
         if (!carried) {
             // ゲームが本来送る距離を超えていない音。地上員作業などで、発生地点で聞かれ、volume が本当に音量である物だ。
-            return new SimpleSoundInstance(recording, sound.getSource(), setup.volume(), setup.pitch(),
+            return new SimpleSoundInstance(recording, sound.getSource(),
+                    setup.volume() * setup.gain(), setup.pitch(),
                     SoundInstance.createUnseededRandom(), sound.getX(), sound.getY(), sound.getZ());
         }
 
-        Vec3 at = new Vec3(sound.getX(), sound.getY(), sound.getZ());
-        double away = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition().distanceTo(at);
-        float fade = (float) Mth.clamp(away / Math.max(setup.carry(), 1.0F), 0.0, 1.0);
-
-        return new SimpleSoundInstance(recording.getLocation(), sound.getSource(),
-                setup.volume() * (float) Math.pow(1.0F - fade, FALLOFF),
-                setup.pitch() * (1.0F - fade * DULLING),
-                SoundInstance.createUnseededRandom(), false, 0, SoundInstance.Attenuation.NONE,
-                at.x, at.y, at.z, false);
+        // 大きさは gain だけから。volume は距離であって音量ではない——
+        // WeaponDefinition.SoundSetup.gain() 参照。着くまで待つ必要があれば Arrivals が預かり、
+        // ここへは null が返る（＝この音を今は鳴らすな）。
+        return Arrivals.send(recording.getLocation(), sound.getSource(),
+                new Vec3(sound.getX(), sound.getY(), sound.getZ()),
+                setup.gain(), setup.pitch(), setup.carry(), DULLING);
     }
 
     /**

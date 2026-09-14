@@ -1,12 +1,19 @@
 package com.ashvehicles.client.particle;
 
+import com.ashvehicles.client.MotorLight;
+import com.ashvehicles.client.ghost.dh.DHFog;
 import com.ashvehicles.particle.TintedParticleOption;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
+
+import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.ParticleRenderType;
 import net.minecraft.client.particle.TextureSheetParticle;
@@ -15,10 +22,12 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 /**
- * MOD が描く全パーティクルの共通点。色は生成元のオプションから来ること、ロード範囲外でも見えること、そして
- * 深度を残さないこと。
+ * MOD が描く全パーティクルの共通点。色は生成元のオプションから来ること、ロード範囲外でも見えること、距離に
+ * 上限を持たないこと、そして深度を残さないこと。
  *
  * <p>これらが存在する理由は照明だ。バニラはパーティクルが何に照らされているかを世界へ問うが、下のチャンクが
  * 未ロードなら世界の答えは0になる——つまりそこのパーティクルは単に暗いのではなく、真っ黒に描かれる。ロード範囲
@@ -60,6 +69,8 @@ public abstract class WeaponParticle extends TextureSheetParticle {
             RenderSystem.setShaderTexture(0, TextureAtlas.LOCATION_PARTICLES);
             RenderSystem.enableBlend();
             RenderSystem.defaultBlendFunc();
+            // このバッチの間だけ霧の帯を押し広げる。戻すのは ParticleReach 自身。
+            ParticleReach.open();
 
             return tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.PARTICLE);
         }
@@ -177,11 +188,100 @@ public abstract class WeaponParticle extends TextureSheetParticle {
         return LightTexture.pack(block, LightTexture.sky(lit));
     }
 
+    /**
+     * 世界が答えた明るさ——世界が無ければその代わり——に、近くで燃えているモーターの分を足す。
+     *
+     * <p>後者があるのは、飛んでいるミサイルが自分の煙を内側から照らすためだ。Minecraft の光はブロックを
+     * 置いた時に焼かれる物なので、毎tick数十ブロック動く炎はどのブロックの明るさも変えられない。だが照らす
+     * 相手がこちらの描いている粒なら、世界を通さずここで足せる。{@link MotorLight} 参照。
+     */
     @Override
     protected int getLightColor(float partialTick) {
-        return this.level.hasChunkAt(BlockPos.containing(this.x, this.y, this.z))
+        int lit = this.level.hasChunkAt(BlockPos.containing(this.x, this.y, this.z))
                 ? super.getLightColor(partialTick)
                 : this.lightBeyondTheWorld();
+
+        return MotorLight.lit(lit, this.x, this.y, this.z);
+    }
+
+    // ------------------------------------------------------------------
+    // 距離
+    // ------------------------------------------------------------------
+
+    /**
+     * バニラと同じ板を、遠方面より遠ければ引き寄せて描く。理由と写像は {@link ParticleReach}。
+     *
+     * <p>板の組み立て自体はバニラの {@code renderRotatedQuad} と同一だ。自前で書いているのは、引き寄せが
+     * 位置と大きさの<em>両方</em>に掛かる必要があり、霧の濃さがこの粒のアルファに畳み込まれる必要があるから
+     * ——どちらもバニラ側では private な頂点書き出しの中にある。引き寄せ率が1で霧が0なら、書かれる頂点は
+     * バニラのそれと同一になる。
+     */
+    @Override
+    protected void renderRotatedQuad(VertexConsumer buffer, Camera camera, Quaternionf quaternion,
+            float partialTick) {
+        Vec3 eye = camera.getPosition();
+        double dx = Mth.lerp((double) partialTick, this.xo, this.x) - eye.x;
+        double dy = Mth.lerp((double) partialTick, this.yo, this.y) - eye.y;
+        double dz = Mth.lerp((double) partialTick, this.zo, this.z) - eye.z;
+        double away = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        float fog = ParticleReach.fog(dx, dz, away);
+
+        if (fog >= DHFog.OPAQUE) {
+            // 霧に沈み切った。地形がそこで見えなくなるのと同じ場所で、煙も見えなくなる。
+            return;
+        }
+
+        double pull = ParticleReach.pull(away);
+        float x = (float) (dx * pull);
+        float y = (float) (dy * pull);
+        float z = (float) (dz * pull);
+        float size = this.getQuadSize(partialTick) * (float) pull;
+        float fade = this.alpha * (1.0F - fog);
+        int light = this.getLightColor(partialTick);
+
+        this.corner(buffer, quaternion, x, y, z, 1.0F, -1.0F, size, this.getU1(), this.getV1(), light, fade);
+        this.corner(buffer, quaternion, x, y, z, 1.0F, 1.0F, size, this.getU1(), this.getV0(), light, fade);
+        this.corner(buffer, quaternion, x, y, z, -1.0F, 1.0F, size, this.getU0(), this.getV0(), light, fade);
+        this.corner(buffer, quaternion, x, y, z, -1.0F, -1.0F, size, this.getU0(), this.getV1(), light, fade);
+    }
+
+    /** 板の四隅のうち1つ。バニラの {@code renderVertex} と同じ順序・同じ回転。 */
+    private void corner(VertexConsumer buffer, Quaternionf quaternion, float x, float y, float z,
+            float xOffset, float yOffset, float size, float u, float v, int light, float alpha) {
+        Vector3f at = new Vector3f(xOffset, yOffset, 0.0F).rotate(quaternion).mul(size).add(x, y, z);
+
+        buffer.addVertex(at.x(), at.y(), at.z())
+                .setUv(u, v)
+                .setColor(this.rCol, this.gCol, this.bCol, alpha)
+                .setLight(light);
+    }
+
+    /**
+     * 視錐台に見せる箱は、描かれる場所の物。
+     *
+     * <p>{@code ParticleEngine.render} は粒ごとにこれを視錐台へ通す。本当の位置の箱を渡せば、遠方面の外に
+     * ある物は——引き寄せて面の内側に描くつもりでも——そこで捨てられる。ゴーストパスの {@code inView} が
+     * 同じことを同じ理由でしている。
+     */
+    @Override
+    public AABB getRenderBoundingBox(float partialTick) {
+        Vec3 eye = ParticleReach.eye();
+        double dx = this.x - eye.x;
+        double dy = this.y - eye.y;
+        double dz = this.z - eye.z;
+        double pull = ParticleReach.pull(Math.sqrt(dx * dx + dy * dy + dz * dz));
+
+        if (pull >= 1.0) {
+            return super.getRenderBoundingBox(partialTick);
+        }
+
+        // 描画時と同様、視点を中心に拡縮する。空の同じ部分が、より近くに来る。
+        double x = eye.x + dx * pull;
+        double y = eye.y + dy * pull;
+        double z = eye.z + dz * pull;
+        double size = this.getQuadSize(partialTick) * pull;
+
+        return new AABB(x - size, y - size, z - size, x + size, y + size, z + size);
     }
 
     /** 問い合わせる世界が下に無いときの照らされ方。 */

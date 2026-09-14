@@ -1,5 +1,6 @@
 {
   "type": "rocket",
+  "nation": "ru",
   "item": true,
   "ammo": 20,
   "mass": 380,

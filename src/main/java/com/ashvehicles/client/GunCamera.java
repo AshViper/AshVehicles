@@ -134,7 +134,12 @@ public final class GunCamera {
     private static void rein(AircraftEntity aircraft, int station) {
         AircraftDefinition.Station laid = aircraft.getStations().station(station);
         Quaternionf attitude = aircraft.getAttitude(1.0F);
-        Vec3 body = Attitude.toBody(attitude, CockpitView.lookVector(1.0F));
+        // 先に砲へ繋ぎ止め、それから可動範囲へ収める。この順序でなければならない——砲は必ず範囲の内側に
+        // いるので、砲から一定角までの向きを後から範囲で切っても範囲の外へは出ない。逆順だと、範囲の縁で
+        // 切った向きが砲から離れたままになりうる。
+        Vec3 look = leash(CockpitView.lookVector(1.0F),
+                aircraft.getStations().direction(station, 1.0F), laid);
+        Vec3 body = Attitude.toBody(attitude, look);
 
         if (body.lengthSqr() < 1.0E-6) {
             return;
@@ -150,6 +155,58 @@ public final class GunCamera {
         CockpitView.lookAlong(Attitude.toWorld(attitude,
                 new Vec3(Math.sin(yaw) * flat, Math.sin(pitch), Math.cos(yaw) * flat)));
         CockpitView.applyToPlayer();
+    }
+
+    /**
+     * 頭が砲より先へ行ける角度を、砲の旋回速度の何tick分にするか。
+     *
+     * <p>4 は 0.2 秒。砲がその時間で追い付ける以上に頭を先へやらない、という意味であり、旋回の速い砲では
+     * 広く、遅い砲では狭い縄になる。<b>一定にしているのは角度ではなく遅れの時間だ</b>——砲手が感じるのは
+     * 「マウスを止めてから画面が止まるまで」であって、角度そのものではない。
+     */
+    private static final float LEASH_TICKS = 4.0F;
+
+    /**
+     * 頭を、砲の今の向きから一定角までに繋ぎ止める。
+     *
+     * <p><b>これがガンカメラの操作感の全部だ。</b>映像は砲に固定された箱から取っている
+     * （記憶ノート {@code ac130-gun-camera-is-a-sensor-screen}）ので、画面が回るのは砲が回った分だけ。
+     * ところが頭は毎フレーム、マウスが動いた分だけ即座に回る。砲は毎tick数度しか動けないので、
+     * 大きく振れば頭は砲の遥か先へ行き、<b>その差は入力として溜まる</b>——砲手がマウスを止めても画面は
+     * 何秒も回り続け、行き過ぎたと思って戻せば、今度は溜まった分を打ち消すまで画面が反応しない。
+     * 可動範囲の内側で起きるので {@code clampYaw} / {@code clampPitch} には掛からず、
+     * 「重い」「行き過ぎる」という感触だけが残っていた。
+     *
+     * <p>縄を掛ければ溜まりようが無くなる。マウスをどれだけ速く振っても、頭は砲から
+     * {@link #LEASH_TICKS} 分より先へは進めない。振った分が捨てられるので、手を止めれば画面はその時間で
+     * 止まる。狙いを詰める小さな動きは縄の内側なので、そこでの感触は今までと1つも変わらない。
+     *
+     * <p>戦車の照準がこの問題を「視界を頭に戻す」ことで解いたのに対し、ここでは戻せない——砲手が見ている
+     * のは最初から画面であり、機内から外は見えない（{@code gunner-sight-is-an-eyepiece} の却下案A の項）。
+     * だから溜まりの方を断つ。
+     */
+    private static Vec3 leash(Vec3 look, Vec3 bore, AircraftDefinition.Station laid) {
+        if (look.lengthSqr() < 1.0E-6 || bore.lengthSqr() < 1.0E-6) {
+            return look;
+        }
+
+        Vec3 head = look.normalize();
+        Vec3 gun = bore.normalize();
+        double limit = Math.toRadians(Math.max(laid.traverseRate(), laid.elevationRate()) * LEASH_TICKS);
+        double angle = Math.acos(Mth.clamp(head.dot(gun), -1.0, 1.0));
+
+        if (angle <= limit) {
+            return head;
+        }
+
+        // 砲に直交する成分。頭と砲が張る平面の中で、砲からちょうど limit だけ離れた向きを組み直す。
+        Vec3 across = head.subtract(gun.scale(head.dot(gun)));
+
+        if (across.lengthSqr() < 1.0E-8) {
+            return head;
+        }
+
+        return gun.scale(Math.cos(limit)).add(across.normalize().scale(Math.sin(limit))).normalize();
     }
 
     /**

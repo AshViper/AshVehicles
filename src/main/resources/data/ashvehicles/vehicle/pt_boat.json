@@ -1,4 +1,5 @@
 {
+  "type": "ship",
   "hitbox": {
     "width": 3,
     "height": 2.5,
@@ -36,7 +37,7 @@
     }
   },
   "powertrain": {
-    "max_speed": 0.45,
+    "max_speed": 1.056,
     "reverse_speed": 0.18,
     "acceleration": 0.0025,
     "braking": 0.006,
@@ -60,17 +61,14 @@
   },
   "armament": {
     "main": "ashvehicles:bofors_40",
-    "ammunition": [
-      "ashvehicles:autocannon_apfsds",
-      "ashvehicles:autocannon_he",
-      "ashvehicles:autocannon_heat"
-    ],
+    "ammunition": ["ashvehicles:autocannon_apfsds", "ashvehicles:autocannon_he", "ashvehicles:autocannon_heat"],
     "trunnion": [0.0, 1.9, -1.0],
     "barrel_length": 2.7,
     "recoil": 0.12,
     "recoil_ticks": 4
   },
   "hull": {
+    "cost": 250,
     "health": 260,
     "explosion_power": 4,
     "seats": [
@@ -78,6 +76,12 @@
       [0.7, 1.4, -2.6],
       [-0.7, 1.4, -2.6]
     ]
+  },
+  "buoyancy": {
+    "draught": 0.8,
+    "buoyancy": 0.08,
+    "damping": 0.35,
+    "trim_rate": 0.1
   },
   "camera": {
     "pos": [0.0, 3.0, -13.0],
@@ -91,12 +95,5 @@
     "pitch_min": 0.85,
     "pitch_max": 1.1,
     "range": 160
-  },
-  "type": "ship",
-  "buoyancy": {
-    "draught": 0.8,
-    "buoyancy": 0.08,
-    "damping": 0.35,
-    "trim_rate": 0.1
   }
 }

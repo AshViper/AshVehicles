@@ -196,13 +196,17 @@ public final class BlastFlash implements LayeredDraw.Layer {
 
     @Override
     public void render(GuiGraphics graphics, DeltaTracker delta) {
-        if (LIVE.isEmpty()) {
-            return;
-        }
-
         Minecraft minecraft = Minecraft.getInstance();
 
         if (minecraft.level == null) {
+            return;
+        }
+
+        float partialTick = delta.getGameTimeDeltaPartialTick(false);
+        // モーターの光は爆発を1件も抱えていない時が本番だ。ここで一緒に降りない。
+        float motor = MotorLight.glow(partialTick);
+
+        if (LIVE.isEmpty() && motor <= 0.0F) {
             return;
         }
 
@@ -210,13 +214,16 @@ public final class BlastFlash implements LayeredDraw.Layer {
         float focal = AircraftHud.focalLength(minecraft, graphics);
         // その場の明るさは全員に共通だが、それをどれだけ受けるかは閃光ごとに違う。読むのは一度だけ。
         int light = minecraft.level.getMaxLocalRawBrightness(BlockPos.containing(eye));
-        float partialTick = delta.getGameTimeDeltaPartialTick(false);
         int centreX = graphics.guiWidth() / 2;
         int centreY = graphics.guiHeight() / 2;
 
         // 余韻は重ねない。2発分の空が2倍オレンジになる道理は無いし、そのまま足すと数発で画面が塗り潰される。
-        // 見えるべきなのは、今いちばん強く風景を照らしている1発だ。
-        wash(graphics, strongestGlow(eye, light, partialTick));
+        // 見えるべきなのは、今いちばん強く風景を照らしている1つだ。
+        //
+        // そしてそれは爆発とは限らない。燃えているロケットモーターも同じことを——弱く、長く——するので、
+        // 同じ1枚を取り合う（{@link MotorLight}）。重ねないという規則が意味を持つのは、規則が全部の光源に
+        // 掛かっている時だけだ。
+        wash(graphics, Math.max(strongestGlow(eye, light, partialTick), motor));
 
         for (Flash flash : LIVE) {
             draw(graphics, minecraft, flash, eye, focal, light, partialTick, centreX, centreY);

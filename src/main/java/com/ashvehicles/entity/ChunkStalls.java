@@ -33,8 +33,15 @@ public final class ChunkStalls {
     /** 1行に出す呼び出し元の数。 */
     private static final int NAMES = 6;
 
-    /** 1件につき名前を辿るフレーム数。1つでは配管の外に出られないことがある。 */
-    private static final int CALLERS = 3;
+    /**
+     * 1件につき名前を辿るフレーム数。1つでは配管の外に出られないことがある。
+     *
+     * <p>3 では足りなかった。{@code Entity.updateFluidHeightAndDoFluidPushing} の 2 段と
+     * {@code updateInWaterStateAndDoWaterCurrentPushing} で使い切り、<em>どのエンティティの</em> tick かが
+     * 行に残らない（2026-09-04、1953 ms の停止がそれだった）。5 なら {@code baseTick} とその呼び手
+     * ——{@code ServerPlayer.doTick} か {@code tickNonPassenger} か——まで届く。
+     */
+    private static final int CALLERS = 5;
 
     private static final long MILLIS = 1_000_000L;
 

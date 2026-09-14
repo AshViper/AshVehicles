@@ -1,9 +1,11 @@
 package com.ashvehicles.client;
 
 import java.util.List;
+import java.util.Locale;
 
 import javax.annotation.Nullable;
 
+import com.ashvehicles.AshVehicles;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
@@ -17,6 +19,9 @@ import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -26,6 +31,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 /**
  * ターゲティングポッド越しの視界。カメラをパイロットの頭から外してポッドへ載せ、機体ではなくマウスで旋回させる。
@@ -79,6 +85,16 @@ public final class PodCamera {
     private static final double ENTITY_MARGIN = 0.6;
 
     /**
+     * 遮蔽を判定するとき、実体の当たり箱をどれだけ膨らませるか（ブロック）。
+     *
+     * <p>この MOD の車両の素の直方体は実物より小さい——覆うのは車体だけで、砲塔も履帯もはみ出す
+     * （{@code VehicleChassis.Hitbox} 参照）。膨らませないと、砲塔に十字線を乗せた指示が「箱の外」を
+     * 基準に判定され、地面の方が近いと読まれる。2 は戦車1台ぶんの余裕には足りないが、足元の地面と
+     * 車体上面を分けるには十分で、隣の丘を無効にするほど大きくもない。
+     */
+    private static final double OCCLUSION_MARGIN = 2.0;
+
+    /**
      * 十字線からこの角度までに入っている物を「乗っている」と数える（度）。
      *
      * <p><b>箱への交差ではなく角度で問う理由。</b>この MOD の機体は素の直方体で当たり判定を持たない——箱は
@@ -103,6 +119,8 @@ public final class PodCamera {
     /** 視界の遷移がどこまで進んだか。出し入れのイージング用。 */
     private static float progress;
     private static float progressO;
+    /** 追っている対象がジンバルの範囲外へ出たか。{@link #tick} が毎tick決める。 */
+    private static boolean gimbalLimited;
     @Nullable
     private static AircraftEntity aircraft;
 
@@ -131,8 +149,38 @@ public final class PodCamera {
             active = false;
         }
 
+        follow();
+
         progressO = progress;
         progress = active ? Math.min(progress + RATE, 1.0F) : Math.max(progress - RATE, 0.0F);
+    }
+
+    /**
+     * 追従1tick分。ジンバルの2つの角度を、今対象が居る所へ置き直す。
+     *
+     * <p><b>追っている間もマウスと同じ2つの角度を動かし続ける理由。</b>マークを解放した瞬間、ポッドはこの2つの
+     * 角度へ戻る。追従中に更新していなければそれは<em>捕捉する前にマウスが残した角度</em>で、目標を10秒追った後に
+     * 手を離すと、映像は明後日の方向へ跳ぶ。ここで書き続けておけば、解放は「ボールがその場で止まる」ことになる。
+     *
+     * <p>範囲外へ出たことは記録するだけで、捕捉は解かない。ロックを黙って落とすのは、パイロットが押していない
+     * キーをこちらが押すことだ——計器がそう言い、手放すかどうかは本人が決める。
+     */
+    private static void follow() {
+        Vec3 toMark = markDirection(1.0F);
+
+        if (toMark == null) {
+            gimbalLimited = false;
+
+            return;
+        }
+
+        Vec3 local = toPod(toMark, 1.0F);
+        float wantYaw = (float) (Mth.atan2(-local.x, local.z) * (180.0 / Math.PI));
+        float wantPitch = (float) (-Math.asin(Mth.clamp(local.y, -1.0, 1.0)) * (180.0 / Math.PI));
+
+        yaw = Mth.clamp(wantYaw, -YAW_LIMIT, YAW_LIMIT);
+        pitch = Mth.clamp(wantPitch, PITCH_UP_LIMIT, PITCH_DOWN_LIMIT);
+        gimbalLimited = yaw != wantYaw || pitch != wantPitch;
     }
 
     /**
@@ -199,37 +247,89 @@ public final class PodCamera {
         return aircraft == null ? null : aircraft.getDesignated();
     }
 
+    /** 捕捉対象がジンバルの向けられる範囲の外にいる間 true。計器がそう表示するためにある。 */
+    public static boolean isGimbalLimited() {
+        return gimbalLimited;
+    }
+
     /**
      * ワールドでのポッドの視線。
      *
      * <p>マークがあれば真っ直ぐそこを向く——「追う」の意味はそれが全てだ。機体は飛び続け、マークは置かれた場所に留まり、
      * ポッドはそれを画面中央に保つよう回る。マークが無ければ、マウスが残した2つの角度を、パイロットの頭と同様、機体
      * 自身の姿勢の後に適用した物になる。
+     *
+     * <p><b>追従もジンバルを通る。</b>以前は対象への生のベクトルをそのまま返していたので、目標の上を通過した
+     * ポッドは自分の機体を透かして真後ろを見続けた。ボールはパイロンの先に付いているのであって、機体の中を
+     * 覗けはしない。範囲の外に出た対象は捕捉したままで、映像はジンバルの端で止まる——実物がそうであり、
+     * 「目標を失った」ことがパイロットの画面上で読める唯一の形でもある。
      */
     public static Vec3 direction(float partialTick) {
+        Vec3 toMark = markDirection(partialTick);
+
+        return toMark == null ? Attitude.nose(world(yaw, pitch, partialTick))
+                : gimballed(toMark, partialTick);
+    }
+
+    /** 捕捉対象へのワールド方向。何も捉えていなければ null。 */
+    @Nullable
+    private static Vec3 markDirection(float partialTick) {
         Entity mark = designated();
 
-        if (mark != null && aircraft != null) {
-            Vec3 toMark = mark.position().add(0.0, mark.getBbHeight() * 0.5, 0.0)
-                    .subtract(eye(partialTick));
-
-            if (toMark.lengthSqr() > 1.0E-6) {
-                return toMark.normalize();
-            }
+        if (mark == null || aircraft == null) {
+            return null;
         }
 
-        return Attitude.nose(world(partialTick));
+        Vec3 toMark = mark.getPosition(partialTick).add(0.0, mark.getBbHeight() * 0.5, 0.0)
+                .subtract(eye(partialTick));
+
+        return toMark.lengthSqr() > 1.0E-6 ? toMark.normalize() : null;
+    }
+
+    /**
+     * 与えられた方向を、ジンバルが実際に向けられる範囲へ収めた物。範囲内ならそのまま返る。
+     *
+     * <p>1度ポッドの座標系へ落として2つの角度に直し、そこでクランプしてから世界へ戻す。マウスで振ったポッドと
+     * まったく同じ2つの角度に対する、まったく同じ制限を通すためだ。追従とマウスで別の範囲を持たせれば、解放した
+     * 瞬間に映像が跳ぶ。
+     */
+    private static Vec3 gimballed(Vec3 wanted, float partialTick) {
+        if (aircraft == null) {
+            return wanted;
+        }
+
+        Vec3 local = toPod(wanted, partialTick);
+        float wantYaw = (float) (Mth.atan2(-local.x, local.z) * (180.0 / Math.PI));
+        float wantPitch = (float) (-Math.asin(Mth.clamp(local.y, -1.0, 1.0)) * (180.0 / Math.PI));
+        float heldYaw = Mth.clamp(wantYaw, -YAW_LIMIT, YAW_LIMIT);
+        float heldPitch = Mth.clamp(wantPitch, PITCH_UP_LIMIT, PITCH_DOWN_LIMIT);
+
+        return heldYaw == wantYaw && heldPitch == wantPitch ? wanted
+                : Attitude.nose(world(heldYaw, heldPitch, partialTick));
+    }
+
+    /**
+     * ワールドの方向を機体の座標系へ。姿勢の逆回転を掛けるだけ。
+     *
+     * <p>{@link #world} の逆であり、そうでなければならない。ここで出る2つの角度が、マウスが積み上げている
+     * {@code yaw} と {@code pitch} と同じ意味を持つのは、両者が同じ回転を逆向きに通っているからだ。
+     */
+    private static Vec3 toPod(Vec3 world, float partialTick) {
+        Vector3f turned = new Quaternionf(aircraft.getAttitude(partialTick)).conjugate()
+                .transform(new Vector3f((float) world.x, (float) world.y, (float) world.z));
+
+        return new Vec3(turned.x(), turned.y(), turned.z());
     }
 
     /** ワールドでのポッド自身の回転。視線はここから取る。 */
-    private static Quaternionf world(float partialTick) {
+    private static Quaternionf world(float aroundY, float aroundX, float partialTick) {
         if (aircraft == null) {
             return new Quaternionf();
         }
 
         return new Quaternionf(aircraft.getAttitude(partialTick))
-                .rotateY(-yaw * DEG_TO_RAD)
-                .rotateX(pitch * DEG_TO_RAD)
+                .rotateY(-aroundY * DEG_TO_RAD)
+                .rotateX(aroundX * DEG_TO_RAD)
                 .normalize();
     }
 
@@ -355,11 +455,28 @@ public final class PodCamera {
         // 交わった距離——しばしば数百ブロック——を「地面」と呼ぶ。その値で実体の捜索を打ち切っていたので、
         // 1500ブロック先の機体は角度を見る前に落とされ、指示はいつも目標の手前か向こうの床に着いた。
         // 推測が実物を隠してはならない。
-        Entity struck = aimedAt(from, along, REACH);
+        Sweep sweep = aimedAt(from, along, REACH);
+        Entity struck = sweep.best();
+        boolean occluded = struck != null && behindGround(from, struck, ground);
+
+        // 押下1回につき1行。実体を指示できないという報告は、この1行のどこかで必ず説明が付く。候補=0 なら
+        // クライアントがその実体を持っていないか型が名簿に無い、候補があって実体=無しなら十字線から外れて
+        // いる（惜しい= がその角度）、実体があって遮蔽=true なら地面に遮られたと判断された。
+        AshVehicles.LOGGER.info("[pod] 指示: 実体={} 候補={} 惜しい={} 遮蔽={} 地面={} 推定={}",
+                struck == null ? "無し"
+                        : struck.getType().toShortString() + "@"
+                                + Math.round(centreOf(struck).distanceTo(from)),
+                sweep.considered(),
+                sweep.nearest() == null ? "無し"
+                        : String.format(Locale.ROOT, "%s %.2f度",
+                                sweep.nearest().getType().toShortString(), sweep.nearestAngle()),
+                occluded,
+                ground == null ? "無し" : Math.round(ground.point().distanceTo(from)),
+                ground != null && ground.estimated());
 
         // 実体が乗っていれば、それが指示先。サーバーはこの場合マークを置かず対象そのものを保持するので
         // （{@code AircraftEntity#designate}）、渡す点はその位置でよく、推定でもない。
-        if (struck != null && !behindGround(from, struck, ground)) {
+        if (struck != null && !occluded) {
             PacketDistributor.sendToServer(new DesignatePayload(false, centreOf(struck),
                     struck.getId(), false));
 
@@ -367,7 +484,12 @@ public final class PodCamera {
         }
 
         // 実体も地面も無い。本当に何も乗っていないので、指示する物が無いと言う方が正しい。
+        //
+        // ただし黙って何もしないのはやめる。以前はここで無言で戻っていたので、パイロットにはキーが効いて
+        // いないのか、狙いが外れているのか、そもそも指示できない相手なのかを区別する手掛かりが1つも無かった。
         if (ground == null) {
+            report();
+
             return;
         }
 
@@ -375,26 +497,61 @@ public final class PodCamera {
     }
 
     /**
-     * 十字線が乗っている物。無ければ null。
+     * 十字線の走査結果。採った物と、採らなかった中で最も十字線に近かった物。
+     *
+     * <p>外れた候補まで持ち帰るのは、下のログのためだけにある。「掴めない」という報告に対して、籠に何も
+     * 入っていなかったのか、惜しい所に居たのかは、まったく別の話だからだ。
+     *
+     * @param best 籠に入った物のうち最も十字線に近い物。無ければ null
+     * @param nearest 籠に入らなかった物も含めた、最も十字線に近い物。無ければ null
+     * @param nearestAngle その物が十字線から外れていた角度（度）
+     * @param considered 距離の内側にあり、指示しうる型だった候補の数
+     */
+    private record Sweep(@Nullable Entity best, @Nullable Entity nearest, double nearestAngle,
+            int considered) {
+    }
+
+    /**
+     * 十字線が乗っている物を探す。
      *
      * <p>採るのは籠に入っている物のうち<em>最も十字線に近い</em>物で、最も近い物ではない。乗員が狙いを付けて
      * いる先こそ指したい物だから。{@link #BASKET_ANGLE} 参照。
      *
-     * @param reach ここまでの物だけ見る。地面が見つかっていればそこまで——斜面の向こうに立っている車両は
-     *              乗員の意図ではない——見つかっていなければポッドの到達距離いっぱい
+     * <p><b>空間クエリではなくクライアントの実体一覧を歩く。</b>以前は視線を包む AABB で
+     * {@code Level#getEntities} を引いていたが、この籠は<em>角</em>であって箱ではないので、箱は近似に
+     * すぎず、しかもその近似で落とした物は角度を見る前に消えていた。落とし方は3つあった——2048ブロックの
+     * 廊下を35ブロック膨らませた箱は<em>実体側の当たり箱と交差しなければならない</em>のに、この MOD の
+     * 機体と車両の素の直方体は車輪の位置にある小さな箱で（{@link com.ashvehicles.entity.VehiclePart} が
+     * 本来の当たり判定を持つ）、遠方ではその箱が廊下の外に出る。加えて箱による索引はセクション記憶に
+     * 依存しており、ロード済み範囲の外にいる実体——ゴーストとして描かれている機体そのもの——について
+     * 保証が無い。
+     *
+     * <p>一覧を歩けばどれも問わずに済む。押下1回につき1度だけ、クライアントが知っている実体を全部見て、
+     * 距離と型と角度だけで決める。数百から数千の実体に対する1回の走査は、キー押下1回の代金として無料だ。
+     * ゴーストとして描かれている機体はこの一覧に必ず居る——描けているということは、クライアントがその実体を
+     * 持っているということだからだ（{@code EntityTrackingMixin}）。
+     *
+     * @param reach ここまでの物だけ見る
      */
-    @Nullable
-    private static Entity aimedAt(Vec3 from, Vec3 along, double reach) {
-        // 箱は籠を包める太さにする。線分の AABB をそのまま使うと、真北へ向いた視線では箱が X 方向に薄い
-        // ままになり、1度外れた——2000ブロック先では35ブロック横の——目標が箱に入らない。角度で選ぶ前に
-        // 箱で落としてしまえば、籠は名ばかりになる。
-        double spread = reach * Math.tan(Math.toRadians(BASKET_ANGLE));
-        AABB box = new AABB(from, from.add(along.scale(reach))).inflate(Math.max(ENTITY_MARGIN, spread));
+    private static Sweep aimedAt(Vec3 from, Vec3 along, double reach) {
+        ClientLevel level = Minecraft.getInstance().level;
+
+        if (level == null) {
+            return new Sweep(null, null, 180.0, 0);
+        }
+
         double basket = Math.cos(Math.toRadians(BASKET_ANGLE));
         Entity best = null;
         double closest = basket;
+        Entity nearest = null;
+        double widest = -1.0;
+        int considered = 0;
 
-        for (Entity candidate : aircraft.level().getEntities(aircraft, box, PodCamera::designatable)) {
+        for (Entity candidate : level.entitiesForRendering()) {
+            if (candidate == aircraft || !designatable(candidate)) {
+                continue;
+            }
+
             Vec3 gap = centreOf(candidate).subtract(from);
             double distance = gap.length();
 
@@ -402,7 +559,14 @@ public final class PodCamera {
                 continue;
             }
 
+            considered++;
+
             double alignment = gap.scale(1.0 / distance).dot(along);
+
+            if (alignment > widest) {
+                widest = alignment;
+                nearest = candidate;
+            }
 
             if (alignment > closest) {
                 closest = alignment;
@@ -410,7 +574,18 @@ public final class PodCamera {
             }
         }
 
-        return best;
+        return new Sweep(best, nearest,
+                Math.toDegrees(Math.acos(Mth.clamp(widest, -1.0, 1.0))), considered);
+    }
+
+    /** 十字線の下に指示できる物が無かったことをパイロットへ伝える。 */
+    private static void report() {
+        LocalPlayer pilot = Minecraft.getInstance().player;
+
+        if (pilot != null) {
+            pilot.displayClientMessage(
+                    Component.translatable("message.ashvehicles.designate_none"), true);
+        }
     }
 
     /** その物の中心。足元ではなく。遠方では機体の高さの半分だけでも十字線の乗り方が変わる。 */
@@ -425,10 +600,30 @@ public final class PodCamera {
      * 残す。ただし遮る資格があるのは<em>実際に見えたブロック</em>だけだ。ロード範囲の外で推定された床は、
      * 乗員が見ている物ではなく計算の産物であり、しかも Distant Horizons を入れていれば乗員はそこに本物の
      * 地形を見ている。推定に実物を隠す権利は無い。
+     *
+     * <p><b>比べるのは実体の中心ではなく、こちらを向いている面である。</b>中心で比べていたので、地上の
+     * 物はほぼ常に「地面の裏」と判定されて捨てられていた。地面に立っている車両を斜め上から見れば、視線は
+     * 車体を掠めてその<em>先</em>の地面に当たる。当たった地面までの距離は、車体の足元とほぼ同じで、
+     * 車体の中心——足元より上、つまり浅い角度では視線に沿ってより遠い点——<em>より近い</em>ことが多い。
+     * 中心を使う限り、この判定は「地面の上に立っている物は指示できない」と読み替えられる。それは
+     * 照準ポッドが存在する理由そのものを否定する規則だった。
+     *
+     * <p>そこで実体の当たり箱のうち視点に最も近い点を採る。地面がその手前で当たっていれば本当に遮られて
+     * おり、車体を掠めた先に当たっているなら遮られていない。箱を少し膨らませるのは、この MOD の素の
+     * 直方体が実物より小さいからだ——当たり判定は {@link com.ashvehicles.entity.VehiclePart} が持っており、
+     * 部品は指示の距離ではクライアントへ送られてすらいない（{@link #designatable} 参照）。
      */
     private static boolean behindGround(Vec3 from, Entity struck, @Nullable Terrain.Ground ground) {
-        return ground != null && !ground.estimated()
-                && centreOf(struck).distanceTo(from) > ground.point().distanceTo(from);
+        if (ground == null || ground.estimated()) {
+            return false;
+        }
+
+        AABB box = struck.getBoundingBox().inflate(OCCLUSION_MARGIN);
+        Vec3 nearest = new Vec3(Mth.clamp(from.x, box.minX, box.maxX),
+                Mth.clamp(from.y, box.minY, box.maxY),
+                Mth.clamp(from.z, box.minZ, box.maxZ));
+
+        return ground.point().distanceTo(from) < nearest.distanceTo(from);
     }
 
     /**

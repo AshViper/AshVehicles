@@ -275,6 +275,13 @@ public final class WeaponMounts {
     /** 選択中の兵装のシーカーが捉えている相手。シーカーを持つ兵装のみ。 */
     private final TargetLock lock;
     private Mount[] mounts = new Mount[0];
+    /**
+     * ファイルが与える初期装備を配り終えたか。
+     *
+     * <p>保存しない。ディスクにあるということは既に配られた後の内容だということなので、
+     * {@link #load} がそのまま「配り終えた」を意味する。
+     */
+    private boolean stocked;
     /** {@link #mounts} の不変リスト版。背後の配列が作り直された時だけ作り直す。 */
     @Nullable
     private List<Mount> mountsView;
@@ -284,6 +291,8 @@ public final class WeaponMounts {
     private boolean dirty;
     /** 前 tick の引き金状態。単発の兵装が「押した」と「押しっぱなし」を区別するため。 */
     private boolean triggerHeld;
+    /** 連射を録った発砲音を、録音の長さに1回へ間引く。{@link FireSoundPacing} 参照。 */
+    private final FireSoundPacing soundPacing = new FireSoundPacing();
 
     public WeaponMounts(AircraftEntity aircraft) {
         this.aircraft = aircraft;
@@ -842,6 +851,27 @@ public final class WeaponMounts {
     }
 
     /**
+     * 積んでいるポッドが機体の弾倉に足す、対抗手段の発数。
+     *
+     * <p><b>ここだけは積ではなく和である。</b>他の数値は機体が既に持っていた物を良くするが、外付けの
+     * 投射機は持っていない物を持たせる——フレアを1発も積まない MQ-9 に倍率を掛けても0発のままだ。
+     *
+     * @param flare フレアなら true、チャフなら false
+     */
+    public int podCountermeasures(boolean flare) {
+        int extra = 0;
+
+        for (Mount mount : this.mounts()) {
+            if (mount.equipment != null) {
+                EquipmentDefinition pod = Definitions.equipment(mount.equipment);
+                extra += flare ? pod.flares() : pod.chaff();
+            }
+        }
+
+        return extra;
+    }
+
+    /**
      * この機体を狙っているレーダーシーカーが、ロックを決めるのにどれだけ余計に時間を要するか。ジャマーなら
      * 1を超える。
      *
@@ -1140,15 +1170,25 @@ public final class WeaponMounts {
         this.dirty = true;
     }
 
-    /** 積んでいる次の兵装を選ぶ。ハードポイント順で、末尾から先頭へ回る。 */
-    public void selectNext() {
+    /**
+     * 積んでいる兵装を {@code step} 個ぶん送る。ハードポイント順で、末尾から先頭へ回る。
+     *
+     * <p>向きを取るのはマウスホイールのためだ。キー1つで送っていた頃は前へしか進めず、それで足りて
+     * いた。ホイールは戻せることを前提に回されるので、逆へ送れない選択は「壊れている」と読まれる。
+     *
+     * @param step 進める数。負なら逆へ。0 は何もしない
+     */
+    public void selectStep(int step) {
         List<ResourceLocation> weapons = this.carried();
 
         if (weapons.isEmpty()) {
             this.selected = null;
         } else {
+            // 選択が一覧に無い（積み替え直後など）ときの indexOf は −1。そこから前へ1つで先頭に
+            // なるよう、基準を −1 のまま回す。floorMod なので負の step でも同じ式で足りる。
             int index = weapons.indexOf(this.selected);
-            this.selected = weapons.get((index + 1) % weapons.size());
+
+            this.selected = weapons.get(Math.floorMod(index + step, weapons.size()));
         }
 
         this.dirty = true;
@@ -1173,9 +1213,17 @@ public final class WeaponMounts {
      * <p>リロードで<em>種別</em>が変わったステーションは空にする。爆弾を積んでいたパイロットが今はセンサー
      * ステーションになったなら爆弾を保持し続けられないし、黙って残せば「自分のファイルがポッドだと言って
      * いる場所から撃つ機体」になる。
+     *
+     * <p><b>初期装備を配るのはここの最初の1回だけ。</b> {@code hardpoint.rack()} を書いたステーション
+     * （ウェポンベイのレール）には、生成された機体が最初からそれを付けている。2回目以降は配らない
+     * ——さもないと外したラックが次の tick に生えてくる。ディスクから読んだ機体、サーバーから受け取った
+     * 機体は既に自分の搭載内容を持っているので、{@link #load} が「配り終えた」側に置く。
      */
     private void ensureLayout() {
         List<AircraftDefinition.Hardpoint> hardpoints = this.aircraft.getStats().hardpoints();
+        boolean stocking = !this.stocked;
+
+        this.stocked = true;
 
         if (this.mounts.length != hardpoints.size()) {
             Mount[] resized = new Mount[hardpoints.size()];
@@ -1227,6 +1275,17 @@ public final class WeaponMounts {
             if (mount.equipment != null) {
                 mount.equipment = null;
                 this.dirty = true;
+            }
+
+            // ファイルがこのステーションに与えている初期装備。重量は見ない——これは誰かが吊った物では
+            // なく機体がそう作られているという話であり、搭載可能重量が縛るのはその上に吊る物の方だ。
+            if (stocking && mount.rack == null && hardpoint.rack().isPresent()) {
+                ResourceLocation fitted = hardpoint.rack().get();
+
+                if (takesRack(hardpoint, Definitions.rack(fitted))) {
+                    mount.rack = fitted;
+                    this.dirty = true;
+                }
             }
 
             // リロードで翼端になった（あるいは翼端でなくなった）ステーションからは、組にならなくなった
@@ -1282,7 +1341,7 @@ public final class WeaponMounts {
         // パイロットが砲座を選んでいる間、パイロンの兵装は引き金に繋がっていない。引き金は1つで、選択も
         // 1つだからだ。GunStations.cycle 参照。
         boolean armed = trigger && selectedWeapon != null && equipped && !this.aircraft.isCrashing()
-                && this.aircraft.getAviator() instanceof Player
+                && (this.aircraft.getAviator() instanceof Player || this.aircraft.isBot())
                 && !this.aircraft.getStations().pilotHoldsStation();
 
         // 自動兵装は引き金を引いている間撃ち続ける。それ以外は1押し1発なので、押しっぱなしでミサイル
@@ -1467,13 +1526,20 @@ public final class WeaponMounts {
         }
 
         // ミサイルはレールを離れた時点でシーカーが持っていた物を取り、以後は何も受け取らない。追い続ける
-        // のはミサイル自身の問題だ。だからロックがある時は素の機首方向へは出ない——レーダー指示のロックは
-        // 今や弾の狭いヘッドではなくレーダー自身の走査範囲で保持される（TargetLock#bestCandidate 参照）
-        // ので、機首方向にしか撃たないレールは、広角のロックに対して数十度の差を track_angle が諦める前に
-        // 詰めろと要求することになる。代わりに目標へケージングする。実物のレールが、放つ前に弾を指定目標へ
-        // ケージングするのと同じ。
+        // のはミサイル自身の問題だ。
+        //
+        // <p><b>それでも出ていく向きはレールの向き、つまり機首方向である。</b>以前はロックがある時だけ
+        // 目標へケージングしていた。狙いは広角ロックの初期誤差を弾に渡さないことで、理屈は通っていたが、
+        // 使われ方に対して間違っていた——照準ポッドが保持しているのは<em>ポッドが見ている物</em>であり、
+        // ポッドは真下や後下方を覗く望遠鏡だ。ケージングはその視線をそのままレールの向きにするので、
+        // 対地兵装を撃ったパイロットには、ミサイルが機体から前へ出ずにカメラの向いた方向へ横ざまに
+        // 飛び出すように見えていた。実物のレールはそうしない。弾はレールに沿って離れ、そこから自分で
+        // 曲がる。
+        //
+        // <p>広角ロックの初期誤差は今も残るが、それを詰めるのは誘導の仕事であり、
+        // {@code guidance.turn_rate} と {@code track_angle} がその可否を決める。撃った瞬間に弾を
+        // 目標へ向けてしまうことは、その2つの数字を無効にすることでもあった。
         Entity locked = this.releaseTarget(weapon);
-        Vec3 caged = cagedAim(locked, muzzle, nose);
         RandomSource random = this.aircraft.getRandom();
 
         // 機首を軸にした円錐。直交2方向のガウス分布で、ファイルの半頂角が「誰も届かない縁」ではなく
@@ -1483,7 +1549,7 @@ public final class WeaponMounts {
         double spread = Math.tan(Math.toRadians(weapon.firing().salvoSpread())) * 0.5;
 
         for (int i = 0; i < Math.max(1, weapon.firing().salvo()); i++) {
-            Vec3 direction = caged
+            Vec3 direction = nose
                     .add(right.scale(random.nextGaussian() * (scatter + spread)))
                     .add(up.scale(random.nextGaussian() * (scatter + spread)))
                     .normalize();
@@ -1530,11 +1596,6 @@ public final class WeaponMounts {
         }
     }
 
-    /**
-     * ケージングされた弾が出ていく方向。ロックがあればその相手へ、無ければ機首方向——無誘導の兵装すべてと、
-     * 何も保持せず撃った誘導兵装がそれ。方向を作れない唯一の場合（目標がパイロン上にちょうど重なっている）
-     * でも機首方向に戻す。
-     */
     /** 砲腔線に直交する「上」。散布を撒く2軸のうちの1本で、もう1本はこれと砲腔線の外積になる。 */
     private static Vec3 sideways(Vec3 bore, Vec3 fallback) {
         Vec3 side = bore.cross(new Vec3(0.0, 1.0, 0.0));
@@ -1542,21 +1603,16 @@ public final class WeaponMounts {
         return side.lengthSqr() < 1.0E-6 ? fallback : side.cross(bore).normalize();
     }
 
-    private static Vec3 cagedAim(@Nullable Entity locked, Vec3 muzzle, Vec3 nose) {
-        if (locked == null) {
-            return nose;
-        }
-
-        Vec3 toTarget = locked.position().add(0.0, locked.getBbHeight() * 0.5, 0.0).subtract(muzzle);
-
-        return toTarget.lengthSqr() > 1.0E-6 ? toTarget.normalize() : nose;
-    }
-
     /**
-     * 発砲中は何発出ていても1tickに1回。兵装ファイルが指定するイベント、無ければ兵装名から作った物。
+     * 発砲中は何発出ていても1tickに1回（連射を録った音は {@link WeaponDefinition.SoundSetup#interval()} に1回）。
+     * 兵装ファイルが指定するイベント、無ければ兵装名から作った物。
      * どちらも持たないクライアントは {@link com.ashvehicles.client.sound.WeaponSounds} の既定へ落ちる。
      */
     private void playFireSound(WeaponDefinition weapon, ResourceLocation weaponId) {
+        if (!this.soundPacing.due(weaponId, weapon, this.aircraft.level().getGameTime())) {
+            return;
+        }
+
         ResourceLocation event = weapon.sound().fire()
                 .orElseGet(() -> weaponId.withPath(SOUND_PREFIX + weaponId.getPath()));
 
@@ -1676,7 +1732,9 @@ public final class WeaponMounts {
                 }
 
                 int perItem = kind.roundsPerItem();
-                int taken = Math.min(offered, (gun.ammo() - load.ammo) / perItem);
+                // 容量は機体が言う値。同じ砲でも積む機体で携行弾数が違う（Hardpoint.capacity 参照）。
+                int capacity = hardpoint.capacity(gun);
+                int taken = Math.min(offered, (capacity - load.ammo) / perItem);
 
                 if (taken <= 0) {
                     continue;
@@ -1685,7 +1743,7 @@ public final class WeaponMounts {
                 load.ammo += taken * perItem;
                 this.dirty = true;
 
-                return new Resupply(load.weapon, taken, load.ammo, gun.ammo());
+                return new Resupply(load.weapon, taken, load.ammo, capacity);
             }
         }
 
@@ -1726,7 +1784,9 @@ public final class WeaponMounts {
 
                 WeaponDefinition gun = Definitions.weapon(load.weapon);
                 int perItem = Definitions.ammunition(round).perItem();
-                int taken = Math.min(offered, (gun.ammo() - load.ammo) / perItem);
+                // 容量は機体が言う値。同じ砲でも積む機体で携行弾数が違う（Hardpoint.capacity 参照）。
+                int capacity = hardpoint.capacity(gun);
+                int taken = Math.min(offered, (capacity - load.ammo) / perItem);
 
                 if (taken <= 0) {
                     continue;
@@ -1736,7 +1796,7 @@ public final class WeaponMounts {
                 load.ammunition = round;
                 this.dirty = true;
 
-                return new Resupply(load.weapon, taken, load.ammo, gun.ammo());
+                return new Resupply(load.weapon, taken, load.ammo, capacity);
             }
         }
 
@@ -1868,12 +1928,16 @@ public final class WeaponMounts {
             return 0;
         }
 
-        int capacity = Definitions.weapon(weapon).ammo();
+        WeaponDefinition fitted = Definitions.weapon(weapon);
         int from = slot < 0 ? 0 : slot;
         int until = slot < 0 ? this.mounts.length : slot + 1;
         int taken = 0;
 
         for (int at = from; at < until && taken < offered; at++) {
+            // 内蔵砲の容量は機体が上書きできる。吊り物のステーションでは砲自身の値がそのまま返る。
+            AircraftDefinition.Hardpoint hardpoint = this.hardpoint(at);
+            int capacity = hardpoint == null ? fitted.ammo() : hardpoint.capacity(fitted);
+
             for (Load load : this.mounts[at].loads) {
                 if (!weapon.equals(load.weapon) || load.ammo >= capacity) {
                     continue;
@@ -2001,6 +2065,9 @@ public final class WeaponMounts {
             }
         }
 
+        // 読んだ内容がその機体の搭載構成そのもの。初期装備を上から配れば、外したラックが読み込みのたびに
+        // 戻ってくる。
+        this.stocked = true;
         this.selected = tag.contains("Selected") ? ResourceLocation.tryParse(tag.getString("Selected")) : null;
         // サーバーが送る内容には入っており、ディスクから読む内容には無い。無い場合、シーカーは何も持たず
         // に始まり、次の tick で自分の目標を見つける。

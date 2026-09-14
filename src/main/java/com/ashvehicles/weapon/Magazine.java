@@ -227,12 +227,46 @@ public final class Magazine {
         return at >= 0 && at + 1 < types.size() ? types.get(at + 1) : null;
     }
 
+    /**
+     * その架台の一覧で、今の弾種の1つ前にある物。先頭まで来ていれば null。
+     *
+     * <p>{@link #next} の鏡。null が「この架台はこれ以上戻れない」の合図になり、切り替えは前の架台へ移る。
+     * ホイールが逆へ回せるようになって初めて要る物で、キー1つで送っていた頃には行き先が無かった。
+     */
+    @Nullable
+    public static ResourceLocation previous(GroundVehicleEntity vehicle, Armament station) {
+        List<ResourceLocation> types = types(vehicle, station);
+        ResourceLocation now = selected(vehicle, station);
+
+        if (now == null) {
+            return null;
+        }
+
+        int at = types.indexOf(now);
+
+        return at > 0 ? types.get(at - 1) : null;
+    }
+
     /** その架台を一覧の先頭の弾種へ戻す。切り替えが架台へ入り直すたびに呼ぶ。 */
     public static void rewind(GroundVehicleEntity vehicle, Armament station) {
         List<ResourceLocation> types = types(vehicle, station);
 
         if (!types.isEmpty()) {
             select(vehicle, station, types.get(0));
+        }
+    }
+
+    /**
+     * その架台を一覧の末尾の弾種へ送る。逆送りで架台へ入り直すたびに呼ぶ。
+     *
+     * <p>{@link #rewind} の鏡。前の架台へ戻ったとき先頭の弾種に着地すると、そこからもう1段戻す操作が
+     * 同じ架台の中で行き場を失い、送りと戻しが対称でなくなる。
+     */
+    public static void wind(GroundVehicleEntity vehicle, Armament station) {
+        List<ResourceLocation> types = types(vehicle, station);
+
+        if (!types.isEmpty()) {
+            select(vehicle, station, types.get(types.size() - 1));
         }
     }
 

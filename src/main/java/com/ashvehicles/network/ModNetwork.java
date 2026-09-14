@@ -16,7 +16,7 @@ public final class ModNetwork {
      * NeoForge 自身のペイロードに乗るが、サーバーが書いた形式と違う形式でクライアントが読めば、結果は
      * 同じ「接続が壊れる」。{@link com.ashvehicles.entity.VehicleProjectile#writeSpawnData} 参照。
      */
-    private static final String PROTOCOL_VERSION = "17";
+    private static final String PROTOCOL_VERSION = "21";
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
@@ -30,6 +30,9 @@ public final class ModNetwork {
                 DesignatePayload::handle);
         registrar.playToServer(GunTriggerPayload.TYPE, GunTriggerPayload.STREAM_CODEC,
                 GunTriggerPayload::handle);
+        // 乗らずに車外から操作する砲。ハンドルと引き金。
+        registrar.playToServer(GunCrewPayload.TYPE, GunCrewPayload.STREAM_CODEC,
+                GunCrewPayload::handle);
         registrar.playToServer(EjectPayload.TYPE, EjectPayload.STREAM_CODEC, EjectPayload::handle);
         // 無人機。繋ぐ・切る と、繋いでいる間の操縦桿。
         registrar.playToServer(DroneLinkPayload.TYPE, DroneLinkPayload.STREAM_CODEC,
@@ -38,6 +41,12 @@ public final class ModNetwork {
                 DroneInputPayload::handle);
         registrar.playToServer(BlastPowerPayload.TYPE, BlastPowerPayload.STREAM_CODEC,
                 BlastPowerPayload::handle);
+        // チームデスマッチ。出撃の注文と、旗が開かせる出撃盤、そして掲示板。
+        registrar.playToServer(DeployPayload.TYPE, DeployPayload.STREAM_CODEC, DeployPayload::handle);
+        registrar.playToClient(DeployOpenPayload.TYPE, DeployOpenPayload.STREAM_CODEC,
+                DeployOpenPayload::handle);
+        registrar.playToClient(MatchStatePayload.TYPE, MatchStatePayload.STREAM_CODEC,
+                MatchStatePayload::handle);
         registrar.playToClient(DefinitionSyncPayload.TYPE, DefinitionSyncPayload.STREAM_CODEC,
                 DefinitionSyncPayload::handle);
         registrar.playToClient(BlastSoundPayload.TYPE, BlastSoundPayload.STREAM_CODEC, BlastSoundPayload::handle);
@@ -46,6 +55,10 @@ public final class ModNetwork {
                 MissileTrackPayload::handle);
         registrar.playToClient(HitReportPayload.TYPE, HitReportPayload.STREAM_CODEC,
                 HitReportPayload::handle);
+        registrar.playToClient(VehicleGonePayload.TYPE, VehicleGonePayload.STREAM_CODEC,
+                VehicleGonePayload::handle);
+        // 戦闘 AI の可視化。/tdm ai debug を開いた運営にだけ届く。
+        registrar.playToClient(AiDebugPayload.TYPE, AiDebugPayload.STREAM_CODEC, AiDebugPayload::handle);
     }
 
     private ModNetwork() {

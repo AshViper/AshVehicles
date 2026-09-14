@@ -260,6 +260,23 @@ public final class WreckEffects {
                 8 + (int) (force * 2.0F), reach * 0.2, 0.12 + speed * 0.1);
     }
 
+    /**
+     * 期限が来た残骸が片付くところ。土埃と、崩れた金属の欠片だけ。
+     *
+     * <p><b>爆発ではない。</b>火はとうに消えており（{@link #BURN_OUT_TICKS}）、ここで起きているのは
+     * 燃え尽きた船体が自分の重さで崩れることだ。音も光も無い。見た者に伝わるべきなのは「片付いた」で
+     * あって「今もう一度何かが起きた」ではないので、目を引く物は何も出さない。
+     *
+     * <p>それでも無ではいけない。目の前で物が音も無く消えるのは、ゲームがバグったように見える唯一の
+     * 消え方だからだ。土埃は「そこに何かがあった」と「もう無い」を同時に言う。
+     */
+    public static void settle(ServerLevel level, Vec3 at, double reach) {
+        Effects.send(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.DUST, (float) (reach * 0.3)),
+                6 + (int) reach, reach * 0.3, 0.03);
+        Effects.send(level, at, ModParticles.DEBRIS.get().of(SCRAP, 1.0F),
+                4 + (int) reach, reach * 0.25, 0.06);
+    }
+
     private WreckEffects() {
     }
 }

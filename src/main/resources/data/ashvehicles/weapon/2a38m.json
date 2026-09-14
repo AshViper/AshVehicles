@@ -7,12 +7,13 @@
     "rounds_per_second": 20.83,
     "salvo": 2,
     "salvo_spread": 0.35,
-    "spread": 0.25
+    "spread": 0.85
   },
   "projectile": {
     "damage": 6.0,
     "speed": 48.0,
     "gravity": 0.0245,
+    "drag": 0.0004,
     "range": 4000.0,
     "ricochet": 35.0,
     "tracer": "FFD27A"

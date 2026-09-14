@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AshVehicles AI ビューア</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+<aside id="left" class="panel">
+  <header class="brand">
+    <h1>AI ビューア</h1>
+    <p class="sub">AshVehicles 戦闘 AI が覚えた地図と、地上の車両と航空機の戦い方</p>
+  </header>
+
+  <section class="block">
+    <h2>読み込み</h2>
+    <div class="row">
+      <button id="open-folder" class="btn primary" type="button">フォルダを開く…</button>
+      <input type="file" id="pick-folder" webkitdirectory directory multiple hidden>
+      <label class="btn" for="pick-files">ファイル…</label>
+      <input type="file" id="pick-files" multiple accept=".json,.jsonl,.mca" hidden>
+    </div>
+    <div class="row refresh-row">
+      <button id="refresh" class="btn" type="button" disabled>最新に更新</button>
+      <label class="check"><input type="checkbox" id="auto-refresh" disabled>自動（10秒）</label>
+      <span id="refreshed" class="refreshed"></span>
+    </div>
+    <p id="refresh-hint" class="hint"></p>
+    <p class="hint">CurseForge のインスタンスのフォルダ（例 <code>Instances\a</code>）を選ぶと、覚えた地図・ワールドの地形・戦闘の記録をまとめて探す。ここへドラッグしても開ける。ファイルはこのページの中で読むだけで、どこにも送らない。</p>
+    <dl id="found" class="found"></dl>
+    <div id="progress" class="progress" hidden><div class="bar"></div><span class="label"></span></div>
+  </section>
+
+  <section class="block">
+    <h2>地図</h2>
+    <label class="field">覚えた地図<select id="memory-select"></select></label>
+    <label class="field">地形<select id="world-select"></select></label>
+    <div class="row">
+      <button id="load-terrain" class="btn" type="button">見えている範囲の地形を読む</button>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>レイヤー</h2>
+    <label class="check"><input type="checkbox" id="show-terrain" checked>地形</label>
+    <label class="field slim">地形の明るさ<input type="range" id="terrain-light" min="25" max="100" value="75"></label>
+    <h3>覚えた地図</h3>
+    <div class="radios" id="learned-mode"></div>
+    <label class="field slim">不透明度<input type="range" id="learned-alpha" min="0" max="100" value="80"></label>
+    <label class="check"><input type="checkbox" id="fade-unsure" checked>経験の少ないマスは薄く</label>
+    <h3>戦闘の重ね</h3>
+    <label class="check"><input type="checkbox" id="show-points" checked>拠点と戦域</label>
+    <label class="check"><input type="checkbox" id="show-anchor" checked>居座る円（拠点の内側）</label>
+    <label class="check"><input type="checkbox" id="show-tracks" checked>地上の車両の跡</label>
+    <label class="check"><input type="checkbox" id="show-aircraft" checked>航空機の跡</label>
+    <label class="check"><input type="checkbox" id="show-stuck" checked>詰まり・抜け出し</label>
+    <label class="check"><input type="checkbox" id="show-water" checked>水に入った所</label>
+    <label class="check"><input type="checkbox" id="show-releases" checked>航空機が撃った所</label>
+    <label class="check"><input type="checkbox" id="show-kills" checked>撃破した所</label>
+    <label class="check"><input type="checkbox" id="show-deaths" checked>撃破された所</label>
+    <label class="check"><input type="checkbox" id="show-captures" checked>制圧した所</label>
+  </section>
+
+  <section class="block">
+    <h2>道の代償の重み</h2>
+    <div class="weights">
+      <label>詰まる<input type="number" id="w-trap" step="0.1" value="3"></label>
+      <label>水<input type="number" id="w-water" step="0.1" value="6"></label>
+      <label>倒される<input type="number" id="w-death" step="0.1" value="1"></label>
+      <label>抜けやすい<input type="number" id="w-flow" step="0.05" value="0.2"></label>
+      <label>危険の嫌い方<input type="number" id="w-risk" step="0.1" value="1"></label>
+    </div>
+    <p class="hint">版のパラメータ <code>map.*</code> の既定値。ゲームの地上の AI が道の1歩に足す代償と同じ式で塗る。</p>
+  </section>
+
+  <section class="block">
+    <h2>凡例</h2>
+    <div id="legend"></div>
+  </section>
+</aside>
+
+<main id="stage">
+  <canvas id="map"></canvas>
+  <div id="empty" class="empty">
+    <div>
+      <p class="big">フォルダをここへドラッグ</p>
+      <p>または左の「フォルダを開く…」</p>
+    </div>
+  </div>
+  <div id="hud" class="hud"></div>
+  <div id="tooltip" class="tooltip" hidden></div>
+  <div id="pov" class="pov" hidden>
+    <div class="pov-bar">
+      <b>視点</b>
+      <select id="pov-bot" title="見る機体（✈ は航空機。時刻は出ていた間）"></select>
+      <button id="pov-prev" class="btn small" type="button" title="この時刻に出ている前の機体">◀</button>
+      <button id="pov-next" class="btn small" type="button" title="この時刻に出ている次の機体">▶</button>
+      <span class="pov-modes">
+        <button class="btn small on" type="button" data-pov-mode="cockpit" title="機体の中から">操縦席</button>
+        <button class="btn small" type="button" data-pov-mode="chase" title="機体の後ろ上から">後方</button>
+      </span>
+      <label class="check" title="地図の真ん中を機体に合わせ続ける"><input type="checkbox" id="pov-follow">地図で追う</label>
+      <span class="spacer"></span>
+      <button id="pov-size" class="btn small" type="button" title="大きく／小さく">⤢</button>
+      <button id="pov-close" class="btn small" type="button" title="閉じる（Esc）">✕</button>
+    </div>
+    <div class="pov-view">
+      <canvas id="pov-canvas" title="ドラッグで見回す・ホイールで視野・ダブルクリックで戻す・枠をクリックでその機体へ"></canvas>
+      <div id="pov-note" class="pov-note" hidden></div>
+    </div>
+  </div>
+  <div class="zoom">
+    <button id="zoom-in" class="btn" type="button" title="拡大">＋</button>
+    <button id="zoom-out" class="btn" type="button" title="縮小">－</button>
+    <button id="zoom-fit" class="btn" type="button" title="覚えた地図の全体">全体</button>
+    <button id="zoom-battle" class="btn" type="button" title="選んだ戦闘の全部（飛んだ跡を含む）">戦闘</button>
+  </div>
+  <div id="timeline" class="timeline" hidden>
+    <button id="play" class="btn" type="button">▶</button>
+    <input type="range" id="time" min="0" max="1000" value="0">
+    <span id="time-label" class="mono">0:00</span>
+    <select id="speed">
+      <option value="5">×5</option>
+      <option value="10">×10</option>
+      <option value="20" selected>×20</option>
+      <option value="60">×60</option>
+    </select>
+    <label class="check"><input type="checkbox" id="replay-trail" checked>直前30秒</label>
+  </div>
+</main>
+
+<aside id="right" class="panel">
+  <nav class="tabs">
+    <button type="button" data-tab="place" class="on">場所</button>
+    <button type="button" data-tab="memory">覚えた地図</button>
+    <button type="button" data-tab="battles">戦闘</button>
+    <button type="button" data-tab="growth">成長</button>
+  </nav>
+  <section class="tab on" id="tab-place"></section>
+  <section class="tab" id="tab-memory"></section>
+  <section class="tab" id="tab-battles"></section>
+  <section class="tab" id="tab-growth"></section>
+</aside>
+
+<script src="nbt.js"></script>
+<script src="colors.js"></script>
+<script src="files.js"></script>
+<script src="data.js"></script>
+<script src="terrain.js"></script>
+<script src="map.js"></script>
+<script src="panels.js"></script>
+<script src="pov.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

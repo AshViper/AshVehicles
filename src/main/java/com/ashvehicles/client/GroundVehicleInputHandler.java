@@ -4,6 +4,7 @@ import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.entity.GroundVehicleInput;
 import com.ashvehicles.network.GroundVehicleInputPayload;
+import com.ashvehicles.network.GunTriggerPayload;
 
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -43,22 +44,13 @@ public final class GroundVehicleInputHandler {
         // 倒し角も頭の可動範囲も変わる。TurretSight 参照。
         TurretSight.follow();
 
-        // 1つのキーが MOD 内すべての兵装を順送りするが、キーマッピングはクリックを最初に要求した呼び出し元へ
-        // 渡す。このハンドラと AircraftInputHandler は順序の定めなく毎tick走るので、2つの条件は互いの正確な鏡で
-        // なければ競合する。こちらはプレイヤーが地上車両に乗っているとき押下を取り、あちらは乗っていないとき取る。
-        // 実行順に関わらず、ちょうど一方だけが取る。
-        //
-        // 運転中だけでなく単に同乗している間も吸い出し、その場合は捨てる。後席での押下がキューに残り、席を移った
-        // 瞬間に兵装を切り替えてしまうのを防ぐためだ。
-        //
-        // 以前のように無条件で吸い出すと、パイロットの足元から押下を奪ってしまう。コックピットではこのハンドラは
-        // クリックに用が無いのに取ってしまい、機体側のハンドラには何も残らなかった。キーを押しっ放しにすると直る
-        // ように見えたのは、押しっ放しがリピートして2回目のクリックを作り、それを他方が拾えたからだ。兵装切り替え
-        // に長押しが要ると言われていた理由はそれが全てだ。
-        boolean cycleWeapon = player.getVehicle() instanceof GroundVehicleEntity
-                && ModKeyMappings.CYCLE_WEAPON.consumeClick();
+        // 砲手席の乗員はここで済む。運転入力は送らないが引き金は持っている。
+        gunnerControls(minecraft, player);
 
         GroundVehicleEntity vehicle = drivenVehicle(player);
+        // 兵装の切り替えはホイール。溜める場所は機体と共通で、取り出すのは運転している物が決まった後だ。
+        // {@link WeaponScroll} 参照——受け口が1つなので、キー時代にあった機体側との取り合いは無い。
+        int cycleWeapon = WeaponScroll.take(vehicle);
 
         if (vehicle == null) {
             return;
@@ -90,12 +82,58 @@ public final class GroundVehicleInputHandler {
         vehicle.setInput(input);
         // 車両のtickより前に行う。このイベントが Pre である理由はそれが全てだ。砲塔はそのtick内で据えられるので、
         // 据える経路となる視界がどう傾いているかを知っている必要がある。
-        vehicle.setSightTilt(sightTilt(minecraft, vehicle));
+        float tilt = sightTilt(minecraft, vehicle);
+
+        vehicle.setSightTilt(tilt);
         // 車体・速度・砲塔も同送する。サーバーはそのどれも見られないからだ。ここから運転される車両はサーバー上で
         // tickの合間に届くパケットによって動かされるが、バニラの移動パケットは方位と仰角しか運ばない。
         PacketDistributor.sendToServer(new GroundVehicleInputPayload(input, vehicle.getAttitude(),
-                vehicle.getSpeed(), vehicle.getTurretYaw(1.0F), vehicle.getGunPitch(1.0F), cycleWeapon));
+                vehicle.getSpeed(), vehicle.getTurretYaw(1.0F), vehicle.getGunPitch(1.0F), cycleWeapon,
+                tilt));
     }
+
+    /**
+     * 運転していない乗員の唯一の操作——引き金。
+     *
+     * <p>独立砲塔（{@code TurretStations}）を持つ車両の砲手席がこれで撃つ。運転入力のパケットは運転して
+     * いる者しか送らないので、砲手の引き金はこの1ビットだけを運ぶ。押している間の状態なので、引いている間
+     * は毎tick、離した瞬間に1度送る。機体の砲手とまったく同じ仕組みで、同じペイロードを使っている
+     * （{@code AircraftInputHandler.gunnerControls}）。
+     *
+     * <p>バニラのクリックは運転手の場合と同じ理由で飲み込む。砲塔を回している間、攻撃ボタンは引き金で
+     * あって、車内の壁を殴る手段ではない。
+     */
+    private static void gunnerControls(Minecraft minecraft, LocalPlayer player) {
+        if (!(player.getVehicle() instanceof GroundVehicleEntity vehicle)
+                || vehicle.getControllingPassenger() == player
+                || vehicle.getTurrets().liveStationOf(player) < 0) {
+            if (triggerHeld) {
+                triggerHeld = false;
+                PacketDistributor.sendToServer(new GunTriggerPayload(false));
+            }
+
+            return;
+        }
+
+        while (minecraft.options.keyAttack.consumeClick()) {
+        }
+
+        while (minecraft.options.keyUse.consumeClick()) {
+        }
+
+        boolean pressed = minecraft.options.keyAttack.isDown();
+
+        // 引いている間は毎tick送る。サーバー側は報告が途切れた砲手の引き金を数tickで離すので、押しっぱなし
+        // は「押している」と言い続けることでしか表せない。
+        if (pressed || pressed != triggerHeld) {
+            PacketDistributor.sendToServer(new GunTriggerPayload(pressed));
+        }
+
+        triggerHeld = pressed;
+    }
+
+    /** 前tickで引き金を引いていたか。離したことを1度だけ知らせるために持つ。 */
+    private static boolean triggerHeld;
 
     /**
      * 運転中、攻撃ボタンにバニラの動作を一切させない。殴打も、戦車がたまたま寄りかかっている物の採掘もしない。
@@ -105,7 +143,7 @@ public final class GroundVehicleInputHandler {
     @SubscribeEvent
     public static void onInteractionKey(InputEvent.InteractionKeyMappingTriggered event) {
         if ((event.isAttack() || event.isUseItem()) && Minecraft.getInstance().player instanceof LocalPlayer player
-                && drivenVehicle(player) != null) {
+                && (drivenVehicle(player) != null || gunnedVehicle(player) != null)) {
             event.setSwingHand(false);
             event.setCanceled(true);
         }
@@ -129,6 +167,15 @@ public final class GroundVehicleInputHandler {
         }
 
         return minecraft.options.getCameraType().isFirstPerson() ? 0.0F : vehicle.getStats().camera().tilt();
+    }
+
+    /** この乗員が砲塔を回している車両。運転しているのではなく、砲手席に座っている場合。 */
+    private static GroundVehicleEntity gunnedVehicle(LocalPlayer player) {
+        return player.getVehicle() instanceof GroundVehicleEntity vehicle
+                && vehicle.getControllingPassenger() != player
+                && vehicle.getTurrets().liveStationOf(player) >= 0
+                ? vehicle
+                : null;
     }
 
     private static GroundVehicleEntity drivenVehicle(LocalPlayer player) {

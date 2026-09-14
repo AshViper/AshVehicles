@@ -15,6 +15,8 @@ uniform float Bias;
 uniform float Bloom;
 uniform float Grain;
 uniform float Vignette;
+uniform float Floor;
+uniform float Span;
 
 in vec2 texCoord;
 
@@ -27,11 +29,18 @@ float noise(vec2 seed) {
 // What the sensor reads out of a pixel the eye was shown in colour. Brightness carries most
 // of it, then three corrections: foliage and open sky/water read cold whatever their
 // brightness, and anything burning reads far hotter than its brightness alone.
+//
+// The fire term carries a threshold. Without it, every warm-toned surface in ordinary
+// daylight -- sand, dirt, stripped wood, a lit stone wall -- cleared the test by a little
+// and was pushed the rest of the way to saturation by the 1.9 weight. Two patches of ground
+// that differ in brightness then read as the same flat white, which is the terrain detail
+// the gunner needs most. Real fire clears the threshold several times over, so the things
+// that should glow still glow.
 float heat(vec3 colour) {
     float lum  = dot(colour, vec3(0.2126, 0.7152, 0.0722));
     float leaf = max(colour.g - max(colour.r, colour.b), 0.0);
     float sky  = max(colour.b - max(colour.r, colour.g), 0.0);
-    float fire = max(colour.r - 0.5 * (colour.g + colour.b), 0.0);
+    float fire = max(colour.r - 0.5 * (colour.g + colour.b) - 0.18, 0.0);
 
     return lum * 0.95 - leaf * 0.85 - sky * 1.25 + fire * 1.90;
 }
@@ -72,5 +81,18 @@ void main() {
 
     value = mix(1.0 - value, value, Polarity);
 
-    fragColor = vec4(vec3(clamp(value, 0.0, 1.0)), 1.0);
+    // Grey base. The readout stops short of paper white and of pure black, and everything the
+    // sensor has to say lands inside that band.
+    //
+    // Clipping at both ends is what made the ground unreadable. The mid tones are where terrain
+    // lives -- a rise a little brighter than the field beside it, a track a little darker than
+    // the dirt around it -- and an image that reaches 0 and 1 spends most of its pixels at one
+    // end or the other, where those differences no longer exist. Landing in a band costs the
+    // extremes, which carried no detail anyway, and keeps the gradation that does.
+    //
+    // It is applied after polarity so both readings sit in the same band. Doing it before would
+    // leave black-hot with a bright frame around a dim picture.
+    value = Floor + clamp(value, 0.0, 1.0) * Span;
+
+    fragColor = vec4(vec3(value), 1.0);
 }

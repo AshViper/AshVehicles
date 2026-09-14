@@ -23,6 +23,11 @@ public final class ModParticles {
 
     /** モーター燃焼中のノズル後方の噴煙。濃く、熱く、すぐ消える。 */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> MOTOR_SMOKE = register("motor_smoke");
+    /**
+     * その煙が出てくる元の炎。ノズルの数ブロック後ろで終わり、そこにいる間ずっと自分で光っている。
+     * {@link com.ashvehicles.client.particle.MotorFlameParticle} 参照。
+     */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> MOTOR_FLAME = register("motor_flame");
     /** その後に空中へ残る分。パイロットが実際に目で追う航跡はこちら。 */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> CONTRAIL = register("contrail");
     /** 爆発の火球。 */

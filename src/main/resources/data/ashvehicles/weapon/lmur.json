@@ -1,0 +1,44 @@
+{
+  "type": "missile",
+  "nation": "ru",
+  "item": true,
+  "ammo": 1,
+  "mass": 105,
+  "requires": "targeting_pod",
+  "firing": {
+    "rounds_per_second": 1.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 250.0,
+    "speed": 0.9,
+    "thrust": 0.2,
+    "burn_ticks": 220,
+    "spool_ticks": 20,
+    "top_speed": 16.0,
+    "gravity": 0.0006,
+    "range": 0,
+    "explosion": 3.2,
+    "tracer": "FFD0A0",
+    "trail": {
+      "colour": "D8D4C8",
+      "exhaust": "6B655A",
+      "density": 1.5,
+      "size": 0.95
+    }
+  },
+  "guidance": {
+    "turn_rate": 5.5,
+    "lock_angle": 20.0,
+    "lock_range": 3000.0,
+    "lock_ticks": 10,
+    "track_angle": 110.0,
+    "proximity": 2.0,
+    "seeker": "laser"
+  },
+  "sound": {
+    "volume": 1.15,
+    "pitch": 1.05
+  }
+}

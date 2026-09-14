@@ -7,9 +7,15 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.CountermeasureEntity;
+import com.ashvehicles.entity.DesignationEntity;
+import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.entity.LateWorld;
 import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.entity.TargetDroneEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
+import com.ashvehicles.entity.VehiclePart;
+import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.network.SensorPayload;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.weapon.TargetLock;
@@ -20,7 +26,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -49,14 +57,24 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * 相手を実体として持っているここだけになる。判定は接触に乗って計器へ渡り、味方の照射に対しては警戒受信機
  * を鳴らさない。
  *
- * <p><b>やらないこと。</b> 地形は一切考慮しない。山の陰の目標も目標のまま。現実のレーダーはそこまで
- * 甘くないが、代案は数百ブロック先まで1走査ごと1目標ごとに視線判定を撃つことで、しかもその地面はたい
- * ていロードすらされていない。
+ * <p><b>地形は遮る。</b> 尾根の向こうの目標は目標ではない。判定は近い順に、スコープが載せられる件数
+ * （{@link #MOST_CONTACTS}）が埋まるまでしか撃たない——見えている物が十数件見つかれば、その後ろに何が
+ * あるかを訊く理由がそもそも無いからだ。{@link #inSight} 参照。
  */
 public final class Sensors {
     /** スコープに描く価値のある上限であり、送る価値のある上限。 */
     private static final int MOST_CONTACTS = 16;
     private static final int MOST_THREATS = 8;
+
+    /**
+     * 走査が作った接触1件と、それが誰だったか。
+     *
+     * <p>視線判定は近い順に、枠が埋まるまでしか撃たない（{@link #sweep}）。だから接触を作った後も
+     * 相手を手放せない——判定を撃つ相手がその物だからだ。送るのは {@link Contact} だけで、こちらは
+     * 掃引の内側にしか存在しない。
+     */
+    private record Seen(Entity entity, Contact contact) {
+    }
 
     private final VehicleEntityBase vehicle;
     private List<Contact> contacts = List.of();
@@ -135,7 +153,8 @@ public final class Sensors {
      * アンテナ1掃引分。近傍の全エンティティを1度歩くだけで済ませる。
      *
      * <p>機体には両方（前方にいるか／こちらに関心があるか）を訊く。両方に該当し得るのは機体だけだから。
-     * 徒歩のプレイヤーはスコープに載るだけ、飛翔中のミサイルは警告になるだけ。
+     * 徒歩のプレイヤーはスコープに載るだけ、飛翔中のミサイルはスコープに載った上で、こちらへ向かって
+     * いるなら警告にもなる。
      */
     private void sweep(ServerLevel level, VehicleChassis.Radar radar) {
         Vec3 from = this.vehicle.position();
@@ -149,11 +168,11 @@ public final class Sensors {
         TargetLock lock = this.vehicle.lock();
         Entity seeking = lock == null ? null : lock.target();
 
-        List<Contact> found = new ArrayList<>();
+        List<Seen> seen = new ArrayList<>();
         List<Threat> warnings = new ArrayList<>();
         AABB box = this.vehicle.getBoundingBox().inflate(reach);
 
-        for (Entity other : level.getEntities(this.vehicle, box, Sensors::worthLookingAt)) {
+        for (Entity other : level.getEntities(this.vehicle, box, this::worthLookingAt)) {
             Vec3 gap = other.position().subtract(from);
             double distance = gap.length();
 
@@ -163,24 +182,12 @@ public final class Sensors {
 
             float bearing = bearing(gap, along, right);
 
-            if (other instanceof RocketEntity missile) {
-                if (missile.getTarget() == this.vehicle && distance <= radar.warningRange()) {
-                    warnings.add(new Threat(bearing, Threat.Kind.MISSILE));
-                }
-
-                // ここで抜けない。飛翔中の誘導弾は<em>スコープにも載る</em>。
-                //
-                // <p>以前はここで全部捨てていたので、ミサイルが乗員に届く形は方位だけの警報1本しか無かった
-                // ——距離も高度も無く、しかも自分が狙われている場合に限られた。対空システムにとってそれは
-                // 二重に痛い。飛来する弾こそ最も撃ちたい目標であり、そして {@code TargetLock} は自前の
-                // シーカー距離より遠くではレーダーの一覧からしか目標を取らないので、載らない物は照準を
-                // 渡せない＝事実上迎撃できないからだ。味方へ向かう弾が一切見えないのも同じ1行の結果だった。
-                //
-                // <p>載せないのは手の出しようが無い2つだけ。迎撃できない弾と、自分が今撃った弾——後者は
-                // {@code TargetLock} が候補から外すのと同じ理由で、スコープでも同じ扱いにする。
-                if (!missile.isInterceptable() || missile.wasFiredBy(this.vehicle)) {
-                    continue;
-                }
+            // 飛翔中の誘導弾は警報にもなる。スコープには他の全部と同じ資格で載っている（{@link
+            // #worthLookingAt}）ので、ここで足すのは「こちらへ向かっている」という、位置からは読めない
+            // 1つだけだ。
+            if (other instanceof RocketEntity missile && missile.getTarget() == this.vehicle
+                    && distance <= radar.warningRange()) {
+                warnings.add(new Threat(bearing, Threat.Kind.MISSILE));
             }
 
             Iff identity = Iff.between(this.vehicle, other);
@@ -207,20 +214,70 @@ public final class Sensors {
                     && gap.scale(1.0 / distance).dot(along) > widest) {
                 // 標的ドローンは空中の的なので、スコープでは航空機の記号で出す。飛翔中のミサイルも同じ
                 // ——地上目標の記号で出れば、高度を持って向かってくる物が地面を這う物に見える。
-                found.add(new Contact(other.getId(), bearing, (float) distance,
+                seen.add(new Seen(other, new Contact(other.getId(), bearing, (float) distance,
                         (float) (other.getY() - this.vehicle.getY()),
                         other == seeking,
                         other instanceof AircraftEntity || other instanceof TargetDroneEntity
                                 || other instanceof RocketEntity,
-                        identity));
+                        identity,
+                        // 対空陣地か。この1つだけは接触の中で「危険の種類」を語る欄で、HMD が世界に
+                        // 印を置く相手を決める（{@link Contact#emitter}）。押せるのはここだけだ
+                        // ——相手を実体として持っているのはサーバーのこちら側しかない。
+                        other instanceof GroundVehicleEntity ground && ground.radar().fitted())));
             }
         }
 
-        found.sort(Comparator.comparingDouble(Contact::range));
+        // 近い順に視線を通し、枠が埋まったらそこで止める。
+        //
+        // <p>並べ替えが先なのは、スコープに載るのが「見つけた中で近い順に十数件」だからで、それは
+        // 判定を撃つ順でもある。遠くの尾根の裏に何百体いようと、手前が埋まっていれば1本も撃たない
+        // ——この掃引で最も高くつく処理を、意味のある件数に縛る唯一の方法だ。
+        seen.sort(Comparator.comparingDouble(entry -> entry.contact().range()));
+
+        List<Contact> found = new ArrayList<>(Math.min(seen.size(), MOST_CONTACTS));
+
+        for (Seen entry : seen) {
+            if (found.size() >= MOST_CONTACTS) {
+                break;
+            }
+
+            if (this.inSight(level, entry.entity())) {
+                found.add(entry.contact());
+            }
+        }
+
         warnings.sort(Comparator.comparingInt((Threat threat) -> threat.kind().ordinal()).reversed());
 
-        this.contacts = List.copyOf(found.subList(0, Math.min(found.size(), MOST_CONTACTS)));
+        this.contacts = List.copyOf(found);
         this.threats = List.copyOf(warnings.subList(0, Math.min(warnings.size(), MOST_THREATS)));
+    }
+
+    /**
+     * その相手との間に、地面や建物が挟まっていないか。
+     *
+     * <p><b>中心から中心へ引く。</b> 機体の原点は胴体の腹にあり、車両のそれは車体の底にある——地面
+     * すれすれの点から撃った線は、自分の乗っている地面をかすめて自分自身の足元で止まりうる。箱の中心
+     * どうしなら、両端は必ず物体の内側にある。
+     *
+     * <p><b>まだ届いていない chunk は空として読む。</b> {@link LateWorld} の窓を開けるのがそれで、
+     * 開けなければ {@code Level.getBlockState} は無い chunk を<em>生成して</em>答える——数千ブロック
+     * の線を1本引くたびに、tick スレッドの上でワールド生成が走ることになる（{@code LateWorldMixin} が
+     * 避けている当のもの）。持っていない地面は遮らない。実際、そこに何があるかをこの側は知らない。
+     *
+     * <p>止めるのは当たり判定を持つブロックだけ。草も炎も看板も電波を止めない。流体も同じで、水面下の
+     * 目標は水に守られない——{@code ClipContext.Fluid.NONE} がそれを言っている。
+     */
+    private boolean inSight(ServerLevel level, Entity target) {
+        Vec3 from = this.vehicle.getBoundingBox().getCenter();
+        Vec3 to = target.getBoundingBox().getCenter();
+        boolean was = LateWorld.enter();
+
+        try {
+            return level.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE, this.vehicle)).getType() == HitResult.Type.MISS;
+        } finally {
+            LateWorld.restore(was);
+        }
     }
 
     /**
@@ -261,34 +318,58 @@ public final class Sensors {
     }
 
     /**
-     * 機体、徒歩の人間、そして既にこちらへ向かっている物。
+     * 世界にある物。ほぼ全部。
      *
-     * <p>航空機だけでなく地上車両も含める。理由は2つとも共通で、車列を攻撃しに行く機体はそれをスコープ
-     * に載せたいし、地上の対空陣地は機体の受信機が聞き取れる存在でなければならない。
+     * <p><b>型の名簿を持たない。</b> 以前はここが「機体・地上車両・標的ドローン・徒歩の人間・飛翔中の
+     * ミサイル」という列挙で、それ以外——牛も、ボートも、トロッコも、他 MOD が足した何かも——レーダーに
+     * とって存在しなかった。名簿が要ると、撃たれ得る物を1つ足すたびにこことは別に5か所を巡ることに
+     * なる（{@code targetable-entities-are-name-listed}）。レーダーが答えるのは「そこに物があるか」で
+     * あって「それが何か」ではないので、既定を<em>載せる</em>側に置いてある。
+     *
+     * <p>落とすのは、<b>スコープに1行を割く意味が無い物</b>だけ:
+     *
+     * <ul>
+     *   <li><b>機体自身の当たり判定箱</b>（{@link VehiclePart}）。それは機体そのものであり、機体は既に
+     *       1件として載っている。落とさなければ空母1隻が接触80件になる</li>
+     *   <li><b>何かに乗っている物</b>。乗員も積み荷も、運んでいる機体として既に載っている</li>
+     *   <li><b>ミサイル以外の飛翔物</b>。機関砲弾・無誘導ロケット・撒いたフレアと金属箔は、数の暴力で
+     *       枠を埋める——毎秒100発出る機関砲は、引き金を引いている間じゅうスコープを自分の弾で真っ白に
+     *       する。そして<em>本当の脅威はその中の1本</em>、こちらへ向かって曲がってくるミサイルだ。
+     *       だから飛んでいる物のうち載せるのは {@link RocketEntity#isInterceptable() ミサイル}
+     *       だけにする。{@code TargetLock} がロック候補を選ぶ判定とわざと同じ物を使っている</li>
+     *   <li><b>自分が撃ったミサイル</b>。同上。自分の弾に照準を渡す装置に用は無い</li>
+     *   <li><b>残骸</b>。そこにあるし金属でできてもいるが、撃墜された物を全部映し続けるスコープは
+     *       戦えない目標で埋まり、戦える1つがその中に紛れる</li>
+     *   <li><b>指示点のマーカー</b>（{@link DesignationEntity}）。地面に当たっている光の点であって
+     *       物体ではない——見えず、撃てず、ぶつかれない。レーダーに映る面を持たない</li>
+     * </ul>
+     *
+     * <p>スペクテイターは世界に居ない。それ以外——動物も、ボートも、トロッコも、他 MOD の何かも——は
+     * 全部載る。
      */
-    private static boolean worthLookingAt(Entity candidate) {
-        if (!candidate.isAlive()) {
+    private boolean worthLookingAt(Entity candidate) {
+        if (!candidate.isAlive() || candidate instanceof VehiclePart
+                || candidate instanceof DesignationEntity || candidate.isPassenger()) {
             return false;
         }
 
-        if (candidate instanceof RocketEntity) {
-            return true;
+        // 飛んでいる物で載るのはミサイルだけ。しかも自分が撃った物は載らない。
+        if (candidate instanceof VehicleProjectile shot) {
+            return shot instanceof RocketEntity missile && missile.isInterceptable()
+                    && !missile.wasFiredBy(this.vehicle);
+        }
+
+        // 撒いた物も同じ理由で落とす。デコイが仕事をするのはスコープの上ではなくシーカーの中だ
+        // （{@code RocketEntity.checkDecoys} と {@code TargetLock.screened}）。
+        if (candidate instanceof CountermeasureEntity) {
+            return false;
         }
 
         if (candidate instanceof VehicleEntityBase machine) {
-            // 残骸は風景。そこにあるし金属でできてもいるが、撃墜された物を全部映し続けるスコープは
-            // 戦えない目標で埋まり、戦える1つがその中に紛れてしまう。
             return !machine.isWrecked();
         }
 
-        // 標的ドローンはスコープに載るために飛んでいる。載らなければレーダー誘導弾の遠距離試験ができない
-        // ——シーカー単独の距離の外では、レーダーが渡した物しか取れないので（TargetLock 参照）。
-        if (candidate instanceof TargetDroneEntity) {
-            return true;
-        }
-
-        // 機体に乗っている者は乗員であって目標ではない。スペクテイターはそもそも居ない。
-        return candidate instanceof Player player && !player.isSpectator() && player.getVehicle() == null;
+        return !(candidate instanceof Player player) || !player.isSpectator();
     }
 
     /** 照準線からの角度（度）。右が正、水平面で測る。 */

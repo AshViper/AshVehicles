@@ -131,6 +131,14 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
 
     @Override
     public Color getRenderColor(GhostAnimatable animatable, float partialTick, int packedLight) {
+        // サーマル映像の中では機械は熱い。ここにも要るのは、砲手が実際に撃つ距離ではゲーム自身の
+        // レンダラーが既に降板してこちらへ引き継いでいるからだ（{@code VehicleRenderer} の引き継ぎの項）。
+        // 近くだけ光って遠くが光らないのでは、ガンシップにとって意味のある距離に何も効いていない。
+        // 判定と理由は {@code ThermalTargets.hot}。
+        if (com.ashvehicles.client.ThermalTargets.hot(animatable.ghost().uuid())) {
+            return Color.ofRGBA(255, 0, 0, 255);
+        }
+
         // 透過度は距離の管轄、暗さはエンティティの管轄。残骸はどの距離でも焦げているし、機体色で描かれる
         // ゴーストは、ゲーム自身のレンダラーが引き継いだ瞬間に残骸を生き返らせてしまう。DH の霧はさらに
         // その上へ掛かる——濃さの分だけ透明へ寄せれば、既に霧の色をした背景が透けて「霧に混ざった」画になる。

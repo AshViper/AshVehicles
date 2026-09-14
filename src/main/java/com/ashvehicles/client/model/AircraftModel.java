@@ -29,16 +29,9 @@ import software.bernie.geckolib.model.GeoModel;
  * 単に固定されたままになる。
  */
 public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
-    /**
-     * モデル上でノズルが振れる角度（度）。
-     *
-     * <p>機体の {@code vtol.max_angle} からは読まずここに持つ。あれはジオメトリではなく推力についての値だからだ。
-     * 物理が90度をどう扱うかは決まっているが、90度に見せるためにモデルが何をすべきかはノズルの作り方次第であり、
-     * 逆向きに振れるノズルはここの符号を反転して直す。
-     */
-    private static final float NOZZLE_TRAVEL = 90.0F;
-
-    // 各可動部の作動量（度）。逆向きに動く部品があればここの符号を反転する。
+    // 各可動部の作動量（度）。逆向きに動く部品があればここの符号を反転する。ノズルだけは
+    // VehicleChassis.NOZZLE_TRAVEL にある——当たり判定の箱を振る側も同じ角度を要るので、
+    // どちらにも属さない場所へ置いてある。
     private static final float ELEVATOR_TRAVEL = 20.0F;
     private static final float AILERON_TRAVEL = 20.0F;
     private static final float RUDDER_TRAVEL = 18.0F;
@@ -139,11 +132,12 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
      * @param wingSweep 可変翼の後退角（度）。他の可動部と違って0〜1の作動量ではなく角度そのものを運ぶ。
      *        全開後退が何度かは機体ごとに違い、ここの定数ではなく機体ファイルの数値だからだ
      * @param bay 兵装倉の扉の開き量。0が閉、1が全開
+     * @param ramp 後部ハッチの開き量。0が閉、1が全開
      * @param sweepGear ここで脚を振るか。アニメーションファイルに脚サイクルを持たない機体用
      */
     public record Pose(float elevator, float aileron, float rudder, float gear, float flaps, float nozzle,
-            float bay, float rotor, float tailRotor, float rotorRate, float tailRotorRate, float wingSweep,
-            boolean sweepGear) {
+            float bay, float ramp, float rotor, float tailRotor, float rotorRate, float tailRotorRate,
+            float wingSweep, boolean sweepGear) {
         /** 機体の舵面が今どうなっているか。 */
         public static Pose of(AircraftEntity aircraft, float partialTick) {
             // 機首を上げると水平尾翼の後縁が下がるので、ピッチ差分を反転している。
@@ -155,6 +149,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     aircraft.getFlapsProgress(partialTick),
                     aircraft.getVtolProgress(partialTick),
                     aircraft.getBayProgress(partialTick),
+                    aircraft.getRampProgress(partialTick),
                     aircraft.getRotorAngle(partialTick),
                     aircraft.getTailRotorAngle(partialTick),
                     aircraft.getRotorAngle(1.0F) - aircraft.getRotorAngle(0.0F),
@@ -185,6 +180,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     Mth.lerp(partialTick, previous.flaps(), now.flaps()),
                     Mth.lerp(partialTick, previous.nozzle(), now.nozzle()),
                     Mth.lerp(partialTick, previous.bay(), now.bay()),
+                    Mth.lerp(partialTick, previous.ramp(), now.ramp()),
                     now.rotor() + now.rotorRate() * wind,
                     now.tailRotor() + now.tailRotorRate() * wind,
                     now.rotorRate(), now.tailRotorRate(),
@@ -237,6 +233,15 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
             rotateZ(model, setup, VehicleChassis.bayDoor(true, pair), -bay);
         }
 
+        // 後部ハッチ。倉の扉と同じく1つの角度だが、軸が違う。輸送機の後部は左右に割れるのではなく上下に
+        // 開くので、腹の下の前後軸（Z）ではなく左右軸（X）周り——舵面や脚と同じ軸だ。ランプは後縁を下げ、
+        // その上を塞ぐ扉は同じだけ逆へ、つまり機内の天井側へ跳ね上がる。片方しか持たない模型では、
+        // 持っている方だけが動く。
+        float ramp = pose.ramp() * setup.rampTravel();
+
+        rotateX(model, setup, VehicleChassis.RAMP, ramp);
+        rotateX(model, setup, VehicleChassis.RAMP_DOOR, -ramp);
+
         // 可変翼。翼根で機体の鉛直軸周りに回し、両翼端を尾部へ運ぶ。どちら回りが「後ろ」かは左右で逆になる
         // が、その左右をロール名で決めない——駆動方向はボーン自身の立ち位置（ピボットの X）と機体後方の向き
         // から sweepAboutY が導く。以前はロール名に固定符号を付けており、GeckoLib のベイク（X 鏡映と回転の
@@ -251,7 +256,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         // 模型が既にどの姿勢で作られているかを引く。0で巡航姿勢——固定翼機のノズルは全部そう作られている
         // ——だが、ティルトローター機のナセルはホバー姿勢で寝かせて作られることがあり、そのままでは巡航中に
         // 立ち、ホバーで前を向く。まるごと逆だ。AircraftDefinition.Vtol#nozzleRest 参照。
-        float nozzle = pose.nozzle() * NOZZLE_TRAVEL - setup.nozzleRest();
+        float nozzle = pose.nozzle() * VehicleChassis.NOZZLE_TRAVEL - setup.nozzleRest();
 
         rotateX(model, setup, AircraftDefinition.Bone.NOZZLE, nozzle);
         rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_LEFT, nozzle);

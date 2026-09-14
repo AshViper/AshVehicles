@@ -1,5 +1,6 @@
 {
   "type": "bomb",
+  "nation": "us",
   "item": true,
   "ammo": 1,
   "mass": 277,
@@ -10,11 +11,12 @@
     "salvo": 1
   },
   "projectile": {
-    "damage": 45.0,
+    "damage": 500.0,
     "speed": 0.15,
     "gravity": 0.0245,
     "range": 4000.0,
     "explosion": 8.1,
+    "blast": 300.0,
     "tracer": "8F9482",
     "trail": false
   },

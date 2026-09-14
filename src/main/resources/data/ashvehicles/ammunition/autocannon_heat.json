@@ -4,7 +4,8 @@
   "projectile": {
     "damage": 19.0,
     "speed": 52.0,
-    "gravity": 0.027,
+    "gravity": 0.0245,
+    "drag": 0.00035,
     "range": 2000.0,
     "explosion": 0.5,
     "ricochet": 0.0,

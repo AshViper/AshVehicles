@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "S": {
+      "item": "ashvehicles:steel_plate"
+    },
+    "C": {
+      "item": "ashvehicles:circuit_board"
+    },
+    "B": {
+      "tag": "minecraft:banners"
+    },
+    "I": {
+      "tag": "c:ingots/iron"
+    }
+  },
+  "pattern": [
+    "SBS",
+    "SCS",
+    "III"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:capture_point"
+  }
+}

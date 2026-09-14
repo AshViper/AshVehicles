@@ -25,7 +25,8 @@ import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class EntitySounds {
     private static final List<LiveSounds<?>> FAMILIES =
-            List.of(EngineSounds.SOUNDS, GearSounds.SOUNDS, ProjectileSounds.SOUNDS);
+            List.of(EngineSounds.SOUNDS, GearSounds.SOUNDS, DiveSounds.SOUNDS, TurretSounds.SOUNDS,
+                    ProjectileSounds.SOUNDS);
 
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {

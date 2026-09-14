@@ -1,0 +1,24 @@
+{
+  "type": "gun",
+  "item": false,
+  "ammo": 170,
+  "gun_class": "machine_gun",
+  "firing": {
+    "rounds_per_second": 17.5,
+    "spread": 0.5
+  },
+  "projectile": {
+    "damage": 6.0,
+    "speed": 43.0,
+    "gravity": 0.0245,
+    "drag": 0.00042,
+    "range": 1500.0,
+    "ricochet": 14.0,
+    "tracer": "FFD080"
+  },
+  "sound": {
+    "fire": "ashvehicles:weapon.gun",
+    "volume": 1.5,
+    "pitch": 1.2
+  }
+}

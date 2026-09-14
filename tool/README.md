@@ -6,12 +6,15 @@ nothing ships, and the mod neither knows nor cares that this folder exists.
 ## vehicle-editor.html
 
 Draws a machine's model and lets you build everything that has a *place* on it over the top: the
-collision boxes, the turret ring, the trunnion the gun swings on, the crew seats, both cameras, an
+collision boxes, the turret ring, the trunnion the gun swings on, the crew seats — drawn as the crew,
+sitting — both cameras, the coaxial's muzzle, where an aeroplane condenses the air at speed, an
 aircraft's stations — with the racks, the stores and the pods hung on them, out of the game's own
 files — and the plain hitbox the game files the entity under. One view you turn with
 the mouse — square on to any of the six sides at a keystroke, anywhere in between by dragging — and
 a pose you can traverse and elevate to check that what you have built follows the model when the
-turret comes round.
+turret comes round. A plane can be run through the model to cut away whatever is in front of what
+you are working on, and a drag can be made to land on the model's own corners rather than on the
+grid.
 
 Everything is shown and typed in the machine's own frame in blocks, so what you read on screen is
 exactly what goes in the file.
@@ -263,6 +266,12 @@ it names pylons that are already placed and named on the machine — so it picks
 buttons, one per pylon, rather than asking you to spell them. That is the whole reason it is not in
 the table of figures: `pylons` is a list of names that only mean anything against this machine.
 
+It also names the **bones** the model moves when the gun is laid, and the separate one that elevates
+where there is one. Those are two fields under the arcs. They were being read and not written until
+now, which cost the AH-64 its chin turret's `bone` on every round trip through the tool and left it a
+gun the model no longer swings — every machine file in this repository now goes in and comes back out
+of the editor saying the same thing, which is the check that this is right.
+
 An aeroplane with no stations fires everything straight down the nose, which is every fighter. The
 ones that have them are the gunships and the helicopters, and the seat number is what decides whose
 gun it is — `0` is the pilot's, so a single-seat aeroplane's turret is the pilot's turret.
@@ -346,6 +355,26 @@ else and was not going to start here.
 名前空間はフォルダ名であり ID の前半でもあるので、他のパックと衝突しません。機体のアイテム画像は
 MOD がモデルから描きますが、兵装・ラック・ポッドのアイテム画像だけは自分で用意する必要があり、
 足りない物は行の脇と zip 内の `README.txt` に書き出されます。
+
+### The folder it opened last time
+
+Choosing the folder is four clicks through a directory tree and it is the same folder every time —
+and it was four clicks *again* after every reload, which here is not rare: reloading is how a change
+to this file is picked up, and it is what a browser does on its own to a tab left long enough.
+
+So the folder is remembered. The handle goes into IndexedDB — which can hold one, where
+`localStorage` holds only strings — and on the next visit a button under **A folder…** offers it by
+name. One click and it is open, with the machine that was open in it opened again.
+
+**Nothing is read until that button is pressed**, and that is the browser's rule rather than a choice
+made here: the right to read a folder is granted to a gesture the user made, and a page that reached
+into a folder on the disk the moment it loaded would be a page nobody should trust. Chrome remembers
+an allowed folder for the site, so in practice the click is silent — no dialog, straight in.
+
+前に開いたフォルダーを覚えています。再読み込みしても、**フォルダー…** の下にそのフォルダー名のボタンが
+出るので、1 回押せば開き直せます（前に開いていた機体も一緒に開きます）。ページを開いた時点では何も読み
+ません——ブラウザーがフォルダーを読む権利をユーザーの操作にしか与えないためで、一度許可したフォルダー
+なら、そのボタンを押すだけでダイアログも出ません。
 
 ### Reading it all again
 
@@ -518,6 +547,17 @@ angles the modeller actually typed: 35°, 40°, 42.5° down the glacis, ±27.5°
 **Symmetric** is greyed out for it: it merges what the modeller drew, and a machine drawn
 symmetric comes out symmetric without being squared up afterwards.
 
+**Every cube** is the fifth, and it is the fourth with the merging taken out: one box per cube, at
+the cube's own angle, and nothing joined to anything. It is the most faithful draft there can be
+and the least usable one — a T-64 is 1303 cubes and comes out at 903 boxes with the ignore-under
+left where it is, and vanilla's ender dragon claims nine parts. *At most*, *fill %* and *turn may
+cost %* are greyed out because there is nothing left for them to decide; the two dials that bear
+on it are the ones that throw cubes away before it runs, *ignore cubes under* and *skip rotor &
+gear*. Reach for it to see what shape a hitbox could have if boxes were free, to lift one part of
+a model out at the exact angle it was drawn at, or as the baseline the other four are measured
+against. On the C-130 it is 657 boxes against 12 for *keep
+the shape*, and 100% of the draft is machine — by construction, since every box is a cube.
+
 「モデルに合わせる」は逆の手順で、全キューブから最も安い組を統合し続けて上限個数まで減らします。
 「輪郭をなぞる」はさらに別で、モデルを細かいセルに焼いて数百個の箱で拾い上げ、その箱同士を最も
 無駄なく収まるサイズと角度で統合して上限個数まで減らします。角度の候補は機体そのものから読み
@@ -528,6 +568,16 @@ symmetric comes out symmetric without being squared up afterwards.
 数通り作り、体積が最小の下書きを採用します。予算は使い切ります — 統合は貪欲なのでやり過ぎるため、
 箱が余っているあいだは最も体積を買い戻せる統合から順に巻き戻します。翼が1箱に丸められていたら、
 翼弦方向の段々が返ってきます。
+
+「キューブそのまま」は5つ目で、「形を保つ」から統合を抜いたものです。1キューブにつき1箱を、
+キューブ自身の角度で置くだけ。最も忠実な下書きであり、同時に最も使えない下書きでもあります —
+T-64 は 1303 キューブあり、既定の除外を通しても 903 箱になります。バニラのエンダードラゴンの
+パーツは9個です。上限個数・充填率・回転の許容コストは決めるものが無いので無効になります。効くのは
+走らせる前にキューブを落とす2つ、「無視するキューブ」と「ローターと脚を除く」だけ。箱が無料だったら
+当たり判定はどんな形になりうるかを見る、
+モデルの一部だけを描かれたままの角度で取り出す、他の4つを測る基準にする、といった使い方です。
+C-130 では「形を保つ」の 12 箱に対して 657 箱で、下書きの 100% が機体になります — 箱がキューブ
+そのものなので、当然そうなります。
 
 セルが決めるのは**分け方**で、箱そのものは**モデル**に合わせます。仕上げの各ボックスは自分の
 受け持つキューブ（中心がそのボックスの担当セルにあるキューブ）に丸ごと沿わせるので、キューブは
@@ -666,18 +716,37 @@ screen and up it — and <kbd>,</kbd> <kbd>.</kbd> move along the third. The lit
 the bottom right corner says which way each of them is pointing once the origin has been panned off
 the pane.
 
-**The top view has +x on the left, and that is not a mistake.** Inside the file +x points to the
-machine's *left* — see *[Coordinates](#coordinates)* — so looking down at a machine with its nose
-up the screen, its left side really is on your left. The old top pane drew the mirror image of that.
-If it is the old orientation you want, <kbd>6</kbd> is the same picture from below.
+**A file's +x is the machine's right**, so the top view — looking down with the nose up the screen —
+has +x on the right, and the view called *right* stands off the starboard side.
+
+That was the other way round here until 2026-09-08, and the whole pane was mirrored by it. Three
+things say which way it goes and they agree. `Attitude.right` is `−att·(1,0,0)`, and `Attitude.toWorld`
+negates x on the way *in*, so a file offset `(fx,fy,fz)` lands at `fx·right + fy·up + fz·nose`; the
+frame the mod turns things in has +X to the left, and a file offset is that same point written the
+other way round, which is the step that was being read as though the file said left. `Attitude.rotate`
+turns the nose toward −x for a positive yaw and its own note calls a positive yaw *nose right*. And
+the AC-130 in this repository — the one aeroplane whose asymmetry everybody knows — carries its guns
+at x −3.6 and −4.4, on the port side, where an AC-130's guns are.
+
+**Nothing in any file had to move for it.** The model is read into the file's own frame and
+everything is placed in that frame, so the two were mirrored together and a box fitted to a wing was
+always written correctly. It was only ever the reader who was told the wrong side — which does not
+show on a symmetric aeroplane, and shows at once on a crew member sitting off the centreline.
 
 ビューは 1 面になり、マウスで回します。何も無いところをドラッグ（または <kbd>Alt</kbd>+ドラッグ）で
 回転、右／中ドラッグで平行移動、ホイールでズーム、ダブルクリックでそこを中心に据えます。
 <kbd>1</kbd>〜<kbd>6</kbd> で正面・背面・右舷・左舷・上面・下面に正対し、<kbd>7</kbd> か <kbd>0</kbd>
 で斜めに戻ります。正対しているときの見え方・目盛り・辺の掴み方は、従来の平面ビューとまったく同じです。
-左上の `斜め — x / y` はドラッグと矢印キーが効く二軸、右下の十字は各軸の向きです。上面で +x が左に来る
-のは仕様です（ファイル内の +x は機体の左。*[Coordinates](#coordinates)* を参照）。従来の向きが要るなら
-<kbd>6</kbd>（下面）が同じ絵です。
+左上の `斜め — x / y` はドラッグと矢印キーが効く二軸、右下の十字は各軸の向きです。
+
+**ファイルの +x は機体の右**なので、上面図（機首を上）では +x が画面の右、「右舷」は本当に右舷側から
+見た絵です。2026-09-08 まで**これが左右逆で、画面全体が鏡像になっていました**。根拠は 3 つあり一致して
+います: `Attitude.toWorld` は入口で x を反転するので、ファイルの `(fx,fy,fz)` は
+`fx·right + fy·up + fz·nose` に落ちる（`Attitude.right` = `−att·(1,0,0)`）。`Attitude.rotate` は正のヨーで
+機首を −x へ向け、その注釈自身が「機首右が正」と書いている。そして AC-130 の砲は x −3.6 と −4.4、
+実機どおり左舷側にある。**ファイルの数値は 1 つも変わりません** — モデルも配置物も同じファイル座標系に
+あり、一緒に鏡像になっていたので、翼に合わせた箱は常に正しく書かれていました。誤っていたのは読む側の
+左右だけで、対称な飛行機では分からず、中心線から外れた座席では一目で分かります。
 
 ### Shortcuts
 
@@ -695,6 +764,7 @@ If it is the old orientation you want, <kbd>6</kbd> is the same picture from bel
 | <kbd>Shift</kbd>+<kbd>B</kbd> | a whole set of boxes off the model — <kbd>Enter</kbd> takes it, <kbd>Esc</kbd> throws it away |
 | <kbd>Shift</kbd>+<kbd>M</kbd> <kbd>Y</kbd> | mirrored twin · keep twins in step |
 | <kbd>G</kbd> | snap: 0.05 → 0.1 → 0.25 → 0.5 → 1 → off |
+| <kbd>J</kbd> | snap to the model itself — the corners of its cubes and the middles of their faces |
 | <kbd>V</kbd> <kbd>L</kbd> <kbd>A</kbd> | model skin/solid/ghost/wire/off · the names, off to begin with · frame everything |
 | <kbd>W</kbd> | the racks and the stores hung on the stations, drawn or not |
 | <kbd>X</kbd> <kbd>Shift</kbd>+<kbd>X</kbd> | the collision boxes, drawn or not · the crosses. Nothing is forgotten either way |
@@ -712,12 +782,14 @@ If it is the old orientation you want, <kbd>6</kbd> is the same picture from bel
 | green | collision boxes on the hull |
 | blue | collision boxes on the turret, swung about the ring |
 | yellow | collision boxes on the gun: swung about the ring and rocked about the trunnion |
-| violet | a crew place, drawn as the crew: a seat is where their *feet* go, and whether their head is inside the roof is the only question anyone asks of one |
+| violet | a crew place, drawn as the crew *sitting*. The point is **0.15 under the seat pan** — a rider's feet land 0.6 below it, not on it |
 | pale blue, tied to a seat by a hairline | that seat's own first-person eye, if it has been given one |
 | orange | the turret ring, and the circle its boxes sweep |
 | yellow | the trunnion, the barrel and the wedge between full depression and full elevation |
 | pale blue | the first-person eye |
 | pink | the chase camera, and roughly what it can see |
+| pale yellow | the coaxial's muzzle, and its line of fire |
+| ice blue | the vapour cone at speed — drawn at its own radius — and the wingtips under load |
 | teal | the lens of a targeting pod fitted to a special station, and roughly what it would see |
 | red | an aircraft's weapon stations |
 | amber | an aircraft's special stations, the ones that take a pod |
@@ -870,9 +942,71 @@ one, so a weapon added five minutes ago is visible before it is drawn.
 データ・モデル・テクスチャをそのまま読みます。モデルが無いものは、ゲームと同じく同フォルダーの
 `default.geo.json` で描きます。
 
+### The crew, sitting
+
+A seat used to be drawn as a box 0.6 wide and 1.8 tall standing on the point, and a standing box
+answers the wrong question. **Nobody stands in an aeroplane.** The game puts a passenger's model into
+its riding pose — `HumanoidModel` rocks the legs forward by 1.41 radians, which is eighty-one
+degrees, so what was a leg hanging down is a leg lying along the seat pan — and it is those legs that
+decide whether a seat is in the cockpit or through the instrument panel.
+
+So the crew are drawn sitting, and taken straight off `HumanoidModel` rather than sketched: the
+pivots and the cubes are `PlayerModel`'s, and the angles are the ones `setupAnim` puts on when
+`riding` is set — the legs forward by 1.4137 radians with a little splay, the arms down by 0.6283
+onto the controls.
+
+**And the point in the file is not where their feet go**, which is what it looks like from the mod's
+side and is the reason the figure sat six tenths of a block too high here at first. `Entity.positionRider`
+places a rider at the vehicle's attachment point *minus the rider's own*, and a player's own is
+`Player.DEFAULT_VEHICLE_ATTACHMENT` = `(0, 0.6, 0)`. So the feet land 0.6 **under** the figure the
+file gives.
+
+The mod's own renderer was undoing that. `PassengerTiltHandler` rebuilds a rider's pose from the
+aircraft rather than from the rider — that is how the crew bank with the wings — and it went straight
+to the seat, which put the drawn pilot back on top of the point and 0.6 above their own hitbox, eye
+and dismount place. Fixed on 2026-09-08, and the seat figures in the files say it was the drawing
+that was wrong rather than the numbers: set the top of a pilot's head against the canopy over it and
+every fighter here clears by 0.08 to 0.18 of a block with the drop applied, and pokes 0.4 to 0.6 out
+of the glass without it.
+
+Which turns the rule of thumb round and makes it a useful one. Everything below is measured from the
+point you type:
+
+| | |
+| --- | --- |
+| feet | −0.60 |
+| **hip — the seat pan** | **+0.15** |
+| knees, forward | +0.28, out to z +0.76 |
+| shoulders | +0.95 |
+| eye | +1.02 |
+| top of the head | +1.40 |
+
+So **a seat pan drawn at 1.75 wants its seat at 1.6**, and the crew member's head is a block above
+that. The eye figure is where their eyes physically are and is *not* the first-person view: this mod
+takes that from the seat's own eye, or from the machine's `camera.cockpit` where a seat has none.
+
+**Facing** turns the figure about the vertical axis. It is drawn only and is written to no file: the
+game does not turn a rider, who faces wherever they are looking, all the way round. It is here
+because a door gunner and a bench down the side of a hold cannot be judged at all against a figure
+that only ever faces the nose — the question there is whether the crew fit facing *out*. Four buttons
+for the quarters and a field for anything between, and mirroring a seat mirrors its facing with it.
+
+座席は「座った人」として描かれます。人体は `HumanoidModel` の騎乗ポーズ（脚 −1.4137 rad、腕 −0.6283 rad）
+をそのまま写したものです。**ファイルに書く点は足元ではありません** — `Entity.positionRider` は
+「乗り物側の取り付け点 − 搭乗者側の取り付け点」に置き、プレイヤーの側は
+`Player.DEFAULT_VEHICLE_ATTACHMENT` = `(0, 0.6, 0)` なので、**足は書いた点の 0.6 下**に来ます。
+
+書いた点からの相対位置: 足 −0.60 ／ **腰（座面）+0.15** ／ 膝 +0.28・前へ 0.76 ／ 肩 +0.95 ／
+目 +1.02 ／ 頭頂 +1.40。つまり**座面が 1.75 の機体なら座席は 1.6** です。目の位置は「実際に目がある所」
+であって一人称視点ではありません（一人称は座席専用の視点か `camera.cockpit`）。
+
+**向き**は表示のみで、ファイルには書かれません（ゲームは搭乗者の向きを固定しないため）。ドアガンや
+貨物室の横向きベンチのように、「外を向いて収まるか」を見たいときのためのものです。
+
 ### Where each seat looks out from
 
-A seat is where a crew member's feet are. Where their *eye* is, is a second point, and it used to be
+A seat is where a crew member sits — see *[The crew, sitting](#the-crew-sitting)* for exactly where
+that puts them. Where their *eye* is, is a second point, and it used to be
 one point for the whole machine — so a CV90 showed its seven dismounts the commander's cupola, an
 F-14's back-seater looked out of the front canopy, and a destroyer sat a man eight blocks below the
 bridge and showed him the bridge.
@@ -880,7 +1014,7 @@ bridge and showed him the bridge.
 So the eye belongs to the seat. Select a seat and press **Give this seat its own eye**: a second
 point appears above it, tied to its seat by a hairline, and you drag it to wherever that crew member's
 head actually is — out of a hatch, under a canopy, behind a vision block. It is listed under its own
-seat, so which head goes with which pair of feet is never in question.
+seat, so which head goes with whose shoulders is never in question.
 
 A seat with no eye of its own goes on using the machine's single eye, the pale blue **cockpit eye**
 under *Points*, exactly as it always has. Nothing has to be given one, and a machine is improved a
@@ -909,6 +1043,40 @@ with it. An aircraft has no turret, so it has no *mount* to set.
 ドラッグで実際の頭の位置に置けます。**取り付け先**（車体／砲塔）は、その視点が砲塔と一緒に回るか
 どうかです。視点を置かなかった座席は、従来どおり「点」の一人称視点を使います。
 
+### Everything else that has a place
+
+Three more points join the ring, the trunnion, the eye and the chase camera under **Points**. All
+three were figures you typed into a panel — or, in the last case, constants in the mod that were the
+same on every machine — and all three are places on a model, which is to say things nobody can type
+correctly and everybody can drag correctly.
+
+| | |
+| --- | --- |
+| **coaxial muzzle** (ground) | where the machine gun beside the main one puts its rounds. Bolted to the mantlet, so it traverses and elevates with the barrel: <kbd>Q</kbd> <kbd>E</kbd> <kbd>[</kbd> <kbd>]</kbd> and its line of fire should stay along the gun |
+| **vapour cone** (aircraft) | where the shock collar forms at speed. Drawn as a ring of the radius the file gives, standing square across the nose |
+| **wingtip vapour** (aircraft) | where the ropes come off the tips under load. One tip is written down and the other is its mirror |
+
+**All three read three zeros as "the file does not say"**, which is the mod's own reading of them: a
+coaxial muzzle of `0 0 0` is what a vehicle with no machine gun has, and an aeroplane with no
+`effects` block has its condensation worked out from its airframe. So a point that has not been
+placed is drawn at a whisper *where the mod would put it anyway* — the cone at 1.5 up and 2 forward,
+the wingtips at the edge of the widest box — and written nowhere. Move it and it becomes a figure of
+the file; **Back to the machine's own** takes it out again.
+
+The two figures a cone cannot be dragged into saying — how big it is, and how fast the aeroplane has
+to be going — are under **Performance** in an `effects` block, along with how many G it takes to
+start the wingtips. None of it touches how the machine flies.
+
+The vapour cone was constants in `AircraftEntity` until now, the same on a Cessna and a B-52: 1.5
+above the origin and 2 in front of it, three blocks across. That is roughly right on a fighter and
+puts the cone under the wing of a bomber and in front of the nose of a helicopter, which is why it
+is now a block in the file. **A machine whose file says nothing gets exactly what it got before.**
+
+**同軸機銃の銃口**（地上車両）、**ベイパーコーン**と**翼端ベイパー**（航空機）が「点」に加わりました。
+どれも 3 つの 0 が「ファイルに書かない」を意味し、書かないうちは MOD が導く位置に薄く描かれます。動かせば
+その機体の値になり、**既定に戻す**で消えます。コーンの半径・発生速度・翼端渦の発生 G は **性能**の
+`effects` にあります。ベイパーコーンは今まで全機共通の定数でした——書かなければ今までと同じです。
+
 ### Coordinates
 
 A `.geo.json` is written in model units, sixteen to a block, Y up, facing north. The mod describes
@@ -920,15 +1088,19 @@ from one to the other is three steps and every one of them flips something:
    `(-mx, my, mz)/16` in the space it draws in.
 2. `VehicleRenderer.applyRotations` turns that by a half circle about Y, after the attitude, which
    puts it at `(mx, my, -mz)/16` in the frame the attitude leaves behind.
-3. That frame is not the file's. `Attitude.toWorld` negates x on the way out, and
-   `VehicleShapeRenderer` translates a box by `-offset.x` for the same reason: **inside the mod,
-   +X points left.** So a file offset is that same point written `(-fx, fy, fz)`.
+3. That frame is not the file's. `Attitude.toWorld` negates x on the way in, and
+   `VehicleShapeRenderer` translates a box by `-offset.x` for the same reason: **inside the frame the
+   mod turns things in, +X points left.** So a file offset is that same point written
+   `(-fx, fy, fz)` — which is to say **a file's +x is the machine's right**. Both halves of that
+   sentence are true and the second is the one that gets dropped: it is what this pane was reading
+   backwards until 2026-09-08. See *[The view](#the-view)*.
 
 Setting the two against each other:
 
     machine = (−mx · k, my · k, −mz · k),   k = model scale ÷ 16
 
-**The x is the part that catches people, the old editor included.** It cannot be caught by looking:
+**The x is the part that catches people, the old editor included, and this one twice over — once in
+the mapping and once in which way round the pane drew it.** It cannot be caught by looking:
 mirror a symmetric aeroplane and it is the same aeroplane, which is why it went unnoticed for as
 long as there was nothing here but aeroplanes. It shows on a vehicle that is not symmetric, and the
 Leopard settles it four ways over: its file puts the turret ring at x +0.03 and the trunnion at
@@ -984,6 +1156,40 @@ Get that mount right or the barrel is shot at through the wrong volume: left on 
 box stays at its resting angle however far the gun is laid, so a gun elevated at an aircraft is hit
 where it is not and missed where it is.
 
+### The section, and snapping to the model
+
+Two things the tool could not do, both of which come up the moment something has to go *inside* a
+shape rather than on it.
+
+**The section** (under **Machine**) puts one plane through the model on an axis and stops drawing
+whatever is in front of it. A slider or a field moves it, **Flip** chooses which half is kept, and
+the axis buttons switch it off again. A cube is judged **by its middle** and not by its corners: keep
+every cube with a corner on the near side and a section down the centreline of a fuselage keeps the
+fuselage, which is one long cube through the middle, and the inside you wanted to see is still shut.
+Nothing about it changes what is written, what a box is fitted to, or what can be picked — it is one
+plane and the ink in front of it. It is the way to put a seat under a canopy, an eye behind a vision
+block or a muzzle in a mantlet, and *Wireframe* was the old answer and a poor one: five hundred cubes
+of outline is a haze in which the one shape you are fitting to is the line you cannot pick out.
+
+**Snap to model** (<kbd>J</kbd>) makes a drag land on the corners of the model's own cubes and the
+middles of their faces, rather than on the grid. The grid snap is for laying boxes out; this is for
+putting a point where the modeller already drew something — a seat on the seat pan, a muzzle at the
+end of the barrel, a station on the pylon — and not one of those is at a multiple of 0.05. The reach
+is in screen pixels, so it is the same reach at every zoom, and it honours the section: a plane that
+has taken the roof off is a plane whose corners are no longer in the way.
+
+And picking a bone out under **Bones** now says where it is. Its pivot, and the middle and the
+extent of everything on it, in the machine's own blocks — the same numbers the boxes are written in —
+with **Put the selected here** and **On its pivot** beside them. That is the missing half of *Box
+round this bone*: that button could always put a **box** on a bone, and a seat, a station, an eye or
+a muzzle had nothing of the kind.
+
+**断面**（「機体」パネル）は、軸を 1 つ選んで平面を置き、その手前のモデルを描きません。車内・
+コックピット内に物を置くための機能です。判定はキューブの中心で行うので、胴体の中心線で切れば胴体は
+開きます。**モデルに吸着**（<kbd>J</kbd>）はドラッグをモデルのキューブの角と面の中心に吸い付かせます。
+座面・砲身の先・パイロンはどれも 0.05 刻みの位置にはありません。**ボーン**を選ぶと、その回転中心・
+中心・寸法が機体座標の数値で読め、**選択中をここへ** で選択中の物をそこへ動かせます。
+
 ### Seeing the model
 
 The model is drawn filled, tinted by bone, and painted back to front. Five hundred cubes of
@@ -1004,10 +1210,25 @@ parallelogram whatever the model has been turned by, and a parallelogram is what
 transform puts a rectangle onto: each face is one draw, at the sheet's own resolution, unsmoothed.
 Both ways of writing UVs work — a cube that names every face and a cube that gives one corner and
 lets the six be laid out in the net Minecraft has always used, `mirror` included. Which corner of a
-face each patch is pinned to is read off GeckoLib’s own cube builder rather than worked out from
-the format, because two things about it are not what anyone would assume: the u axis runs from the
-second corner of the quad to the first, and `east` is the file’s −x side because the loader has
-already turned the model half round by the time the faces are named. Faces are lit by which way
+face each patch is pinned to is read off GeckoLib's own cube builder rather than worked out from the
+format, because three things about it are not what anyone would assume:
+
+- **The u axis runs from the second corner of the quad to the first.** `GeoQuad.build` swaps `u` and
+  `uWidth` before pinning them on, so vertex 0 wears the right-hand edge of the patch and vertex 1
+  the left. Every face is laid on from the right.
+- **Unless the cube is mirrored, when it does not swap them.** That is the whole of what `mirror`
+  does to a *patch*; the other half of mirroring — the two sides trading faces, and the lid and the
+  floor with them for a cube that names its faces — is done somewhere else entirely, in
+  `verticesForQuad`. Doing only the second half paints every mirrored cube's patch back to front: a
+  wing drawn once and used on both sides comes out with its panel lines running the wrong way on one
+  side only, which reads as a texture rather than as a fault. That was the state of this tool until
+  2026-09-08, over 171 cubes in fifteen of the models here.
+- **`east` is the model's −x side**, which is the file's +x and the machine's right, because the
+  loader bakes a cube's origin as `−(origin.x + size.x)`.
+
+All six faces, in all four combinations of `mirror` and the two ways of writing UVs, are checked
+against a re-implementation of `BakedModelFactory` and `GeoQuad.build` taken straight from
+GeckoLib's source. Faces are lit by which way
 they point, or a machine painted one green all over would come out as a green blob.
 
 A model that asks for a sheet of one size and is given another is stretched to fit, exactly as the

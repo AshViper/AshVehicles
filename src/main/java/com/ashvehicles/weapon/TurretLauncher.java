@@ -102,6 +102,8 @@ public final class TurretLauncher {
     private final TargetLock lock;
     /** 前 tick に引き金が引かれていたか。押しっぱなしで筒を空にしないため。 */
     private boolean triggerWasDown;
+    /** 連射を録った発射音を、録音の長さに1回へ間引く。{@link FireSoundPacing} 参照。 */
+    private final FireSoundPacing soundPacing = new FireSoundPacing();
 
     public TurretLauncher(GroundVehicleEntity vehicle) {
         this.vehicle = vehicle;
@@ -231,7 +233,10 @@ public final class TurretLauncher {
         // 無人の陣地は何も追尾していない。見たままにすれば、放置された発射機が数km四方の空を永遠に掃引
         // し、マップ中の警戒受信機を鳴らし続ける。レーダー自体が守っている規則と同じ——Sensors.tick 参照。
         // あちらも同じ2つの理由で無人の機体では停止する。
-        if (this.vehicle.getControllingPassenger() == null) {
+        // AI の車両は席に誰も座っていない（操縦役は車両のフィールド、[[bots-are-a-pilot-object-on-the-vehicle]]）ので数える。
+        // 数えなかった間、AI の発射機は1発も撃たなかった——TOS も BM-21 も TOW もパーンツィリの 57E6 も（2026-09-13 に
+        // 見付けた「地上車両のロケットやミサイルを使わない」の正体。航空機の引き金の {@code WeaponMounts.tick} と同じ穴）。
+        if (this.vehicle.getControllingPassenger() == null && !this.vehicle.isBot()) {
             this.lock.clear();
             this.triggerWasDown = false;
 
@@ -465,6 +470,11 @@ public final class TurretLauncher {
         }
 
         WeaponEffects.muzzleBlast(level, rail, bore, BOOST_BLAST, round.tracer());
+        // 後ろが開いている筒だけが持つ物。筒の後端は砲身方向の反対側——仰角が付いていれば、そのぶん
+        // 斜め下後方になる。WeaponEffects.backblast 参照。
+        tubes.backblast().ifPresent(tube -> WeaponEffects.backblast(level,
+                rail.subtract(bore.scale(tube.length())), bore, this.vehicle.getY(),
+                tube.power(), round.tracer()));
         this.playLaunchSound(missile, missileId);
 
         Magazine.spend(this.vehicle, GroundVehicleEntity.Armament.MISSILE, 1);
@@ -484,6 +494,10 @@ public final class TurretLauncher {
      * 「誰にこの音を知らせるか」を決めており、レールを離れるミサイルは撃った谷の向こうまで聞こえるから。
      */
     private void playLaunchSound(WeaponDefinition missile, ResourceLocation missileId) {
+        if (!this.soundPacing.due(missileId, missile, this.vehicle.level().getGameTime())) {
+            return;
+        }
+
         ResourceLocation event = missile.sound().fire()
                 .orElseGet(() -> missileId.withPath(WeaponMounts.SOUND_PREFIX + missileId.getPath()));
 

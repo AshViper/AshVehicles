@@ -2,12 +2,18 @@ package com.ashvehicles.entity;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.WeakHashMap;
 
 import javax.annotation.Nullable;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.ai.BotPilot;
+import com.ashvehicles.ai.log.BattleEvents;
 import com.ashvehicles.data.Definitions;
+import com.ashvehicles.match.Deathmatch;
+import com.ashvehicles.network.VehicleGonePayload;
 import com.ashvehicles.particle.Effects;
 import com.ashvehicles.sensor.Sensors;
 import com.ashvehicles.weapon.TargetLock;
@@ -19,6 +25,7 @@ import com.ashvehicles.vehicle.WreckEffects;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -30,6 +37,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
@@ -50,6 +58,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 /**
  * 飛ぶ物でも走る物でも、この MOD の全機体に共通する部分。
@@ -109,6 +118,18 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.STRING);
 
     /**
+     * 貨物として運ばれている間、運んでいる側の軸で見た自分の位置。
+     *
+     * <p>座席と違って番号ではなく座標を持つのは、貨物室に決まった置き場が無いから。乗り入れて止まった所が
+     * その車両の場所であり、それは運転手が決めることだ。運んでいる側はこの値を読んで毎tick置き直す
+     * （{@link #getPassengerAttachmentPoint}）ので、両側が同じ計算で同じ場所へ置く——運搬
+     * （{@code Hitboxes.carry}）と違って位置パケットが介在せず、機体が毎tick2ブロック進んでも遅れない。
+     * <b>それが「甲板に立てる」と「積んで飛べる」を分けている全部だ。</b>
+     */
+    private static final EntityDataAccessor<Vector3f> DATA_HOLD =
+            SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.VECTOR3);
+
+    /**
      * タンクに残っている燃料。
      *
      * <p>同期する理由は2つあり、どちらも「持ち主はサーバーだが、必要とするのはクライアント」だ。飛行モデル
@@ -118,6 +139,15 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      */
     private static final EntityDataAccessor<Float> DATA_FUEL =
             SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.FLOAT);
+
+    /**
+     * AI が動かしているか。
+     *
+     * <p>操縦役（{@link #getPilot}）はサーバーにしか無いので、クライアントが「誰かが動かしている」を知る手段がこれ
+     * だけになる。AI のヘリのローターは、これが無いと止まったまま飛んで見える（{@code AircraftEntity.tickRotor}）。
+     */
+    private static final EntityDataAccessor<Boolean> DATA_BOT =
+            SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.BOOLEAN);
 
     /** ファイルが1つも無い機体の耐久。最初の擦り傷で終わらないように。 */
     public static final float DEFAULT_HEALTH = 300.0F;
@@ -145,6 +175,27 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     private static final double CARRY_LIMIT = 32.0;
 
     /**
+     * 一度乗った者を、足が離れても何 tick 運び続けるか。
+     *
+     * <p>8 tick、0.4秒。<b>接触を毎tick問い直すのをやめるための猶予だ。</b> 甲板が跳ねれば足は離れ、機体が
+     * 降下すれば床は足元から逃げ、人が跳べば当然離れる——そのどれもが「降りた」ではないのに、接触だけを
+     * 見ていると降りたことにされ、機体だけが進んで人は端から落ちる。
+     *
+     * <p>これは C-130 の貨物室が確実な理由をそのまま持ってきた物でもある。あちらは積んだ車両を搭乗者に
+     * するので、接触という問い自体が無い（{@code AircraftEntity.tickHold}）。人を搭乗者にはできない——
+     * 歩けなくなる——ので、代わりに「乗った」という状態の方を持つ。
+     */
+    private static final int ABOARD_GRACE = 8;
+
+    /**
+     * 今この機体に乗っている物と、猶予の残り。
+     *
+     * <p>弱参照キー。消えたエンティティを掴んだままにしないため。両側がそれぞれ自分の分を持つ——運ぶのは
+     * 側ごとの判断だ（{@code Hitboxes.owns}）。
+     */
+    private final Map<Entity, Integer> aboard = new WeakHashMap<>();
+
+    /**
      * 残骸が乗員を抱えたまま落ち続けてよい上限（tick）。
      *
      * <p>20秒。{@link #holdsCrewToTheGround} を返す機体で、地面が最後まで来なかった場合の逃げ道だ。奈落へ
@@ -153,6 +204,23 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * ないバグとして体験される。
      */
     private static final int WRECK_HOLD = 400;
+
+    /**
+     * 残骸が世界に残る時間（tick）。
+     *
+     * <p>5分。火が消えるのは1分強（{@code WreckEffects.BURN_OUT_TICKS}）なので、そこから4分近くは冷えた
+     * 鉄の塊として立っている——レンチを持った誰かが金属を持ち帰るための時間だ（{@link #salvage}）。誰も
+     * 来なければ片付く。
+     *
+     * <p><b>残骸を残すこと自体は今も意図的だ。</b>撃墜された機体がその場から消えるのは、撃墜という出来事が
+     * まったく伝わらない唯一の形である（{@link #wreck} の注記）。期限が変えるのは「いつまで」だけで、
+     * 「残すかどうか」ではない。これが無いと、戦場は誰も片付けない黒い船体で埋まっていき、そのどれもが
+     * 当たり判定とtickを持ち続ける。
+     *
+     * <p><b>試合中に壊れた物は30秒</b>（{@code Deathmatch.WRECK_LIFETIME}）。どちらになるかは壊れた瞬間に
+     * 決まり、{@link #wreckLifetime} が持つ。
+     */
+    private static final int WRECK_LIFETIME = 6000;
 
     protected VehiclePart[] parts = new VehiclePart[0];
     /** 前回配置した時点で全ての箱がどこにあったか。{@link #placedBounds} 参照。 */
@@ -176,6 +244,11 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * 検出する手段であり、それは「速度が速度でなくなる tick」だ。
      */
     private int wreckAge;
+    /**
+     * この残骸が片付くまでの tick。壊れた瞬間に決め（{@link #wreck}）、保存して持ち歩く。試合が終わっても
+     * 始まっても変わらないように。{@code Deathmatch.wreckLifetime} 参照。
+     */
+    private int wreckLifetime = WRECK_LIFETIME;
     private boolean wasFalling;
     private double fallSpeed;
 
@@ -300,6 +373,12 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
 
         this.wreckAge++;
 
+        if (this.wreckAge >= this.wreckLifetime) {
+            this.clearAway(level);
+
+            return;
+        }
+
         // getVelocity() ではなく deltaMovement を使う。これはこの tick に機体が動く前に走り、物理を回して
         // いる側の getVelocity() は「どこまで進んだか」から測るので、tick のこの時点では毎回ゼロになる。
         // ここで delta が持っているのは前 tick が残した値で、それがまさに残骸の落ち方。
@@ -331,6 +410,26 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         WreckEffects.burn(level, this.position(), this.getAttitude(), this.wreckAge, velocity, reach);
     }
 
+    /**
+     * 期限の来た残骸を片付ける。
+     *
+     * <p>中に残っている物を先に降ろす。落ちるところまで一緒に落ちた乗員は普通この前に降りている
+     * （{@link #WRECK_HOLD}）が、貨物室の車両や、着地を報告できないまま抱えられ続けた者はまだ中にいる
+     * ことがある。残骸と一緒に消えてよい物は1つも無い。
+     *
+     * <p>音も光も無く、土埃だけ立てて消える。爆発ではないからだ——起きているのは、燃え尽きた船体が自分の
+     * 重さで崩れて地面の一部になることであり、それを見た者に伝わるべきなのは「片付いた」であって
+     * 「今もう一度何かが起きた」ではない。
+     *
+     * <p>{@code discard} は {@link #remove} を通るので、クライアントには「本当に消えた」と伝わる
+     * ——さもないと回収済みの機体のゴーストがその場に立ち続ける。
+     */
+    private void clearAway(ServerLevel level) {
+        this.ejectPassengers();
+        WreckEffects.settle(level, this.position(), this.reach());
+        this.discard();
+    }
+
     public abstract VehicleChassis.Hitbox hitbox();
 
     public abstract VehicleChassis.Sound soundSetup();
@@ -342,6 +441,20 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * リソースパックを一度も見たことが無いから。同じ名前のクライアント側は {@code ModSounds} にある。
      */
     public static final String SOUND_PREFIX = "engine.";
+
+    /**
+     * この機械が音のうえで何で動いているか。{@code engine.<これ>} が推進方式ごとの既定になる。
+     *
+     * <p><b>1 つの既定を全部で分け合っていた。</b>解決順は「ファイルの指定 → 機体名 → 既定」で、
+     * MOD 内でファイルに書いてあるのは地上車両の {@code engine.tank} だけなので、戦闘機もヘリも
+     * 無人機も同じ {@code engine.default} を鳴らしていた。ジェットとローターが同じ音であることに
+     * 理由は無い——録音が 1 本しか無かった、というだけである。
+     *
+     * <p>ここが答えるのは<em>種別</em>であって録音ではない。{@code engine.jet} を提供する
+     * リソースパックがあればジェットだけが差し替わり、無ければ従来どおり既定へ落ちる。録音を
+     * 増やさずに、増やせる場所を作るのがこのメソッドの仕事だ。
+     */
+    public abstract String engineClass();
 
     /** エンジンの負荷（[0,1]）。音の高さと音量をここから決める。 */
     public abstract float getEngineNote();
@@ -388,6 +501,24 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return this.getFuel() - before;
     }
 
+    /**
+     * 燃料を満たし、弾倉を満たす。出撃整備1回ぶん。サーバーのみ。
+     *
+     * <p><b>手で置いた機体はこれを通らない。</b> 工廠で組んだ機体は空の弾倉と空のタンクで出てくる
+     * ——満たすのは燃料缶と弾薬箱を持った誰かの仕事で、それがこの MOD の兵站だ。これを呼ぶのは、その
+     * 手順ごと省く場所——チームデスマッチの出撃（{@code match/Deathmatch.deploy}）だけ。試合の最中に
+     * 弾薬箱を探しに戻る遊びは誰も望んでいない。
+     *
+     * <p>基底が満たすのは燃料だけ。弾倉の形は機体と車両で別物なので、それぞれが足す。
+     */
+    public void rearm() {
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        this.setFuel(this.fuelSetup().capacity());
+    }
+
     /** 満タンに対する残量の割合（[0,1]）。燃料を持たない機械は常に満タンと答える。 */
     public float getFuelFraction() {
         VehicleChassis.Fuel fuel = this.fuelSetup();
@@ -430,13 +561,55 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
+     * この機械を動かしている AI。人が動かしているなら null。
+     *
+     * <p>サーバーだけが持ち、保存しない。付け直すのは {@code match/Bots} で、印そのものは車両の
+     * {@code getPersistentData} にある——だからチャンクの再ロードでも再起動でも、戻ってきた車両は
+     * また自分で走り出す。
+     */
+    @Nullable
+    private BotPilot pilot;
+
+    @Nullable
+    public BotPilot getPilot() {
+        return this.pilot;
+    }
+
+    public void setPilot(@Nullable BotPilot pilot) {
+        this.pilot = pilot;
+        this.entityData.set(DATA_BOT, pilot != null);
+    }
+
+    /** AI が動かしている機械か。サーバーでだけ答える。 */
+    public boolean isBot() {
+        return this.pilot != null;
+    }
+
+    /** AI が動かしている機械か。{@link #isBot} と違い、クライアントでも答える。 */
+    public boolean isBotDriven() {
+        return this.entityData.get(DATA_BOT);
+    }
+
+    /**
+     * 今この機械を動かしている者がいるか。人でも AI でも。
+     *
+     * <p><b>{@link #getAviator} の有無で代用してはいけない場所のための問い。</b> あちらは<em>誰が</em>に
+     * 答えるので、AI には答えようがない——人ではないからだ。だが「シーカーが空を掃いてよいか」「エンジンが
+     * 掛かっているか」が本当に訊いているのは<em>動かしている者がいるか</em>であって、その者が人かどうか
+     * ではない。放置された機械を外すという目的はどちらでも変わらない。
+     */
+    public boolean isOperated() {
+        return this.getAviator() != null || this.pilot != null;
+    }
+
+    /**
      * エンジンが今かかっているか。燃料を消すかどうかの判断であって、出力の大小ではない。
      *
      * <p>誰かが乗っているか、あるいはレバーが入っているか。放置された機械のエンジンは止まっていると見なす。
      * 野原に置いた戦車が翌週には空タンクになっている——それは誰も望まない現実味だ。
      */
     protected boolean isEngineRunning() {
-        return this.getAviator() != null || this.getEngineNote() > 0.0F;
+        return this.isOperated() || this.getEngineNote() > 0.0F;
     }
 
     /**
@@ -608,9 +781,11 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         builder.define(DATA_HEALTH, DEFAULT_HEALTH);
         builder.define(DATA_WRECKED, false);
         builder.define(DATA_SEATS, "");
+        builder.define(DATA_HOLD, new Vector3f());
         // 耐久と同じ理由で0から始める。これはコンストラクタの中から走るのでまだ機体に訊けない。本当の量は
         // コンストラクタが満タンで埋める。
         builder.define(DATA_FUEL, 0.0F);
+        builder.define(DATA_BOT, false);
     }
 
     /**
@@ -682,6 +857,105 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     }
 
     /**
+     * 届いた打撃のうち、この機体が実際に受け取る割合。既定は1で、書かれた点数がそのまま引かれる。
+     *
+     * <p>耐久を増やすのとは別の物だ。耐久は「何発で壊れるか」、これは「1発がどれだけ効くか」。厚い装甲を
+     * 持つ車体を、計器に出る点数を膨らませずに固くするための口で、読み手にとっては 4000 のままの方が
+     * 「何発耐えるか」が読みやすい。
+     *
+     * <p><b>自分で自分を傷つける分には掛からない。</b>掛けるのは {@link #hurt} ——外から届いた打撃——の
+     * 中だけで、機体が自分の構造に掛けた荷重（{@code AircraftEntity.checkStructuralLoad}）は装甲の話では
+     * ないので {@link #wound} を直に呼ぶ。
+     */
+    protected float damageTaken() {
+        return 1.0F;
+    }
+
+    /**
+     * 弾が入った面の装甲厚（mm）。{@link com.ashvehicles.weapon.Penetration} へ渡す。
+     *
+     * <p>面は箱自身の向きで数える（{@link VehicleShape.Plate} 参照）。パイロン、まだ配置されていない箱、
+     * リロードでファイルがもう記述しなくなった箱（{@link VehiclePart#fold} された物）は 0——装甲の無い場所。
+     *
+     * @param part この機体の箱。呼ぶ側が親を確かめてから渡す
+     * @param margin 命中を見つけた判定が箱を膨らませた量。面は同じ大きさの箱で求めないと、稜線付近で隣の
+     *               面を指す（{@link Hitbox#normalAt} 参照）
+     */
+    public float plateAt(VehiclePart part, Vec3 at, double margin) {
+        List<VehicleShape.Box> shape = this.getShape().boxes();
+        Hitbox box = part.hitbox();
+
+        if (part.isPylon() || box == null || part.getBox() >= shape.size()) {
+            return 0.0F;
+        }
+
+        Hitbox grown = box.grow(margin);
+
+        return shape.get(part.getBox()).plate().facing(grown.local(grown.normalAt(at)));
+    }
+
+    /**
+     * 点から点へ引いた線が最初に入る箱の、その面の装甲厚（mm）。どの箱にも入らなければ 0。
+     *
+     * <p>触れずに炸裂した弾頭用。近接信管の弾には「入った面」が無いので、炸裂点から機体の真ん中へ線を引き、
+     * 破片が最初に叩く板を答えにする。炸裂点が既に箱の中なら、その箱の最も近い面。
+     */
+    public float plateToward(Vec3 from, Vec3 to) {
+        List<VehicleShape.Box> shape = this.getShape().boxes();
+        float plate = 0.0F;
+        double nearest = Double.MAX_VALUE;
+
+        for (VehiclePart part : this.parts) {
+            Hitbox box = part.hitbox();
+
+            if (part.isPylon() || box == null || part.getBox() >= shape.size()) {
+                continue;
+            }
+
+            Vec3 entry = box.clip(from, to).orElse(null);
+
+            if (entry != null && entry.distanceToSqr(from) < nearest) {
+                nearest = entry.distanceToSqr(from);
+                plate = shape.get(part.getBox()).plate().facing(box.local(box.normalAt(entry)));
+            }
+        }
+
+        return plate;
+    }
+
+    /**
+     * 点から機体の形までの距離（ブロック）。一番近い箱の表面まで。点が箱の中なら0。
+     *
+     * <p>爆風が届くかを測るための物で、原点からの距離では測らない。原点は車輪の間に沈んでおり、全長の長い機体の端で
+     * 炸裂した爆弾は、原点から見れば遠い。箱を持たない機体だけ、素の当たり判定から測る。
+     */
+    public double distanceToShape(Vec3 point) {
+        List<VehicleShape.Box> shape = this.getShape().boxes();
+        double nearest = Double.MAX_VALUE;
+
+        for (VehiclePart part : this.parts) {
+            Hitbox box = part.hitbox();
+
+            if (part.isPylon() || box == null || part.getBox() >= shape.size()) {
+                continue;
+            }
+
+            nearest = Math.min(nearest, box.distanceTo(point));
+        }
+
+        if (nearest < Double.MAX_VALUE) {
+            return nearest;
+        }
+
+        AABB plain = this.getBoundingBox();
+        double x = Math.max(Math.max(plain.minX - point.x, point.x - plain.maxX), 0.0);
+        double y = Math.max(Math.max(plain.minY - point.y, point.y - plain.maxY), 0.0);
+        double z = Math.max(Math.max(plain.minZ - point.z, point.z - plain.maxZ), 0.0);
+
+        return Math.sqrt(x * x + y * y + z * z);
+    }
+
+    /**
      * 打撃を受ける。機体のいくつの箱を経由して届いても1回だけ。
      *
      * <p>範囲にダメージを与える物——とりわけ爆発——はレベルへ範囲内の全部を問い合わせ、順に傷つける。そして
@@ -717,6 +991,18 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             return false;
         }
 
+        // 爆風の打撃を自前で持つ弾（{@code projectile.blast}）の、バニラの爆発の分は受けない。その弾は機体への爆風を
+        // VehicleProjectile.blastMachines で別に渡している——両方数えれば、至近弾がバニラの式の分だけ重くなる。
+        if (source.is(DamageTypeTags.IS_EXPLOSION) && source.getDirectEntity() instanceof VehicleProjectile shot
+                && shot.getRound().blast() > 0.0F) {
+            return false;
+        }
+
+        // 試合中の味方撃ち。陣営を持たない機体と、味方撃ちを許した試合では何も起きない。
+        if (Deathmatch.protects(this, source)) {
+            return false;
+        }
+
         // 残骸には起こり得ることが既に全部起きている。それ以上進む物は無い。使う耐久が残っていないし、
         // もう一周すれば自分の爆発を2度目に起こすことになる——その爆風が残骸自身の箱へ届けばまさにそうなる。
         if (this.isWrecked()) {
@@ -738,7 +1024,14 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         this.setHurtTime(10);
         this.gameEvent(GameEvent.ENTITY_DAMAGE, source.getEntity());
 
-        if (this.wound(amount)) {
+        float before = this.getHealth();
+        boolean finished = this.wound(amount * this.damageTaken());
+
+        // 戦闘 AI の被弾の記憶と与ダメージの勘定。撃破を数えるより前に置く——倒した1発の打撃も、倒した者の
+        // 与ダメージに入る。渡すのは実際に減った耐久で、書かれた点数ではない。
+        BattleEvents.vehicleHurt(this, source, before - this.getHealth());
+
+        if (finished) {
             this.destroy(source);
         }
 
@@ -803,7 +1096,33 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     /** 撃破された機体は、使える機体を落とすのではなくバラバラになる。 */
     @Override
     protected void destroy(DamageSource source) {
+        // 撃破を数える唯一の場所。弾でも爆風でも墜落でもここを通るので、試合はここだけを見ればよい。
+        Deathmatch.onVehicleDestroyed(this, source);
         this.wreck();
+    }
+
+    /**
+     * 機体が世界から消える唯一の出口。ここで、本当に消えたのかどうかをクライアントへ述べる。
+     *
+     * <p>クライアントは除去理由を受け取らない。レンチで畳まれた機体も、片付けられた残骸も、チャンクごと
+     * 眠っただけの機体も、届くのは同じ「このエンティティを消せ」1つだけだ。ゴーストは駐機した機体の受信
+     * が止まることを「世界が眠った」と読む（{@code AircraftGhostAdapter} 参照）ので、それが正しくない
+     * 場合——回収・片付け・撃破——はサーバーが言わなければならない。言わなければ、回収した機体の写真が
+     * 誰も戻ってこない場所に永久に立ち続ける。
+     *
+     * <p>アンロードとディメンション移動では何も送らない。{@code shouldDestroy} が偽になるのがまさに
+     * 「機体はまだ在るが、ここからは見えなくなった」場合であり、ゴーストが在る理由そのものだ。
+     */
+    @Override
+    public void remove(RemovalReason reason) {
+        boolean gone = !this.isRemoved() && reason.shouldDestroy();
+        Level level = this.level();
+
+        super.remove(reason);
+
+        if (gone && level instanceof ServerLevel server) {
+            VehicleGonePayload.broadcast(server, this.getUUID());
+        }
     }
 
     /** これが残す穴の大きさ。 */
@@ -812,9 +1131,10 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     /**
      * 終わり。全員を降ろし、爆発させ、機体があった場所に焼け残った船体を立てる。
      *
-     * <p>機体は除去しない。破壊された機体がただ存在しなくなるのは、撃墜された事実がまったく伝わらない唯一の
-     * 形だ——空も地面も空っぽになる。代わりに残すのは、同じ場所の同じ形で、黒く、動かず、中の金属以外に価値
-     * の無い物。レンチを持った誰かがそれを片付けてスクラップを持ち帰る。{@link #salvage} 参照。
+     * <p>機体は除去しない。破壊された機体がその瞬間にただ存在しなくなるのは、撃墜された事実がまったく
+     * 伝わらない唯一の形だ——空も地面も空っぽになる。代わりに残すのは、同じ場所の同じ形で、黒く、動かず、
+     * 中の金属以外に価値の無い物。レンチを持った誰かがそれを片付けてスクラップを持ち帰る（{@link #salvage}）。
+     * 誰も来なければ5分で自ら片付く（{@link #WRECK_LIFETIME}）。試合中に壊れた物は30秒。
      *
      * <p>全損フラグは爆発の後ではなく前に立てる。爆発は起きた瞬間に届く範囲の全部を傷つけ、この機体自身の
      * 当たり判定の箱も届く範囲にある。箱はその打撃を通し、機体は再び破壊され、再び爆発する。先にフラグを
@@ -826,6 +1146,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         }
 
         this.setWrecked(true);
+        // いつ片付くかは今決める。試合中に壊れた残骸は30秒、それ以外は5分。Deathmatch.wreckLifetime 参照。
+        this.wreckLifetime = Deathmatch.wreckLifetime(this, WRECK_LIFETIME);
 
         // 降ろす機体はここで降ろす。抱えたままにする機体は、残骸が地面に着くまで tick() 側が待つ。
         if (!this.holdsCrewToTheGround()) {
@@ -1030,13 +1352,98 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             }
         }
 
-        return Math.max(this.getPassengers().indexOf(passenger), 0);
+        // 割り当てが届く前の1tick分のフォールバック。搭乗者リストの中の位置だが、積み荷は数えない
+        // ——先に戦車を積んでいると、最初に乗り込んだ乗員が座席0ではなく座席1から始まってしまう。
+        int index = 0;
+
+        for (Entity aboard : this.getPassengers()) {
+            if (aboard == passenger) {
+                return index;
+            }
+
+            if (!(aboard instanceof VehicleEntityBase)) {
+                index++;
+            }
+        }
+
+        return 0;
     }
 
-    /** 残骸には誰も乗り込まない。座席は残っておらず、そこでできることも無い。 */
+    /**
+     * 残骸には誰も乗り込まない。座席は残っておらず、そこでできることも無い。
+     *
+     * <p>貨物は席を数えない。積める物は乗員ではないし、C-130 の座席8つのうち1つを戦車が占めるのは、
+     * 数え方として単に間違っている。入れるかどうかは {@link #canHold} が別に答える。
+     */
     @Override
     protected boolean canAddPassenger(Entity passenger) {
-        return !this.isWrecked() && this.getPassengers().size() < this.getMaxPassengers();
+        if (this.isWrecked()) {
+            return false;
+        }
+
+        return passenger instanceof VehicleEntityBase cargo
+                ? this.canHold(cargo)
+                : this.crewAboard() < this.getMaxPassengers();
+    }
+
+    /**
+     * 今乗っている乗員の数。積み荷は数えない。
+     *
+     * <p>{@code getPassengers().size()} をそのまま定員と比べてはいけない。貨物室の車両も搭乗者なので、
+     * 戦車を1台積んだ C-130 は座席が8つあるのに7人しか乗れなくなる。
+     */
+    public int crewAboard() {
+        int crew = 0;
+
+        for (Entity aboard : this.getPassengers()) {
+            if (!(aboard instanceof VehicleEntityBase)) {
+                crew++;
+            }
+        }
+
+        return crew;
+    }
+
+    /**
+     * この機体が、その車両を貨物として積めるか。貨物室を持つ機体だけが真を返す。
+     *
+     * <p>既定は偽。積める場所を持つのは輸送機だけで、戦闘機の胴体にも戦車の車内にも戦車の入る空間は無い。
+     */
+    protected boolean canHold(VehicleEntityBase cargo) {
+        return false;
+    }
+
+    /** これが何かの貨物室に積まれているか。乗っている相手が機体なら、席ではなく貨物室にいる。 */
+    public boolean isCargo() {
+        return this.getVehicle() instanceof VehicleEntityBase;
+    }
+
+    /**
+     * その物が、この機体の貨物室の中にいるか。
+     *
+     * <p>搭乗（{@link #isCargo}）とは別の問い。積まれた車両は搭乗者だが、機内を歩いている人は搭乗者では
+     * ない——歩けなくなってしまう。この問いが答えるのは「機体と一緒に動く場所にいるか」であり、
+     * {@code Hitboxes} が2つのことに使う。<b>中にいる物は運ぶ</b>（足元が床に触れているかを問わない。
+     * 上昇する機体の床は毎tick足元から離れ、床は人を押し上げないので、接触を条件にすると機内の人は
+     * 置き去りになる）。そして<b>中にいる物は轢かない</b>（機内に立つ人の体は当然その機体の箱の中に
+     * あるので、数えれば輸送機は飛行中ずっと自分の乗客を轢き続ける）。
+     *
+     * <p>既定は偽。貨物室を持たない機体の「中」は、単に機体の一部だ。
+     */
+    public boolean holdsInside(Entity rider) {
+        return false;
+    }
+
+    /** 貨物として運ばれている間の、運んでいる側の軸で見た自分の位置。 */
+    public Vec3 getHoldOffset() {
+        Vector3f held = this.entityData.get(DATA_HOLD);
+
+        return new Vec3(held.x(), held.y(), held.z());
+    }
+
+    public void setHoldOffset(Vec3 offset) {
+        this.entityData.set(DATA_HOLD,
+                new Vector3f((float) offset.x, (float) offset.y, (float) offset.z));
     }
 
     /**
@@ -1241,7 +1648,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     protected void addPassenger(Entity passenger) {
         super.addPassenger(passenger);
 
-        if (!this.level().isClientSide) {
+        // 貨物は席を取らない。取らせると、戦車1台を積んだ輸送機の乗員が1人減る。
+        if (!this.level().isClientSide && !(passenger instanceof VehicleEntityBase)) {
             this.seatBoarding(passenger);
         }
     }
@@ -1250,7 +1658,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     protected void removePassenger(Entity passenger) {
         super.removePassenger(passenger);
 
-        if (!this.level().isClientSide) {
+        if (!this.level().isClientSide && !(passenger instanceof VehicleEntityBase)) {
             this.seatLeaving(passenger);
         }
     }
@@ -1259,10 +1667,33 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * ヨーとピッチだけからではなく機体自身の軸から組む。だから座席は翼と一緒にバンクし、車体と一緒に傾く。
      * オイラー角でオフセットを回すと、ロールした機体の中で乗員だけが直立し、モデルが描くコックピットから
      * 浮いてしまう。
+     *
+     * <p><b>搭乗者側の取り付け点も機体軸で引く。</b> Minecraft は乗員を {@code 座席点 − 搭乗者の取り付け点}
+     * に置く（{@code Entity.positionRider}）が、その取り付け点——プレイヤーなら {@code (0, 0.6, 0)}——は
+     * Y 軸周りにしか回らない（{@code EntityAttachments.transformPoint}）ので、<em>ワールドの真下</em>へ
+     * 0.6 引かれる。水平飛行では機体の下とワールドの下が同じ向きなので誰も気付かないが、傾けた瞬間に
+     * その 0.6 が機体軸から外れる: 60 度バンクで約 0.6、90 度で約 0.85 ブロック、乗員が低い翼の側へ
+     * 滑り出す。旋回とロールの間だけ、乗員がキャノピーからはみ出して見えていたのはこれだ。
+     *
+     * <p>ここで足し戻して、姿勢を通した同じ長さを引く。差し引きは 0 なので水平では従来と1ミリも変わらず、
+     * 傾いた機体でだけ、乗員が座面に対して同じ場所に留まる。<b>直すのは描画ではなく置く位置の方だ</b>
+     * ——当たり判定も降車位置もここから出るので、モデルだけ座席へ戻すと見えている頭に弾が当たらなくなる。
+     * 描画側（{@code client/PassengerTiltHandler}）はこの答えを再現する。
+     *
+     * <p>取り付け点は縦にしか伸びない。プレイヤーが {@code (0, 0.6, 0)}、既定は {@code (0, 0, 0)} で、
+     * 貨物として積まれる機体は後者だから沈まない。だから姿勢を通すのに向きの取り違えは起きない。
      */
     @Override
     protected Vec3 getPassengerAttachmentPoint(Entity passenger, EntityDimensions dimensions, float scale) {
-        return Attitude.toWorld(this.getAttitude(), this.getSeatOffset(this.getSeatIndex(passenger)));
+        // 貨物は席に着いていない。乗り入れて止まった所にいる。
+        Vec3 offset = passenger instanceof VehicleEntityBase cargo
+                ? cargo.getHoldOffset()
+                : this.getSeatOffset(this.getSeatIndex(passenger));
+
+        Quaternionf attitude = this.getAttitude();
+        Vec3 drop = passenger.getVehicleAttachmentPoint(this);
+
+        return Attitude.toWorld(attitude, offset).add(drop).subtract(Attitude.toWorld(attitude, drop));
     }
 
     /**
@@ -1270,7 +1701,19 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * する。座席・砲口・一人称視点の目に使うので、そのどれもが機体の動きに乗る。
      */
     public Vec3 toWorld(Vec3 offset, float partialTick) {
-        return this.getPosition(partialTick).add(Attitude.toWorld(this.getAttitude(partialTick), offset));
+        return this.bodyOrigin(partialTick).add(Attitude.toWorld(this.getAttitude(partialTick), offset));
+    }
+
+    /**
+     * 機体座標系の原点が、この瞬間ワールドのどこにあるか。
+     *
+     * <p>ふつうはエンティティの位置そのもの。姿勢は<em>この点の周り</em>に回るので、模型が回ってほしい点と
+     * ここが食い違う機体だけが上書きする（{@link com.ashvehicles.entity.AircraftEntity#bodyOrigin} — 尾輪式
+     * が主輪を軸に尻を下ろす）。**箱も座席もカメラも銃口も、描画までが1つの答えを共有していること**が要点で、
+     * 分けて持つと描かれている機体と当たる場所がずれる。
+     */
+    protected Vec3 bodyOrigin(float partialTick) {
+        return this.getPosition(partialTick);
     }
 
     // ------------------------------------------------------------------
@@ -1352,6 +1795,59 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
 
     /** 箱が世界で取っている回転。機体内での自分の角度も含む。 */
     protected abstract Quaternionf boxRotation(VehicleShape.Box box);
+
+    /**
+     * その物を今この機体が運ぶか。
+     *
+     * <p>問うのは「今その上に立っているか」ではなく<b>「乗ったまま離れていないか」</b>だ。足が触れていれば
+     * 猶予は満タンに戻り、離れても{@link #ABOARD_GRACE}tick は運び続ける——ただし<b>機体の上から水平に
+     * 外れたらその場で終わり</b>。跳ねても降下しても運ばれ、脇へ歩いて降りれば運ばれなくなる。
+     *
+     * <p>高さは見ない。甲板の上で跳んだ者も、機体が沈んで足元が離れた者も、まだその機体の上にいる。
+     *
+     * @param touching 今この tick、足がこの機体の箱に触れているか
+     */
+    final boolean carries(Entity rider, boolean touching) {
+        if (touching) {
+            this.aboard.put(rider, ABOARD_GRACE);
+
+            return true;
+        }
+
+        Integer left = this.aboard.get(rider);
+
+        if (left == null) {
+            return false;
+        }
+
+        AABB bounds = this.placed;
+        AABB box = rider.getBoundingBox();
+        boolean over = bounds != null && bounds.minX < box.maxX && bounds.maxX > box.minX
+                && bounds.minZ < box.maxZ && bounds.maxZ > box.minZ;
+
+        // 足が離れた理由が「宙にいるから」である間だけ猶予は続く。跳んだ者、甲板が下から逃げた者は
+        // まだ乗っている。<b>何か固い物の上に立った者は降りている</b>——動いている船から桟橋へ降りた人を
+        // 0.4秒引きずらないための1行で、甲板の上に立っている限り上の touching が毎tick真になるので、
+        // 本当に乗っている者がこの条件で落とされることはない。
+        if (!over || rider.onGround() || left <= 1) {
+            this.aboard.remove(rider);
+
+            return false;
+        }
+
+        this.aboard.put(rider, left - 1);
+
+        return true;
+    }
+
+    /**
+     * その物が今この機体に乗っているか。数えるだけで、猶予は動かさない。
+     *
+     * <p>運搬が「自分を運んでいる相手を運び返す」のを防ぐために問われる。{@code Hitboxes.rides} 参照。
+     */
+    public final boolean isAboard(Entity rider) {
+        return this.aboard.containsKey(rider);
+    }
 
     /**
      * 前回の配置時点で、機体の全ての箱が収まっていた世界の領域。
@@ -1607,17 +2103,38 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     protected void readAdditionalSaveData(CompoundTag tag) {
         this.setWrecked(tag.getBoolean("Wrecked"));
         this.wreckAge = tag.getInt("WreckAge");
+        // 期限を持つ前に保存された残骸は5分のまま。
+        this.wreckLifetime = tag.contains("WreckLifetime") ? tag.getInt("WreckLifetime") : WRECK_LIFETIME;
         this.readOldHold(tag);
         // 燃料システムが存在する前にワールドへ書き出された機械には読む値が無いので、空ではなく満タンで戻る。
         // 耐久と同じ判断だ。空で戻せば、更新した瞬間に世界中の機械が一斉に動かなくなる。
         this.setFuel(tag.contains("Fuel") ? tag.getFloat("Fuel") : this.fuelSetup().capacity());
+
+        if (tag.contains("Hold")) {
+            ListTag held = tag.getList("Hold", Tag.TAG_DOUBLE);
+
+            if (held.size() == 3) {
+                this.setHoldOffset(new Vec3(held.getDouble(0), held.getDouble(1), held.getDouble(2)));
+            }
+        }
     }
 
     @Override
     protected void addAdditionalSaveData(CompoundTag tag) {
         tag.putBoolean("Wrecked", this.isWrecked());
         tag.putInt("WreckAge", this.wreckAge);
+        tag.putInt("WreckLifetime", this.wreckLifetime);
         tag.putFloat("Fuel", this.getFuel());
+
+        // 貨物室の中の居場所。搭乗そのものはバニラが保存するが、どこに置かれていたかは知らない。
+        if (this.isCargo()) {
+            Vec3 offset = this.getHoldOffset();
+            ListTag held = new ListTag();
+            held.add(DoubleTag.valueOf(offset.x));
+            held.add(DoubleTag.valueOf(offset.y));
+            held.add(DoubleTag.valueOf(offset.z));
+            tag.put("Hold", held);
+        }
     }
 
     @Override

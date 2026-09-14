@@ -12,6 +12,7 @@
     "damage": 12,
     "speed": 55.0,
     "gravity": 0.0245,
+    "drag": 0.0005,
     "range": 2500.0,
     "explosion": 0.6,
     "ricochet": 22,

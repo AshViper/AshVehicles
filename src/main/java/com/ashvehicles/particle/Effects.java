@@ -3,11 +3,13 @@ package com.ashvehicles.particle;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.network.BlastSoundPayload;
+import com.ashvehicles.match.Deathmatch;
 import com.ashvehicles.registry.ModParticles;
 
 import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.particles.ParticleOptions;
+import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -35,8 +37,9 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * <p>このファイルで知っておく価値があるのは、なぜ全パーティクルパケットに長距離フラグを立てるか。
  * 通常のパーティクルは32ブロック以遠の相手には送られず、何かの拍子に届いてもクライアント側で捨てられ
  * る。32ブロックは松明には妥当、兵器には無意味な距離だ。爆弾は300メートル上空から狙うもので、投下後の
- * パイロットの関心は「爆発したか、どこにか」の一点に尽きる。フラグは両方の上限をプロトコル上の天井で
- * ある512ブロックまで引き上げる。
+ * パイロットの関心は「爆発したか、どこにか」の一点に尽きる。フラグは両方の上限を512ブロックまで引き上げ、
+ * そこから先は {@link #scatter} が同じパケットを自分で送る——512はプロトコルの限界ではなく、
+ * {@code ServerLevel} の送信先判定1行だ。
  *
  * <p>これは、ロード範囲外の爆発が見えること自体の条件でもある。ここでは世界を一切必要としない。
  * パーティクルには位置と色を伝えるだけで、外側でも黒くならずに光ることは
@@ -129,6 +132,21 @@ public final class Effects {
      * あり、下にいるのは機関砲の炸裂弾だけ。
      */
     private static final float CRATERLESS = 1.0F;
+
+    /**
+     * バニラが長距離フラグ付きで送る上限（ブロック）。{@code ServerLevel.sendParticles} はこれより遠い
+     * プレイヤーに何も送らず、false を返して終わる。
+     */
+    private static final double VANILLA_REACH = 512.0;
+    /** そこから先、粒の大きさ1あたり何ブロック延ばすか。 */
+    private static final double REACH_PER_SCALE = 80.0;
+    /**
+     * どれだけ大きくても、ここより遠くへは送らない（ブロック）。
+     *
+     * <p>{@link BlastSoundPayload} の天井と同じ値だ。同じ理由でもある——見えている物が聞こえ、聞こえて
+     * いる物が見えるべきで、片方だけが3km届いて片方が512mで消えるのは、爆発の在り方として読めない。
+     */
+    private static final double FURTHEST = 3000.0;
 
     /**
      * エンジンが再生せず、再生できないと文句も言わない唯一の音。
@@ -230,8 +248,15 @@ public final class Effects {
         float drawn = Mth.clamp(power, 1.0F, BIGGEST);
         ParticleOptions fireball = ModParticles.BLAST.get().of(colour, drawn * 0.3F);
 
+        // 試合中の会場は削らない（{@code match/Deathmatch.protectsTerrain}）。KEEP の爆発はブロックを
+        // 1つも集めないので、穴が開かないだけでなく光線1本ぶん安い。爆風のダメージとノックバックは
+        // 種別に関わらず起きる。
+        Level.ExplosionInteraction interaction = Deathmatch.protectsTerrain(level)
+                ? Level.ExplosionInteraction.NONE
+                : Level.ExplosionInteraction.MOB;
+
         level.explode(source, Explosion.getDefaultDamageSource(level, source), null,
-                at.x, at.y, at.z, power, NO_FIRE, Level.ExplosionInteraction.MOB,
+                at.x, at.y, at.z, power, NO_FIRE, interaction,
                 fireball, fireball, SILENCE);
     }
 
@@ -325,18 +350,67 @@ public final class Effects {
     }
 
     /**
+     * この大きさの粒を送る価値のある距離（ブロック）。
+     *
+     * <p>大きさで測るのは、遠さの限界を決めているのが結局それだからだ。機関砲の発砲炎は3km先では1画素に
+     * 届かないし、キノコ雲はそこでも空の半分を占める。{@link BlastSoundPayload#carry} が規模で聞こえる距離を
+     * 決めるのと同じ形にしてある——実際 {@link #detonate} が渡す大きさは爆発規模そのものなので、あの2つは
+     * 同じ数値から同じ距離を出す。
+     */
+    private static double carry(float scale) {
+        return Math.min(VANILLA_REACH + scale * REACH_PER_SCALE, FURTHEST);
+    }
+
+    /**
+     * 全プレイヤーへ1つの散布を届ける。バニラが届けられる相手にはバニラで、届けられない相手には同じパケットを
+     * 直接。
+     *
+     * <p><b>512ブロックはプロトコルの限界ではない。</b>限界だと思っていたが、そうではなかった。パケットの座標
+     * は double で、上限を課しているのは {@code ServerLevel} の送信先判定1行だけだ。そこで落とされる相手には
+     * まったく同じ {@code ClientboundLevelParticlesPacket} を自分で送ればよく、クライアントは出所を区別しない
+     * ——長距離フラグが立っているので、受け取った側も32ブロックの足切りを通さない。
+     *
+     * <p>これが要るのは、この MOD が512ブロック先の出来事を日常的に見せるからだ。ゴーストは距離の上限を持た
+     * ないし（{@code ghostEndDistance} の既定は「無制限」）、炸裂音は3kmまで届く。爆発だけが512mで消えるのは
+     * 単に穴だった。描く側の上限は {@link com.ashvehicles.client.particle.ParticleReach} が外してある。
+     *
+     * <p>パケットは1つ作って全員へ使い回す。位置も中身も相手によらない。
+     */
+    private static void scatter(ServerLevel level, Vec3 at, TintedParticleOption particle, int count,
+            double spreadX, double spreadY, double spreadZ, double speed) {
+        double carry = carry(particle.scale());
+        ClientboundLevelParticlesPacket packet = null;
+
+        for (ServerPlayer player : level.players()) {
+            if (level.sendParticles(player, particle, true, at.x, at.y, at.z, count,
+                    spreadX, spreadY, spreadZ, speed)) {
+                continue;
+            }
+
+            if (player.distanceToSqr(at) >= carry * carry) {
+                continue;
+            }
+
+            if (packet == null) {
+                packet = new ClientboundLevelParticlesPacket(particle, true, at.x, at.y, at.z,
+                        (float) spreadX, (float) spreadY, (float) spreadZ, (float) speed, count);
+            }
+
+            player.connection.send(packet);
+        }
+    }
+
+    /**
      * パーティクルの散布。{@code count} 個を {@code spread} ブロックの範囲に撒き、{@code speed} の
      * 速さでランダムな方向へ飛ばす。
      *
      * <p>プレイヤーごとに1パケット。長距離フラグはプレイヤー単位の呼び出しでしか立てられないため。範囲外
-     * の相手はサーバー側で落とすので、これはブロードキャストではなくプレイヤーリストのループと数個の
-     * パケットで済む。
+     * の相手は落とすので、これはブロードキャストではなくプレイヤーリストのループと数個のパケットで済む。
+     * どこまでを範囲内とするかは {@link #scatter} 参照。
      */
     public static void send(ServerLevel level, Vec3 at, TintedParticleOption particle, int count,
             double spread, double speed) {
-        for (ServerPlayer player : level.players()) {
-            level.sendParticles(player, particle, true, at.x, at.y, at.z, count, spread, spread, spread, speed);
-        }
+        scatter(level, at, particle, count, spread, spread, spread, speed);
     }
 
     /**
@@ -347,10 +421,7 @@ public final class Effects {
      */
     public static void send(ServerLevel level, Vec3 at, TintedParticleOption particle, int count,
             Vec3 spread, double speed) {
-        for (ServerPlayer player : level.players()) {
-            level.sendParticles(player, particle, true, at.x, at.y, at.z, count,
-                    spread.x, spread.y, spread.z, speed);
-        }
+        scatter(level, at, particle, count, spread.x, spread.y, spread.z, speed);
     }
 
     /**
@@ -361,10 +432,7 @@ public final class Effects {
      * 両方置いてある。
      */
     public static void aimed(ServerLevel level, Vec3 at, TintedParticleOption particle, Vec3 velocity) {
-        for (ServerPlayer player : level.players()) {
-            level.sendParticles(player, particle, true, at.x, at.y, at.z, 0,
-                    velocity.x, velocity.y, velocity.z, 1.0);
-        }
+        scatter(level, at, particle, 0, velocity.x, velocity.y, velocity.z, 1.0);
     }
 
     private Effects() {

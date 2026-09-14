@@ -2,6 +2,7 @@ package com.ashvehicles.mixin;
 
 import java.util.Set;
 
+import com.ashvehicles.Config;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.DesignationEntity;
@@ -68,6 +69,17 @@ public abstract class EntityTrackingMixin {
         if (this.entity instanceof VehicleEntityBase machine) {
             callback.cancel();
             this.ashvehicles$report(player, withinGhostRange(machine, player));
+        } else if (this.entity instanceof ServerPlayer && Config.playerGhostRange() > 0) {
+            // 人も同じ理由でここにいる。地上に立っている人を 2km 上空から見ることはできないが、
+            // 滑走路の上や、隣を飛んでいる僚機の中にいる人は見える——そして今その両方が、相手の
+            // 足元の地面が送られなくなった瞬間に消えていた。機体と違って、消えたのが機械ではなく
+            // 人であることに気付ける立場の人がその場にいる。
+            //
+            // 設定で持つのは、これが唯一「対象がいくらでも増えうる」型だからだ。機体の数はワールド
+            // に置かれた数で決まるが、プレイヤーの数はサーバーの人数で決まり、この扱いの費用は
+            // その2乗で効く。0 ならこの分岐は無く、バニラの判定がそのまま走る。
+            callback.cancel();
+            this.ashvehicles$report(player, this.ashvehicles$within(player, Config.playerGhostRange()));
         } else if (this.entity instanceof VehicleProjectile || this.entity instanceof DesignationEntity
                 || this.entity instanceof TargetDroneEntity) {
             callback.cancel();

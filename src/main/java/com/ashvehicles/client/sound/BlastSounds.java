@@ -43,13 +43,6 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
 public final class BlastSounds {
-    /** ブロック/tick。秒速343m を、毎秒20tick で換算した値。 */
-    private static final double SPEED_OF_SOUND = 17.15;
-    /**
-     * 距離による減音の指数。1未満なので最初は急に落ちてから遠方まで粘る。耳に対する音量の振る舞いでもあり、
-     * 遠方まで届かせることに意味を持たせている要素でもある。
-     */
-    private static final double FALLOFF = 0.85;
     /** 真上での爆発のピッチと、全到達距離でそのうちどれだけ失われるか。 */
     private static final float NEAR_PITCH = 1.05F;
     private static final float DULLING = 0.5F;
@@ -78,7 +71,7 @@ public final class BlastSounds {
             return;
         }
 
-        int wait = Math.min((int) (earTo(minecraft, at) / SPEED_OF_SOUND), LONGEST_WAIT);
+        int wait = Math.min(Air.travel(earTo(minecraft, at)), LONGEST_WAIT);
 
         if (wait <= 0) {
             play(minecraft, at, power);
@@ -125,15 +118,16 @@ public final class BlastSounds {
         // ここから始まる。到達時刻の計算をもう一度書かずに済むのは副産物で、本質は同じ現象だということ。
         BlastShake.felt(at, power);
 
-        double fade = Mth.clamp(earTo(minecraft, at) / BlastSoundPayload.carry(power), 0.0, 1.0);
-        float volume = (float) Math.pow(1.0 - fade, FALLOFF);
+        double away = earTo(minecraft, at);
+        float volume = Air.carried(away, BlastSoundPayload.carry(power));
+        float fade = (float) Mth.clamp(away / BlastSoundPayload.carry(power), 0.0, 1.0);
 
         if (volume <= 0.0F) {
             return;
         }
 
         minecraft.getSoundManager().play(new BlastSoundInstance(
-                recording(minecraft), volume, pitch(power, (float) fade), at));
+                recording(minecraft), volume, pitch(power, fade), at));
     }
 
     /**

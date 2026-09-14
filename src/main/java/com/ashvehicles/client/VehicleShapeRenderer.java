@@ -8,6 +8,7 @@ import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
+import com.ashvehicles.weapon.TurretStations;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
@@ -105,9 +106,19 @@ public final class VehicleShapeRenderer {
         poseStack.mulPose(aircraft.getAttitude(partialTick));
 
         for (VehicleShape.Box box : shape.boxes()) {
+            // 可動部の箱は機体構造から離れて自分のヒンジ回りに振れる。当たる箱と描く箱がずれていては、
+            // 形状を目で合わせる道具として用を成さないので、位置も向きもエンティティ側と同じ計算から出す。
+            Vec3 swing = aircraft.swingOf(box, partialTick);
+            Vec3 offset = AircraftEntity.swung(box, swing);
+
             poseStack.pushPose();
             // 機体座標系では +X が左を指すので、右へのオフセットは負値になる。
-            poseStack.translate(-box.offset().x, box.offset().y, box.offset().z);
+            poseStack.translate(-offset.x, offset.y, offset.z);
+
+            if (swing.lengthSqr() != 0.0) {
+                poseStack.mulPose(AircraftEntity.swingOf(swing));
+            }
+
             poseStack.mulPose(box.orientation());
 
             Vec3 half = box.size().scale(0.5);
@@ -164,10 +175,7 @@ public final class VehicleShapeRenderer {
         }
 
         Vec3 position = vehicle.getPosition(partialTick);
-        Vec3 ring = vehicle.getStats().turret().ring();
-        Vec3 trunnion = vehicle.getStats().armament().trunnion();
-        float traverse = vehicle.getTurretYaw(partialTick);
-        float elevation = vehicle.getGunPitch(partialTick);
+        TurretStations stations = vehicle.getTurrets();
 
         poseStack.pushPose();
         poseStack.translate(position.x - eye.x, position.y - eye.y, position.z - eye.z);
@@ -176,6 +184,14 @@ public final class VehicleShapeRenderer {
         for (VehicleShape.Box box : shape.boxes()) {
             boolean onTurret = box.mount() == VehicleShape.Mount.TURRET || box.mount() == VehicleShape.Mount.GUN;
             boolean onGun = box.mount() == VehicleShape.Mount.GUN;
+            // 独立砲塔の箱は、その砲塔自身の旋回輪・耳軸・角で組む。番号を書かない箱は車両自身の砲塔だ。
+            // 当たり判定側（{@code GroundVehicleEntity.mountOffset}）と同じ選び方でなければならない。
+            int index = box.stationIndex();
+            boolean laid = index >= 0 && index < stations.count();
+            Vec3 ring = laid ? stations.station(index).ring() : vehicle.getStats().turret().ring();
+            Vec3 trunnion = laid ? stations.trunnionOf(index) : vehicle.getStats().armament().trunnion();
+            float traverse = laid ? stations.yawOf(index, partialTick) : vehicle.getTurretYaw(partialTick);
+            float elevation = laid ? stations.pitchOf(index, partialTick) : vehicle.getGunPitch(partialTick);
             Vec3 offset = onTurret
                     ? box.offset().subtract(onGun ? trunnion : ring)
                     : box.offset();

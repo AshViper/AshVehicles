@@ -13,6 +13,7 @@
     "HitScanMixin",
     "LateWorldMixin",
     "LateWorldTickMixin",
+    "PilotTickMixin",
     "RoundChunkLoadMixin",
     "SurfaceParallelMixin",
     "VehicleMoveCheckMixin"
@@ -20,9 +21,12 @@
   "client": [
     "CameraMixin",
     "HitboxMixin",
+    "MatchGlowColourMixin",
+    "MatchGlowMixin",
     "MountHintMixin",
     "MouseLookMixin",
     "PilotChunkGateMixin",
+    "PlayerDrawDistanceMixin",
     "SectionCompileOrderMixin"
   ],
   "injectors": {

@@ -17,6 +17,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.common.world.chunk.RegisterTicketControllersEvent;
 import net.neoforged.neoforge.common.world.chunk.TicketController;
@@ -169,6 +170,32 @@ public final class AircraftChunkLoader {
      */
     private static final int DEEP_DISTANCE = -1;
     /**
+     * 奥の帯を実際に頼む距離。{@link #DEEP_DISTANCE} か、c2me が入っていれば 0。
+     *
+     * <p><b>c2me の下では負の距離は何も生成しない。</b> c2me のチャンクシステム書き換え
+     * （{@code TheChunkSystem.vanillaIf$setLevel}）は、バニラのチケット水準を自分の段階へ写すときに
+     * FULL 未満へ写る物を全部 {@code Deferred}——「誰かが実際に要求するまで何もしない」——に変える
+     * （{@code useLegacyScheduling} が偽、既定）。水準 34 は {@code initialize_light} へ写り、それは
+     * FULL 未満なので、奥の帯のチケットは置かれるだけで生成器に届かない。2026-09-06 に c2me の
+     * デコンパイルで確認。前方 6 秒の帯が空のまま、機体は 3 秒の帯の先端に追い付いていた。
+     *
+     * <p>距離 0 なら水準 33 = FULL（c2me では {@code SERVER_ACCESSIBLE}）で、生成される。奥の帯が
+     * 買っていた「保存されない」は c2me の下では元から無い——あちらは {@code ChunkMap.save} の型判定を
+     * 潰して全部書く（{@code MixinThreadedAnvilChunkStorage.alwaysSaveChunk}）。失う物が無い。
+     *
+     * <p>足す時と外す時で同じ距離でなければ外れないので、ワールドが開く前に 1 度だけ決めて動かさない。
+     * {@link #onRegisterTicketControllers} 参照。
+     */
+    private static int deepDistance = DEEP_DISTANCE;
+    /**
+     * 前方の地面がこれより短い（tick）と、それを言う。
+     *
+     * <p>40 は 2 秒。回廊が保持している 30 tick より少し先で、そこまで地面が無ければ機体は数 tick 後に
+     * {@code LateWorld} の窓の中を飛ぶ。生成が間に合っているかどうかを、推測ではなく数字で残すための行で、
+     * 間に合っている間は黙っている。1 機につき毎秒 1 行まで。
+     */
+    private static final double SHORT_AHEAD_TICKS = 40.0;
+    /**
      * 扇を開く長さ（tick）。この先までは「直進する」ではなく「行き得る先全部」を頼む。
      *
      * <p>30 は1.5秒。その間にフルに引けば機首は30度ほど振れる——旋回の出口がまだ扇の中にある長さだ。
@@ -213,6 +240,15 @@ public final class AircraftChunkLoader {
         // FULL 手前の段階へ写ることはコードから読み取れる（DEEP_DISTANCE 参照）が、それが「地形として
         // 意味のある所まで作る段階」かどうかは生成ピラミッドの形次第で、ピラミッドはデータパックが
         // 触れる物ではないにせよバージョンで変わる。null や EMPTY が出たら、奥の帯は何も作っていない。
+        if (ModList.get().isLoaded("c2me")) {
+            // c2me は FULL 未満の水準を保留にするので、奥の帯も完成品で頼む。deepDistance 参照。
+            deepDistance = 0;
+            AshVehicles.LOGGER.info("[chunk] c2me を検出。先読みの奥の帯は水準 33（FULL）で頼み、"
+                    + "地表の並列化は c2me に任せる（ParallelSurface.ENABLED = {}）", ParallelSurface.ENABLED);
+
+            return;
+        }
+
         AshVehicles.LOGGER.info("[chunk] 先読みの奥の帯は水準 {}（生成段階 {}）で止まる",
                 33 - DEEP_DISTANCE, ChunkLevel.generationStatus(33 - DEEP_DISTANCE));
     }
@@ -485,6 +521,8 @@ public final class AircraftChunkLoader {
         int lastZ = Integer.MIN_VALUE;
         // 手前と奥の境。ここまでは完成品を、ここから先は素地だけを頼む。deep 参照。
         double near = NEAR_TICKS * speed / SAMPLE;
+        // 線の上で最初に「まだ無い」chunk に当たったサンプル。無ければ -1。groundAhead 参照。
+        int missingAt = -1;
 
         for (int i = 0; i < samples; i++) {
             x += stepX;
@@ -500,6 +538,11 @@ public final class AircraftChunkLoader {
             lastX = chunkX;
             lastZ = chunkZ;
             (i < near ? wanted.near : wanted.deep).add(new ChunkPos(chunkX, chunkZ));
+
+            // 訊くのは「地形がもう在るか」。hasChunk はチケット水準しか見ない（update 参照）。
+            if (missingAt < 0 && level.getChunkSource().getChunkNow(chunkX, chunkZ) == null) {
+                missingAt = i;
+            }
         }
 
         // 扇は手前だけ。旋回の出口はすぐそこで、そこは完成した地面が要る場所だ。
@@ -509,9 +552,39 @@ public final class AircraftChunkLoader {
         wanted.deep.removeAll(wanted.near);
 
         retile(level, asked.near, wanted.near, 0);
-        retile(level, asked.deep, wanted.deep, DEEP_DISTANCE);
+        retile(level, asked.deep, wanted.deep, deepDistance);
+
+        groundAhead(aircraft, level, speed, missingAt, wanted);
 
         return wanted;
+    }
+
+    /**
+     * 前方の地面が短い時だけ、どこで切れているかを言う。
+     *
+     * <p>「生成が追い付いているか」を答える唯一の数字がこれだ。先読みの線の上で最初に無い chunk までの
+     * 距離を tick に直したもので、{@link #SHORT_AHEAD_TICKS} 以上なら黙る。人が飛ばしている機体だけ、
+     * 1 機につき毎秒 1 行。無人機や落下中の残骸が追い付かれても、それを読む人はいない。
+     *
+     * @param missingAt 線の上で最初に無かったサンプルの添字。線の全長が在れば負
+     */
+    private static void groundAhead(AircraftEntity aircraft, ServerLevel level, double speed,
+            int missingAt, Tiers wanted) {
+        if (missingAt < 0 || aircraft.getAviator() == null
+                || (level.getGameTime() + aircraft.getId()) % 20 != 0) {
+            return;
+        }
+
+        double ticks = missingAt * SAMPLE / speed;
+
+        if (ticks >= SHORT_AHEAD_TICKS) {
+            return;
+        }
+
+        AshVehicles.LOGGER.info("[chunk] {} の前方 {} tick（{} block）で地面が切れている。速度 {} block/tick、"
+                + "先読み {}+{} chunk、tick {}",
+                aircraft.getName().getString(), Math.round(ticks), Math.round(missingAt * SAMPLE),
+                String.format("%.1f", speed), wanted.near.size(), wanted.deep.size(), level.getGameTime());
     }
 
     /**

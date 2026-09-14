@@ -242,4 +242,36 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
         return animatable.getStats().model().scale();
     }
 
+    /**
+     * 尾輪式の機体を、車輪が地面に着く高さまで下げてから姿勢を掛ける。
+     *
+     * <p>姿勢は機体の原点周りに回る。尾輪式が立っているだけで持っている機首上げ
+     * （{@link AircraftDefinition.Undercarriage#groundStance}）をそこへ掛けると、支点にあるはずの主輪が
+     * {@code sin(角) × 支点までの距離} だけ持ち上がる——機体全体が地面から浮いて見える。実機が尻を下ろすとき
+     * に回るのは原点ではなく主輪の接地点なので、その差だけ機体を下げれば同じ絵になる。
+     *
+     * <p><b>姿勢を掛ける<em>前</em>に平行移動する。</b>ここでの平行移動はワールドの鉛直そのものであり、
+     * {@link AircraftEntity#bodyOrigin} が当たり判定箱・座席・カメラ・銃口に対して行う下げ方と1文字も違わ
+     * ない。姿勢の後（{@code applyBodyMotion}）に置くと機体軸で効いてしまい、傾いた分だけ描かれる模型と
+     * 箱がずれる。
+     *
+     * <p><b>脚の出方に比例させる。</b>「今この瞬間に接地しているか」を訊く必要は無い——脚を上げた機体には
+     * 車輪の高さを合わせるべき地面がそもそも無いし、空中で機体が 0.3 ブロック下にあることは誰にも見えない。
+     * 脚の作動量は描画のために既に同期・補間されているので、新しい状態を1つも増やさずに、格納と同じ時間を
+     * かけて滑らかに抜ける。
+     *
+     * <p>{@code ground_stance} を書かない機体（同梱の27機すべて）ではここは丸ごと素通りする。
+     */
+    @Override
+    protected void applyRotations(AircraftEntity animatable, PoseStack poseStack, float ageInTicks,
+            float rotationYaw, float partialTick, float nativeScale) {
+        float sink = animatable.stanceSink(partialTick);
+
+        if (sink != 0.0F) {
+            poseStack.translate(0.0F, -sink, 0.0F);
+        }
+
+        super.applyRotations(animatable, poseStack, ageInTicks, rotationYaw, partialTick, nativeScale);
+    }
+
 }

@@ -1,0 +1,27 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_ammo",
+  "tab": "ammo",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:armor_plate",
+      "count": 2
+    },
+    {
+      "tag": "c:ingots/copper",
+      "count": 2
+    },
+    {
+      "item": "minecraft:gunpowder",
+      "count": 3
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:naval_gun_ap"
+  }
+}

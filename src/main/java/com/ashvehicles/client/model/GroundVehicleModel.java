@@ -1,11 +1,14 @@
 package com.ashvehicles.client.model;
 
+import java.util.List;
+
 import org.joml.Vector3f;
 
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 import com.ashvehicles.vehicle.Ride;
+import com.ashvehicles.weapon.TurretStations;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -74,9 +77,11 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
      * @param wheelTravel 転輪がバネ上で動く距離（ブロック）。0なら走行装置を車体に固定せず、描くサスペンションを
      *                    持たない車両になる
      */
-    public record Setup(VehicleChassis.Model model, float recoilTravel, float wheelTravel) {
+    public record Setup(VehicleChassis.Model model, float recoilTravel, float wheelTravel,
+            List<GroundVehicleDefinition.Station> turrets) {
         public static Setup of(GroundVehicleDefinition stats) {
-            return new Setup(stats.model(), stats.armament().recoil(), stats.suspension().travel());
+            return new Setup(stats.model(), stats.armament().recoil(), stats.suspension().travel(),
+                    stats.turrets());
         }
     }
 
@@ -93,8 +98,18 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
      */
     public record Pose(float turretYaw, float gunPitch, float wheelLeft, float wheelRight, float steerAngle,
             float recoil,
-            Ride ride) {
+            Ride ride, float[] stationYaw, float[] stationPitch) {
         public static Pose of(GroundVehicleEntity vehicle, float partialTick) {
+            TurretStations stations = vehicle.getTurrets();
+            int count = stations.count();
+            float[] yaw = new float[count];
+            float[] pitch = new float[count];
+
+            for (int index = 0; index < count; index++) {
+                yaw[index] = stations.yawOf(index, partialTick);
+                pitch[index] = stations.pitchOf(index, partialTick);
+            }
+
             return new Pose(
                     vehicle.getTurretYaw(partialTick),
                     vehicle.getGunPitch(partialTick),
@@ -102,7 +117,9 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
                     vehicle.getWheelAngle(partialTick, true),
                     vehicle.getSteerAngle(partialTick),
                     vehicle.getRecoil(partialTick),
-                    vehicle.getRide(partialTick));
+                    vehicle.getRide(partialTick),
+                    yaw,
+                    pitch);
         }
 
         /**
@@ -127,8 +144,30 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
                     Mth.lerp(partialTick, previous.wheelRight(), now.wheelRight()),
                     Mth.lerp(partialTick, previous.steerAngle(), now.steerAngle()),
                     Mth.lerp(partialTick, previous.recoil(), now.recoil()),
-                    Ride.between(previous.ride(), now.ride(), partialTick));
+                    Ride.between(previous.ride(), now.ride(), partialTick),
+                    blendAngles(previous.stationYaw(), now.stationYaw(), partialTick, true),
+                    blendAngles(previous.stationPitch(), now.stationPitch(), partialTick, false));
         }
+    }
+
+    /**
+     * 独立砲塔の角を2つのスナップショットの間で混ぜる。長さが違う——定義が読み直された直後がそうだ——
+     * 場合は新しい方をそのまま採る。混ぜる相手のいない角を混ぜるより、1フレーム跳ぶ方が軽い事故だ。
+     */
+    private static float[] blendAngles(float[] previous, float[] now, float partialTick, boolean wraps) {
+        if (previous.length != now.length) {
+            return now;
+        }
+
+        float[] blended = new float[now.length];
+
+        for (int index = 0; index < now.length; index++) {
+            blended[index] = wraps
+                    ? Mth.rotLerp(partialTick, previous[index], now[index])
+                    : Mth.lerp(partialTick, previous[index], now[index]);
+        }
+
+        return blended;
     }
 
     /** 地上車両のモデルにポーズを付ける。 */
@@ -166,6 +205,21 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
         //
         // 側はロール名から読まない。L と名の付いたボーンが右側にあるのはこの MOD では実績のある事故で、
         // 少なくとも1台では同じ側の車輪ごとに向きすら違っている。ピボットの X と親の連なりに訊く。
+        // 独立砲塔。車両自身の砲塔とまったく同じ2つの回転を、砲塔ごとの角で行う。名前を書いていない
+        // 砲塔は回らない——{@code turnAboutY} は無い名前に何もしないので、照準と弾だけが正しく動く。
+        for (int index = 0; index < figures.turrets().size(); index++) {
+            GroundVehicleDefinition.Station station = figures.turrets().get(index);
+            float yaw = index < pose.stationYaw().length ? pose.stationYaw()[index] : 0.0F;
+            float pitch = index < pose.stationPitch().length ? pose.stationPitch()[index] : 0.0F;
+
+            // 模型が既に振られている分を差し引く。横や後ろを向いた姿勢で作られた砲塔がそれで、
+            // 引かずに回すと弾の出る向きと砲塔の向きがその角だけ食い違う。Station.Model.rest 参照。
+            turnAboutY(model, station.bone(), TURRET_SIGN * Mth.wrapDegrees(yaw - station.rest()));
+            // 俯仰は turnAboutX ではない。横向きに作られた砲塔の砲は、自分の X 軸周りでは上がらず
+            // 転がる。{@link VehicleGeoModel#elevate} 参照。
+            elevate(model, station.elevates(), GUN_SIGN * pitch);
+        }
+
         for (String wheel : setup.roadWheels()) {
             model.getBone(wheel).ifPresent(found ->
                     turnAboutX(found, WHEEL_SIGN * (machineSideX(found) > 0.0F

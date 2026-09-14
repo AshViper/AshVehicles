@@ -1,0 +1,35 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_missile",
+  "tab": "weapon",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 6
+    },
+    {
+      "item": "ashvehicles:avionics",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:seeker",
+      "count": 1
+    },
+    {
+      "item": "ashvehicles:rocket_motor",
+      "count": 3
+    },
+    {
+      "item": "ashvehicles:high_explosive",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:fuze",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:aim54"
+  }
+}

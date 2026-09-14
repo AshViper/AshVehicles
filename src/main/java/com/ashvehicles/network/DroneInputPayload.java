@@ -32,7 +32,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
  * 狙うことはできない。{@link AircraftInputPayload} と同じ理屈。
  */
 public record DroneInputPayload(AircraftInput input, boolean toggleGear, boolean toggleFlaps,
-        boolean cycleWeapon, boolean jettison) implements CustomPacketPayload {
+        int cycleWeapon, boolean jettison) implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<DroneInputPayload> TYPE =
             new CustomPacketPayload.Type<>(
@@ -43,11 +43,11 @@ public record DroneInputPayload(AircraftInput input, boolean toggleGear, boolean
                 payload.input().write(buf);
                 buf.writeBoolean(payload.toggleGear());
                 buf.writeBoolean(payload.toggleFlaps());
-                buf.writeBoolean(payload.cycleWeapon());
+                buf.writeByte(payload.cycleWeapon());
                 buf.writeBoolean(payload.jettison());
             },
             buf -> new DroneInputPayload(AircraftInput.read(buf),
-                    buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean()));
+                    buf.readBoolean(), buf.readBoolean(), buf.readByte(), buf.readBoolean()));
 
     @Override
     public CustomPacketPayload.Type<DroneInputPayload> type() {
@@ -73,8 +73,8 @@ public record DroneInputPayload(AircraftInput input, boolean toggleGear, boolean
                 drone.toggleFlaps();
             }
 
-            if (payload.cycleWeapon()) {
-                drone.cycleWeapon();
+            if (payload.cycleWeapon() != 0) {
+                drone.cycleWeapon(payload.cycleWeapon());
             }
 
             if (payload.jettison()) {

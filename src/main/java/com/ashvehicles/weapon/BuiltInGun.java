@@ -1,5 +1,6 @@
 package com.ashvehicles.weapon;
 
+import java.util.List;
 import java.util.Optional;
 
 import javax.annotation.Nullable;
@@ -52,54 +53,119 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class BuiltInGun {
     /**
-     * 車両の2門のうちどちらか。何を撃ち、どこに残弾を持ち、弾がどこから出るか。
+     * この砲が何であるか。何を撃ち、どこに残弾を持ち、弾がどこから出て、どの線へ飛ぶか。
      *
-     * <p>火砲が「すること」は砲によらず同じ。火砲が「<em>何であるか</em>」がここにあり、それは5つの問いで
-     * 尽きる。
+     * <p>火砲が「すること」は砲によらず同じ。火砲が「<em>何であるか</em>」がここにある。
+     *
+     * <p><b>列挙ではなく口にしてあるのは、砲架が2つに収まらなくなったからだ。</b>車両に組み込まれた砲は
+     * 長く主砲と同軸機銃の2門だけで、それは {@link Fixed} の2つとして今もそこにある。独立砲塔
+     * （{@link TurretStations}）はそこへ加わる3つ目の<em>種類</em>で、何門あるかは車両ファイルが決める
+     * ——だから定数にはできない。撃ち方は1つも変わらないので、変わる部分だけがここに並んでいる。
      */
-    public enum Mount {
+    public interface Mount {
+        /** 砲塔の主砲。 */
+        Mount MAIN = Fixed.MAIN;
+        /** 主砲に固定された機関銃。 */
+        Mount COAXIAL = Fixed.COAXIAL;
+
+        /** この砲がどの兵装ファイルか。積んでいない車両では空。 */
+        Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle);
+
+        int rounds(GroundVehicleEntity vehicle);
+
+        void rounds(GroundVehicleEntity vehicle, int rounds);
+
+        int reload(GroundVehicleEntity vehicle);
+
+        void reload(GroundVehicleEntity vehicle, int ticks);
+
+        /** この砲の弾が出る世界座標。この tick 時点で。 */
+        Vec3 muzzle(GroundVehicleEntity vehicle, int barrel);
+
+        /**
+         * 順番に撃つ砲身の本数。ファイルが別を言わなければ1で、防盾に固定された機銃が2本だったことは
+         * 一度も無い。
+         */
+        default int barrels(GroundVehicleEntity vehicle) {
+            return 1;
+        }
+
+        /**
+         * この砲のカウンタが車両のタグ内で何と呼ばれるか。主砲は空文字。主砲のキーは2門目が存在する前に
+         * 書かれた物で、そのまま残してある。古いワールドで保存された戦車が砲弾を持って戻ってくるように。
+         */
+        String tag();
+
+        /** 弾が出ていく線（世界座標の単位ベクトル）。砲塔ごとに違うのはこれと砲口だけだ。 */
+        Vec3 bore(GroundVehicleEntity vehicle);
+
+        /** 撃った者。戦果と、弾が誰の物かがこれで決まる。誰も乗っていなければ null。 */
+        @Nullable
+        LivingEntity crew(GroundVehicleEntity vehicle);
+
+        /** 今この砲の薬室にある弾種。弾種を並べていない砲架では null。 */
+        @Nullable
+        ResourceLocation ammunition(GroundVehicleEntity vehicle);
+
+        /** 弾種を並べた砲架か。並べた砲架は並べた物しか受け取らない。 */
+        boolean typed(GroundVehicleEntity vehicle);
+
+        /** 撃った分を弾倉から引く。弾種を持つ砲架では撃った弾種の分から。 */
+        void spend(GroundVehicleEntity vehicle, int rounds);
+
+        /** この砲架が受け取る弾種の一覧。1回の装填で何発入るかがここから決まる。 */
+        List<ResourceLocation> types(GroundVehicleEntity vehicle);
+    }
+
+    /**
+     * 車両に最初からある2門。何を撃ち、どこに残弾を持ち、弾がどこから出るか。
+     *
+     * <p>どちらも車両自身の砲塔で据えられ、車両自身の3つの弾倉（{@link Magazine}）に数えられる。そこが
+     * 独立砲塔との違いの全部で、それ以外は同じ砲だ。
+     */
+    public enum Fixed implements Mount {
         /**
          * 主砲。砲塔がその周りに組まれている砲であり、後座して車体を揺らす砲であり、乗員がミサイルへ
          * 切り替える時にしまう砲。
          */
         MAIN {
             @Override
-            Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle) {
+            public Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle) {
                 return vehicle.getStats().armament().main();
             }
 
             @Override
-            int rounds(GroundVehicleEntity vehicle) {
+            public int rounds(GroundVehicleEntity vehicle) {
                 return vehicle.getRounds();
             }
 
             @Override
-            void rounds(GroundVehicleEntity vehicle, int rounds) {
+            public void rounds(GroundVehicleEntity vehicle, int rounds) {
                 vehicle.setRounds(rounds);
             }
 
             @Override
-            int reload(GroundVehicleEntity vehicle) {
+            public int reload(GroundVehicleEntity vehicle) {
                 return vehicle.getReload();
             }
 
             @Override
-            void reload(GroundVehicleEntity vehicle, int ticks) {
+            public void reload(GroundVehicleEntity vehicle, int ticks) {
                 vehicle.setReload(ticks);
             }
 
             @Override
-            Vec3 muzzle(GroundVehicleEntity vehicle, int barrel) {
+            public Vec3 muzzle(GroundVehicleEntity vehicle, int barrel) {
                 return vehicle.getMuzzle(barrel, 1.0F);
             }
 
             @Override
-            int barrels(GroundVehicleEntity vehicle) {
+            public int barrels(GroundVehicleEntity vehicle) {
                 return vehicle.getBarrelCount();
             }
 
             @Override
-            String tag() {
+            public String tag() {
                 return "";
             }
 
@@ -116,37 +182,37 @@ public final class BuiltInGun {
          */
         COAXIAL {
             @Override
-            Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle) {
+            public Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle) {
                 return vehicle.getStats().coaxial().gun();
             }
 
             @Override
-            int rounds(GroundVehicleEntity vehicle) {
+            public int rounds(GroundVehicleEntity vehicle) {
                 return vehicle.getCoaxRounds();
             }
 
             @Override
-            void rounds(GroundVehicleEntity vehicle, int rounds) {
+            public void rounds(GroundVehicleEntity vehicle, int rounds) {
                 vehicle.setCoaxRounds(rounds);
             }
 
             @Override
-            int reload(GroundVehicleEntity vehicle) {
+            public int reload(GroundVehicleEntity vehicle) {
                 return vehicle.getCoaxReload();
             }
 
             @Override
-            void reload(GroundVehicleEntity vehicle, int ticks) {
+            public void reload(GroundVehicleEntity vehicle, int ticks) {
                 vehicle.setCoaxReload(ticks);
             }
 
             @Override
-            Vec3 muzzle(GroundVehicleEntity vehicle, int barrel) {
+            public Vec3 muzzle(GroundVehicleEntity vehicle, int barrel) {
                 return vehicle.gunToWorld(vehicle.getStats().coaxial().muzzle(), 1.0F);
             }
 
             @Override
-            String tag() {
+            public String tag() {
                 return "Coax";
             }
 
@@ -156,39 +222,48 @@ public final class BuiltInGun {
             }
         };
 
-        /** この砲がどの兵装ファイルか。積んでいない車両では空。 */
-        abstract Optional<ResourceLocation> weapon(GroundVehicleEntity vehicle);
-
-        abstract int rounds(GroundVehicleEntity vehicle);
-
-        abstract void rounds(GroundVehicleEntity vehicle, int rounds);
-
-        abstract int reload(GroundVehicleEntity vehicle);
-
-        abstract void reload(GroundVehicleEntity vehicle, int ticks);
-
-        /** この砲の弾が出る世界座標。この tick 時点で。 */
-        abstract Vec3 muzzle(GroundVehicleEntity vehicle, int barrel);
-
-        /**
-         * 順番に撃つ砲身の本数。ファイルが別を言わなければ1で、防盾に固定された機銃が2本だったことは
-         * 一度も無い。
-         */
-        int barrels(GroundVehicleEntity vehicle) {
-            return 1;
-        }
-
-        /**
-         * この砲のカウンタが車両のタグ内で何と呼ばれるか。主砲は空文字。主砲のキーは2門目が存在する前に
-         * 書かれた物で、そのまま残してある。古いワールドで保存された戦車が砲弾を持って戻ってくるように。
-         */
-        abstract String tag();
-
         /**
          * この砲が車両のどの架台か。弾種と選択はそちらの言葉で数えられている——弾倉が種類ごとに分かれる
          * のも、切り替えが順に回るのも、砲ではなく架台の性質だ。{@link Magazine} 参照。
          */
         public abstract GroundVehicleEntity.Armament station();
+
+        /**
+         * どちらの砲も車両自身の砲塔で据えられる。同軸機銃が主砲と同じ線へ撃つのは「同軸」であることの
+         * 全部で、主砲がその線を決めている。
+         */
+        @Override
+        public Vec3 bore(GroundVehicleEntity vehicle) {
+            return vehicle.getAimDirection(1.0F);
+        }
+
+        /** 撃つのは運転席の乗員。この2門を持っているのはその1人だけだ。 */
+        @Override
+        @Nullable
+        public LivingEntity crew(GroundVehicleEntity vehicle) {
+            return vehicle.getAviator();
+        }
+
+        @Override
+        @Nullable
+        public ResourceLocation ammunition(GroundVehicleEntity vehicle) {
+            return Magazine.selected(vehicle, this.station());
+        }
+
+        @Override
+        public boolean typed(GroundVehicleEntity vehicle) {
+            return Magazine.typed(vehicle, this.station());
+        }
+
+        @Override
+        public void spend(GroundVehicleEntity vehicle, int rounds) {
+            Magazine.spend(vehicle, this.station(), rounds);
+        }
+
+        @Override
+        public List<ResourceLocation> types(GroundVehicleEntity vehicle) {
+            return Magazine.types(vehicle, this.station());
+        }
     }
 
     /**
@@ -213,6 +288,8 @@ public final class BuiltInGun {
     private int barrel;
     /** 次の発射炎までの残り発数。{@link #FLASH_EVERY} 参照。 */
     private int untilFlash;
+    /** 連射を録った発砲音を、録音の長さに1回へ間引く。{@link FireSoundPacing} 参照。 */
+    private final FireSoundPacing soundPacing = new FireSoundPacing();
 
     public BuiltInGun(GroundVehicleEntity vehicle, Mount mount) {
         this.vehicle = vehicle;
@@ -266,7 +343,7 @@ public final class BuiltInGun {
      */
     @Nullable
     private ResourceLocation ammunition() {
-        return Magazine.selected(this.vehicle, this.mount.station());
+        return this.mount.ammunition(this.vehicle);
     }
 
     /**
@@ -275,7 +352,7 @@ public final class BuiltInGun {
      */
     @Nullable
     public AmmoKind ammoKind() {
-        if (Magazine.typed(this.vehicle, this.mount.station())) {
+        if (this.mount.typed(this.vehicle)) {
             return null;
         }
 
@@ -303,12 +380,12 @@ public final class BuiltInGun {
         // だけ書かれた箱を押し込めば、それがどちらとして入ったのか誰にも言えなくなる。そこは
         // Magazine.load が名指しで受け取る道になっている。
         if (weapon == null || weapon.ammoKind().orElse(null) != kind || offered <= 0
-                || Magazine.typed(this.vehicle, this.mount.station())) {
+                || this.mount.typed(this.vehicle)) {
             return 0;
         }
 
         int perItem = kind.roundsPerItem();
-        int room = (weapon.ammo() - this.mount.rounds(this.vehicle)) / perItem;
+        int room = (this.capacity() - this.mount.rounds(this.vehicle)) / perItem;
         int taken = Math.min(offered, room);
 
         if (taken <= 0) {
@@ -330,11 +407,46 @@ public final class BuiltInGun {
         return this.mount.weapon(this.vehicle).isPresent();
     }
 
-    /** 満載時の弾倉の発数。兵装自身のファイルから。 */
+    /**
+     * 満載時の弾倉の発数。兵装自身のファイルから。
+     *
+     * <p><b>人力装填の砲だけは違う。</b> 牽引砲には弾庫が無い。あるのは薬室1つと、その脇に置かれた弾だけで、
+     * 撃つたびに誰かが1発差し込む。だから {@code hull.crewed} の砲が持てるのは1回の装填分——弾薬アイテム
+     * 1個が何発分かで、砲弾なら1発、機関砲の弾倉なら30発——であり、兵装ファイルが書いた弾庫の大きさは
+     * 「この砲が受け付ける最大」としてしか働かない。{@link #oneLoading} 参照。
+     */
     public int capacity() {
         return this.mount.weapon(this.vehicle)
-                .map(id -> Definitions.weapon(id).ammo())
+                .map(id -> this.vehicle.isCrewed()
+                        ? Math.min(Definitions.weapon(id).ammo(), this.oneLoading())
+                        : Definitions.weapon(id).ammo())
                 .orElse(0);
+    }
+
+    /**
+     * 1回の装填で入る発数。弾薬アイテム1個ぶん。
+     *
+     * <p>弾種を並べた架台では、並べたうちで最も大きい1個ぶんを採る。今選んでいる弾種から取ると、榴弾を
+     * 選んでいる砲へ「1個が2発分」の弾種を差し出した瞬間、空きが足りないという理由で装填できなくなる
+     * ——どの弾種でもちょうど1個は入る、が守りたい規則だ。
+     *
+     * <p>弾種を並べていない架台では、その砲が受け取る汎用の弾薬箱1個ぶん。
+     */
+    private int oneLoading() {
+        int most = 0;
+
+        for (ResourceLocation type : this.mount.types(this.vehicle)) {
+            most = Math.max(most, Definitions.ammunition(type).perItem());
+        }
+
+        if (most > 0) {
+            return most;
+        }
+
+        return this.mount.weapon(this.vehicle)
+                .flatMap(id -> Definitions.weapon(id).ammoKind())
+                .map(AmmoKind::roundsPerItem)
+                .orElse(1);
     }
 
     /** 装填手の所要時間（tick）。兵装の発射速度から。 */
@@ -376,10 +488,10 @@ public final class BuiltInGun {
 
         // 発射炎と音はこのtickの1発目の砲口から。5発ぶんの炎を重ねても明るくなるだけで、5つには見えない。
         Vec3 muzzle = this.mount.muzzle(this.vehicle, this.barrel % barrels);
-        Vec3 bore = this.vehicle.getAimDirection(1.0F);
+        Vec3 bore = this.mount.bore(this.vehicle);
         Vec3 right = across(bore);
         Vec3 up = right.cross(bore).normalize();
-        LivingEntity crew = this.vehicle.getAviator();
+        LivingEntity crew = this.mount.crew(this.vehicle);
         RandomSource random = this.vehicle.getRandom();
 
         double scatter = Math.tan(Math.toRadians(weapon.firing().spread())) * 0.5;
@@ -406,7 +518,7 @@ public final class BuiltInGun {
         this.playFireSound(weapon, weaponId);
 
         // 減るのは撃った弾種の分。弾種を持たない架台では残弾カウンタそのもので、そこも以前と同じ。
-        Magazine.spend(this.vehicle, this.mount.station(), perTick);
+        this.mount.spend(this.vehicle, perTick);
         this.mount.reload(this.vehicle, ticksFor(weapon.firing().roundsPerSecond()));
     }
 
@@ -475,6 +587,10 @@ public final class BuiltInGun {
      * 「誰にこの音を知らせるか」を決めており、戦車砲は32ブロックよりはるかに遠くまで聞こえる。
      */
     private void playFireSound(WeaponDefinition weapon, ResourceLocation weaponId) {
+        if (!this.soundPacing.due(weaponId, weapon, this.vehicle.level().getGameTime())) {
+            return;
+        }
+
         ResourceLocation event = weapon.sound().fire()
                 .orElseGet(() -> weaponId.withPath(WeaponMounts.SOUND_PREFIX + weaponId.getPath()));
 

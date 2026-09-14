@@ -2,9 +2,6 @@ package com.ashvehicles.client;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.GroundVehicleEntity;
-import com.ashvehicles.vehicle.Attitude;
-
-import org.joml.Quaternionf;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.CameraType;
@@ -42,8 +39,8 @@ import net.neoforged.neoforge.client.event.ViewportEvent;
  * あるからだ。砲を真横へ据えれば視界も車体側面越しに回り込む。実物のキューポラと同じだ。機体から取るのは位置だけ
  * で、方向は依然として乗員の物。そもそも砲塔を据えているのがそれだからだ。
  *
- * <p>ただし1つ例外がある。照準キー——右クリック——を押している間は方向も車両から取り、乗員はその同じ点から
- * 砲腔線に沿って覗く。どちらのカメラで押しても同じ場所へ来るし、その間は倒しも掛からない。理由は
+ * <p>照準キー——右クリック——を押している間は、三人称であってもここへ来る。覗くとは接眼部へ寄ることであり、
+ * 押す前にどちらのカメラだったかは関係が無い。方向は依然として乗員の物で、その間は倒しも掛からない。理由は
  * {@link TurretSight} に書いてある。
  */
 @EventBusSubscriber(modid = AshVehicles.MODID, value = Dist.CLIENT)
@@ -78,16 +75,10 @@ public final class GroundVehicleCameraHandler {
             return;
         }
 
-        // 砲手照準を覗いている間は、どちらのカメラでも視界を完全に砲が持つ。乗員の頭は動き続けており、砲塔は
-        // それを追っている。TurretSight 参照。倒す物も無い——倒すのは追跡カメラの都合であって、照準眼鏡は
-        // 砲腔線に沿ってしか覗けない。
+        // 砲手照準を覗いている間は一人称と同じで、視界は乗員の頭のまま。倒しも掛けない——倒すのは追跡カメラの
+        // 都合であって接眼部の都合ではないし、掛ければ砲へ渡している倒し角と食い違う（GroundVehicleInputHandler
+        // の sightTilt もここで0を答える）。TurretSight 参照。
         if (TurretSight.vehicle() == vehicle) {
-            Quaternionf bore = TurretSight.world(vehicle, (float) event.getPartialTick());
-
-            event.setYaw(Attitude.heading(bore));
-            event.setPitch(Attitude.elevation(bore));
-            event.setRoll(Attitude.bank(bore));
-
             return;
         }
 

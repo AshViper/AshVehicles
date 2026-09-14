@@ -90,10 +90,12 @@ public final class VehicleChassis {
     public record Model(float scale, Map<String, String> bones, List<String> roadWheels,
             List<String> steeredWheels, float steerLock, Optional<Track> track, List<String> slavedTurrets,
             List<String> propellers, String propellerAxis, float nozzleRest,
-            float bayTravel, float bayRest, int bayCycleTicks) {
+            float bayTravel, float bayRest, int bayCycleTicks,
+            float rampTravel, int rampCycleTicks) {
         public static final Model DEFAULT =
                 new Model(1.0F, Map.of(), List.of(), List.of(), 0.0F, Optional.empty(), List.of(),
-                        List.of(), "z", 0.0F, DEFAULT_BAY_TRAVEL, 0.0F, DEFAULT_BAY_CYCLE);
+                        List.of(), "z", 0.0F, DEFAULT_BAY_TRAVEL, 0.0F, DEFAULT_BAY_CYCLE,
+                        DEFAULT_RAMP_TRAVEL, DEFAULT_RAMP_CYCLE);
 
         public static final Codec<Model> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.optionalFieldOf("scale", 1.0F).forGetter(Model::scale),
@@ -133,7 +135,18 @@ public final class VehicleChassis {
                 Codec.FLOAT.optionalFieldOf("bay_rest", 0.0F).forGetter(Model::bayRest),
                 // 扉が開ききる（あるいは閉じきる）までの時間。降着装置の cycle_ticks と同じ単位で、
                 // 同じ役目を果たす。
-                Codec.INT.optionalFieldOf("bay_cycle_ticks", DEFAULT_BAY_CYCLE).forGetter(Model::bayCycleTicks)
+                Codec.INT.optionalFieldOf("bay_cycle_ticks", DEFAULT_BAY_CYCLE).forGetter(Model::bayCycleTicks),
+                // 後部ハッチが開ききったときの角度（度）。ランプ（{@code ramp}）がこの角度だけ振り下がり、
+                // その上を塞ぐ扉（{@code ramp_door}）が同じだけ逆——つまり機内へ跳ね上がる。輸送機の後部は
+                // 実物もそう動く。片方しか持たない模型では、持っている方だけが動く。
+                //
+                // 符号は模型の作られ方で決まる。倉の扉とまったく同じ話で、ランプが機内へめり込むなら反転
+                // すること。ヒンジより後ろへ伸びる板は正の rotX で下がる。
+                Codec.FLOAT.optionalFieldOf("ramp_travel", DEFAULT_RAMP_TRAVEL).forGetter(Model::rampTravel),
+                // ランプが開ききる（あるいは閉じきる）までの時間。倉の扉より遅い既定にしてあるのは、
+                // 実物がそうだからだ——爆弾倉の扉は1秒台で開き、貨物ランプは人が歩いて渡れる物として
+                // 十数秒かけて降りる。
+                Codec.INT.optionalFieldOf("ramp_cycle_ticks", DEFAULT_RAMP_CYCLE).forGetter(Model::rampCycleTicks)
         ).apply(instance, Model::new));
 
         /**
@@ -150,6 +163,16 @@ public final class VehicleChassis {
             }
 
             return false;
+        }
+
+        /**
+         * 後部ハッチを持つか。ランプか上扉のどちらか1枚でも名指しされていればそう。
+         *
+         * <p>持たない機体ではハッチの開閉そのものが存在せず、キーを押しても何も起きない。輸送機以外の
+         * ほぼ全部がそれだ。
+         */
+        public boolean hasRamp() {
+            return !this.bone(RAMP).isEmpty() || !this.bone(RAMP_DOOR).isEmpty();
         }
 
         /** この機体に操舵で向きが変わる車輪があるか。 */
@@ -184,6 +207,37 @@ public final class VehicleChassis {
     public static String bayDoor(boolean right, int pair) {
         return (right ? "bay_right" : "bay_left") + (pair <= 1 ? "" : "_" + pair);
     }
+
+    /**
+     * 後部ハッチのランプ——踏んで渡る方の板——の役割名。ヒンジは前縁にあり、後縁が下がる。
+     *
+     * <p>倉の扉と違って左右の対にしていない。輸送機の後部は左右に割れる物ではなく、上下に開く物だからだ。
+     */
+    public static final String RAMP = "ramp";
+
+    /**
+     * ランプの上を塞ぐ扉の役割名。ランプと逆へ——機内の天井側へ——振れる。
+     *
+     * <p>C-130 や C-17 の後部が2枚に分かれているのがこれで、模型が1枚でしか作られていなければ書かなくて
+     * よい。書かなければ動かないだけで、ランプは変わらず動く。
+     */
+    public static final String RAMP_DOOR = "ramp_door";
+
+    /**
+     * ノズルが完全に下を向いたときの角度（度）。
+     *
+     * <p>模型を振る側（{@code AircraftModel}）と当たり判定の箱を振る側（{@code AircraftEntity}）の
+     * 両方が使うので、どちらにも属さないここに置いてある。飛行モデルの {@code vtol.max_angle} とは
+     * 別物だ——あちらは推力が向く角度、こちらは絵と箱が向く角度で、機体ファイルごとに違ってよい前者と
+     * 違ってこちらは模型の作り方の話になる。
+     */
+    public static final float NOZZLE_TRAVEL = 90.0F;
+
+    /** 後部ハッチが開ききる角度の既定値（度）。ランプが水平よりわずかに下、地面へ向く角度。 */
+    public static final float DEFAULT_RAMP_TRAVEL = 65.0F;
+
+    /** ハッチが開ききるまでの既定の時間（tick）。5秒。実物の貨物ランプはおおむねその程度で降りる。 */
+    public static final int DEFAULT_RAMP_CYCLE = 100;
 
     /**
      * 1つのリンクから描画時に組み立てる履帯。
@@ -335,6 +389,15 @@ public final class VehicleChassis {
      * @param engine 使う音イベント。空なら機体名から探す
      * @param gear 機体の脚が作動する音のイベント。空なら機体名から探す。これもループで、脚が動いている
      *             間だけ、音量も再生速度も一定で鳴らす。以下の数値はエンジン専用。地上の物は持たない
+     * @param dive 急降下中に鳴らすサイレンのイベント。<b>ここが空の機体は急降下しても無音であり、それが
+     *             既定である</b>——サイレンは空力で回る装置であって、翼が生む音ではない。書いた機体だけが
+     *             それを積んでいる（Ju 87 の Jericho-Trompete）。ループで、音量と再生速度は降下角と対気
+     *             速度から作られる。{@code client.sound.DiveSounds} 参照
+     * @param turret 砲塔・砲架が動いている間に出す音のイベント。空なら車両名から探し、それも無ければ
+     *               MOD の既定へ落ちる——ただし<b>既定は2つあり、どちらになるかは {@code hull.crewed} が
+     *               決める</b>。電動／油圧の架台（{@code turret.default}）と、人が回すハンドル
+     *               （{@code turret.crank}）は別の音であり、同じ機構ではないからだ。ループで、音量も
+     *               再生速度も架台が今出している速さから作られる。{@code client.sound.TurretSounds} 参照
      * @param volume 全開時、機体の真横での音量。1 が収録そのまま
      * @param idleVolume エンジンが回っている停止時の、上記に対する比率
      * @param pitchMin 停止時の再生速度
@@ -344,13 +407,17 @@ public final class VehicleChassis {
      *              そこまでではない
      */
     public record Sound(Optional<ResourceLocation> engine, Optional<ResourceLocation> gear,
+            Optional<ResourceLocation> dive, Optional<ResourceLocation> turret,
             float volume, float idleVolume, float pitchMin, float pitchMax, float range) {
         public static final Sound DEFAULT =
-                new Sound(Optional.empty(), Optional.empty(), 1.0F, 0.35F, 0.7F, 1.25F, 512.0F);
+                new Sound(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        1.0F, 0.35F, 0.7F, 1.25F, 512.0F);
 
         public static final Codec<Sound> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.optionalFieldOf("engine").forGetter(Sound::engine),
                 ResourceLocation.CODEC.optionalFieldOf("gear").forGetter(Sound::gear),
+                ResourceLocation.CODEC.optionalFieldOf("dive").forGetter(Sound::dive),
+                ResourceLocation.CODEC.optionalFieldOf("turret").forGetter(Sound::turret),
                 Codec.FLOAT.optionalFieldOf("volume", DEFAULT.volume()).forGetter(Sound::volume),
                 Codec.FLOAT.optionalFieldOf("idle_volume", DEFAULT.idleVolume()).forGetter(Sound::idleVolume),
                 Codec.FLOAT.optionalFieldOf("pitch_min", DEFAULT.pitchMin()).forGetter(Sound::pitchMin),

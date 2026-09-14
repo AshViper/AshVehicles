@@ -13,8 +13,8 @@ import software.bernie.geckolib.model.GeoModel;
 /**
  * あらゆる兵装を、飛翔中でも主翼に吊られていても、自身のジオメトリファイルから描く。
  *
- * <p>ここに特定の兵装専用の物は無い。ジオメトリとテクスチャは兵装自身の名前で見つかるので、{@code r60} は
- * 場所を教えられずとも {@code geo/weapon/r60.geo.json} と {@code textures/weapon/r60.png} から描かれる。機体と
+ * <p>ここに特定の兵装専用の物は無い。ジオメトリとテクスチャは兵装自身の名前で見つかるので、{@code r73} は
+ * 場所を教えられずとも {@code geo/weapon/r73.geo.json} と {@code textures/weapon/r73.png} から描かれる。機体と
  * 同じ仕組みであり、新しい兵装に Java は一切要らない——{@code data/} の JSON、モデル、テクスチャだけだ。
  *
  * <p><b>しかも兵装だけではない。</b>機体に吊られる3種——兵装、それを吊る
