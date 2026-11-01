@@ -277,6 +277,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final double LANDING_SETTLE = 0.06;
     /** 着地の衝撃（ブロック/tick）1あたりに車首を揺する角速度（度/tick）。 */
     private static final float LANDING_NOD = 12.0F;
+    /** 宙にある車体の回転が1tickで空気に削られる割合。 */
+    private static final float AIR_SPIN_DRAG = 0.02F;
 
     /** 履帯に沿って地面を読む間隔の上限（ブロック）。ブロック1つの起伏を取りこぼさない細かさ。 */
     private static final double TRACK_SAMPLE_SPACING = 0.9;
@@ -2603,13 +2605,25 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 front = Math.max(front, box.offset().z + half.z);
                 back = Math.min(back, box.offset().z - half.z);
 
-                // 箱の底の四隅 {前へ s, 右へ t, 底の高さ}。箱の +x は左なので t はその符号反転。
+                // 箱の底の格子 {前へ s, 右へ t, 底の高さ}。箱の +x は左なので t はその符号反転。四隅だけを読むと、
+                // 隅と隅の間に入ったブロック（長い車首の下の段、車体側面の下の土手）を見落とし、箱がそこへ
+                // 埋まった。履帯と同じ細かさで底の縁を読む（内側だけに当たる柱は稀で、毎tick読む数が箱の面積で
+                // 増えるのは割に合わない）。四隅は必ず含む。
                 double bottom = box.offset().y - half.y;
+                int alongCount = Math.max(2, Mth.ceil(box.size().z / TRACK_SAMPLE_SPACING) + 1);
+                int acrossCount = Math.max(2, Mth.ceil(box.size().x / TRACK_SAMPLE_SPACING) + 1);
 
-                for (int i = 0; i < 4; i++) {
-                    double s = box.offset().z + ((i & 1) == 0 ? half.z : -half.z);
-                    double t = -(box.offset().x + ((i & 2) == 0 ? half.x : -half.x));
-                    undersides.add(new double[] {s, t, bottom});
+                for (int i = 0; i < alongCount; i++) {
+                    double s = box.offset().z - half.z + box.size().z * i / (alongCount - 1);
+
+                    for (int j = 0; j < acrossCount; j++) {
+                        if (i != 0 && i != alongCount - 1 && j != 0 && j != acrossCount - 1) {
+                            continue;
+                        }
+
+                        double t = -(box.offset().x - half.x + box.size().x * j / (acrossCount - 1));
+                        undersides.add(new double[] {s, t, bottom});
+                    }
                 }
             }
 
@@ -2833,10 +2847,18 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         // 姿勢は追従ではなくばね。settle_rate をばね定数に読み、減衰を臨界より弱くすると、段差を越えた車体は
         // 目標の角度を少し行き過ぎて揺り返す。
-        float stiffness = Mth.clamp(suspension.settleRate(), 0.0F, 1.0F);
-        float damping = 2.0F * Mth.sqrt(stiffness) * SUSPENSION_DAMPING_RATIO;
-        this.hullPitchRate += (targetPitch - this.hullPitch) * stiffness - this.hullPitchRate * damping;
-        this.hullBankRate += (targetBank - this.hullBank) * stiffness - this.hullBankRate * damping;
+        // 宙にある車体を地面へ向けて回す力は無い。ばねは転輪が地面を押しているときだけ働き、宙では離れた
+        // ときの回転がそのまま続く（空気が僅かに削るだけ）。宙でも掛けると、飛んだ車体が見えない手で水平に
+        // 保たれていた。
+        if (!this.onGround() || this.fallSpeed > 0.0) {
+            this.hullPitchRate *= 1.0F - AIR_SPIN_DRAG;
+            this.hullBankRate *= 1.0F - AIR_SPIN_DRAG;
+        } else {
+            float stiffness = Mth.clamp(suspension.settleRate(), 0.0F, 1.0F);
+            float damping = 2.0F * Mth.sqrt(stiffness) * SUSPENSION_DAMPING_RATIO;
+            this.hullPitchRate += (targetPitch - this.hullPitch) * stiffness - this.hullPitchRate * damping;
+            this.hullBankRate += (targetBank - this.hullBank) * stiffness - this.hullBankRate * damping;
+        }
         this.hullPitch = Mth.clamp(this.hullPitch + this.hullPitchRate, -60.0F, 60.0F);
         this.hullBank = Mth.clamp(this.hullBank + this.hullBankRate, -60.0F, 60.0F);
         this.setXRot(-this.hullPitch);

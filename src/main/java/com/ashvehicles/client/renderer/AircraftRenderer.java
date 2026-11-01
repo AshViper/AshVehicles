@@ -81,6 +81,7 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
 
         if (!this.drawingGhost) {
             CockpitDisplays.draw(aircraft, partialTick, poseStack, bufferSource);
+            CockpitDisplays.drawHud(aircraft, partialTick, poseStack, bufferSource);
         }
 
         List<AircraftDefinition.Hardpoint> hardpoints = aircraft.getStats().hardpoints();

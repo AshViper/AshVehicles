@@ -139,10 +139,12 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
      * @param ramp 後部ハッチの開き量。0が閉、1が全開
      * @param sweepGear ここで脚を振るか。アニメーションファイルに脚サイクルを持たない機体用
      * @param throttle スロットル。0がアイドル、1が全開
+     * @param steer 操向輪の切れ角（度）。前が右へ出るのが正
+     * @param wheelSpin 車輪の転がった角（度）
      */
     public record Pose(float elevator, float aileron, float rudder, float gear, float flaps, float nozzle,
             float bay, float ramp, float rotor, float tailRotor, float rotorRate, float tailRotorRate,
-            float wingSweep, boolean sweepGear, float throttle) {
+            float wingSweep, boolean sweepGear, float throttle, float steer, float wheelSpin) {
         /** 機体の舵面が今どうなっているか。 */
         public static Pose of(AircraftEntity aircraft, float partialTick) {
             // 機首を上げると水平尾翼の後縁が下がるので、ピッチ差分を反転している。
@@ -161,7 +163,11 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     aircraft.getTailRotorAngle(1.0F) - aircraft.getTailRotorAngle(0.0F),
                     aircraft.getWingSweep(partialTick),
                     !AircraftAnimations.hasGearCycle(aircraft),
-                    aircraft.getThrottle());
+                    aircraft.getThrottle(),
+                    // 尾輪式の操向輪は後ろにあるので、旋回の外へ前を向ける。
+                    aircraft.getWheelSteer(partialTick)
+                            * (aircraft.getStats().landingGear().groundStance() > 0.0F ? -1.0F : 1.0F),
+                    aircraft.getWheelSpin(partialTick));
         }
 
         /**
@@ -192,7 +198,9 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     now.rotorRate(), now.tailRotorRate(),
                     Mth.lerp(partialTick, previous.wingSweep(), now.wingSweep()),
                     now.sweepGear(),
-                    Mth.lerp(partialTick, previous.throttle(), now.throttle()));
+                    Mth.lerp(partialTick, previous.throttle(), now.throttle()),
+                    Mth.lerp(partialTick, previous.steer(), now.steer()),
+                    Mth.rotLerp(partialTick, previous.wheelSpin(), now.wheelSpin()));
         }
     }
 
@@ -231,6 +239,19 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
             rotateZ(model, setup, AircraftDefinition.Bone.LEFT_GEAR_DOOR, gear * GEAR_DOOR_TRAVEL);
             rotateZ(model, setup, AircraftDefinition.Bone.RIGHT_GEAR_DOOR, -gear * GEAR_DOOR_TRAVEL);
         }
+
+        // 前輪の切れ角と車輪の転がり。どちらも機体の動きから読んだ値で、脚が出ていなければ描かない。符号は
+        // 方向舵と逆——舵面は後縁が、車輪は前が旋回の側へ出る。
+        float down = pose.gear();
+
+        // 切れる脚を名指ししていない機体は前脚ごと切る。
+        String steerBone = setup.bone(AircraftDefinition.Bone.NOSE_STEER);
+
+        rotateY(model, steerBone.isEmpty() ? setup.bone(AircraftDefinition.Bone.NOSE_GEAR) : steerBone,
+                -pose.steer() * down);
+        rotateX(model, setup, AircraftDefinition.Bone.NOSE_WHEEL, pose.wheelSpin());
+        rotateX(model, setup, AircraftDefinition.Bone.LEFT_WHEEL, pose.wheelSpin());
+        rotateX(model, setup, AircraftDefinition.Bone.RIGHT_WHEEL, pose.wheelSpin());
 
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_LEFT, pose.flaps() * FLAP_TRAVEL);
         rotateX(model, setup, AircraftDefinition.Bone.FLAP_RIGHT, pose.flaps() * FLAP_TRAVEL);

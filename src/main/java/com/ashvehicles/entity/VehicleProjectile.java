@@ -1405,6 +1405,11 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      * <p>炎そのものはクライアントのレンダラーが形状で描く（{@code AfterburnerPlume.motor}）。以前はここで炎の
      * 粒を撒いていたが、1tickに数十ブロック進むミサイルでは粒が点線になり、点火直後の短い間しか柱に見えなかった。
      */
+    /** 発射からの経過（tick、補間込み）。両側で同じ速さで進む {@link #age} から。 */
+    public float flightTime(float partialTick) {
+        return this.age + partialTick;
+    }
+
     public double ignitionFlare(float partialTick) {
         return 1.0 + (IGNITION_FLARE - 1.0) * Math.max(0.0, 1.0 - (this.age + partialTick) / IGNITION_TICKS);
     }

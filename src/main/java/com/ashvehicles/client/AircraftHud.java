@@ -7,6 +7,7 @@ import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.item.HmdItem;
 import com.ashvehicles.sensor.Contact;
 import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.sensor.Threat;
@@ -195,34 +196,55 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         // 先に、窓の外に合わせて描かれる印。水平線もラダーも照準も、そこに在る物と同じ場所に乗っている
         // ことに意味があるので、大きさは本体の座標系のまま動かさない。{@link HudScale} 参照。
-        int[] path = speed < 0.05 ? null : project(minecraft, velocity.scale(1.0 / speed),
-                focalLength(minecraft, graphics), centreX, centreY);
+        //
+        // <p>HMD を被っていれば、全部が頭に付いて来る——中央の姿勢・マーク・ロック枠も、B スコープと警戒受信機
+        // も、計器も画面いっぱいに出る。被っていなければ、一人称で残るのはコクピットの中のガラス板 1 枚、つまり
+        // HUD だけだ。照準・数値・警告・着弾表示は MFD と同じく模型の一部としてその板に描かれ、首を振れば板は
+        // 視界の外へ出る。{@link HmdItem}・{@link CockpitDisplays#drawHud} 参照。
+        boolean hmd = HmdItem.isWorn(minecraft.player);
 
-        drawAttitude(graphics, attitude, centreX, centreY, path);
-        drawMarkers(graphics, minecraft, aircraft, attitude, velocity, speed, centreX, centreY);
-        drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
-        drawLock(graphics, minecraft, aircraft, partialTick, centreX, centreY);
-        drawHMDCues(graphics, minecraft, aircraft, partialTick, centreX, centreY);
-        drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
+        if (hmd) {
+            int[] path = speed < 0.05 ? null : project(minecraft, velocity.scale(1.0 / speed),
+                    focalLength(minecraft, graphics), centreX, centreY);
 
-        // 次に計器。こちらは外の何にも対応していない——読む物であって、見る物の上に乗る物ではない——ので
-        // 1段小さく描き、その分だけ画面を空ける。
+            drawAttitude(graphics, attitude, centreX, centreY, path);
+            drawMarkers(graphics, minecraft, aircraft, attitude, velocity, speed, centreX, centreY);
+            drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
+            drawLock(graphics, minecraft, aircraft, partialTick, centreX, centreY);
+            drawHMDCues(graphics, minecraft, aircraft, partialTick, centreX, centreY);
+            drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
+
+            drawInstruments(graphics, minecraft, aircraft, attitude, velocity, speed);
+            RadarDisplay.draw(graphics, minecraft.font, aircraft);
+        } else if (!minecraft.options.getCameraType().isFirstPerson()) {
+            // 三人称にはコクピットが無く、覗き込むガラスも無い。照準と計器は画面に置いたまま描く。
+            drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
+            drawBombSight(graphics, minecraft, aircraft, centreX, centreY);
+            drawInstruments(graphics, minecraft, aircraft, attitude, velocity, speed);
+        }
+        // 一人称で HMD が無ければ、画面には何も描かない。照準・数値・警告・着弾表示はコクピットの中のガラス板へ、
+        // MFD と同じく模型の一部として描かれる。{@link CockpitDisplays#drawHud} 参照。
+
+        // 射出ハンドルの目盛りはガラスに載せない。座席を引く者がどちらを向いていても見えなければならない。
         HudScale.push(graphics);
+        drawEject(graphics, minecraft.font, HudScale.width(graphics) / 2, HudScale.height(graphics) / 2);
+        HudScale.pop(graphics);
+    }
 
-        int panelCentreX = HudScale.width(graphics) / 2;
-        int panelCentreY = HudScale.height(graphics) / 2;
+    /** 外の何にも対応していない、読むための計器——数値・下の両隅の枠・警告・着弾表示。1段小さく描き、その分だけ画面を空ける。 */
+    private static void drawInstruments(GuiGraphics graphics, Minecraft minecraft, AircraftEntity aircraft,
+            Quaternionf attitude, Vec3 velocity, double speed) {
+        HudScale.push(graphics);
 
         drawNumbers(graphics, minecraft.font, aircraft, attitude, velocity, speed);
         drawPanels(graphics, minecraft, aircraft, attitude, velocity, speed);
-        drawCaution(graphics, minecraft.font, aircraft, attitude, velocity, speed, panelCentreX);
-        drawEject(graphics, minecraft.font, panelCentreX, panelCentreY);
+        drawCaution(graphics, minecraft.font, aircraft, attitude, velocity, speed, HudScale.width(graphics) / 2);
 
         HudScale.pop(graphics);
 
         // 直近の着弾があれば、その結果。戦車乗員が得るのと同じ計器で、理由も同じだ。空から機関砲を撃つ距離では、
-        // 当たった連射と外れた連射は照準の後ろからは見分けが付かない。この2つは自分で縮むので外に置く。
+        // 当たった連射と外れた連射は照準の後ろからは見分けが付かない。これは自分で縮む。
         HitReadout.draw(graphics, minecraft.font);
-        RadarDisplay.draw(graphics, minecraft.font, aircraft);
     }
 
     /**
@@ -1005,7 +1027,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /** 今の構え。選んでいる兵装の種類から。何も選んでいなければ航法。 */
-    private static String mode(AircraftEntity aircraft) {
+    static String mode(AircraftEntity aircraft) {
         WeaponDefinition weapon = aircraft.getWeapons().selectedWeapon();
 
         if (weapon == null) {
@@ -1379,6 +1401,32 @@ public final class AircraftHud implements LayeredDraw.Layer {
      */
     private static void drawCaution(GuiGraphics graphics, Font font, AircraftEntity aircraft,
             Quaternionf attitude, Vec3 velocity, double speed, int centreX) {
+        String text = caution(aircraft, attitude, velocity, speed);
+
+        if (text == null) {
+            return;
+        }
+
+        int colour = WARNING;
+        int width = font.width(text) + 26;
+        int left = centreX - width / 2;
+        int top = 46;
+
+        graphics.fill(left, top, left + width, top + 14, 0xB0000000);
+        graphics.fill(left, top, left + width, top + 1, colour);
+        graphics.fill(left, top + 13, left + width, top + 14, colour);
+        graphics.fill(left, top, left + 1, top + 14, colour);
+        graphics.fill(left + width - 1, top, left + width, top + 14, colour);
+
+        bang(graphics, left + 7, top + 3, colour);
+        graphics.drawString(font, text, left + 20, top + 4, colour, false);
+    }
+
+    /**
+     * 今出すべき警告の文。無ければ、またはミサイル警報の点滅が消えている瞬間なら null。画面の計器と HUD のガラス板
+     * （{@link CockpitDisplays#drawHud}）が同じ1件を出すように、選ぶのはここ1か所。
+     */
+    static String caution(AircraftEntity aircraft, Quaternionf attitude, Vec3 velocity, double speed) {
         float stallAngle = aircraft.getStats().wing().stallAngle();
         boolean stalled = speed > 0.05 && !aircraft.onGround() && !aircraft.isHovering()
                 && Math.abs(angleOfAttack(attitude, velocity, speed)) > stallAngle;
@@ -1401,28 +1449,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
         } else if (aircraft.fuelSetup().fitted() && aircraft.getFuelFraction() <= BINGO_FUEL) {
             text = "BINGO FUEL";
         } else {
-            return;
+            return null;
         }
 
         // 点滅させるのは撃たれているときだけ。動く物は視野の端でも拾えるが、拾わせる価値があるのは、
         // 読む前に操縦桿を倒すべき1件だけだ。
         if (threat == Threat.Kind.MISSILE && (aircraft.tickCount % 10) < 4) {
-            return;
+            return null;
         }
 
-        int colour = WARNING;
-        int width = font.width(text) + 26;
-        int left = centreX - width / 2;
-        int top = 46;
-
-        graphics.fill(left, top, left + width, top + 14, 0xB0000000);
-        graphics.fill(left, top, left + width, top + 1, colour);
-        graphics.fill(left, top + 13, left + width, top + 14, colour);
-        graphics.fill(left, top, left + 1, top + 14, colour);
-        graphics.fill(left + width - 1, top, left + width, top + 14, colour);
-
-        bang(graphics, left + 7, top + 3, colour);
-        graphics.drawString(font, text, left + 20, top + 4, colour, false);
+        return text;
     }
 
     /** 三角の中に感嘆符。字ではなく形で描くのは、この計器のフォントに在るとは限らないからだ。 */
@@ -1464,7 +1500,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /** 特定の兵装を積む全ステーションの残弾合計。 */
-    private static int ammoOf(AircraftEntity aircraft, ResourceLocation weapon) {
+    static int ammoOf(AircraftEntity aircraft, ResourceLocation weapon) {
         return aircraft.getWeapons().ammoOf(weapon);
     }
 
@@ -1481,7 +1517,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * アイテムを持たないので言語ファイルにも無く、そこは今までと1文字も変わらない。
      * {@code GroundVehicleHud.roundName} が弾種に対して同じことをしている。
      */
-    private static String name(ResourceLocation weapon) {
+    static String name(ResourceLocation weapon) {
         String key = "item." + weapon.getNamespace() + "." + weapon.getPath();
         String text = Component.translatable(key).getString();
 
@@ -1494,7 +1530,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * 主翼が気流に対して成す角。機体から読まずここで求めるのは、空力を回すのが操縦中のクライアントだけだからだ。搭乗者を
      * 含む他の全クライアントは、姿勢と機体の進行方向からこれに辿り着くしかない。
      */
-    private static float angleOfAttack(Quaternionf attitude, Vec3 velocity, double speed) {
+    static float angleOfAttack(Quaternionf attitude, Vec3 velocity, double speed) {
         if (speed < 1.0E-4) {
             return 0.0F;
         }

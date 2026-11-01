@@ -4,7 +4,7 @@
   "ammo": 800,
   "gun_class": "autocannon",
   "firing": {
-    "rounds_per_second": 13.3,
+    "rounds_per_second": 7.5,
     "spread": 0.9
   },
   "projectile": {

@@ -15,7 +15,7 @@
     "gravity": 0.0245,
     "range": 4000.0,
     "explosion": 11,
-    "blast": 300.0,
+    "blast": 600.0,
     "tracer": "7C806E",
     "trail": false
   },

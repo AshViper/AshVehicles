@@ -14,6 +14,7 @@ import org.joml.Vector3f;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.DesignationEntity;
+import com.ashvehicles.item.HmdItem;
 import com.ashvehicles.sensor.Contact;
 import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.sensor.Threat;
@@ -27,6 +28,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.LightTexture;
@@ -188,6 +190,233 @@ public final class CockpitDisplays {
         quads = null;
         buffers = null;
         font = null;
+    }
+
+    // ---- HUD ----
+
+    /** HUD のガラス板の大きさ（ブロック）。実機のコンバイナーと同じく、目の前で視角 20 度余り。 */
+    private static final float HUD_WIDTH = 0.24F;
+    private static final float HUD_HEIGHT = 0.2F;
+    /** 板を置く場所。目（{@code camera.cockpit}）から前へ、そして少し下へ。 */
+    private static final float HUD_AHEAD = 0.55F;
+    private static final float HUD_DROP = 0.05F;
+    /** ガラスの色。透けて外が見える程度にだけ緑が乗る。 */
+    private static final int HUD_TINT = 0x183BE86A;
+    private static final int HUD_EDGE = 0x603BE86A;
+
+    /** 目の位置を原点に、機体の描画座標系からガラスの画素へ戻す変換。描いている間だけ持つ。 */
+    private static Matrix4f toGlass;
+
+    /**
+     * HUD。MFD と同じく、一人称で乗っている機体のコクピットの中にガラス板を1枚置き、その上へ描く。
+     *
+     * <p>HMD を被っている者には描かない。あちらは同じ物を全部頭に付けて画面に出している（{@code AircraftHud}）ので、
+     * 板にも描けば重なって二重に見える。
+     *
+     * <p>板は模型の一部で、首を振れば視界の外へ出る。照準・ボアサイト・飛行経路マーカーは実機の HUD と同じく
+     * コリメートされている——板の上の点ではなく「目からその方向へ伸ばした線が板を通る所」に描くので、窓の外の
+     * 物と重なって見え、頭を動かしても外とずれない。数字と警告と着弾表示は板に貼り付いた文字。
+     *
+     * <p>板の位置は定義ファイルに書かない。目（{@code camera.cockpit}）の前に既定の距離で置く。どの機体でも
+     * 目の前には風防があるので、模型を測らずに全機へ同じ規則で置ける。
+     */
+    public static void drawHud(AircraftEntity aircraft, float partialTick, PoseStack poseStack,
+            MultiBufferSource bufferSource) {
+        Minecraft minecraft = Minecraft.getInstance();
+
+        if (minecraft.player == null || minecraft.player.getVehicle() != aircraft
+                || !minecraft.options.getCameraType().isFirstPerson() || HmdItem.isWorn(minecraft.player)) {
+            return;
+        }
+
+        Vec3 eye = aircraft.getStats().camera().cockpit();
+        VehicleChassis.Display glass = new VehicleChassis.Display(
+                new Vec3(eye.x, eye.y - HUD_DROP, eye.z + HUD_AHEAD), HUD_WIDTH, HUD_HEIGHT, 0.0F, 0.0F,
+                "hud", List.of());
+        int height = heightOf(glass);
+        Matrix4f frame = frame(glass, height);
+        Quaternionf attitude = aircraft.getAttitude(partialTick);
+
+        Camera camera = minecraft.gameRenderer.getMainCamera();
+        Vec3 from = camera.getPosition();
+        Vec3 at = aircraft.getPosition(partialTick);
+        toGlass = new Matrix4f()
+                .translate((float) (at.x - from.x), (float) (at.y - from.y), (float) (at.z - from.z))
+                .rotate(attitude)
+                .rotateY((float) Math.PI)
+                .mul(frame)
+                .invert();
+
+        font = minecraft.font;
+        buffers = bufferSource;
+
+        poseStack.pushPose();
+        poseStack.mulPose(attitude);
+        poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
+        matrix = new Matrix4f(poseStack.last().pose()).mul(frame);
+        heightPx = height;
+        layer = 0.0F;
+
+        fill(0, 0, PX, heightPx, HUD_TINT);
+        outline(0, 0, PX, heightPx, HUD_EDGE);
+        hud(aircraft, attitude, partialTick, from);
+
+        poseStack.popPose();
+
+        toGlass = null;
+        matrix = null;
+        quads = null;
+        buffers = null;
+        font = null;
+    }
+
+    /** HUD の中身。 */
+    private static void hud(AircraftEntity aircraft, Quaternionf attitude, float partialTick, Vec3 camera) {
+        Vec3 velocity = aircraft.getVelocity();
+        double speed = velocity.length();
+
+        // コリメートされた印。外の方向に重なる物から先に。
+        float[] nose = through(Attitude.nose(attitude));
+
+        if (nose != null) {
+            line(nose[0] - 6, nose[1], nose[0] - 2, nose[1], GREEN);
+            line(nose[0] + 2, nose[1], nose[0] + 6, nose[1], GREEN);
+            line(nose[0], nose[1] - 1, nose[0], nose[1] + 1, GREEN);
+        }
+
+        if (speed >= 0.05) {
+            float[] path = through(velocity.scale(1.0 / speed));
+
+            if (path != null) {
+                ring(path[0], path[1], 3.0F, GREEN);
+                line(path[0] - 7, path[1], path[0] - 3, path[1], GREEN);
+                line(path[0] + 3, path[1], path[0] + 7, path[1], GREEN);
+                line(path[0], path[1] - 3, path[0], path[1] - 6, GREEN);
+            }
+        }
+
+        WeaponMounts weapons = aircraft.getWeapons();
+        WeaponDefinition weapon = weapons.selectedWeapon();
+
+        if (weapon != null && GunSight.aims(weapon)) {
+            GunSight.Solution sight = GunSight.solve(aircraft);
+
+            if (sight != null) {
+                Vec3 pipper = sight.bore().muzzle(partialTick)
+                        .add(sight.bore().direction(partialTick).scale(sight.pipperRange()))
+                        .add(sight.pipperDrop());
+                float[] spot = through(pipper.subtract(camera));
+
+                if (spot != null) {
+                    int colour = weapons.selectedAmmo() > 0 ? GREEN : WARNING;
+
+                    ring(spot[0], spot[1], 6.0F, colour);
+                    fill(spot[0] - 0.5F, spot[1] - 0.5F, spot[0] + 0.5F, spot[1] + 0.5F, colour);
+                }
+            }
+        }
+
+        if (weapon != null && weapon.isDropped() && weapons.selectedAmmo() > 0) {
+            BombSight.Solution fall = BombSight.solve(aircraft, weapon);
+            float[] spot = fall == null ? null : through(fall.point().subtract(camera));
+
+            if (spot != null) {
+                int colour = fall.estimated() ? DIM : GREEN;
+
+                ring(spot[0], spot[1], 4.0F, colour);
+                line(spot[0] - 7, spot[1], spot[0] - 4, spot[1], colour);
+                line(spot[0] + 4, spot[1], spot[0] + 7, spot[1], colour);
+            }
+        }
+
+        // 板に貼り付いた文字。左に速度、右に高度、上に方位、下に構えと兵装。
+        int kmh = (int) Math.round(speed * 20.0 * 3.6);
+        int climb = (int) Math.round(velocity.y * 20.0);
+        int middle = heightPx / 2;
+
+        hudBox(String.valueOf(kmh), 3, middle - 6, false);
+        hudBox(String.valueOf(Math.round(aircraft.getY())), PX - 3, middle - 6, true);
+
+        float load = aircraft.getLoadFactor(velocity);
+
+        label(String.format("α %.0f", AircraftHud.angleOfAttack(attitude, velocity, speed)), 3, middle + 9, GREEN);
+        label(String.format("G %.1f", load), 3, middle + 17, Math.abs(load) > 7.0F ? WARNING : GREEN);
+
+        String vs = String.format("VS %+d", climb);
+        String fuel = String.format("F %d%%", Math.round(aircraft.getFuelFraction() * 100.0F));
+
+        label(vs, PX - 3 - font.width(vs) * LABEL, middle + 9, climb < -15 ? WARNING : GREEN);
+        label(fuel, PX - 3 - font.width(fuel) * LABEL, middle + 17, GREEN);
+
+        centred(String.format("%03d", heading(attitude)), PX / 2, 3, GREEN);
+
+        label(AircraftHud.mode(aircraft), 3, heightPx - 9, GREEN);
+
+        if (weapon != null) {
+            String name = shorten(AircraftHud.name(weapons.selected()), 14) + " " + weapons.selectedAmmo();
+
+            label(name, PX - 3 - font.width(name) * LABEL, heightPx - 9,
+                    weapons.selectedAmmo() > 0 ? GREEN : WARNING);
+        }
+
+        String caution = AircraftHud.caution(aircraft, attitude, velocity, speed);
+
+        if (caution != null) {
+            centred(caution, PX / 2, 14, WARNING);
+        }
+
+        // 直近の着弾。画面の右上と同じ行を、板の下の方へ新しい順に積む。
+        float[] row = {heightPx - 20.0F};
+
+        HitCallout.forEachLive((text, colour) -> {
+            if (row[0] > middle + 26) {
+                label(text, PX / 2.0F - font.width(text) * LABEL / 2.0F, row[0], colour);
+                row[0] -= 7.0F;
+            }
+        });
+    }
+
+    /** 目からこの方向へ伸ばした線がガラスを通る画素。通らない（後ろ向き・板の外）なら null。 */
+    private static float[] through(Vec3 direction) {
+        Vector3f origin = toGlass.transformPosition(new Vector3f());
+        Vector3f along = toGlass.transformDirection(
+                new Vector3f((float) direction.x, (float) direction.y, (float) direction.z));
+
+        if (Math.abs(along.z) < 1.0E-7F) {
+            return null;
+        }
+
+        float t = -origin.z / along.z;
+        float x = origin.x + along.x * t;
+        float y = origin.y + along.y * t;
+
+        if (t <= 0.0F || x < 2.0F || x > PX - 2.0F || y < 2.0F || y > heightPx - 2.0F) {
+            return null;
+        }
+
+        return new float[] {x, y};
+    }
+
+    /** 細い線で描く環。 */
+    private static void ring(float x, float y, float radius, int colour) {
+        int steps = 16;
+
+        for (int i = 0; i < steps; i++) {
+            double a = Math.PI * 2.0 * i / steps;
+            double b = Math.PI * 2.0 * (i + 1) / steps;
+
+            line(x + (float) (Math.cos(a) * radius), y + (float) (Math.sin(a) * radius),
+                    x + (float) (Math.cos(b) * radius), y + (float) (Math.sin(b) * radius), colour);
+        }
+    }
+
+    /** 数字の箱。{@code fromRight} なら x は右端。 */
+    private static void hudBox(String value, int x, int y, boolean fromRight) {
+        int width = 26;
+        int left = fromRight ? x - width : x;
+
+        outline(left, y, left + width, y + 12, GREEN);
+        text(value, left + width - 3 - font.width(value), y + 2, GREEN);
     }
 
     /** 画面の縦の画素数。横は常に {@link #PX}。 */

@@ -192,6 +192,15 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
         public static final String LEFT_GEAR_DOOR = "left_gear_door";
         public static final String RIGHT_GEAR_DOOR = "right_gear_door";
         /**
+         * 地上で切れる前輪の脚。機体の鉛直軸（Y）回りに、旋回の向きへ振れる。前輪の脚と同じボーンを名指しして
+         * よく、その場合は脚ごと切れる。ピボットは脚の付け根に置く。
+         */
+        public static final String NOSE_STEER = "nose_steer";
+        /** 転がる車輪そのもの。左右軸（X）回りに、地面の上を進んだ距離だけ回る。脚とは別のボーンが要る。 */
+        public static final String NOSE_WHEEL = "nose_wheel";
+        public static final String LEFT_WHEEL = "left_wheel";
+        public static final String RIGHT_WHEEL = "right_wheel";
+        /**
          * 垂直離着陸が可能な機体のエンジンノズル。ホバリングへ移行する際に下へ振れる。揚力方式のために開く
          * それ以外の物——ファン扉、ロールポスト、補助インテーク——は1つの角度ではなく一連の動きなので、機体の
          * アニメーションファイルに {@code vtol_open} / {@code vtol_closed} として置く。

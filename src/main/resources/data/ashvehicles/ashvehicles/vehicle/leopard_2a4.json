@@ -3014,8 +3014,8 @@
     }
   },
   "powertrain": {
-    "max_speed": 0.944,
-    "reverse_speed": 0.431,
+    "max_speed": 0.629,
+    "reverse_speed": 0.287,
     "acceleration": 0.004,
     "braking": 0.03,
     "rolling_resistance": 0.003,

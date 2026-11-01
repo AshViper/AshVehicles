@@ -14,6 +14,7 @@ import org.joml.Quaternionf;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.client.model.VehicleGeoModel;
+import com.ashvehicles.item.VehicleItem;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.platform.Lighting;
@@ -26,6 +27,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.FogRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -78,6 +81,9 @@ public final class VehicleIcons {
      */
     private static final float DEPTH_MARGIN = 1.0F;
 
+    /** 1フレームで撮影に使ってよい時間。少なくとも1枚は撮る。 */
+    private static final long BUDGET_NANOS = 6_000_000L;
+
     private static final Map<ResourceLocation, ResourceLocation> TAKEN = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> WAITING = ConcurrentHashMap.newKeySet();
     private static final Set<ResourceLocation> FAILED = ConcurrentHashMap.newKeySet();
@@ -115,12 +121,33 @@ public final class VehicleIcons {
      * 他人の状態が無い時点だ。
      */
     public static void takeNext() {
-        ResourceLocation vehicle = QUEUE.poll();
+        // 1フレーム1枚では機体で一杯のタブが埋まるのに数秒かかって見えた。時間の予算の内で撮れるだけ撮る。
+        long deadline = System.nanoTime() + BUDGET_NANOS;
 
-        if (vehicle == null) {
-            return;
+        do {
+            ResourceLocation vehicle = QUEUE.poll();
+
+            if (vehicle == null) {
+                return;
+            }
+
+            takeOne(vehicle);
+        } while (System.nanoTime() < deadline);
+    }
+
+    /**
+     * 全ての機体アイテムの絵を撮影待ちに積む。ワールドへ入った時点で呼ぶので、クリエイティブタブを開く頃には
+     * 撮り終わっている。
+     */
+    public static void prepareAll() {
+        for (Item item : BuiltInRegistries.ITEM) {
+            if (item instanceof VehicleItem<?> vehicle) {
+                of(vehicle.vehicle());
+            }
         }
+    }
 
+    private static void takeOne(ResourceLocation vehicle) {
         WAITING.remove(vehicle);
 
         try {
