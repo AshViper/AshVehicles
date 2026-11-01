@@ -2580,8 +2580,7 @@
     "control_lag": 0.14,
     "weathervane": 2.5,
     "alpha_limit": 1,
-    "aero_damping": 0.05,
-    "thrust_vectoring": 1
+    "aero_damping": 0.05
   },
   "airframe": {
     "nation": "se",

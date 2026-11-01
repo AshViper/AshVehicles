@@ -2972,8 +2972,7 @@
     "control_lag": 0.24,
     "weathervane": 3,
     "alpha_limit": 0.8,
-    "aero_damping": 0.06,
-    "thrust_vectoring": 1
+    "aero_damping": 0.06
   },
   "airframe": {
     "nation": "ru",

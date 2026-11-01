@@ -448,27 +448,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
     /** 迎角リミッターが効き始める点。保持する限界値に対する割合。 */
     private static final float ALPHA_LIMITER_BITE = 0.6F;
-
-    /**
-     * 失速を越え、推力偏向が機首を握っているとき、水平尾翼の復元のうち失われる割合。1にしないのは、尾翼が
-     * 完全に黙るとノズルを戻した後も機体が気流へ戻らず、パイロットが自分で引き戻すしかなくなるから。
-     */
-    private static final double POST_STALL_TAIL_LOSS = 0.85;
-
-    /**
-     * 推力偏向がファイルの値どおりに効く動圧の上限（失速速度での動圧を1とした値）。12 は失速速度の約3.5倍、
-     * F-22 や Su-57 で 400 km/h 前後——コブラに入る速度。それより速いと動圧に反比例して薄れる。
-     */
-    private static final double NOZZLE_REFERENCE_PRESSURE = 12.0;
-
-    /**
-     * 操縦桿を一杯に引いている間、1G のトリムへ戻す尾翼の復元のうち黙る割合。1にしないのは、引いた分の
-     * 手応え——離せば機首が戻る感触——を少し残すため。
-     */
-    private static final double HELD_TRIM = 0.9;
-
-    /** 失速角の手前のどれだけの幅（失速角に対する割合）で {@link #HELD_TRIM} を戻し始めるか。 */
-    private static final double HELD_TRIM_FADE = 0.25;
     /**
      * 昇降舵が機首を押さえる力がフェードインし始める、ローテーション速度に対する割合。滑走の終盤で機体が軽く
      * なる形にし、操縦桿が段階的に急に効き出さないようにする。
@@ -3106,27 +3085,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 低速域の救済まで薄くなり、最も操縦を必要とする場面が最も効かなくなる。
         float control = Math.max(authority / damping * CONTROL_SCALE, TURN_RATE_FLOOR);
 
-        // 推力偏向。ノズルは空気ではなく排気を曲げるので、効きは動圧ではなくエンジンの実出力に比例し、気流の
-        // 減衰も受けない。昇降舵と方向舵の軸だけ——ノズルは補助翼の代わりにはならない。失速後の機体を
-        // 機首から回せるのはこれだけで、クルビットとコブラはここから来る。
-        //
-        // 舵の効きに<em>足す</em>。大きい方を取っていた頃は、コブラの速度（400 km/h 前後）では空力が既に勝って
-        // いてノズルが何も足さず、機首の回る速さ（約1.7度/tick）が主翼が飛行経路を曲げる速さ（約3.3度/tick）に
-        // 届かなかった——迎角は失速の手前で止まり、機体はただ宙返りした。コブラは機首が経路を追い越して初めて
-        // 起きる。
-        //
-        // ノズルの力は一定で、空力は動圧と共に伸びるので、ノズルの比重は動圧に反比例して下がる
-        // （NOZZLE_REFERENCE_PRESSURE）。足したままだと 900 km/h でも機首が4倍速で回り、主翼を折る。
-        float vectored = handling.thrustVectoring() * this.thrustLevel
-                * (float) Math.min(1.0, NOZZLE_REFERENCE_PRESSURE / Math.max(pressure, 1.0E-6));
-        float steering = control + vectored;
-
-        // 空力の効きに対してノズルが占める割合。1に近いほど機首を握っているのは尾翼ではなくノズルで、迎角
-        // リミッターも尾翼の復元もそれだけ道を譲る。速い機体では空力が勝つので、普段の操縦感は変わらない。
-        float nozzleShare = vectored <= 0.0F
-                ? 0.0F
-                : Mth.clamp(vectored / Math.max(aeroAuthority / damping * CONTROL_SCALE, 1.0E-3F), 0.0F, 1.0F);
-
         float previousYRot = this.getYRot();
         float weathervaneYaw = 0.0F;
         float weathervanePitch = 0.0F;
@@ -3137,7 +3095,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         float lag = Mth.clamp(handling.controlLag(), 0.02F, 1.0F);
 
         float commandedPitch = this.limitToWing(
-                this.input.pitch() * handling.pitchRate() * steering, Math.max(lifting, nozzleShare));
+                this.input.pitch() * handling.pitchRate() * control, lifting);
 
         // 接地中は、水平尾翼を持ち上げるだけの空気が流れるまで機首は上がらない。その速度こそ離陸を離陸たらしめ
         // る。機体は走り、操縦桿はどれだけ引いても何も起きず、そして数ノットのうちに機首が軽くなって上がる——その
@@ -3166,7 +3124,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
         this.rollVelocity += (commandedRoll - this.rollVelocity) * lag;
-        this.yawVelocity += (this.input.yaw() * handling.yawRate() * steering - this.yawVelocity) * lag;
+        this.yawVelocity += (this.input.yaw() * handling.yawRate() * control - this.yawVelocity) * lag;
 
         // 前輪操舵。これはまったく別物で、機体が駐機場から自走で向きを変えられる理由だ。地上の車輪は垂直尾翼を
         // 流れる空気の速さを気にしないので、気流が与える操舵権限を迂回し、操縦ラグを通さず即座に応える。方向舵が
@@ -3255,23 +3213,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             double drag = parasitic + wing.inducedDrag() * liftCoefficient * liftCoefficient;
             forces = forces.add(flow.scale(-drag * speed * speed * density));
 
-            // 失速の先では主翼は翼ではなく板になる。上の揚力係数は失速角の2倍で0へ落ちるので、それだけだと
-            // 迎角90度の機体は揚力も誘導抗力も失い、腹で空気を受けているのに抵抗が減る——コブラで速度が
-            // 抜けず、クルビットは弧ではなく直線になる。板が受ける力は板の法線に沿い、気流の法線成分の2乗に
-            // 比例する。それを分解すれば迎角45度で最大の揚力と、90度で最大の抗力が自ずと出る。
-            //
-            // 失速を越えた分だけ入れる。失速角までは今まで通り翼として飛ぶので、普段の飛行は何も変わらない。
-            double plate = Mth.clamp((Math.abs(this.angleOfAttack) - wing.stallAngle())
-                    / Math.max(wing.stallAngle(), 1.0F), 0.0, 1.0);
-
-            if (plate > 0.0) {
-                double normal = -flow.dot(up);
-                double peak = wing.liftCoefficient(wing.stallAngle());
-
-                forces = forces.add(up.scale(normal * Math.abs(normal) * wing.lift() * peak * liftGain
-                        * plate * speed * speed * density));
-            }
-
             this.checkStructuralLoad(motion);
 
             // 垂直尾翼は機首を飛行経路へ引き戻す。方向舵同様、機体自身の垂直軸周りに働くので、背面では機体
@@ -3303,31 +3244,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
                 weathervanePitch = (float) (Math.sin(Math.toRadians(trim - this.angleOfAttack))
                         * handling.weathervane() * aeroAuthority / damping);
-
-                // 引いている間、尾翼は引いた迎角を新しいトリムとして受け入れる。実機の昇降舵はトリム迎角そのもの
-                // を動かす舵であり、尾翼はパイロットが据えた迎角を守るのであって、1G の迎角へ戻そうと争いはしない。
-                // 争わせると操縦桿の効きの大半が尾翼に食われ、F-16 が 430 km/h で 5G、580 km/h でも 7G しか
-                // 引けなかった——ハイG旋回が成立しない。
-                //
-                // 主翼が翼として働いている間だけ。失速角に近づくにつれ戻し、失速の先では従来通り尾翼が機首を
-                // 気流へ引き戻す。そこで黙らせると、引きっぱなしの失速機は抜け出す手段を失う。
-                if (weathervanePitch * this.input.pitch() < 0.0F) {
-                    double stall = Math.max(wing.stallAngle(), 1.0F);
-                    // ノズルが機首を握っている機体は失速の先でも同じ。失速角で尾翼が全力に戻ると、そこが壁になって
-                    // コブラが失速角で止まる。
-                    double inside = Math.max(Mth.clamp(
-                            (stall - Math.abs(this.angleOfAttack)) / (stall * HELD_TRIM_FADE), 0.0, 1.0), nozzleShare);
-
-                    weathervanePitch *= (float) (1.0 - Math.abs(this.input.pitch()) * HELD_TRIM * inside);
-                }
-
-                // 失速の先で、ノズルが機首を握っている分だけ尾翼は黙る。主翼の後流に沈んだ水平尾翼は実機でも
-                // ほとんど効かず、ここで全力で引き戻すとノズルが回そうとする機首を毎tick気流へ叩き戻す——
-                // クルビットは迎角90度の手前で押し返されて終わる。ノズルを持たない機体（share 0）は従来通りで、
-                // 深い失速から機首を気流へ戻すのは今も尾翼の仕事だ。下限ではなく減衰なので、動圧0では0のまま。
-                // 操縦桿を離せば尾翼は戻る。コブラの終わりに機首を気流へ下ろすのは尾翼の仕事だ。
-                weathervanePitch *= (float) (1.0 - nozzleShare * plate * POST_STALL_TAIL_LOSS
-                        * Math.abs(this.input.pitch()));
 
                 // そして胴体は横向きに飛ぶことを拒む。
                 motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()));

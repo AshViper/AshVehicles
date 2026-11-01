@@ -120,7 +120,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
             new Engine(0.02F, 0.02F, 0.06F, 1.0F, Optional.empty(), VehicleChassis.Fuel.DEFAULT, 0.0F),
             new Wing(0.0F, 0.7F, 0.038F, 5.5F, 15.0F, 0.006F, 20.0F, 0.02F, 0.15F, 0.28F, 6.0F, 0.0F,
                     Optional.empty()),
-            new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F, 0.0F),
+            new Handling(1.5F, 3.0F, 1.0F, 0.25F, 3.0F, 0.85F, 0.06F),
             new Airframe(Airframe.DEFAULT_HEALTH, 1.8F, 3.0F, 0.0F, 0, 0.0F, 0.0F, 0,
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0))),
                     Optional.empty(), Optional.empty(), Optional.empty(), List.of()),
@@ -485,13 +485,9 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      *                    与えるのと同じ面が、その舵が起こした回転を減衰させる。速い機体が神経質ではなく
      *                    硬く感じる理由。これが無いと舵効きだけが速度とともに増え、それを収める物が何も
      *                    増えないので機体がふらつく。0で無効
-     * @param thrustVectoring 推力偏向ノズルが機首を振る効き。ファイルの pitch_rate / yaw_rate に対する倍率で、
-     *                        動圧ではなくエンジン出力に比例する。空気が舵面を流れない低速・失速後でも機首が
-     *                        回るのはこれのおかげで、クルビットやコブラはここから来る。この効きが空力の効きを
-     *                        上回る速度域では迎角リミッターが道を譲り、失速後の水平尾翼の復元も弱まる。0で無効
      */
     public record Handling(float pitchRate, float rollRate, float yawRate, float controlLag,
-            float weathervane, float alphaLimit, float aeroDamping, float thrustVectoring) {
+            float weathervane, float alphaLimit, float aeroDamping) {
 
         public static final Codec<Handling> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Codec.FLOAT.fieldOf("pitch_rate").forGetter(Handling::pitchRate),
@@ -500,8 +496,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.FLOAT.optionalFieldOf("control_lag", 0.25F).forGetter(Handling::controlLag),
                 Codec.FLOAT.optionalFieldOf("weathervane", 3.0F).forGetter(Handling::weathervane),
                 Codec.FLOAT.optionalFieldOf("alpha_limit", 0.85F).forGetter(Handling::alphaLimit),
-                Codec.FLOAT.optionalFieldOf("aero_damping", 0.06F).forGetter(Handling::aeroDamping),
-                Codec.FLOAT.optionalFieldOf("thrust_vectoring", 0.0F).forGetter(Handling::thrustVectoring)
+                Codec.FLOAT.optionalFieldOf("aero_damping", 0.06F).forGetter(Handling::aeroDamping)
         ).apply(instance, Handling::new));
     }
 
