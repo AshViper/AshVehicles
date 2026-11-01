@@ -4,6 +4,7 @@
   "item": true,
   "ammo": 1,
   "mass": 253,
+  "requires": "targeting_pod",
   "firing": {
     "rounds_per_second": 2.0,
     "spread": 0.0,
@@ -22,5 +23,14 @@
   "sound": {
     "volume": 1.0,
     "pitch": 0.7
+  },
+  "guidance": {
+    "turn_rate": 2.2,
+    "lock_angle": 30.0,
+    "lock_range": 400.0,
+    "lock_ticks": 10,
+    "track_angle": 140.0,
+    "proximity": 2.0,
+    "seeker": "laser"
   }
 }
