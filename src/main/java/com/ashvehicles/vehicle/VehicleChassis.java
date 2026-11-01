@@ -321,8 +321,7 @@ public final class VehicleChassis {
      * 計器盤の多機能表示器（MFD）1枚。{@link com.ashvehicles.client.CockpitDisplays} が一人称のときだけ
      * その面へ生きた画面を描く。
      *
-     * <p>{@code camera.displays} を書かない機体には目の前下方へ3枚の既定の並びを置く。模型の画面と
-     * ずれるなら書いて合わせる。空の配列を書けば画面を描かない。
+     * <p>{@code camera.displays} を書かない機体には画面を描かない。位置は模型の画面の面から取る。
      *
      * @param pos 画面の中心。機体軸（x 右、y 上、z 前）でブロック単位
      * @param width 横幅（ブロック）

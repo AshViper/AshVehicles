@@ -1,8 +1,6 @@
 package com.ashvehicles.client;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
@@ -30,8 +28,8 @@ import net.minecraft.world.phys.Vec3;
  * 計器盤の多機能表示器（MFD）。一人称で乗っている機体にだけ、その計器盤の面へ生きた画面を描く。
  *
  * <p>模型の画面はただのテクスチャで、どこに画面があるかを模型は知らない。だから位置は定義ファイルの
- * {@code camera.displays} が持つ（{@link VehicleChassis.Display}）。書かない機体には目の前下方へ3枚の
- * 既定の並びを置く——模型の画面と多少ずれても、何も映らない黒い板よりは読める。
+ * {@code camera.displays} が持つ（{@link VehicleChassis.Display}）。書かない機体には何も描かない。
+ * 以前は目の前下方へ既定の3枚を置いていたが、画面の無い操縦席では宙に浮いた板にしかならなかった。
  *
  * <p>描くのは乗っている本人の一人称だけ。三人称や他人の機体の計器盤は小さすぎて読めず、描くだけ無駄。
  *
@@ -81,7 +79,7 @@ public final class CockpitDisplays {
             return;
         }
 
-        List<VehicleChassis.Display> displays = layout(aircraft, aircraft.getSeatIndex(minecraft.player));
+        List<VehicleChassis.Display> displays = aircraft.getStats().camera().displays().orElse(List.of());
 
         if (displays.isEmpty()) {
             return;
@@ -129,33 +127,6 @@ public final class CockpitDisplays {
         quads = null;
         buffers = null;
         font = null;
-    }
-
-    /**
-     * その座席から見える画面。定義に書いてあればそれ、無ければ目の前下方の既定の3枚。
-     *
-     * <p>既定の並びは操縦席（座席0）だけに置く。後席や貨物室に操縦席と同じ計器盤があるとは限らない。
-     */
-    private static List<VehicleChassis.Display> layout(AircraftEntity aircraft, int seat) {
-        Optional<List<VehicleChassis.Display>> written = aircraft.getStats().camera().displays();
-
-        if (written.isPresent()) {
-            return written.get();
-        }
-
-        if (seat != 0) {
-            return List.of();
-        }
-
-        Vec3 eye = aircraft.getSeatEye(0);
-        String left = aircraft.radar().fitted() ? "radar" : "nav";
-        List<VehicleChassis.Display> made = new ArrayList<>(3);
-
-        made.add(new VehicleChassis.Display(eye.add(-0.30, -0.42, 0.60), 0.24F, 0.22F, 18.0F, 16.0F, left));
-        made.add(new VehicleChassis.Display(eye.add(0.0, -0.46, 0.64), 0.24F, 0.22F, 22.0F, 0.0F, "pfd"));
-        made.add(new VehicleChassis.Display(eye.add(0.30, -0.42, 0.60), 0.24F, 0.22F, 18.0F, -16.0F, "sms"));
-
-        return made;
     }
 
     // ---- 頁 ----
