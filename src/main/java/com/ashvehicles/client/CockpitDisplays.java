@@ -109,7 +109,6 @@ public final class CockpitDisplays {
             poseStack.translate(-PX / 2.0F, -heightPx / 2.0F, 0.0F);
 
             matrix = poseStack.last().pose();
-            quads = bufferSource.getBuffer(RenderType.textBackground());
             layer = 0.0F;
 
             fill(-2, -2, PX + 2, heightPx + 2, FRAME);
@@ -508,6 +507,10 @@ public final class CockpitDisplays {
     private static void quad(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3,
             int colour) {
         // 画素の y が下向きなので、時計回りに並べると目の側が表になる。両面を出して向きを気にしない。
+        //
+        // バッファは四角ごとに取り直す。文字が別の描画型を求めると、即時描画の MultiBufferSource は前の型の
+        // バッファを閉じる。握ったままのバッファに書くと "Not building!" でゲームが落ちる。
+        quads = buffers.getBuffer(RenderType.textBackground());
         vertex(x0, y0, colour);
         vertex(x1, y1, colour);
         vertex(x2, y2, colour);
