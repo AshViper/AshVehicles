@@ -234,7 +234,7 @@ public class AshVehiclesClient {
     }
 
     /**
-     * 機体の絵を撮る場所。フレームの先頭で、1フレームにつき1機ずつ。
+     * 機体の絵を撮る場所。フレームの先頭で、1フレームにつき数ミリ秒の予算の内で。
      *
      * <p>必要になった場所で撮らないのは、1枚撮るのにモデル一式を専用テクスチャへ描き、投影・画角・
      * ライティングを退避して戻す必要があるから。画面描画の途中でやれば他人の行列で画面が描かれるし、
@@ -243,6 +243,12 @@ public class AshVehiclesClient {
     @SubscribeEvent
     static void onRenderFrame(RenderFrameEvent.Pre event) {
         VehicleIcons.takeNext();
+    }
+
+    /** ワールドへ入ったら全機体の絵を先に撮り始める。タブを開いてから撮ると並ぶのが目に見えて遅れる。 */
+    @SubscribeEvent
+    static void onLoggingIn(net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingIn event) {
+        VehicleIcons.prepareAll();
     }
 
     /**

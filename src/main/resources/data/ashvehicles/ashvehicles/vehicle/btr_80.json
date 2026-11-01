@@ -1769,8 +1769,8 @@
     "steer_lock": 30
   },
   "powertrain": {
-    "max_speed": 1.111,
-    "reverse_speed": 0.3,
+    "max_speed": 0.741,
+    "reverse_speed": 0.2,
     "acceleration": 0.006,
     "braking": 0.032,
     "rolling_resistance": 0.003,

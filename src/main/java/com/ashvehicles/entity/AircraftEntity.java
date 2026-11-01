@@ -517,6 +517,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private static final float GROUND_PITCH_LIMIT = 15.0F;
     /** 前脚から主脚までの半分（機体の幅に対する割合）。F-16（幅6）で 2.1、実機の脚間 4 m の半分。 */
     private static final double GEAR_BASE = 0.35;
+    /** 見た目の車輪の半径（ブロック）。機体ファイルは持たないので一律。 */
+    private static final double WHEEL_RADIUS = 0.35;
+    /** 前輪の見た目の最大切れ角（度）と、そこへ寄せる速さ（度/tick）。 */
+    private static final float WHEEL_STEER_LIMIT = 60.0F;
+    private static final float WHEEL_STEER_RATE = 6.0F;
+    /** 地上旋回で主脚を軸にするために前 tick の速度へ足した横移動。次の tick の頭で抜く。 */
+    private Vec3 pivotShift = Vec3.ZERO;
     /** 主脚の輪距の半分（幅に対する割合）。F-16 で 1.2、実機 2.4 m の半分。 */
     private static final double GEAR_TRACK = 0.2;
     /** ピッチとロールの回転半径（幅に対する割合）。機体の質量の広がり。 */
@@ -709,6 +716,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private float pitchVelocity;
     /** このtick、ハイG旋回の補助（エアブレーキ＋引き切り）が掛かっているか。 */
     private boolean highG;
+    /** このtick、エアブレーキで尾翼の機首戻しを止めているか。 */
+    private boolean holdAttitude;
     private float rollVelocity;
     private float yawVelocity;
     /** 主翼が気流に対して成す角（度）。失速角を超えると厄介なことになる。 */
@@ -841,6 +850,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private float rotorAngle;
     private float rotorAngleO;
+    // 車輪の見た目。tickWheels が動きから読む。
+    private float wheelSteer;
+    private float wheelSteerO;
+    private float wheelSpin;
+    private float wheelSpinO;
+    @Nullable
+    private Vec3 wheelFrom;
+    private float wheelYaw;
     private float tailAngle;
     private float tailAngleO;
 
@@ -2306,6 +2323,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // それは tickGear が進めた値だ。
         this.tickHold();
         this.tickLerp();
+        this.tickWheels();
 
         if (this.isControlledByLocalInstance()) {
             // 操縦を受け取った最初の tick。飛行モデルが自分の速度とスロットルを積み始める前に、最後に届いた値を持つ。
@@ -3258,7 +3276,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 戻そうとしなくなる。機首を決め打ちで回すのではなく効きを足すだけなので、迎角リミッターは残り、
         // 引けるGは機体と速度が決める。減速はブレーキの抗力がそのまま担う。
         // AI は速すぎるとブレーキを握ったまま引くので外す。
-        this.highG = !rolling && !this.isBotDriven() && this.input.brake() && this.input.pitch() >= HIGH_G_TRIGGER;
+        this.holdAttitude = !rolling && !this.isBotDriven() && this.input.brake();
+        this.highG = this.holdAttitude && this.input.pitch() >= HIGH_G_TRIGGER;
 
         if (this.highG) {
             commandedPitch *= HIGH_G_BOOST;
@@ -3442,18 +3461,32 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // いても、支えるべき機体が重いのだから。
         this.weightOnWheels = (float) Mth.clamp(1.0 - lift / burden / GRAVITY, 0.0, 1.0);
 
-        // 補助中は尾翼が引いた迎角と争わない（機首下げ側の復元だけ消す）。
-        if (this.highG && weathervanePitch < 0.0F) {
+        // エアブレーキを握っている間は尾翼が機首を戻さない。引き切りを離しても据えた姿勢がそのまま残る。
+        if (this.holdAttitude) {
             weathervanePitch = 0.0F;
         }
 
-        this.applyBodyRotation(this.rollVelocity, this.pitchVelocity + weathervanePitch,
-                this.yawVelocity + weathervaneYaw + nosewheel);
+        // 車輪に載った機体は転がった分しか向きを変えられない。方向舵の効きの下限と風見がそのままだと、止まった
+        // 機体がその場で回っていた。荷重が主翼へ移るにつれて空中の振る舞いへ戻す。
+        float aeroYaw = this.yawVelocity + weathervaneYaw;
+
+        if (rolling && this.onWheels()) {
+            float rolled = (float) Math.min(speed / TAXI_SPEED, 1.0);
+            aeroYaw *= Mth.lerp(this.weightOnWheels, 1.0F, rolled);
+        }
+
+        this.applyBodyRotation(this.rollVelocity, this.pitchVelocity + weathervanePitch, aeroYaw + nosewheel);
         this.deltaRotation = Mth.wrapDegrees(this.getYRot() - previousYRot);
         motion = motion.add(forces.scale(1.0 / burden)).add(0.0, -GRAVITY, 0.0);
 
+        // 前 tick に足した回り込みの横移動は速度ではないので、摩擦に通す前に抜く。
+        motion = motion.subtract(this.pivotShift);
+        this.pivotShift = Vec3.ZERO;
+
         if (rolling) {
             motion = this.groundTick(motion, taxiing);
+            this.pivotShift = this.gearPivot(this.deltaRotation);
+            motion = motion.add(this.pivotShift);
         }
 
         // 暴走を止める最後の砦であり、ファイルが要求した場合のみ。最高速度は抗力が自ずと決める。
@@ -3933,7 +3966,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 速度で薄れるのは従来どおり。ただし薄れ始める速度には下限を置く。ファイルの steer_fade が語っている
         // のは滑走路の高速域で、回転翼機はそこを 0.2（14 km/h）と書いている——ホバータキシーしか想定して
         // いなかった頃の値だ。そのままでは、車輪で走り出したヘリが走り出した瞬間に曲がれなくなる。
-        return this.input.yaw() * gear.steerRate() * grip(speed, Math.max(gear.steerFade(), TAXI_GRIP));
+        // 前輪は向きを変えるのではなく進む向きを変える。切った車輪が機体を回せるのは転がった距離の分だけなので、
+        // 回る速さは速度に比例し、止まった機体はその場では回らない。タキシングの上限速度でファイルの値に届く。
+        float rolled = (float) Math.min(speed / TAXI_SPEED, 1.0);
+
+        return this.input.yaw() * gear.steerRate() * rolled * grip(speed, Math.max(gear.steerFade(), TAXI_GRIP));
     }
 
     /** その速度で前輪に残っている効き。速度とともに手放す——高速でも噛む前輪は機体を滑走路の外へ放り出す。 */
@@ -4201,6 +4238,28 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.checkGroundTip(ground, slope);
 
         return new Vec3(ground.x, Math.max(motion.y, onto), ground.z);
+    }
+
+    /**
+     * 地上で向きを変えた分だけ、主脚を軸に回るよう原点をずらす水平移動。
+     *
+     * <p>原点のまわりに回すと機首と尾が逆へ振れ、機体がその場で独楽のように回る。実機は操向輪（前輪式なら
+     * 前輪）が横へ出て、主脚の位置はほとんど動かない。主脚は原点から {@link #GEAR_BASE} だけ後ろ——尾輪式
+     * では操向輪が後ろにあるので前——に見積もる。速度ではないので次の tick の頭で抜く（{@link #pivotShift}）。
+     */
+    private Vec3 gearPivot(float turned) {
+        if (turned == 0.0F || !this.onWheels() || this.weightOnWheels <= 0.0F) {
+            return Vec3.ZERO;
+        }
+
+        double width = Math.max(this.getStats().hitbox().width(), 1.0F);
+        double arm = width * GEAR_BASE * (this.getStats().landingGear().groundStance() > 0.0F ? -1.0 : 1.0);
+        float now = (float) Math.toRadians(this.getYRot());
+        float before = (float) Math.toRadians(this.getYRot() - turned);
+
+        // 主脚 = 原点 − arm·前方。それを動かさないので、原点は arm·(今の前方 − 前の前方) だけ動く。
+        return new Vec3(-Mth.sin(now) + Mth.sin(before), 0.0, Mth.cos(now) - Mth.cos(before))
+                .scale(arm * this.weightOnWheels);
     }
 
     /** 車輪の下の地面が機体へ与える傾き（度）。機首上げが正、右翼下げが正。 */
@@ -4755,6 +4814,63 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * ローターの回転を上げねばならず、その待ち時間こそが「浮かぶレンガの運転」ではなく「ヘリの操縦」らしさの
      * 大半を作っている。降りれば回転が落ちていくので、駐機場に残された機体は急停止せず静まっていく。
      */
+    /**
+     * 車輪の見た目の1tick分。前輪の切れ角と車輪の回転角を、操縦入力ではなく実際の動きから読む。
+     *
+     * <p>ローターと同じく全側で回す。入力は操縦しているクライアントにしか無いが、位置と向きはどこにでもある。
+     * 切れ角は自転車の式を逆に解いた物——転がった距離 v で向きが dψ 変わったなら、軸距 L の前輪は
+     * atan(dψ·L/v) 切れている。止まっている間は解けないので、切れ角はそのまま残す。
+     */
+    private void tickWheels() {
+        this.wheelSteerO = this.wheelSteer;
+        this.wheelSpinO = this.wheelSpin;
+
+        Vec3 here = this.position();
+        Vec3 moved = this.wheelFrom == null ? Vec3.ZERO : here.subtract(this.wheelFrom);
+        float yaw = this.getYRot();
+        float turned = this.wheelFrom == null ? 0.0F : Mth.wrapDegrees(yaw - this.wheelYaw);
+        this.wheelFrom = here;
+        this.wheelYaw = yaw;
+
+        if (!this.onGround() || this.gearProgress <= 0.5F) {
+            this.wheelSteer = approach(this.wheelSteer, 0.0F, WHEEL_STEER_RATE);
+            return;
+        }
+
+        float radians = (float) Math.toRadians(yaw);
+        double along = moved.x * -Mth.sin(radians) + moved.z * Mth.cos(radians);
+
+        this.wheelSpin += (float) Math.toDegrees(along / WHEEL_RADIUS);
+
+        while (this.wheelSpin >= 360.0F) {
+            this.wheelSpin -= 360.0F;
+            this.wheelSpinO -= 360.0F;
+        }
+
+        while (this.wheelSpin < 0.0F) {
+            this.wheelSpin += 360.0F;
+            this.wheelSpinO += 360.0F;
+        }
+
+        if (Math.abs(along) > 1.0E-3) {
+            double base = 2.0 * Math.max(this.getStats().hitbox().width(), 1.0F) * GEAR_BASE;
+            float want = (float) Math.toDegrees(Math.atan(Math.toRadians(turned) * base / along));
+
+            this.wheelSteer = approach(this.wheelSteer, Mth.clamp(want, -WHEEL_STEER_LIMIT, WHEEL_STEER_LIMIT),
+                    WHEEL_STEER_RATE);
+        }
+    }
+
+    /** 前輪の切れ角（度）。右旋回が正。 */
+    public float getWheelSteer(float partialTick) {
+        return Mth.lerp(partialTick, this.wheelSteerO, this.wheelSteer);
+    }
+
+    /** 車輪の転がった角（度）。前進で増える。 */
+    public float getWheelSpin(float partialTick) {
+        return Mth.lerp(partialTick, this.wheelSpinO, this.wheelSpin);
+    }
+
     private void tickRotor() {
         this.rotorSpeedO = this.rotorSpeed;
         this.rotorAngleO = this.rotorAngle;

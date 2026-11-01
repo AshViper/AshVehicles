@@ -6,9 +6,12 @@ import com.ashvehicles.AshVehicles;
 import com.ashvehicles.registry.ModCreativeTabs;
 import com.ashvehicles.registry.ModItems;
 
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.Options;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
@@ -19,6 +22,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ContainerScreenEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
 
 /**
  * クリエイティブタブのジャンル見出しを描く。
@@ -92,6 +96,49 @@ public final class CreativeTabHeadings {
         }
 
         graphics.pose().popPose();
+    }
+
+    /**
+     * 仕切りは飾りなので掴ませない。クリック（左・右・中・シフト）はここで捨てる。サーバーへは何も届かず、
+     * クリエイティブ画面が手に持たせることもない。
+     */
+    @SubscribeEvent
+    public static void onMousePressed(ScreenEvent.MouseButtonPressed.Pre event) {
+        if (overDivider(event.getScreen())) {
+            event.setCanceled(true);
+        }
+    }
+
+    /** 数字キーでホットバーへ入れ替える・Q で捨てる・ブロック選択キーで複製するのも同じく捨てる。 */
+    @SubscribeEvent
+    public static void onKeyPressed(ScreenEvent.KeyPressed.Pre event) {
+        if (!overDivider(event.getScreen())) {
+            return;
+        }
+
+        Options options = Minecraft.getInstance().options;
+        int key = event.getKeyCode();
+        int scan = event.getScanCode();
+        boolean grabs = options.keyDrop.matches(key, scan) || options.keyPickItem.matches(key, scan)
+                || options.keySwapOffhand.matches(key, scan);
+
+        for (KeyMapping hotbar : options.keyHotbarSlots) {
+            grabs |= hotbar.matches(key, scan);
+        }
+
+        if (grabs) {
+            event.setCanceled(true);
+        }
+    }
+
+    private static boolean overDivider(Screen screen) {
+        if (!(screen instanceof CreativeModeInventoryScreen creative)) {
+            return false;
+        }
+
+        Slot slot = creative.getSlotUnderMouse();
+
+        return slot != null && slot.getItem().is(ModItems.TAB_DIVIDER.get());
     }
 
     /**
