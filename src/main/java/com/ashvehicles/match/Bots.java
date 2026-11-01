@@ -663,13 +663,30 @@ public final class Bots {
         }
 
         long now = server.overworld().getGameTime();
+        Reinforcements.Situation situation = situation(server, team.id(), now);
         Reinforcements.Kind kind = Reinforcements.choose(
-                Reinforcements.needs(situation(server, team.id(), now),
+                Reinforcements.needs(situation,
                         Reinforcements.Weights.of(AiVersions.forTeam(server, team.id()).parameters())),
                 byKind.keySet(), random.nextDouble());
         List<ResourceLocation> from = kind == null ? null : byKind.get(kind);
 
-        return from == null || from.isEmpty() ? null : from.get(random.nextInt(from.size()));
+        if (from == null || from.isEmpty()) {
+            return null;
+        }
+
+        // 相方のいない戦車がいれば、軽装甲は歩兵戦闘車から（2026-09-17 の指示「戦車とIFVのコンビで加算」）。
+        if (kind == Reinforcements.Kind.LIGHT && situation.loneTanks() > 0.0) {
+            List<ResourceLocation> ifvs = from.stream()
+                    .filter(id -> Definitions.VEHICLES.get(id) != null
+                            && Roles.of(id, Definitions.VEHICLES.get(id)) == VehicleRole.IFV)
+                    .toList();
+
+            if (!ifvs.isEmpty()) {
+                from = ifvs;
+            }
+        }
+
+        return from.get(random.nextInt(from.size()));
     }
 
     /** その車両か機体が、陣営の足りなさ（{@link Reinforcements}）のどの種類に数えられるか。 */
@@ -703,6 +720,8 @@ public final class Bots {
         double ownArtillery = 0.0;
         double ownFighters = 0.0;
         double ownStrikers = 0.0;
+        List<Entity> tanks = new ArrayList<>();
+        List<Entity> ifvs = new ArrayList<>();
         Set<Entity> seen = new LinkedHashSet<>();
 
         for (Fighter fighter : combatants(server)) {
@@ -738,9 +757,18 @@ public final class Bots {
                     switch (role) {
                         case AA -> {
                         }
-                        case TANK -> ownTanks++;
+                        case TANK -> {
+                            ownTanks++;
+                            tanks.add(ground);
+                        }
                         case ARTILLERY -> ownArtillery++;
-                        default -> ownLight++;
+                        default -> {
+                            ownLight++;
+
+                            if (role == VehicleRole.IFV) {
+                                ifvs.add(ground);
+                            }
+                        }
                     }
                 } else {
                     enemyAirDefence += air;
@@ -778,7 +806,30 @@ public final class Bots {
                 ownLight, ownAirDefence, ownArtillery, ownFighters, ownStrikers, capturable, threatened,
                 Reinforcements.lostTo(team, Reinforcements.Cause.AIR, now),
                 Reinforcements.lostTo(team, Reinforcements.Cause.ARMOUR, now),
-                Reinforcements.lostTo(team, Reinforcements.Cause.AIR_DEFENCE, now), spare);
+                Reinforcements.lostTo(team, Reinforcements.Cause.AIR_DEFENCE, now), spare, lonely(tanks, ifvs),
+                lonely(ifvs, tanks));
+    }
+
+    /** 相方の一覧の誰とも {@link Reinforcements#PAIR_REACH} の内にいない物の数。 */
+    static int lonely(List<Entity> machines, List<Entity> partners) {
+        int count = 0;
+
+        for (Entity machine : machines) {
+            boolean paired = false;
+
+            for (Entity partner : partners) {
+                if (machine.distanceToSqr(partner) <= Reinforcements.PAIR_REACH * Reinforcements.PAIR_REACH) {
+                    paired = true;
+                    break;
+                }
+            }
+
+            if (!paired) {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     /**

@@ -135,15 +135,15 @@ public final class RoutePlanner {
             double height, double strategic, double dig, double water) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("route.threat", 2.0),
-                    parameters.get("route.exposure", 1.5),
-                    parameters.get("route.terrain", 0.5),
+                    parameters.get("route.threat", 1.910342),
+                    parameters.get("route.exposure", 1.90078),
+                    parameters.get("route.terrain", 0.687733),
                     parameters.get("route.unknown", 0.5),
-                    parameters.get("route.cover", 0.3),
-                    parameters.get("route.height", 0.1),
+                    parameters.get("route.cover", 0.332023),
+                    parameters.get("route.height", 0.096946),
                     parameters.get("route.strategic", 0.05),
                     parameters.get("route.dig", 2.0),
-                    parameters.get("route.water", 8.0));
+                    parameters.get("route.water", 10.599508));
         }
     }
 

@@ -31,7 +31,7 @@ import net.minecraft.world.phys.Vec3;
  * 1回だけ、変わらない判断も1行書く——学習には「同じ行動を続けた」という判断も要るが、毎秒書く必要は無い。
  *
  * <p><b>自分で判断できる報酬はここで付ける。</b> 水に沈んだ（{@code WaterEntered}、沈んでいる間は
- * {@code Underwater}）、露出したまま撃ち合いもせずに居続けた（{@code LongExposure}）、
+ * {@code Underwater}）、航空機の翼が飛ぶのをやめた（{@code Stalled}）、露出したまま撃ち合いもせずに居続けた（{@code LongExposure}）、
  * 側面へ回って相手の横か後ろから当てた（{@code GoodFlank}）、避けられた死（{@code UnnecessaryDeath}、撃破の
  * 出口から訊かれる）。撃破と拠点の報酬は試合の出口（{@link BattleEvents}）が付ける。
  */
@@ -308,6 +308,29 @@ public final class PilotRecorder implements CombatController.Listener {
             detail.addProperty("seconds", (now - this.underwaterSince) / 20);
             BattleEvents.reward(this.pilot, BattleEventType.UNDERWATER, detail);
         }
+    }
+
+    /**
+     * 航空機の翼が飛ぶのをやめた（{@code Stalled}、2026-09-14 の指示「ストールになるとペナルティになるように」）。
+     * 入った瞬間に1回だけ引く。抜けたかは操縦役（{@code AirPilot}）が見ていて、抜けてから次に入ればまた引く——
+     * 失速したまま落ちている間に毎 tick 引けば、1回の失速が落ちている長さで重くなる。
+     *
+     * @param chasing そのとき狙っていた相手。無ければ null
+     * @param phase   そのときの段階（{@code AirPilot} の段階の名前）
+     */
+    public void stalled(@Nullable Entity chasing, double speed, double stallSpeed, double angleOfAttack, String phase) {
+        if (!BattleEvents.recording()) {
+            return;
+        }
+
+        JsonObject detail = new JsonObject();
+
+        detail.addProperty("speed", BattleDecisionLog.round(speed));
+        detail.addProperty("stall_speed", BattleDecisionLog.round(stallSpeed));
+        detail.addProperty("angle_of_attack", BattleDecisionLog.round(angleOfAttack));
+        detail.addProperty("phase", phase);
+        detail.addProperty("target", chasing == null ? null : describe(chasing));
+        BattleEvents.reward(this.pilot, BattleEventType.STALLED, detail);
     }
 
     /** 自分の弾が効いた。側面へ回った後の、横か後ろからの命中を手柄にする。 */

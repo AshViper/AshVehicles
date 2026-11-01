@@ -2,10 +2,11 @@ package com.ashvehicles.client.model;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.WeakHashMap;
 
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
+
+import com.google.common.collect.MapMaker;
 
 import software.bernie.geckolib.animation.state.BoneSnapshot;
 import software.bernie.geckolib.cache.object.GeoBone;
@@ -38,10 +39,16 @@ public final class BakedGeometry {
      *
      * <p>弱参照で、キーはボーンオブジェクト自体。おかげでリソースリロードが無料で正しくなる。GeckoLib はリロード
      * したジオメトリから新しいボーンをベイクし、新しいボーンはこれとは別物なので、実際に描かれるジオメトリから
-     * 答えが求め直される。呼び出し元が全てレンダースレッドなのでロック無しで保持する。
+     * 答えが求め直される。
+     *
+     * <p><b>比べるのは同一性で、{@code WeakHashMap} ではいけない。</b>{@link GeoBone#equals} は「名前・親の名前・
+     * キューブの数・子の数が同じ」を等しいとみなす（{@code hashCode} の比較だけ）ので、{@code WeakHashMap} は
+     * <em>別の機体の</em>同じ名前のボーンを同じ鍵として引き、先に測った機体の支点と箱を返していた。geo.json の
+     * 機体どうしでは4つが揃うことは稀だったが、OBJ のボーンはキューブが必ず1つなので、根に置いた
+     * {@code propeller} を持つ機体が2つあれば2機目のプロペラは1機目の軸で回る。
      */
-    private static final Map<GeoBone, Optional<Bounds>> REACHES = new WeakHashMap<>();
-    private static final Map<GeoBone, Vector3f> PIVOTS = new WeakHashMap<>();
+    private static final Map<GeoBone, Optional<Bounds>> REACHES = new MapMaker().weakKeys().makeMap();
+    private static final Map<GeoBone, Vector3f> PIVOTS = new MapMaker().weakKeys().makeMap();
 
     private BakedGeometry() {
     }

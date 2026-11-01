@@ -8,6 +8,7 @@ import org.joml.Vector3f;
 
 import com.ashvehicles.client.model.TrackBelt;
 import com.ashvehicles.client.model.VehicleGeoModel;
+import com.ashvehicles.client.model.obj.MeshBone;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.vehicle.Ride;
 import com.ashvehicles.vehicle.VehicleChassis;
@@ -171,6 +172,15 @@ public final class VehicleIconGeo extends GeoObjectRenderer<VehicleIconGeo.Machi
 
         super.renderRecursively(poseStack, animatable, bone, renderType, bufferSource, buffer, isReRender,
                 partialTick, packedLight, packedOverlay, colour);
+    }
+
+    /** OBJ から焼いたボーンは頂点ごとの法線で描く。{@link MeshBone} 参照。 */
+    @Override
+    public void renderCubesOfBone(PoseStack poseStack, GeoBone bone, VertexConsumer buffer, int packedLight,
+            int packedOverlay, int colour) {
+        if (!MeshBone.draw(poseStack, bone, buffer, packedLight, packedOverlay, colour)) {
+            super.renderCubesOfBone(poseStack, bone, buffer, packedLight, packedOverlay, colour);
+        }
     }
 
     /** 物が占める空間を頂点1つずつ積み上げて求める。何か追加するまでは空。 */

@@ -1,5 +1,6 @@
 package com.ashvehicles.weapon;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.mojang.datafixers.util.Either;
@@ -12,7 +13,7 @@ import net.minecraft.util.StringRepresentable;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 兵装1つを JSON だけで記述した物。{@code data/ashvehicles/weapon/} にファイルを置けば起動時に MOD が
+ * 兵装1つを JSON だけで記述した物。{@code data/ashvehicles/ashvehicles/weapon/} にファイルを置けば起動時に MOD が
  * アイテムを登録し、どの機体のパイロンにも吊れるようになる。機体ファイル側が内蔵兵装として名指しすること
  * もできる。
  *
@@ -32,12 +33,13 @@ import net.minecraft.world.phys.Vec3;
  * @param sound 音
  * @param nation この兵装の国籍。機体の {@code airframe.nation} と同じ書き方。書かなければ国籍を持たない
  *               汎用品で、どの機体も自分の物として扱う（増槽がそう）
+ * @param nuclear 核弾頭。書いた兵装だけが着弾点で核として炸裂する。{@link Nuclear} 参照
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
         Optional<GunClass> gunClass,
         Firing firing, Projectile projectile, Optional<Guidance> guidance,
         Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag, float mass,
-        Optional<Cluster> cluster, Optional<String> nation) {
+        Optional<Cluster> cluster, Optional<String> nation, Optional<Nuclear> nuclear) {
 
     /** {@code RRGGBB}。先頭の # は有っても無くてもよい。この種のファイルでの色表記はすべてこれ。 */
     static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
@@ -89,7 +91,9 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             Cluster.CODEC.optionalFieldOf("cluster").forGetter(WeaponDefinition::cluster),
             // 国籍。吊れるかどうかは決めず、出撃盤のプリセットが自国の物を先に選ぶのに使うだけ。
             // {@code AircraftDefinition.Airframe#uses} 参照。
-            Codec.STRING.optionalFieldOf("nation").forGetter(WeaponDefinition::nation)
+            Codec.STRING.optionalFieldOf("nation").forGetter(WeaponDefinition::nation),
+            // 核弾頭。この1行でグループは15項目——DFU の上限まであと1つ。次に足す物は入れ子に（[[fuel-system-shape]]）。
+            Nuclear.CODEC.optionalFieldOf("nuclear").forGetter(WeaponDefinition::nuclear)
     ).apply(instance, WeaponDefinition::new));
 
     /**
@@ -129,13 +133,87 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     }
 
     /**
+     * 核弾頭。着弾点で、弾頭の爆発の代わりに起きる物の全部（{@link NuclearBlast}）。
+     *
+     * <p><b>規模で核を作らない。</b> {@code projectile.explosion} を数百にするとバニラの爆発が数百ブロックの光線を引き、
+     * ロード済みの外では地形を生成させ、中では山を1つ削る。だから打撃・火・押し・穴・見た目を別々の数字で持ち、打撃は
+     * 光線を1本も引かない音速の波で渡す。{@code projectile.explosion} は核を知らない呼び手のための値で、炸裂には使われない。
+     *
+     * <p>打撃の法則は爆弾の爆風と同じ（{@link Projectile#blastAt}）——{@code radius} まで満額、その2倍で0。
+     *
+     * @param show 見せる爆発規模（{@code particle/Effects} の尺度）。{@code Effects.NUCLEAR}（128）から
+     *             {@code Effects.LARGEST}（255）まで。核の姿になるのはこの範囲だけなので、外の値はそこへ丸める
+     * @param radius 満額の打撃が届く半径（ブロック）。{@code radius × 2} で0
+     * @param damage 満額の打撃（点）。機体にも人にもモブにも。同梱で一番硬い車両が4000
+     * @param fire 生き物に火が付く半径（ブロック）
+     * @param push 爆心での突き飛ばし（1tickあたりブロック）。外縁で0。生き物だけで、機体は押さない
+     * @param crater 試合の外で開ける穴の爆発規模（TNT の4と同じ尺度）。0 なら開けない
+     * @param match チームデスマッチでの値段と、持って出てよい機体
+     */
+    public record Nuclear(float show, float radius, float damage, float fire, float push, float crater,
+            Match match) {
+        /**
+         * 打撃の波が進む速さ（ブロック/tick）。音速、343 m/s。
+         *
+         * <p>ファイルに書かせない。見える環（{@code client/particle/ShockwaveParticle} の核の版）も轟音
+         * （{@code client/sound/Air.SPEED}）も同じ速さで来るので、ここだけ変えると「環が通り過ぎてから死ぬ」になる。
+         */
+        public static final double WAVE_SPEED = 17.15;
+
+        public static final Codec<Nuclear> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("show", 255.0F).forGetter(Nuclear::show),
+                Codec.FLOAT.optionalFieldOf("radius", 300.0F).forGetter(Nuclear::radius),
+                Codec.FLOAT.optionalFieldOf("damage", 5000.0F).forGetter(Nuclear::damage),
+                Codec.FLOAT.optionalFieldOf("fire", 450.0F).forGetter(Nuclear::fire),
+                Codec.FLOAT.optionalFieldOf("push", 2.5F).forGetter(Nuclear::push),
+                Codec.FLOAT.optionalFieldOf("crater", 16.0F).forGetter(Nuclear::crater),
+                Match.CODEC.optionalFieldOf("match", Match.NONE).forGetter(Nuclear::match)
+        ).apply(instance, Nuclear::new));
+
+        /** 打撃が0になる距離（ブロック）。 */
+        public double reach() {
+            return this.radius * 2.0;
+        }
+
+        /** 爆心から {@code distance} ブロックの相手が受ける打撃。 */
+        public double damageAt(double distance) {
+            return Projectile.blastAt(this.damage, this.radius, distance);
+        }
+    }
+
+    /**
+     * 核をチームデスマッチで使うときの値段と、持って出てよい機体。
+     *
+     * <p><b>1発で試合が終わる物なので、試合の中では出撃盤からしか手に入らない。</b> 出撃盤の「核攻撃」のプリセットは
+     * {@code carriers} に名前のある機体にだけ出て、機体の値段に {@code cost} を足す（{@code match/Costs}）。そうして出た
+     * 機体だけが試合中に核を放せる（{@code match/Deathmatch.mayRelease}）。試合の外では何の制限も無い。
+     *
+     * @param cost 1発あたりの出撃ポイント。{@code match} ブロックを書けば既定は3000
+     * @param carriers 試合で持って出てよい機体の ID。空なら試合では誰も使えない
+     */
+    public record Match(int cost, List<ResourceLocation> carriers) {
+        /** {@code match} ブロックを書かない核。試合では使えない。 */
+        public static final Match NONE = new Match(0, List.of());
+
+        public static final Codec<Match> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.INT.optionalFieldOf("cost", 3000).forGetter(Match::cost),
+                ResourceLocation.CODEC.listOf().optionalFieldOf("carriers", List.of()).forGetter(Match::carriers)
+        ).apply(instance, Match::new));
+
+        /** その機体が試合でこれを持って出てよいか。 */
+        public boolean carries(ResourceLocation aircraft) {
+            return this.carriers.contains(aircraft);
+        }
+    }
+
+    /**
      * ゲームが読めるファイルが1つも無い兵装に使う値。撃ちはするのでゲームは動き続けるが、誰も本物の兵装と
      * は思わない物。
      */
     public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
             Optional.empty(),
             new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(),
-            Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty(), Optional.empty());
+            Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty(), Optional.empty(), Optional.empty());
 
     /**
      * 引き金を押し続けている間撃ち続けるか、それとも1押し1発か。
@@ -235,6 +313,11 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      */
     public boolean isDropped() {
         return this.type == Type.BOMB;
+    }
+
+    /** 核弾頭か。{@link Nuclear} 参照。 */
+    public boolean isNuclear() {
+        return this.nuclear.isPresent();
     }
 
     /**

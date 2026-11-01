@@ -1,0 +1,35 @@
+package com.ashvehicles.mixin;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
+
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import com.ashvehicles.client.model.obj.ObjModels;
+
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.ResourceManager;
+import software.bernie.geckolib.cache.GeckoLibCache;
+import software.bernie.geckolib.cache.object.BakedGeoModel;
+
+/**
+ * GeckoLib がリロードで geo.json を焼き終えたら、続けて {@code obj/} の OBJ を焼いて同じマップへ入れる。
+ *
+ * <p>GeckoLib はリロードのたびに模型のマップを新しく作って丸ごと差し替えるので、外から後で足す物は次のリロード
+ * で消える。自前のリロードリスナーから足すと、GeckoLib の差し替えより後に走る保証がリスナーの登録順にしか無い。
+ * ここで GeckoLib 自身の読み込みの続きにしておけば、OBJ は差し替えの前に同じマップへ入り、同じ瞬間に見える
+ * ようになる。入れる関数（{@code models::put}）は素の HashMap なので、GeckoLib が入れ終わった後に繋ぐ。
+ * {@link ObjModels#load} 参照。
+ */
+@Mixin(value = GeckoLibCache.class, remap = false)
+public abstract class ObjModelLoadMixin {
+    @Inject(method = "loadModels", at = @At("RETURN"), cancellable = true)
+    private static void ashvehicles$thenObj(Executor executor, ResourceManager resources,
+            BiConsumer<ResourceLocation, BakedGeoModel> models, CallbackInfoReturnable<CompletableFuture<Void>> result) {
+        result.setReturnValue(result.getReturnValue().thenCompose(done -> ObjModels.load(executor, resources, models)));
+    }
+}

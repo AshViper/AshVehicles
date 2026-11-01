@@ -8,14 +8,15 @@ import com.ashvehicles.weapon.WeaponDefinition;
  * 切り替えて kill 数を稼げるようなスコア式」）。
  *
  * <pre>
- * score = 空域 × (kill × value × 1分あたりの見込み撃破 × e^(−defence × 相手の周りの防空) ÷ (1 + crowd × 同じ相手を狙う僚機)
- *                + support × 支援の急ぎ（支援を要請した味方を撃っている） + objective（拠点の近く）
- *                + sticky（今の相手）、撃ちに入っている間は committed)
+ * score = 空域 × 失速 × (kill × value × 1分あたりの見込み撃破 × e^(−defence × 相手の周りの防空) ÷ (1 + crowd × 同じ相手を狙う僚機)
+ *                    + support × 支援の急ぎ（支援を要請した味方を撃っている） + objective（拠点の近く）
+ *                    + sticky（今の相手）、撃ちに入っている間は committed)
  *       + attackingMe（自分を撃っている） + threat（空を撃てて自分に届く／近くの敵機）
  *
  * 1分あたりの見込み撃破 = 倒せる見込み × 1200 ÷ (着くまでの tick + (要る航過 − 1) × 航過1回の tick)
  * 要る航過 = ⌈残り耐久 ÷ 1回の航過で削れる見込み⌉
  * 空域 = 戦闘空域の外なら e^(−outside × (縁から出た距離 ÷ 600)²)、内なら 1 + inside × 縁から入った深さ ÷ 半径
+ * 失速 = e^(−stall × その相手を狙っていて自分が失速した回数)
  * </pre>
  *
  * <p><b>一番近い相手でも、一番硬い相手でもない。</b> 残り耐久が少なく、機首の前にいて、手持ちの兵装がよく効く相手ほど
@@ -33,6 +34,10 @@ import com.ashvehicles.weapon.WeaponDefinition;
  * 必ず含む）の上空。外側は出た距離の2乗で下がるので、縁の少し外（200ブロックで 0.89 倍）はほとんど変えず、離れすぎ（600で 0.37 倍、
  * 900で 0.11 倍）を強く下げる——航過の旋回と抜けは縁をまたぐのが普通で、そこまで嫌うと縁の近くの敵を撃てない。<b>身を守る分
  * （自分を撃っている・届く脅威）には掛けない</b>——外から撃ってくる相手に背を向けて戻れば、後ろから落とされる。
+ *
+ * <p><b>その相手を狙っていて失速した回数だけ下げる</b>（{@link #stalled}、同日の指示「ストールになるとペナルティになるように」）。
+ * 遅い機体の頭上の戦闘機のように、追えば失速する相手を同じやり方で追い直さない。数えるのは {@code AirPilot} で、当たりと
+ * 同じ長さだけ覚えている。空域と同じく、身を守る分には掛けない。
  *
  * <p><b>削れる見込みは兵装ファイルとゲームの式から出す</b>（{@link #damagePerPass}）: 機銃は弾数 × 当たる割合 × 装甲に
  * 入る割合（{@code weapon/Ricochet} の角度）× 空気で落ちた威力、爆弾はバニラの爆発の式（半径は威力の2倍）に狙いの
@@ -125,22 +130,23 @@ public final class KillScore {
     /** 重み。{@link #of} が版のパラメータ（{@code air.target.*}）から読む。 */
     public record Weights(double air, double gunAir, double kill, double attackingMe, double threat,
             double objective, double sticky, double committed, double crowd, double defence, double outside,
-            double inside, double support) {
+            double inside, double support, double stall) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("air.target.air", 0.6),
-                    parameters.get("air.target.gun_air", 0.3),
-                    parameters.get("air.target.kill", 1.0),
-                    parameters.get("air.target.attacking_me", 1.5),
-                    parameters.get("air.target.threat", 1.0),
-                    parameters.get("air.target.objective", 0.5),
-                    parameters.get("air.target.sticky", 0.3),
-                    parameters.get("air.target.committed", 2.0),
-                    parameters.get("air.target.crowd", 0.5),
-                    parameters.get("air.target.defence", 0.35),
-                    parameters.get("air.target.outside", 1.0),
-                    parameters.get("air.target.inside", 0.3),
-                    parameters.get("air.target.support", 1.5));
+                    parameters.get("air.target.air", 0.563037),
+                    parameters.get("air.target.gun_air", 0.351703),
+                    parameters.get("air.target.kill", 0.990001),
+                    parameters.get("air.target.attacking_me", 1.256301),
+                    parameters.get("air.target.threat", 1.024298),
+                    parameters.get("air.target.objective", 0.457665),
+                    parameters.get("air.target.sticky", 0.341161),
+                    parameters.get("air.target.committed", 1.967855),
+                    parameters.get("air.target.crowd", 0.569032),
+                    parameters.get("air.target.defence", 0.391582),
+                    parameters.get("air.target.outside", 0.976366),
+                    parameters.get("air.target.inside", 0.227759),
+                    parameters.get("air.target.support", 1.378566),
+                    parameters.get("air.target.stall", 0.7));
         }
     }
 
@@ -182,10 +188,11 @@ public final class KillScore {
      * @param outside       相手が戦闘空域の縁から外へ出ている水平の距離（ブロック）。内側は負で、縁から入った深さ
      * @param airspace      戦闘空域の半径（ブロック）。0以下は空域の無い試合で、場所を問わない
      * @param support       その相手が撃っている味方の支援の要請の急ぎ（0〜1、{@code ai/team/SupportCalls#airSupport}）。無ければ0
+     * @param stalls        その相手を狙っていて自分が失速した回数（{@code AirPilot} が当たりと同じ長さだけ覚えている）
      */
     public record Prospect(boolean airborne, double distance, double offTrack, double health, double damagePerPass,
             int passes, boolean attackingMe, boolean threatensMe, boolean onObjective, int allies, double defence,
-            double outside, double airspace, double support) {
+            double outside, double airspace, double support, int stalls) {
     }
 
     /**
@@ -219,6 +226,8 @@ public final class KillScore {
 
         // 戦闘空域から離れた相手ほど下げる（同日の指示）。身を守る分には掛けない。
         score *= airspace(prospect, weights);
+        // 追って失速した相手ほど下げる（同日の指示「ストールになるとペナルティになるように」）。身を守る分には掛けない。
+        score *= stalled(prospect, weights);
 
         if (prospect.attackingMe()) {
             score += weights.attackingMe();
@@ -229,6 +238,15 @@ public final class KillScore {
         }
 
         return score;
+    }
+
+    /**
+     * 失速の罰の倍率。その相手を狙っていて失速した回数 n に e^(−stall × n)——{@code air.target.stall} が 0.7 なら1回で
+     * 0.5 倍、2回で 0.25 倍。追えば失速する相手（遅い機体の頭上の戦闘機、ロールの遅い機体の真後ろの相手）を、同じ
+     * やり方で追い直さない。失速しなかった相手は1。
+     */
+    public static double stalled(Prospect prospect, Weights weights) {
+        return prospect.stalls() <= 0 ? 1.0 : Math.exp(-weights.stall() * prospect.stalls());
     }
 
     /**

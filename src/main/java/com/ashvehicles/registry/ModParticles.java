@@ -62,6 +62,8 @@ public final class ModParticles {
             register("nuclear_layer");
     /** 大型爆発の衝撃波面。地表を走っていく。 */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> SHOCKWAVE = register("shockwave");
+    /** 核の衝撃波面。音速で一定に走り、打撃の波の前面に重なる。{@code scale} は到達距離（ブロック）。 */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> NUCLEAR_WAVE = register("nuclear_wave");
     /**
      * 燃え続ける炎。今爆発した物ではなく燃えている物のためのもので、墜落地点で燃える機体の残骸など。
      * 火球と同じテクスチャだが別物。{@link com.ashvehicles.client.particle.FlameParticle} 参照。

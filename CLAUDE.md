@@ -1,6 +1,6 @@
 # AshVehicles
 
-Minecraft 1.21.1 / NeoForge 21.1.234 の車両・航空機 MOD。Java 21、GeckoLib 4.9.2、JEI・Distant Horizons 対応。`mod_id = ashvehicles`、`com.ashvehicles`。
+Minecraft 1.21.1 / NeoForge 21.1.250 の車両・航空機 MOD。Java 21、GeckoLib 4.9.2、JEI・Distant Horizons 対応。`mod_id = ashvehicles`、`com.ashvehicles`。
 
 ## ビルドと実行
 
@@ -19,20 +19,20 @@ gradlew runData      # データ生成（定義の検証はこれで通す）
 
 | 場所 | 中身 |
 |---|---|
-| `src/main/java/com/ashvehicles/` | 全 394 クラス。`AshVehicles` / `AshVehiclesClient` / `Config` が入口 |
-| `client/` (143) | 描画・HUD・カメラ・音。`ghost` `model` `renderer` `screen` `particle` `sound` `item` |
+| `src/main/java/com/ashvehicles/` | 全 401 クラス。`AshVehicles` / `AshVehiclesClient` / `Config` が入口 |
+| `client/` (146) | 描画・HUD・カメラ・音。`ghost` `model`（`model/obj` が OBJ を GeckoLib の模型に焼く。`obj-models-bake-into-the-geckolib-cache`） `renderer` `screen` `particle` `sound` `item` |
 | `entity/` (31) | `VehicleEntityBase` → `AircraftEntity` / `GroundVehicleEntity`、投射体、チャンク読み込み系 |
-| `weapon/` (18) `sensor/` (4) | 兵装定義とシーカー |
-| `match/` (8) `command/` (2) | チームデスマッチの帳簿と進行、AI の名簿と補充、`/tdm`（`/tdm ai` を含む） |
+| `weapon/` (20) `sensor/` (4) | 兵装定義とシーカー |
+| `match/` (9) `command/` (2) | チームデスマッチの帳簿と進行、AI の名簿と補充、`/tdm`（`/tdm ai` を含む） |
 | `ai/` (89) | 地上車両と航空機の戦闘 AI（航空機は `AirPilot` と `ai/air`、`aircraft-bots-strike-from-passes`）。車両に付く操縦役（`bots-are-a-pilot-object-on-the-vehicle`）を、観測・地図・拠点・判断・戦術・経路・射撃・操縦・記録・版の層に分けてある（`battle-ai-is-layered-with-a-discrete-action-policy`、仕様書 `85 戦闘AI`）。試合を重ねて覚える地図はワールドに保存する（`map-memory-is-counted-not-trained`） |
-| `mixin/` (24) | `ashvehicles.mixins.json`。チャンク送信・生成・描画順に手を入れている |
+| `mixin/` (25) | `ashvehicles.mixins.json`。チャンク送信・生成・描画順に手を入れている |
 | `network/` (21) `registry/` (8) `data/` (6) | パケット、登録、定義読み込みとコンテンツパック |
 | `tool/vehicle-editor.html` | 当たり判定箱を作るブラウザツール |
 | `tool/dump_definitions.py` | 定義ファイルから実装一覧（機体・兵装の数値表）を Obsidian の `データ/` に生成 |
 | `tool/make_weapon_icon.py` | 兵装の geo から 16×16 のアイテムアイコンを起こす。手描きの下地 |
-| `tool/ai/` | 戦闘 AI の学習の段取りをゲームの外で回す Python（版の比較 `evaluate.py`・次の候補 `propose_version.py`・学習用 CSV `export_dataset.py`・覚えた地図の画像 `map_memory.py`）、覚えた地図と戦闘をワールドの地形に重ねて見るブラウザのビューア `viewer/index.html`、判断ロジックの合成試験 `check/` |
+| `tool/ai/` | 戦闘 AI の学習の段取りをゲームの外で回す Python（版の比較 `evaluate.py`・次の候補 `propose_version.py`・学習用 CSV `export_dataset.py`・覚えた地図の画像 `map_memory.py`）、覚えた地図と戦闘をワールドの地形に重ねて見るブラウザのビューア `viewer/index.html`、判断ロジックの合成試験 `check/`、判断の層と AI の航空機を JS に写した代理の試合（会場は自動生成か Minecraft のワールド）を Worker で並列に回して版のパラメータを進化させるブラウザの学習器 `trainer/`（`browser-trainer-evolves-versions-in-a-proxy-sim`。ゲームの式を変えたら `trainer/sim/` も直し `trainer/build_data.py` を打ち直す） |
 
-**コンテンツは定義ファイル駆動**。`src/main/resources/data/ashvehicles/` に aircraft 29 / vehicle 23（うち艦 2） / weapon 42 / ammunition 10 / rack 5 / equipment 3。**登録の本体は Java ではなく定義ファイル**なので、新規追加はまずここを見る（`what-a-new-machine-needs` / `what-a-new-weapon-needs`）。
+**コンテンツは定義ファイル駆動**。`src/main/resources/data/ashvehicles/ashvehicles/` に（名前空間の直下に置かないのは他 MOD との衝突のため。`definition-folders-are-namespaced-by-mod`） aircraft 32 / vehicle 23（うち艦 2） / weapon 42 / ammunition 10 / rack 5 / equipment 3。**登録の本体は Java ではなく定義ファイル**なので、新規追加はまずここを見る（`what-a-new-machine-needs` / `what-a-new-weapon-needs`）。模型は `assets/…/geo/entity/<id>.geo.json` か、代わりに `assets/…/obj/entity/<id>.obj`（Blockbench の画面の向きのまま、`o` がボーン名。蝶番と親子は横の `<id>.bones.json`）。
 
 ## 記憶と記録（重要）
 

@@ -2655,7 +2655,7 @@ const storeCubes = () => {
  *
  * <p>The pod's own figure rather than the aeroplane's, which is why it is a constant here and not
  * something typed into a machine's file: it is read off the pod's model, it is the same wherever the
- * pod is bolted, and it lives in {@code data/ashvehicles/equipment/targeting_pod.json} under
+ * pod is bolted, and it lives in {@code data/ashvehicles/ashvehicles/equipment/targeting_pod.json} under
  * {@code camera}. This is a copy of that, kept so the editor can show what a station would be able
  * to see before anybody loads the aeroplane. A pack that redraws the pod should change both.
  */
@@ -8417,7 +8417,7 @@ function exportMachine() {
 function machinePath() {
   const leaf = state.kind === "ground" ? "vehicle" : "aircraft";
   const name = (state.id || "machine") + ".json";
-  if (!library.dir) return `src/main/resources/data/ashvehicles/${leaf}/${name}`;
+  if (!library.dir) return `src/main/resources/data/ashvehicles/ashvehicles/${leaf}/${name}`;
   const e = library.entries.find(x => x.id === state.id);
   return e && e.data ? e.data.path : [library.root, ...whereItGoes(state.kind), name].join("/");
 }
@@ -8525,9 +8525,9 @@ function whereItGoes(kind) {
   if (model) {
     const p = under(model.geo.path);
     const at = p.lastIndexOf("assets");
-    if (at >= 0) return [...p.slice(0, at), "data", p[at + 1] || "ashvehicles", leaf];
+    if (at >= 0) return [...p.slice(0, at), "data", p[at + 1] || "ashvehicles", "ashvehicles", leaf];
   }
-  return ["src", "main", "resources", "data", "ashvehicles", leaf];
+  return ["src", "main", "resources", "data", "ashvehicles", "ashvehicles", leaf];
 }
 
 /**
@@ -9145,17 +9145,17 @@ function armsWhereItGoes(kind) {
   if (any) { const p = under(any.rec.path); p[p.length - 1] = kind; return p; }
 
   // Failing all that, a machine says everything but the last folder: the three sorts live beside
-  // vehicle/ and aircraft/ under the same data/ashvehicles/.
+  // vehicle/ and aircraft/ under the same data/ashvehicles/ashvehicles/.
   const machine = library.entries.find(e => e.data);
   if (machine) { const p = under(machine.data.path); p[p.length - 1] = kind; return p; }
 
-  return ["src", "main", "resources", "data", "ashvehicles", kind];
+  return ["src", "main", "resources", "data", "ashvehicles", "ashvehicles", kind];
 }
 
 /** The file this armament is written to, real where a folder is open and the layout where not. */
 function armsPath() {
   const name = (arms.id || "armament") + ".json";
-  if (!library.dir) return `src/main/resources/data/ashvehicles/${arms.kind}/${name}`;
+  if (!library.dir) return `src/main/resources/data/ashvehicles/ashvehicles/${arms.kind}/${name}`;
   const e = library.arms.find(a => a.kind === arms.kind && a.id === arms.id);
   return e ? e.rec.path : [library.root, ...armsWhereItGoes(arms.kind), name].join("/");
 }

@@ -39,13 +39,13 @@ public record TacticalProfile(double aggression, double riskTolerance, double pr
      */
     public static TacticalProfile of(VehicleRole role) {
         return switch (role) {
-            case TANK -> new TacticalProfile(0.90, 0.80, 0.50, 0.25, 0.50, 0.45, 0.50, 0.20, 0.00, 0.25, 1.00);
-            case IFV -> new TacticalProfile(0.45, 0.50, 0.45, 0.80, 0.60, 0.60, 0.60, 0.35, 0.80, 0.35, 1.00);
-            case APC -> new TacticalProfile(0.30, 0.40, 0.40, 0.40, 0.70, 0.80, 0.60, 0.30, 0.10, 0.40, 1.00);
-            case SCOUT -> new TacticalProfile(0.30, 0.35, 0.60, 0.60, 0.70, 0.50, 0.30, 0.90, 0.10, 0.45, 1.00);
-            case AA -> new TacticalProfile(0.35, 0.40, 0.80, 0.10, 0.60, 0.60, 0.80, 0.20, 1.00, 0.40, 0.50);
-            case ARTILLERY -> new TacticalProfile(0.25, 0.30, 0.90, 0.05, 0.70, 0.20, 0.90, 0.20, 0.00, 0.50, 0.20);
-            case SUPPORT -> new TacticalProfile(0.40, 0.45, 0.50, 0.30, 0.60, 0.50, 0.90, 0.30, 0.20, 0.40, 0.60);
+            case TANK -> new TacticalProfile(0.907642, 0.815309, 0.497954, 0.289467, 0.507950, 0.516845, 0.391226, 0.195743, 0.021418, 0.257228, 0.974193);
+            case IFV -> new TacticalProfile(0.516428, 0.584188, 0.564972, 0.713363, 0.641940, 0.585146, 0.555418, 0.359667, 0.649848, 0.302153, 1.00);
+            case APC -> new TacticalProfile(0.327526, 0.384315, 0.303157, 0.361527, 0.692795, 1.000000, 0.677966, 0.390026, 0.118305, 0.381595, 1.00);
+            case SCOUT -> new TacticalProfile(0.353565, 0.438573, 0.617452, 0.633468, 0.659989, 0.593472, 0.296332, 1.000000, 0.089777, 0.466705, 0.997490);
+            case AA -> new TacticalProfile(0.367579, 0.415232, 0.680776, 0.078927, 0.548938, 0.570112, 0.678202, 0.198661, 0.758582, 0.272988, 0.550609);
+            case ARTILLERY -> new TacticalProfile(0.240539, 0.307826, 0.828740, 0.049377, 0.583531, 0.175366, 0.960592, 0.202782, 0.049471, 0.485976, 0.207066);
+            case SUPPORT -> new TacticalProfile(0.449090, 0.439861, 0.554079, 0.305744, 0.607050, 0.438927, 0.727824, 0.292558, 0.241130, 0.446751, 0.698136);
         };
     }
 

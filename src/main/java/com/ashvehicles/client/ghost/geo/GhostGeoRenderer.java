@@ -6,6 +6,7 @@ import com.ashvehicles.AshVehicles;
 import com.ashvehicles.client.ghost.EntityGhost;
 import com.ashvehicles.client.ghost.GhostRenderContext;
 import com.ashvehicles.client.ghost.GhostSnapshot;
+import com.ashvehicles.client.model.obj.MeshBone;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 
@@ -16,6 +17,7 @@ import net.minecraft.util.Mth;
 import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
+import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.model.GeoModel;
 import software.bernie.geckolib.renderer.GeoObjectRenderer;
 import software.bernie.geckolib.util.Color;
@@ -164,6 +166,15 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
         super.preRender(poseStack, animatable, model, bufferSource, buffer, isReRender, partialTick,
                 packedLight, packedOverlay, colour);
         poseStack.translate(-0.5F, -0.51F, -0.5F);
+    }
+
+    /** OBJ から焼いたボーンは頂点ごとの法線で描く。{@link MeshBone} 参照。 */
+    @Override
+    public void renderCubesOfBone(PoseStack poseStack, GeoBone bone, VertexConsumer buffer, int packedLight,
+            int packedOverlay, int colour) {
+        if (!MeshBone.draw(poseStack, bone, buffer, packedLight, packedOverlay, colour)) {
+            super.renderCubesOfBone(poseStack, bone, buffer, packedLight, packedOverlay, colour);
+        }
     }
 
     /** ジオメトリ・テクスチャ・アニメーションはスナップショットから、ポーズはアダプタの poser から。 */

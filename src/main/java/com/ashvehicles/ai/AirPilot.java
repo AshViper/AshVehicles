@@ -79,6 +79,11 @@ import org.joml.Quaternionf;
  * <p><b>地面に当たらないことが何より先。</b> 毎 tick、進む先の地面（読める chunk だけ、{@link Ground}）と降りている
  * 速さから引き起こしを決め、そのときは撃つのをやめて上る。撃つ物が尽きたら自陣の方へ抜け、撃った物が着くのを
  * 待って自爆し、出直す（{@link Phase#SPENT}、2026-09-13 の指示）——弾薬箱を運んでくる者はいない。
+ *
+ * <p><b>縦に回らず、失速したら罰する</b>（2026-09-14 の指示「ストールになるとペナルティになるように」「爆撃機とかで垂直に
+ * 旋回しようとする動きがあるので控えたい」）。機首の円錐の外へは水平に回り、引きは飛行経路が求める上りを越えない分だけ
+ * （{@link FlightControl#level}・{@link FlightControl#holdPath}）、速さが失速へ寄るほど上りとバンクを切る（{@link #keepAloft}）。
+ * それでも失速したら記録に罰を付け、そのとき狙っていた相手の点数を下げる（{@link #watchStall}）。
  */
 public final class AirPilot extends BotPilot {
     // ------------------------------------------------------------------
@@ -163,6 +168,12 @@ public final class AirPilot extends BotPilot {
     private static final double STALL_DIVE = 3.0;
     private static final float STALL_BANK = 30.0F;
 
+    /** 失速を数え始めるまでの、出てからの長さ（tick）。出撃は 200 km/h・スロットル半分で、失速速度がその7割を越える機体もある。 */
+    private static final int STALL_GRACE = 100;
+
+    /** 失速から抜けたと見なすまで、翼が飛んでいる長さ（tick）。落ちながら失速角を出入りする機体を、1回の失速と数える。 */
+    private static final int RECOVERED_TICKS = 40;
+
     /** 求める速さをこれだけ超えたらエアブレーキ。 */
     private static final double AIRBRAKE = 1.35;
 
@@ -215,7 +226,11 @@ public final class AirPilot extends BotPilot {
     /** 目標を選び直す間隔（tick）。倒したか見失ったときは待たない。 */
     private static final int RETARGET = 10;
 
-    /** 戦域の縁からこれだけ出たら、持ち場より先に会場へ戻る（ブロック）。出撃は旗の後方1000ブロックから。 */
+    /**
+     * 戦域の縁からこれだけ出たら、持ち場より先に会場へ戻る（ブロック）。出撃は旗の後方1500ブロックから
+     * （{@code Deathmatch.LAUNCH_BEHIND}）で、戦域は一番遠い旗より 96 ブロック外まであるので、出た直後の機体は
+     * 戦域の縁から最大 1404 ブロック外——この首輪の内側に収まる。出撃の距離をこれ＋96 より伸ばすなら、ここも伸ばすこと。
+     */
     private static final double LEASH = 1500.0;
 
     /** 拠点の近くの敵と数える、円の外側の余裕（ブロック）。 */
@@ -292,10 +307,14 @@ public final class AirPilot extends BotPilot {
     private record Arms(ResourceLocation id, WeaponDefinition weapon, AirLoadout.Store store) {
     }
 
-    /** 1つの相手に自分が与えた打撃と、撃った航過の数。見込みを実際の当たりで直すため（{@link #learned}）。 */
+    /**
+     * 1つの相手に自分が与えた打撃と、撃った航過の数。見込みを実際の当たりで直すため（{@link #learned}）。その相手を
+     * 狙っていて失速した回数も（{@link #watchStall}）。
+     */
     private static final class Tally {
         double dealt;
         int passes;
+        int stalls;
         long touched;
     }
 
@@ -329,6 +348,11 @@ public final class AirPilot extends BotPilot {
 
     /** この出撃で撃った数。分類ごと（機関砲は発数、爆弾とミサイルは本数）。 */
     private final EnumMap<AirLoadout.Store, Integer> fired = new EnumMap<>(AirLoadout.Store.class);
+
+    /** この出撃で失速した回数と、今の失速に入った tick（入っていなければ {@code Long.MIN_VALUE}）と、抜けてから飛んだ長さ。 */
+    private int stalls;
+    private long stalledAt = Long.MIN_VALUE;
+    private int flyingTicks;
 
     /** 追ってくるミサイルのうち、警告の距離に入っている一番近い1本。{@link #dodge} が毎 tick 書く。 */
     @Nullable
@@ -405,6 +429,10 @@ public final class AirPilot extends BotPilot {
 
         this.flight.sense(attitude);
         this.phaseTicks++;
+
+        if (!this.rotorcraft) {
+            this.watchStall(now);
+        }
 
         // 空から出た機体は脚が出たまま。抗力で遅いだけなので最初に畳む。畳めない脚は機体の側が断る。
         if (!this.gearChecked && !this.aircraft.onGround()) {
@@ -483,8 +511,12 @@ public final class AirPilot extends BotPilot {
         this.evade(orders, here, motion);
         this.keepAloft(orders, here, motion, speed);
 
-        FlightControl.Stick stick = this.flight.point(attitude, orders.heading, false, orders.bank);
-        float pitch = stick.pitch();
+        // 機首の円錐の外へは水平に回り、引きは飛行経路が求める上りを越えない分だけ。マウス操縦の式のままでは、後ろの少し
+        // 上へ向くとループに、真横へ回ると斜めのループに入り、爆撃機はその頂で失速する（{@link FlightControl#level}・
+        // {@link FlightControl#holdPath}、2026-09-14）。
+        Vec3 heading = FlightControl.level(attitude, orders.heading);
+        FlightControl.Stick stick = this.flight.point(attitude, heading, false, orders.bank);
+        float pitch = FlightControl.holdPath(stick.pitch(), attitude, motion, heading);
 
         // 失速角の手前では引かない。引けば主翼が飛ぶのをやめ、機首はそのまま地面へ向く。
         if (pitch > 0.0F
@@ -496,7 +528,7 @@ public final class AirPilot extends BotPilot {
         float throttle = FlightControl.throttle(speed, stalling ? this.aircraft.getMaxSpeed() : orders.speed,
                 this.aircraft.getThrottle());
 
-        this.steering = here.add(orders.heading.scale(STEERING_REACH));
+        this.steering = here.add(heading.normalize().scale(STEERING_REACH));
 
         return new AircraftInput(pitch, stick.roll(), stick.yaw(), throttle,
                 !stalling && speed > orders.speed * AIRBRAKE, this.trigger(orders), orders.flare, orders.chaff,
@@ -792,13 +824,75 @@ public final class AirPilot extends BotPilot {
             return;
         }
 
-        if (speed < this.aircraft.getStallSpeed() * STALL_MARGIN) {
-            Vec3 flat = this.horizontal(orders.heading);
+        double stall = this.aircraft.getStallSpeed();
+        Vec3 flat = this.horizontal(orders.heading);
+
+        if (speed < stall * STALL_MARGIN) {
             double radians = Math.toRadians(-STALL_DIVE);
 
             orders.heading = new Vec3(flat.x * Math.cos(radians), Math.sin(radians), flat.z * Math.cos(radians));
             orders.bank = Math.min(orders.bank, STALL_BANK);
+
+            return;
         }
+
+        // 失速へ寄るほど、上りとバンクを切る（2026-09-14）。上れば速さを失い、深く傾けて回れば翼の荷重が増える——どちらも
+        // 速さの余裕の中でだけ許す。巡航ではどちらも普段の上限のまま。降りる角は切らない。
+        double climb = Math.toRadians(FlightControl.sustainableClimb(speed, stall, STALL_MARGIN));
+
+        if (orders.heading.normalize().y > Math.sin(climb)) {
+            orders.heading = new Vec3(flat.x * Math.cos(climb), Math.sin(climb), flat.z * Math.cos(climb));
+        }
+
+        orders.bank = Math.min(orders.bank,
+                Math.max(STALL_BANK, FlightControl.sustainableBank(speed, stall, STALL_MARGIN)));
+    }
+
+    /**
+     * 失速を数える（2026-09-14 の指示「ストールになるとペナルティになるように」）。翼が失速角を越えたか、失速速度を
+     * 下回ったら、入った瞬間に1回:
+     *
+     * <ul>
+     * <li>記録へ罰を付ける（{@code Stalled}、設定の {@code rewards.stalled}）</li>
+     * <li>そのとき狙っていた相手に数え、その相手の点数を下げる（{@link KillScore#stalled}）——追えば失速する相手を、
+     *     同じやり方で追い直さない</li>
+     * </ul>
+     *
+     * <p>{@value #RECOVERED_TICKS} tick 飛び続けてから次に入れば、また数える。出てすぐの {@value #STALL_GRACE} tick は
+     * 数えない。失速させないこと自体は罰ではなく舵の側（{@link #keepAloft} と {@link FlightControl#holdPath}）の仕事で、
+     * 罰は記録と狙う相手にしか効かない。
+     */
+    private void watchStall(long now) {
+        double speed = this.aircraft.getDeltaMovement().length();
+        boolean stalled = this.age > STALL_GRACE && !this.aircraft.onGround() && !this.aircraft.isHovering()
+                && (this.aircraft.isStalled() || speed < this.aircraft.getStallSpeed());
+
+        if (!stalled) {
+            if (this.stalledAt != Long.MIN_VALUE && ++this.flyingTicks >= RECOVERED_TICKS) {
+                this.stalledAt = Long.MIN_VALUE;
+            }
+
+            return;
+        }
+
+        this.flyingTicks = 0;
+
+        if (this.stalledAt != Long.MIN_VALUE) {
+            return;
+        }
+
+        this.stalledAt = now;
+        this.stalls++;
+
+        if (this.target != null) {
+            Tally tally = this.tally(this.target.getId());
+
+            tally.stalls++;
+            tally.touched = now;
+        }
+
+        this.recorder.stalled(this.target, speed, this.aircraft.getStallSpeed(), this.aircraft.getAngleOfAttack(),
+                this.phase.name());
     }
 
     // ------------------------------------------------------------------
@@ -1042,10 +1136,12 @@ public final class AirPilot extends BotPilot {
             }
         }
 
+        Tally tally = this.tallies.get(entity.getId());
+
         return new KillScore.Prospect(airborne, distance, offTrack, healthOf(entity),
                 this.learned(entity, KillScore.damagePerPass(round, mark, ammo)), KillScore.passesLeft(round, mark, ammo),
                 this.damage.hurtBy(entity, now, window) || this.chasedBy(entity), threatensMe, near(entity, objectives),
-                wingmen.get(entity.getId()), defence, outside, arena, support);
+                wingmen.get(entity.getId()), defence, outside, arena, support, tally == null ? 0 : tally.stalls);
     }
 
     /** 名簿の敵のうち、空を撃てる地上車両（{@code Roles.defendsAir}）。相手の周りの防空と、自分に届く脅威を数えるため。 */
@@ -1693,6 +1789,8 @@ public final class AirPilot extends BotPilot {
         into.addProperty("fired_gun", this.fired.getOrDefault(AirLoadout.Store.GUN, 0));
         into.addProperty("fired_bomb", this.fired.getOrDefault(AirLoadout.Store.BOMB, 0));
         into.addProperty("fired_aam", this.fired.getOrDefault(AirLoadout.Store.AAM, 0));
+        into.addProperty("stalls", this.stalls);
+        into.addProperty("stalled", this.stalledAt != Long.MIN_VALUE);
     }
 
     @Override

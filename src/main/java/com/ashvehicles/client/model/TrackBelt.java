@@ -5,12 +5,12 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.WeakHashMap;
 
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 import com.ashvehicles.vehicle.Ride;
+import com.google.common.collect.MapMaker;
 import com.ashvehicles.vehicle.VehicleChassis;
 
 import net.minecraft.util.Mth;
@@ -130,9 +130,12 @@ public final class TrackBelt {
      *
      * <p>弱参照で、キーはモデルオブジェクト自体。おかげでリロードが無料で正しくなる。GeckoLib はリロードしたジオメトリ
      * から新しいモデルをベイクし、新しいモデルはこれとは別物なので、実際に描かれるジオメトリから形状が求め直される。
-     * 呼び出し元が全てレンダースレッドなのでロック無しで保持する。
+     *
+     * <p>比べるのは同一性。{@link BakedGeoModel} は record なので中身で等しさを決め、その中身のボーンは名前と
+     * 数だけで等しくなる（{@code BakedGeometry} の同じ項）。
      */
-    private static final Map<BakedGeoModel, Map<VehicleChassis.Track, Shape>> SHAPES = new WeakHashMap<>();
+    private static final Map<BakedGeoModel, Map<VehicleChassis.Track, Shape>> SHAPES =
+            new MapMaker().weakKeys().makeMap();
 
     private TrackBelt() {
     }

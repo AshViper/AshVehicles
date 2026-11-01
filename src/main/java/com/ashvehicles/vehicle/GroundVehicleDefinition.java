@@ -13,7 +13,7 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * One ground vehicle, described entirely in JSON. Drop a file in
- * {@code data/ashvehicles/vehicle/} and the mod registers an entity type and an item for it at
+ * {@code data/ashvehicles/ashvehicles/vehicle/} and the mod registers an entity type and an item for it at
  * start-up; no Java needed.
  *
  * <p>The arrangement is the aircraft's, and deliberately so — see
@@ -437,7 +437,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * vehicle.
      *
      * <p>How hard it hits, how far it reaches and how often it can fire are not here. Those belong
-     * to the weapon's own file in {@code data/ashvehicles/weapon/}, exactly as they do for anything
+     * to the weapon's own file in {@code data/ashvehicles/ashvehicles/weapon/}, exactly as they do for anything
      * an aircraft carries, and a tank gun is no different for being bolted in rather than hung on.
      * What is here is the part that is about <em>this vehicle</em>: where the barrel ends, and what
      * happens to the tank when the gun goes off.
@@ -593,7 +593,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * file says is where the rounds leave from.
      *
      * <p>How hard the rounds hit, how fast they leave and how quickly they come is not here either.
-     * That is the weapon's own file under {@code data/ashvehicles/weapon/}, exactly as it is for the
+     * That is the weapon's own file under {@code data/ashvehicles/ashvehicles/weapon/}, exactly as it is for the
      * main gun and for anything hung on a wing.
      *
      * @param gun the weapon the belt feeds, or empty for a vehicle that carries no machine gun
@@ -637,7 +637,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      * all hold the same round, and the only questions are how many are left and whether the seeker
      * has anything. How hard the missile hits, how far it reaches, how hard it can turn and what its
      * seeker is looking for are none of this record's business either — they are in the weapon's own
-     * file under {@code data/ashvehicles/weapon/}, exactly as they are for a missile on a wing.
+     * file under {@code data/ashvehicles/ashvehicles/weapon/}, exactly as they are for a missile on a wing.
      *
      * <p>What is here is the part that is about <em>this vehicle</em>: which round it carries and
      * where the round leaves from.

@@ -16,13 +16,26 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
  * そこでは前提が成り立たず、機体はそれぞれ別の機体のテクスチャ対応で塗られて出てくる。ライブの機体は
  * 通常フェーズで描かれるので高速経路のままでよく、被害も出ない——だからこの覆いはゴーストパスだけが使う。
  *
- * <p>コストは1頂点につき仮想呼び出し1段。ゴーストは1フレーム最大256体で、通常は十数体だ。
+ * <p><b>1頂点まるごとの書き込みは、まるごと渡す。</b>{@link VertexConsumer} の11引数の
+ * {@code addVertex} は既定では位置・色・UV・オーバーレイ・光・法線の6回の呼び出しに割られ、覆いを挟むと
+ * その6回がそれぞれもう1段の仮想呼び出しになる。包んだ {@code BufferBuilder} はその11引数版を自前で
+ * 持っていて、フォーマットが許せば1回で詰める——バニラの {@code fastFormat}、Sodium・Iris の書き換えも
+ * そこに乗る。遠くの機体はほぼ全部ゴーストパスを通るので、AI を並べた試合では1フレームに数十万頂点が
+ * ここを通る。まるごと渡してもバッファ自身が自分のフォーマットで書くので、gbf の門は閉じたままであり、
+ * この覆いの目的は損なわれない。
  */
 public final class PlainVertices implements VertexConsumer {
     private final VertexConsumer target;
 
     public PlainVertices(VertexConsumer target) {
         this.target = target;
+    }
+
+    /** GeckoLib（と gbf のフォールバック・MeshBone）が1頂点ごとに呼ぶ入口。包んだ側の一括版へそのまま。 */
+    @Override
+    public void addVertex(float x, float y, float z, int color, float u, float v, int packedOverlay,
+            int packedLight, float normalX, float normalY, float normalZ) {
+        this.target.addVertex(x, y, z, color, u, v, packedOverlay, packedLight, normalX, normalY, normalZ);
     }
 
     /** 包んだ側ではなく自分を返す。連鎖の途中で生のバッファが呼び出し元の手に渡らないように。 */

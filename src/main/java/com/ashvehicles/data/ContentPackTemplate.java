@@ -24,12 +24,14 @@ final class ContentPackTemplate {
             The layout is the same one Minecraft itself uses, and the same one this mod uses:
 
                 mypack.zip
-                  data/mypack/aircraft/foo.json          <- one file, one aeroplane
-                  data/mypack/vehicle/bar.json           <- one file, one ground vehicle or ship
-                  data/mypack/weapon/baz.json            <- guns, bombs, missiles, rockets
-                  data/mypack/rack/rail.json             <- pylons and ejector racks
-                  data/mypack/equipment/pod.json         <- pods
+                  data/mypack/ashvehicles/aircraft/foo.json    <- one file, one aeroplane
+                  data/mypack/ashvehicles/vehicle/bar.json     <- one file, one ground vehicle or ship
+                  data/mypack/ashvehicles/weapon/baz.json      <- guns, bombs, missiles, rockets
+                  data/mypack/ashvehicles/ammunition/he.json   <- other rounds for a gun
+                  data/mypack/ashvehicles/rack/rail.json       <- pylons and ejector racks
+                  data/mypack/ashvehicles/equipment/pod.json   <- pods
                   assets/mypack/geo/entity/foo.geo.json  <- the model
+                  assets/mypack/obj/entity/foo.obj       <- ...or the model as a Wavefront OBJ
                   assets/mypack/textures/entity/foo.png  <- its skin
                   assets/mypack/animations/entity/foo.animation.json
                   assets/mypack/lang/en_us.json          <- the names people read
@@ -37,14 +39,27 @@ final class ContentPackTemplate {
             No pack.mcmeta is needed. There is nothing to declare: the folder is only read by this
             mod, and this mod already knows what it is looking at.
 
+            The ashvehicles/ folder between the namespace and the kind is not decoration. Other mods
+            read every namespace's aircraft/ folder as their own (Immersive Aircraft does, and crashes on
+            these files). Packs that still use data/mypack/aircraft/ are read, with a warning in the log.
+
 
             Names
             -----
 
             The folder under data/ and assets/ is the namespace, and the file name is the rest of it.
-            data/mypack/aircraft/foo.json is the aeroplane "mypack:foo". Its entity and its item are
+            data/mypack/ashvehicles/aircraft/foo.json is the aeroplane "mypack:foo". Its entity and its item are
             registered under that name, its model is looked for at assets/mypack/geo/entity/foo.geo.json,
             and its skin at assets/mypack/textures/entity/foo.png -- the same word in both places.
+
+            An OBJ model stands in for the .geo.json of the same name, so nothing else changes. Export
+            it the way Blockbench shows the model: y up, nose towards -Z, one unit is one block, and
+            the wheels at y = 0. Each "o" object becomes a bone of that name, which is the name the
+            "model.bones" block of the definition refers to. The skin is still
+            textures/entity/foo.png; the .mtl file is not read. Parts that swing on a hinge, or that
+            must follow another part (a gun on its turret), need a foo.bones.json next to the OBJ:
+
+                { "bones": { "gun": { "parent": "turret", "pivot": [0, 2.1, -0.9] } } }
 
             Because the namespace is yours, two packs can both ship a "foo" without either one losing.
             Naming your namespace "ashvehicles" is how you would replace something the mod already
@@ -92,7 +107,7 @@ final class ContentPackTemplate {
             -----------------
 
             Every aircraft, vehicle and weapon this mod ships is a file of exactly this kind. Open the
-            mod's jar with any zip program and look under data/ashvehicles/ and assets/ashvehicles/ --
+            mod's jar with any zip program and look under data/ashvehicles/ashvehicles/ and assets/ashvehicles/ --
             those files are the reference, and copying the closest one and editing it is the intended
             way to start.
 

@@ -72,8 +72,8 @@ file is still in the history if you want it: `git show cf0ee44:tool/hitbox-edito
 
 1. **Drop the folder in.** The two files a machine is made of live nowhere near each other — the
    model in `src/main/resources/assets/ashvehicles/geo/entity/`, and the machine's own file, the
-   boxes included in its `hitbox` block, in `data/ashvehicles/vehicle/` or
-   `data/ashvehicles/aircraft/` — so hand the editor `src/main/resources` whole, by dropping it on
+   boxes included in its `hitbox` block, in `data/ashvehicles/ashvehicles/vehicle/` or
+   `data/ashvehicles/ashvehicles/aircraft/` — so hand the editor `src/main/resources` whole, by dropping it on
    the page or through **A folder…**. It is walked once, the pairs are matched up by name, and
    every machine in there comes up as a list you can click: pick one and both its files are read.
    Nothing is opened until it is picked, so handing over the whole repository costs a walk and not
@@ -219,9 +219,9 @@ all three:
 
 | | what it is |
 | --- | --- |
-| `data/ashvehicles/weapon/` | what is fired: the rate, the round, the motor, the seeker, the smoke |
-| `data/ashvehicles/rack/` | the carriage between a station and its stores — how many, and where each hangs |
-| `data/ashvehicles/equipment/` | a pod, which is carried rather than fired |
+| `data/ashvehicles/ashvehicles/weapon/` | what is fired: the rate, the round, the motor, the seeker, the smoke |
+| `data/ashvehicles/ashvehicles/rack/` | the carriage between a station and its stores — how many, and where each hangs |
+| `data/ashvehicles/ashvehicles/equipment/` | a pod, which is carried rather than fired |
 
 None of the three has anything with a *place* on a machine, which is why it is a panel of figures
 and not a thing to drag: a rack's stations are offsets from a pylon and a pod's lens is an offset
@@ -312,9 +312,9 @@ What comes out, for a pack called `mypack` holding one aeroplane and one missile
 
 ```
 mypack.zip
-  data/mypack/aircraft/foo.json          the definition
+  data/mypack/ashvehicles/aircraft/foo.json          the definition
   data/mypack/recipe/foo.json            what it is built out of
-  data/mypack/weapon/mymissile.json
+  data/mypack/ashvehicles/weapon/mymissile.json
   data/mypack/recipe/mymissile.json
   assets/mypack/geo/entity/foo.geo.json  the model, as it was loaded
   assets/mypack/textures/entity/foo.png  the skin, as it was loaded
@@ -327,7 +327,7 @@ mypack.zip
 
 Three things about that list are worth saying out loud.
 
-- **The namespace is the folder and the first half of every name.** `data/mypack/aircraft/foo.json`
+- **The namespace is the folder and the first half of every name.** `data/mypack/ashvehicles/aircraft/foo.json`
   is the aeroplane `mypack:foo`; its entity, its item, its model and its skin are all looked for
   under that one word. Two packs can both ship a `foo` without either losing. Calling your namespace
   `ashvehicles` is how you would *replace* something the mod ships — do that on purpose or not at
@@ -816,10 +816,10 @@ hang a missile on one sort or a pod on the other. Select a pylon and set **what 
 
 - **weapon** — armament. Nothing hangs on it directly: a *rack* is bolted on first, and the stores go
   on the rack. How many the station then carries, where each of them hangs and what sort it will take
-  are all the rack's to say, and racks are their own files in `data/ashvehicles/rack/`. Drawn red,
+  are all the rack's to say, and racks are their own files in `data/ashvehicles/ashvehicles/rack/`. Drawn red,
   with the hook the pylons have always had.
 - **special** — one pod, bolted straight on with no rack in between: a targeting pod, a jammer, a
-  decoy set, out of `data/ashvehicles/equipment/`. Nothing here is ever fired. Drawn amber, and as a
+  decoy set, out of `data/ashvehicles/ashvehicles/equipment/`. Nothing here is ever fired. Drawn amber, and as a
   cross rather than a hook, because nothing hangs off it.
 
 A station with a **fixed weapon** is neither. It is part of the airframe, the game ignores the kind
@@ -844,7 +844,7 @@ station has a clear view down and ahead before settling on it.
 
 The offset from the station to the lens is *not* the aeroplane's to set, and there is nothing here to
 type: it is read off the pod's own model and lives in the pod's file, under `camera`, in
-`data/ashvehicles/equipment/`. Fit a pod to the station and the cross moves to *that* pod's own
+`data/ashvehicles/ashvehicles/equipment/`. Fit a pod to the station and the cross moves to *that* pod's own
 figure; with none fitted the editor falls back on a copy of the shipped targeting pod's — `POD_LENS`
 in the source, one line — purely so it can draw the preview. A pack that redraws the pod should
 change both.
@@ -853,7 +853,7 @@ change both.
 そこにターゲティングポッドを付けたときのレンズ位置です。映像はポッドから撮るので、どのステーション
 に付けるかで見える範囲が変わります — 胴体内側なら機体下面から、翼下外側なら間に吊った兵装越しに。
 前下方が抜けているかを確認してから決めてください。ステーションとレンズの相対位置は機体側ではなく
-ポッド側（`data/ashvehicles/equipment/` の `camera`）が持ちます。
+ポッド側（`data/ashvehicles/ashvehicles/equipment/` の `camera`）が持ちます。
 
 パイロンには2種類あります。**兵装**はラックを付けてからその上に武装を吊るステーション（赤・フック
 形）、**特殊**はポッドを直付けするステーション（橙・十字形）で、ゲーム側はこの2つを取り違えません。

@@ -1,5 +1,7 @@
 package com.ashvehicles.client;
 
+import javax.annotation.Nullable;
+
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.network.MatchStatePayload;
@@ -25,10 +27,14 @@ import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
  * 同じ輪郭だ。描いているのはここではなくゲーム本体のアウトラインパスで、この MOD が足しているのは
  * 「光って見えるか」（{@code MatchGlowMixin}）と「何色か」（{@code MatchGlowColourMixin}）の2つの答え
  * だけ。箱は機体の形を教えないし、パーツ箱の和は翼端の外まで膨らむ——輪郭は模型そのものをなぞる。
+ * ゲームのレンダラーが降板した距離（ゴースト）でも模型が見えている限り縁取るのは {@code GhostOutline}。
  *
- * <p><b>味方だけ。</b> 敵の位置を教える計器はこの MOD の趣味ではないし、レーダーと照準器が既にその
- * 仕事を——見つける手間と引き換えに——持っている。光らせるのは「撃ってよいか」を一瞬で決めるためで、
- * 上空から見下ろした戦車が味方か敵かは、塗装では絶対に読めない。
+ * <p><b>陣営に入っている者には味方だけ。</b> 敵の位置を教える計器はこの MOD の趣味ではないし、レーダーと
+ * 照準器が既にその仕事を——見つける手間と引き換えに——持っている。光らせるのは「撃ってよいか」を一瞬で
+ * 決めるためで、上空から見下ろした戦車が味方か敵かは、塗装では絶対に読めない。
+ *
+ * <p><b>どの陣営にも入っていない者には全陣営。</b> 観戦している者や運営にとって、戦場は「どちらが
+ * どこにいるか」を見る物だ。その者には撃つ相手がいないので、敵を配る心配も無い。色はそれぞれの陣営の色。
  *
  * <p><b>自分の機体は光らせない。</b> 一人称視点の機内が輪郭で縁取られても、誰の役にも立たない。
  *
@@ -87,29 +93,39 @@ public final class MatchMarks {
     // ------------------------------------------------------------------
 
     /**
-     * その相手を味方として光らせるか。ゲーム本体のアウトラインパスに繋がる唯一の述語。
+     * その相手を光らせるか。ゲーム本体のアウトラインパスに繋がる唯一の述語。
+     */
+    public static boolean glows(Entity entity) {
+        return glowTeam(entity) != null;
+    }
+
+    /** その相手の輪郭の色（RGB）。光らせない相手なら -1。 */
+    public static int glowColour(Entity entity) {
+        String team = glowTeam(entity);
+
+        return team == null ? -1 : MatchView.colourOfTeam(team) & 0xFFFFFF;
+    }
+
+    /**
+     * その相手をどの陣営の色で光らせるか。光らせないなら null。陣営に入っている者には自陣だけ、入っていない
+     * 者には全陣営を答える（クラスの注記）。
      *
      * <p><b>毎フレーム、世界の全エンティティについて訊かれる。</b> 弾も破片もここを通るので、型で落と
      * せるものは名簿を引く前に落とす。
      *
-     * <p>機体が味方かどうかは<b>乗っている者</b>で決める。機体に書かれた陣営タグはサーバーの持ち物で、
+     * <p>機体の陣営は<b>乗っている者</b>で決める。機体に書かれた陣営タグはサーバーの持ち物で、
      * クライアントには届かない（{@code Deathmatch.TEAM_KEY}）。空の機体が光らないのはそのためで、
-     * 乗っていない機体を味方と呼ぶ理由も特に無い。<b>例外は AI の車両</b>——あれは乗っている者を持たない
-     * まま戦うので、サーバーが UUID の名簿を別に配っている。
+     * 乗っていない機体をどこかの陣営と呼ぶ理由も特に無い。<b>例外は AI の車両</b>——あれは乗っている者を
+     * 持たないまま戦うので、サーバーが UUID の名簿を別に配っている。
      */
-    public static boolean isFriendly(Entity entity) {
+    @Nullable
+    private static String glowTeam(Entity entity) {
         if (!(entity instanceof Player) && !(entity instanceof VehicleEntityBase)) {
-            return false;
+            return null;
         }
 
         if (!MatchView.running()) {
-            return false;
-        }
-
-        String own = MatchView.ownTeam();
-
-        if (own == null) {
-            return false;
+            return null;
         }
 
         Minecraft minecraft = Minecraft.getInstance();
@@ -117,37 +133,49 @@ public final class MatchMarks {
 
         // 自分と、自分が今乗っている機体は光らせない。一人称の機内を輪郭で縁取っても誰の役にも立たない。
         if (entity == self || (self != null && entity == self.getVehicle())) {
-            return false;
+            return null;
         }
 
+        String own = MatchView.ownTeam();
+
         if (entity instanceof Player player) {
-            // 機体に乗っている味方は機体の側が光る。中の人まで光らせると輪郭が二重になる。
-            return !(player.getVehicle() instanceof VehicleEntityBase)
-                    && own.equals(MatchView.teamIdOf(player.getUUID()));
+            // 機体に乗っている者は機体の側が光る。中の人まで光らせると輪郭が二重になる。
+            return player.getVehicle() instanceof VehicleEntityBase
+                    ? null
+                    : shown(own, MatchView.teamIdOf(player.getUUID()));
         }
 
         VehicleEntityBase vehicle = (VehicleEntityBase) entity;
 
         if (vehicle.isWrecked()) {
-            return false;
+            return null;
         }
 
+        // 陣営に入っている者には自陣の者しか答えが返らないので、陣営の割れた相乗りでも自陣が乗っていれば
+        // 味方として光る。入っていない者には最初に見つかった陣営。
         for (Entity rider : vehicle.getIndirectPassengers()) {
-            if (rider instanceof Player player && own.equals(MatchView.teamIdOf(player.getUUID()))) {
-                return true;
+            if (rider instanceof Player player) {
+                String team = shown(own, MatchView.teamIdOf(player.getUUID()));
+
+                if (team != null) {
+                    return team;
+                }
             }
         }
 
         // 乗っている者のいない車両でも、AI なら陣営が分かる。20 対 20 の戦場で味方の戦車が1両も光らない
         // のでは、この輪郭の意味が半分無くなる（{@code MatchStatePayload.Team.machines}）。
-        return own.equals(MatchView.teamOfMachine(vehicle.getUUID()));
+        return shown(own, MatchView.teamOfMachine(vehicle.getUUID()));
     }
 
-    /** 味方の輪郭の色（RGB）。自陣の色そのもの。 */
-    public static int friendlyColour() {
-        String own = MatchView.ownTeam();
+    /** 見ている者の陣営が {@code own} のとき、陣営 {@code team} の者を光らせるならその陣営、でなければ null。 */
+    @Nullable
+    private static String shown(@Nullable String own, @Nullable String team) {
+        if (team == null) {
+            return null;
+        }
 
-        return own == null ? 0xFFFFFF : MatchView.colourOfTeam(own) & 0xFFFFFF;
+        return own == null || own.equals(team) ? team : null;
     }
 
     // ------------------------------------------------------------------

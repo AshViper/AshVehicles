@@ -162,6 +162,7 @@ public class AshVehiclesClient {
                 sprites -> CinderParticle.provider(sprites, CinderParticle.RUBBLE));
         event.registerSpriteSet(ModParticles.FIRE.get(), FlameParticle::provider);
         event.registerSpriteSet(ModParticles.SHOCKWAVE.get(), ShockwaveParticle::provider);
+        event.registerSpriteSet(ModParticles.NUCLEAR_WAVE.get(), ShockwaveParticle::nuclear);
         event.registerSpriteSet(ModParticles.SPARK.get(), sprites -> SparkParticle.provider(sprites, true));
         event.registerSpriteSet(ModParticles.DEBRIS.get(), sprites -> SparkParticle.provider(sprites, false));
         event.registerSpriteSet(ModParticles.VAPOUR.get(),

@@ -55,15 +55,15 @@ public final class RetreatPlanner {
             double ally, double cover, double high) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("tactics.retreat.safety", 1.0),
-                    parameters.get("tactics.retreat.support", 0.5),
-                    parameters.get("tactics.retreat.away", 0.6),
-                    parameters.get("tactics.retreat.distance", 0.4),
-                    parameters.get("tactics.retreat.point", 0.25),
-                    parameters.get("tactics.retreat.base", 0.15),
-                    parameters.get("tactics.retreat.ally", 0.2),
-                    parameters.get("tactics.retreat.cover", 0.3),
-                    parameters.get("tactics.retreat.high", 0.15));
+                    parameters.get("tactics.retreat.safety", 1.001126),
+                    parameters.get("tactics.retreat.support", 0.481704),
+                    parameters.get("tactics.retreat.away", 0.531829),
+                    parameters.get("tactics.retreat.distance", 0.506116),
+                    parameters.get("tactics.retreat.point", 0.249305),
+                    parameters.get("tactics.retreat.base", 0.163348),
+                    parameters.get("tactics.retreat.ally", 0.235638),
+                    parameters.get("tactics.retreat.cover", 0.256427),
+                    parameters.get("tactics.retreat.high", 0.184792));
         }
     }
 

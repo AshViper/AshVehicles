@@ -40,7 +40,7 @@ public record MatchStatePayload(int phase, List<Team> teams, List<Point> points,
      * （{@code client/MatchMarks}）——敵の位置を壁越しに配る計器はこの MOD の趣味ではない。
      *
      * <p><b>{@code machines} は AI の車両。</b> 人の機体は「乗っている者」から味方かどうかが決まるが
-     * （{@code MatchMarks.isFriendly}）、AI には乗っている者がいない——20 対 20 の戦場で味方の戦車が1両も
+     * （{@code MatchMarks.glows}）、AI には乗っている者がいない——20 対 20 の戦場で味方の戦車が1両も
      * 光らないのでは、この名簿を配っている意味が半分無くなる。陣営タグはサーバーの持ち物なので、
      * どの車両が自陣の AI かはここでしか伝えられない。
      */

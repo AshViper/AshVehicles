@@ -242,6 +242,22 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final double PROBE_ABOVE = 2.0;
     private static final double PROBE_BELOW = 3.0;
 
+    /** 姿勢のばねの減衰比。1 未満なので段差の後に1〜2回揺り返す。 */
+    private static final float SUSPENSION_DAMPING_RATIO = 0.35F;
+    /** 段差に乗り上げた高さのうち、上向きの速度として車体に残る割合（全速のとき）。 */
+    private static final double STEP_KICK = 0.35;
+    /** この速さ（ブロック/tick）で段差の跳ね上げが満額になる。 */
+    private static final double KICK_FULL_SPEED = 0.5;
+    /** 着地の速度のうち跳ね返る割合。 */
+    private static final double LANDING_RESTITUTION = 0.25;
+    /** これより遅い着地は跳ねずに止まる。 */
+    private static final double LANDING_SETTLE = 0.06;
+    /** 着地の衝撃（ブロック/tick）1あたりに車首を揺する角速度（度/tick）。 */
+    private static final float LANDING_NOD = 12.0F;
+
+    /** 履帯に沿って地面を読む間隔の上限（ブロック）。ブロック1つの起伏を取りこぼさない細かさ。 */
+    private static final double TRACK_SAMPLE_SPACING = 0.9;
+
     /**
      * 読み値を「地表」ではなく「プローブ自身の上限」と見なすための、上端からの許容幅（ブロック）。
      *
@@ -341,6 +357,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private float hullPitch;
     /** 右側が左側よりどれだけ下か（度）。同じ読み値から。 */
     private float hullBank;
+    /** 姿勢の角速度（度/tick）。サスペンションのばねが揺り戻す分。 */
+    private float hullPitchRate;
+    private float hullBankRate;
 
     /** 車首方向の速度（ブロック/tick）。負は後進。 */
     private float speed;
@@ -2551,24 +2570,113 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         double halfLength = suspension.contactLength() * 0.5;
         double halfWidth = suspension.contactWidth() * 0.5;
 
+        // 四隅だけでは履帯の中ほどの起伏が見えない。稜線を跨いだ戦車は前後の平均の高さに置かれ、腹が丘に
+        // 埋まっていた。そこで左右の履帯それぞれに沿って約1ブロックおきに地面を読む。
+        int along = Math.max(2, Mth.ceil(halfLength * 2.0 / TRACK_SAMPLE_SPACING) + 1);
+        int count = along * 2;
+        double[] s = new double[count];
+        double[] t = new double[count];
+        double[] h = new double[count];
         Vec3 centre = this.position();
-        double frontLeft = this.groundUnder(centre.add(forward.scale(halfLength)).subtract(right.scale(halfWidth)));
-        double frontRight = this.groundUnder(centre.add(forward.scale(halfLength)).add(right.scale(halfWidth)));
-        double rearLeft = this.groundUnder(centre.subtract(forward.scale(halfLength)).subtract(right.scale(halfWidth)));
-        double rearRight = this.groundUnder(centre.subtract(forward.scale(halfLength)).add(right.scale(halfWidth)));
 
-        // 下に何も無ければ水平と読む。空中の車両が向かうべき姿勢はそれだ。今離れた斜面の角度を保つ理由は
-        // 無い。
-        float targetPitch = slopeAngle(mean(frontLeft, frontRight), mean(rearLeft, rearRight), halfLength * 2.0);
-        float targetBank = slopeAngle(mean(frontLeft, rearLeft), mean(frontRight, rearRight), halfWidth * 2.0);
+        for (int side = 0; side < 2; side++) {
+            double across = side == 0 ? -halfWidth : halfWidth;
 
-        float rate = Mth.clamp(suspension.settleRate(), 0.0F, 1.0F);
-        this.hullPitch = Mth.lerp(rate, this.hullPitch, targetPitch);
-        this.hullBank = Mth.lerp(rate, this.hullBank, targetBank);
+            for (int i = 0; i < along; i++) {
+                int k = side * along + i;
+                s[k] = -halfLength + halfLength * 2.0 * i / (along - 1);
+                t[k] = across;
+                h[k] = this.groundUnder(centre.add(forward.scale(s[k])).add(right.scale(across)));
+            }
+        }
+
+        // 姿勢は読み値に最小二乗で当てた平面から取る。下に何も無ければ水平と読む。空中の車両が向かうべき
+        // 姿勢はそれだ。今離れた斜面の角度を保つ理由は無い。
+        double[] plane = fitPlane(s, t, h);
+        float targetPitch = (float) Math.toDegrees(Math.atan(plane[0]));
+        // ロールは左が高いときを正とし、t は右向き。
+        float targetBank = (float) Math.toDegrees(Math.atan(-plane[1]));
+
+        // 姿勢は追従ではなくばね。settle_rate をばね定数に読み、減衰を臨界より弱くすると、段差を越えた車体は
+        // 目標の角度を少し行き過ぎて揺り返す。
+        float stiffness = Mth.clamp(suspension.settleRate(), 0.0F, 1.0F);
+        float damping = 2.0F * Mth.sqrt(stiffness) * SUSPENSION_DAMPING_RATIO;
+        this.hullPitchRate += (targetPitch - this.hullPitch) * stiffness - this.hullPitchRate * damping;
+        this.hullBankRate += (targetBank - this.hullBank) * stiffness - this.hullBankRate * damping;
+        this.hullPitch = Mth.clamp(this.hullPitch + this.hullPitchRate, -60.0F, 60.0F);
+        this.hullBank = Mth.clamp(this.hullBank + this.hullBankRate, -60.0F, 60.0F);
         this.setXRot(-this.hullPitch);
 
-        // 接地面の中心。車体が同じ平面に沿って寝ている以上、車両の原点はここに属する。
-        this.rest(mean(mean(frontLeft, frontRight), mean(rearLeft, rearRight)), suspension);
+        // 高さは平均ではなく「今描いている車体の平面がどの読み値の下にも潜らない最低の高さ」。履帯は一番高い
+        // 所に乗るのであって、地面の平均に乗るのではない。姿勢がまだ追い付いていない間も、潜るより浮く側へ
+        // 倒れる。
+        double tanPitch = Math.tan(Math.toRadians(this.hullPitch));
+        double tanBank = Math.tan(Math.toRadians(this.hullBank));
+        double support = Double.NaN;
+
+        for (int k = 0; k < count; k++) {
+            if (Double.isNaN(h[k])) {
+                continue;
+            }
+
+            double origin = h[k] - s[k] * tanPitch + t[k] * tanBank;
+            support = Double.isNaN(support) ? origin : Math.max(support, origin);
+        }
+
+        this.rest(support, suspension);
+    }
+
+    /**
+     * 読み値 h = c + a·s + b·t に最小二乗で当てた傾き {a, b}。NaN は除外する。片側の履帯しか地面を読んで
+     * いなければ横の傾きは決まらないので 0、点が足りなければ両方 0。
+     */
+    private static double[] fitPlane(double[] s, double[] t, double[] h) {
+        double n = 0.0, ms = 0.0, mt = 0.0, mh = 0.0;
+
+        for (int k = 0; k < h.length; k++) {
+            if (!Double.isNaN(h[k])) {
+                n++;
+                ms += s[k];
+                mt += t[k];
+                mh += h[k];
+            }
+        }
+
+        if (n < 2.0) {
+            return new double[] {0.0, 0.0};
+        }
+
+        ms /= n;
+        mt /= n;
+        mh /= n;
+        double ss = 0.0, tt = 0.0, st = 0.0, sh = 0.0, th = 0.0;
+
+        for (int k = 0; k < h.length; k++) {
+            if (Double.isNaN(h[k])) {
+                continue;
+            }
+
+            double ds = s[k] - ms;
+            double dt = t[k] - mt;
+            double dh = h[k] - mh;
+            ss += ds * ds;
+            tt += dt * dt;
+            st += ds * dt;
+            sh += ds * dh;
+            th += dt * dh;
+        }
+
+        double det = ss * tt - st * st;
+
+        if (det > 1.0E-6) {
+            return new double[] {(sh * tt - th * st) / det, (th * ss - sh * st) / det};
+        }
+
+        if (ss > 1.0E-6) {
+            return new double[] {sh / ss, 0.0};
+        }
+
+        return new double[] {0.0, tt > 1.0E-6 ? th / tt : 0.0};
     }
 
     /**
@@ -2587,7 +2695,34 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         double climb = suspension.climbHeight();
         double rise = support - this.getY();
 
-        if (Double.isNaN(support) || rise < -climb) {
+        if (Double.isNaN(support)) {
+            this.fall();
+
+            return;
+        }
+
+        // 跳ね上がっている最中か、既に宙にいる車両は、坂を下るように地面へ吸い付かせず放物線で落とす。
+        // 地面より下へ出たらそこが着地で、衝撃の一部を跳ね返し、車首を揺する。
+        if (this.fallSpeed > 0.0 || !this.onGround() && rise < 0.0) {
+            this.fall();
+
+            if (this.getY() < support) {
+                double impact = -this.fallSpeed;
+                this.setPos(this.getX(), Math.min(support, this.getY() + climb), this.getZ());
+
+                if (impact > LANDING_SETTLE) {
+                    this.fallSpeed = impact * LANDING_RESTITUTION;
+                    this.hullPitchRate -= (float) impact * LANDING_NOD;
+                } else {
+                    this.fallSpeed = 0.0;
+                    this.setOnGround(true);
+                }
+            }
+
+            return;
+        }
+
+        if (rise < -climb) {
             this.fall();
 
             return;
@@ -2595,8 +2730,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         // 段差へ乗り上げるか、坂を下る。登坂能力を超える高さは、ここへ来る前に水平方向で止められている。
         // 上限は、読み違えが車両を崖に沿って打ち上げるのを防ぐためのもの——本来は崖で止まるべきなのだ。
-        this.setPos(this.getX(), this.getY() + Math.min(rise, climb), this.getZ());
-        this.fallSpeed = 0.0;
+        double up = Math.min(rise, climb);
+        this.setPos(this.getX(), this.getY() + up, this.getZ());
+
+        // 速く段差へ乗り上げた車体は、持ち上げられた勢いのまま少し宙へ出る。坂の連続した持ち上げで跳ねない
+        // よう、1tick で目に見えるほど持ち上がったときだけ。
+        double pace = Mth.clamp(Math.abs(this.speed) / KICK_FULL_SPEED, 0.0, 1.0);
+        this.fallSpeed = up > 0.2 ? up * STEP_KICK * pace : 0.0;
         this.setOnGround(true);
     }
 

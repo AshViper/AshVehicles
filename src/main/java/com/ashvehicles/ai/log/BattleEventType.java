@@ -42,6 +42,7 @@ public enum BattleEventType {
     LONG_EXPOSURE("LongExposure"),
     WATER_ENTERED("WaterEntered"),
     UNDERWATER("Underwater"),
+    STALLED("Stalled"),
     WEAPON_RELEASED("WeaponReleased");
 
     private final String id;
@@ -70,6 +71,7 @@ public enum BattleEventType {
             case LONG_EXPOSURE -> rewards.longExposure();
             case WATER_ENTERED -> rewards.waterEntered();
             case UNDERWATER -> rewards.underwater();
+            case STALLED -> rewards.stalled();
             default -> 0.0;
         };
     }

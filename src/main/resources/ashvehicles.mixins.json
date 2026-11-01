@@ -20,11 +20,13 @@
   ],
   "client": [
     "CameraMixin",
+    "GhostOutlineMixin",
     "HitboxMixin",
     "MatchGlowColourMixin",
     "MatchGlowMixin",
     "MountHintMixin",
     "MouseLookMixin",
+    "ObjModelLoadMixin",
     "PilotChunkGateMixin",
     "PlayerDrawDistanceMixin",
     "SectionCompileOrderMixin"

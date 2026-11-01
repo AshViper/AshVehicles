@@ -1,7 +1,10 @@
 package com.ashvehicles.match;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import javax.annotation.Nullable;
@@ -19,12 +22,16 @@ import com.ashvehicles.network.MatchStatePayload;
 import com.ashvehicles.registry.ModBlocks;
 import com.ashvehicles.registry.ModEntities;
 import com.ashvehicles.vehicle.Attitude;
+import com.ashvehicles.weapon.WeaponDefinition;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -134,13 +141,13 @@ public final class Deathmatch {
      * 航空機を出す位置——旗の後方と、旗から測った高さ（ブロック）。
      *
      * <p><b>航空機は飛んでいる状態で出す。</b> 滑走路を走って上がる遊びは、試合の1回目には楽しくても
-     * 20回目には移動時間でしかない。1km 後方から出すのは、出た瞬間が敵の照準の中では困るからで、
-     * そのぶんを飛んでから戦線に着く。
+     * 20回目には移動時間でしかない。1.5km 後方から出すのは、出た瞬間が敵の照準の中では困るからで、
+     * そのぶんを飛んでから戦線に着く（2026-09-14 に 1km から伸ばした）。
      *
      * <p>「後ろ」は旗のブロックの向きの逆。向きはブロックを置いた者が向いていた方角なので、戦線の方を
      * 向いて旗を置けば、機体は後方から前線へ向かって出る。
      */
-    private static final double LAUNCH_BEHIND = 1000.0;
+    private static final double LAUNCH_BEHIND = 1500.0;
     private static final double LAUNCH_HEIGHT = 500.0;
 
     /**
@@ -156,6 +163,30 @@ public final class Deathmatch {
 
     /** 空中に出した機体のスロットル。出た瞬間からエンジンが回っている。 */
     private static final float LAUNCH_THROTTLE = 0.5F;
+
+    /** 出撃で買った核の残り発数を書く、機体の persistent data のキー。{@link #mayRelease} 参照。 */
+    public static final String NUCLEAR_KEY = "AshVehiclesNuclear";
+
+    /** 核を放した陣営を書く、弾の persistent data のキー。{@link #nuclearDetonated} 参照。 */
+    private static final String NUCLEAR_TEAM_KEY = "AshVehiclesNuclearTeam";
+
+    /**
+     * 核で決着した試合の機体を片付けるまでの tick。10秒。
+     *
+     * <p>既定の核の波（到達距離600ブロック）が戦場を渡り切るのに35 tick、そこから壊れた機体が燃えて見えるだけの時間。
+     */
+    private static final int NUCLEAR_AFTERMATH = 200;
+
+    /** 核で決着したときの画面中央の題（tick）。閃光とキノコ雲の立ち上がりに被らないよう、ゆっくり出す。 */
+    private static final int TITLE_FADE_IN = 40;
+    private static final int TITLE_STAY = 100;
+    private static final int TITLE_FADE_OUT = 40;
+
+    /** 遅らせた片付けの予定。期限と、そのとき戦場にいた機体。{@link #finish(MinecraftServer, MatchState, MatchTeam, int)}。 */
+    private record Aftermath(long due, Set<UUID> doomed) {
+    }
+
+    private static final List<Aftermath> AFTERMATHS = new ArrayList<>();
 
     private Deathmatch() {
     }
@@ -340,7 +371,9 @@ public final class Deathmatch {
         Entity killer = attackerOf(source);
         boolean loud = !vehicle.isBot() || killer != null;
 
-        credit(server, state, victim, killer, vehicle.getDisplayName(), loud);
+        // 航空機は、倒した者がいなくても「撃墜」として読み上げる（2026-09-14 の指示「自滅した際に撃墜判定」）。手柄は
+        // 誰にも付けない——地面に突っ込んだ機体を、直前に撃っていた誰かの撃破にはしない。
+        credit(server, state, victim, killer, vehicle.getDisplayName(), loud, vehicle instanceof AircraftEntity);
         // 陣営が次に出す車両の見立て（{@code ai/team/Reinforcements}）へ、何に倒されたかを渡す。
         Bots.noteLoss(server, victim, vehicle, killer);
         // 戦闘 AI の記録と報酬。勘定（チケット）はここより上で済んでいて、こちらは何も変えない。
@@ -412,7 +445,7 @@ public final class Deathmatch {
         if (!already) {
             Entity killer = attackerOf(event.getSource());
 
-            credit(fallen.server, state, victim, killer, fallen.getDisplayName(), true);
+            credit(fallen.server, state, victim, killer, fallen.getDisplayName(), true, false);
             BattleEvents.playerKilled(fallen, killer);
         }
     }
@@ -425,9 +458,12 @@ public final class Deathmatch {
      * 決めないと数えられないが、チケットなら決めなくてよい——そして墜落と自爆を勘定に入れられる。
      *
      * <p>倒した側に付くのは記録だけ（{@code MatchTeam.kills}）。勝敗には関わらない。
+     *
+     * @param downed 失われたのが航空機か。倒した者がいないとき「失った」ではなく「撃墜された」と読み上げる。手柄は
+     *               変わらず誰にも付かない
      */
     private static void credit(MinecraftServer server, MatchState state, String victimTeam,
-            @Nullable Entity attacker, Component victim, boolean loud) {
+            @Nullable Entity attacker, Component victim, boolean loud, boolean downed) {
         MatchTeam fallen = state.team(victimTeam);
 
         if (fallen == null) {
@@ -440,7 +476,10 @@ public final class Deathmatch {
         MatchTeam scoring = killerTeam == null ? null : state.team(killerTeam);
 
         if (scoring == null) {
-            if (loud) {
+            if (loud && downed) {
+                announce(server, Component.translatable("message.ashvehicles.match.shot_down", victim,
+                        fallen.display(), fallen.tickets()));
+            } else if (loud) {
                 announce(server, Component.translatable("message.ashvehicles.match.lost", fallen.display(),
                         victim, fallen.tickets()));
             }
@@ -549,7 +588,8 @@ public final class Deathmatch {
         }
 
         // 値段の確認だけ先に。引くのは機体が実際に置けてからで、置けなかった出撃で財布が減っては困る。
-        int cost = Costs.of(loadout.vehicle());
+        // 吊る物に試合での値段を持つ物（核）があれば、それも足す（{@link Costs#of(Loadout)}）。
+        int cost = Costs.of(loadout);
 
         if (state.pointsOf(player.getUUID()) < cost) {
             return Deployed.no("message.ashvehicles.match.too_poor", cost,
@@ -575,6 +615,14 @@ public final class Deathmatch {
 
         if (vehicle instanceof AircraftEntity aircraft) {
             loadout.apply(aircraft);
+
+            // 買った核の数だけ、この機体は試合中に核を放せる（{@link #mayRelease}）。数は注文書から——プリセットは
+            // WeaponMounts と同じ規則で吊れる数を数え済みなので（AirPresets.Plan）、吊れた数と食い違わない。
+            int nuclear = Costs.nuclear(loadout);
+
+            if (nuclear > 0) {
+                aircraft.getPersistentData().putInt(NUCLEAR_KEY, nuclear);
+            }
         }
 
         vehicle.rearm();
@@ -724,8 +772,9 @@ public final class Deathmatch {
             return false;
         }
 
-        aircraft.setDeltaMovement(forward.scale(LAUNCH_SPEED_KMH / KMH_PER_BLOCK_TICK));
-        aircraft.setThrottle(LAUNCH_THROTTLE);
+        // デルタ移動だけでなく、乗ったパイロットのクライアントが引き継ぐ同期値にも置く（AircraftEntity.launch）。
+        // デルタ移動だけでは AI の機体しか飛ばず、人の機体はその場から落ちていた。
+        aircraft.launch(forward.scale(LAUNCH_SPEED_KMH / KMH_PER_BLOCK_TICK), LAUNCH_THROTTLE);
 
         return true;
     }
@@ -838,6 +887,17 @@ public final class Deathmatch {
      * @param winner 勝った陣営。引き分けなら null
      */
     public static void finish(MinecraftServer server, MatchState state, @Nullable MatchTeam winner) {
+        finish(server, state, winner, 0);
+    }
+
+    /**
+     * 同じ物を、機体の片付けを遅らせて。
+     *
+     * @param clearAfter 片付けるまでの tick。0 ならその場で。遅らせても片付けるのは<b>今いる</b>機体だけで、待っている間に
+     *                   次の試合が始まって出た機体には触らない（{@link #settle}）
+     */
+    public static void finish(MinecraftServer server, MatchState state, @Nullable MatchTeam winner,
+            int clearAfter) {
         state.setPhase(MatchState.Phase.ENDED);
         state.setWinner(winner == null ? null : winner.id());
         state.setTicksLeft(0);
@@ -854,7 +914,13 @@ public final class Deathmatch {
 
         // 片付けより前。生き残っていた AI の一生を、消える前に締める。
         BattleEvents.matchEnded(server, state, winner);
-        clear(server);
+
+        if (clearAfter > 0) {
+            AFTERMATHS.add(new Aftermath(server.getTickCount() + clearAfter, tagged(server)));
+        } else {
+            clear(server);
+        }
+
         sync(server, state);
     }
 
@@ -885,6 +951,156 @@ public final class Deathmatch {
         }
 
         return removed;
+    }
+
+    /** 今いる、試合で出た機体の UUID。 */
+    private static Set<UUID> tagged(MinecraftServer server) {
+        Set<UUID> found = new HashSet<>();
+
+        for (ServerLevel level : server.getAllLevels()) {
+            for (Entity entity : level.getAllEntities()) {
+                if (entity instanceof VehicleEntityBase
+                        && !entity.getPersistentData().getString(TEAM_KEY).isEmpty()) {
+                    found.add(entity.getUUID());
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /** 期限の来た遅い片付けを済ませる。{@link #finish(MinecraftServer, MatchState, MatchTeam, int)} 参照。 */
+    private static void settle(MinecraftServer server) {
+        if (AFTERMATHS.isEmpty()) {
+            return;
+        }
+
+        long now = server.getTickCount();
+        Iterator<Aftermath> each = AFTERMATHS.iterator();
+
+        while (each.hasNext()) {
+            Aftermath aftermath = each.next();
+
+            if (now < aftermath.due()) {
+                continue;
+            }
+
+            each.remove();
+
+            for (ServerLevel level : server.getAllLevels()) {
+                for (UUID id : aftermath.doomed()) {
+                    Entity doomed = level.getEntity(id);
+
+                    if (doomed != null) {
+                        doomed.ejectPassengers();
+                        doomed.discard();
+                    }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 核
+    // ------------------------------------------------------------------
+
+    /**
+     * 今その機体がその兵装を放してよいか。核でなければ常に真、試合の外でも常に真。
+     *
+     * <p><b>試合の核は出撃盤で買った物だけ</b>（2026-09-14 の指示「TDM の際は B-2・B-52・B-1 かつ2000ポイントで」、同日に3000へ）。出撃盤の
+     * 「核攻撃」は兵装ファイルの {@code nuclear.match.carriers} に名前のある機体にだけ出て、出た機体に買った数を書く
+     * （{@link #NUCLEAR_KEY}）。
+     *
+     * <p><b>吊る所ではなく放す所で門番する。</b> 手持ちの核を試合前から置いてあった爆撃機に吊る道も、陣営タグの無い機体で
+     * 試合に割り込む道もある。吊る道を1本ずつ塞ぐより、全部が通る引き金の1箇所（{@code WeaponMounts.tick}）で訊く方が漏れない。
+     */
+    public static boolean mayRelease(AircraftEntity aircraft, WeaponDefinition weapon) {
+        MinecraftServer server = aircraft.getServer();
+
+        if (!weapon.isNuclear() || server == null || !MatchState.of(server).isRunning()) {
+            return true;
+        }
+
+        return weapon.nuclear().get().match().carries(aircraft.getAircraftId())
+                && aircraft.getPersistentData().getInt(NUCLEAR_KEY) > 0;
+    }
+
+    /**
+     * 試合中に核が放された。買った数を1つ減らし、弾に放した陣営を書き、全員に読み上げる。試合の外では何もしない。
+     *
+     * <p><b>陣営は弾が持ち歩く。</b> 起爆は放してから十秒ほど後で、その間に爆撃機が撃ち落とされても勝つのは落とした側だ。
+     * 起爆の瞬間に機体へ訊くと、落ちた爆撃機からは陣営が引けないし、試合が始まる前に放された核が始まった後に起爆して
+     * 勝ちを拾うこともできてしまう。
+     */
+    public static void armNuclear(AircraftEntity aircraft, VehicleProjectile bomb) {
+        MinecraftServer server = aircraft.getServer();
+
+        if (server == null) {
+            return;
+        }
+
+        MatchState state = MatchState.of(server);
+
+        if (!state.isRunning()) {
+            return;
+        }
+
+        CompoundTag data = aircraft.getPersistentData();
+
+        data.putInt(NUCLEAR_KEY, Math.max(0, data.getInt(NUCLEAR_KEY) - 1));
+
+        String team = teamIdOf(state, aircraft);
+        MatchTeam dropping = team == null ? null : state.team(team);
+
+        if (dropping == null) {
+            return;
+        }
+
+        bomb.getPersistentData().putString(NUCLEAR_TEAM_KEY, dropping.id());
+
+        Entity crew = aircraft.getAviator();
+
+        announce(server, Component.translatable("message.ashvehicles.match.nuclear_released",
+                (crew != null ? crew : aircraft).getDisplayName(), dropping.display())
+                .withStyle(ChatFormatting.RED));
+    }
+
+    /**
+     * 核が起爆した。試合中に放された物なら、放した陣営の勝ちで試合を終える（2026-09-14 の指示「TDM で起爆したら撃った
+     * チームの強制勝利」）。
+     *
+     * <p><b>チケットより先に決める。</b> 波は戦場の機体を次々に壊し、そのたびに {@link #onVehicleDestroyed} がチケットを
+     * 引く——先に波を通すと、チケットを使い切った側の負けとして別の決着が先に付く。だから試合を終えてから波を通し、
+     * 波が壊した物は勘定に入らない。
+     *
+     * <p><b>片付けは遅らせる</b>（{@link #NUCLEAR_AFTERMATH}）。その場で片付けると閃光の瞬間に戦場の機体が全部消え、
+     * 波が壊す物が何も残らない。
+     */
+    public static void nuclearDetonated(ServerLevel level, VehicleProjectile bomb) {
+        MinecraftServer server = level.getServer();
+        MatchState state = MatchState.of(server);
+        String team = bomb.getPersistentData().getString(NUCLEAR_TEAM_KEY);
+        MatchTeam winner = team.isEmpty() ? null : state.team(team);
+
+        if (!state.isRunning() || winner == null) {
+            return;
+        }
+
+        announce(server, Component.translatable("message.ashvehicles.match.nuclear_victory", winner.display())
+                .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+
+        Component title = Component.translatable("message.ashvehicles.match.nuclear_title")
+                .withStyle(ChatFormatting.RED, ChatFormatting.BOLD);
+        Component subtitle = Component.translatable("message.ashvehicles.match.nuclear_subtitle", winner.display());
+
+        // 副題は題より先に送る。クライアントは題が届いた時点で表示を始め、そのとき持っている副題を添える。
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            player.connection.send(new ClientboundSetTitlesAnimationPacket(TITLE_FADE_IN, TITLE_STAY, TITLE_FADE_OUT));
+            player.connection.send(new ClientboundSetSubtitleTextPacket(subtitle));
+            player.connection.send(new ClientboundSetTitleTextPacket(title));
+        }
+
+        finish(server, state, winner, NUCLEAR_AFTERMATH);
     }
 
     /** 決着を測る。残りチケットが並んでいれば引き分け。 */
@@ -1249,6 +1465,9 @@ public final class Deathmatch {
     public static void onServerTick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
         MatchState state = MatchState.of(server);
+
+        // 核で決着した試合の、遅らせた片付け。試合が動いていない間にこそ走る。
+        settle(server);
 
         if (state.isRunning() && state.ticksLeft() > 0) {
             state.setTicksLeft(state.ticksLeft() - 1);

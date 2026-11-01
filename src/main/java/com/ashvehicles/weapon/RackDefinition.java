@@ -8,7 +8,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 懸架具。パイロンと、そこに吊る兵装との間に入る金具。{@code data/ashvehicles/rack/} にファイルを置け
+ * 懸架具。パイロンと、そこに吊る兵装との間に入る金具。{@code data/ashvehicles/ashvehicles/rack/} にファイルを置け
  * ば起動時に MOD がアイテムを登録する。
  *
  * <p>兵装パイロンは翼の取付点でしかない。そこへ直接何かを吊ることはなく、まずランチレールか投下ラックを

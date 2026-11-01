@@ -3,8 +3,10 @@ package com.ashvehicles.client.renderer;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.client.model.WeaponModel;
+import com.ashvehicles.client.model.obj.MeshBone;
 import com.ashvehicles.entity.TargetDroneEntity;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 
 import net.minecraft.client.renderer.culling.Frustum;
@@ -12,6 +14,7 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
+import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 
 /**
@@ -69,6 +72,15 @@ public class TargetDroneRenderer extends GeoEntityRenderer<TargetDroneEntity> {
     @Override
     protected int getSkyLightLevel(TargetDroneEntity entity, BlockPos pos) {
         return 15;
+    }
+
+    /** OBJ から焼いたボーンは頂点ごとの法線で描く。{@link MeshBone} 参照。 */
+    @Override
+    public void renderCubesOfBone(PoseStack poseStack, GeoBone bone, VertexConsumer buffer, int packedLight,
+            int packedOverlay, int colour) {
+        if (!MeshBone.draw(poseStack, bone, buffer, packedLight, packedOverlay, colour)) {
+            super.renderCubesOfBone(poseStack, bone, buffer, packedLight, packedOverlay, colour);
+        }
     }
 
     /** 的の上に名札を浮かべる理由は無い。 */

@@ -358,10 +358,20 @@ public class DeployScreen extends Screen {
                 graphics.fill(x, top, x + width, top + PRESET_H, ACCENT_HOVER);
             }
 
+            // 値段を足すプリセット（核）だけ、右端に足す分を出す。機体の一覧の値段と同じく、読むのは「買えるか」だ。
+            int surcharge = this.presets.get(index).surcharge();
+            String extra = surcharge > 0 ? "+" + surcharge : "";
             String name = this.font.plainSubstrByWidth(this.presets.get(index).role().label().getString(),
-                    width - 12);
+                    width - 12 - this.font.width(extra));
 
             graphics.drawString(this.font, name, x + 6, top + 3, chosen ? ACCENT : TEXT, false);
+
+            if (surcharge > 0) {
+                boolean afford = this.machine != null && MatchView.purse() >= Costs.of(this.machine) + surcharge;
+
+                graphics.drawString(this.font, extra, x + width - 4 - this.font.width(extra), top + 3,
+                        afford ? TEXT_DIM : SHORT, false);
+            }
         }
 
         AirPresets.Preset preset = this.presets.get(this.presetIndex);
@@ -421,8 +431,7 @@ public class DeployScreen extends Screen {
 
         Component label = afford
                 ? Component.translatable("gui.ashvehicles.deploy.launch")
-                : Component.translatable("gui.ashvehicles.deploy.short",
-                        this.machine == null ? 0 : Costs.of(this.machine));
+                : Component.translatable("gui.ashvehicles.deploy.short", this.price());
 
         graphics.drawString(this.font, label, x + (width - this.font.width(label)) / 2, y + 6,
                 afford ? ACCENT : SHORT, false);
@@ -430,7 +439,18 @@ public class DeployScreen extends Screen {
 
     /** 選んでいる機体を今の手持ちで出せるか。断るのはサーバーだが、押す前に読めた方がよい。 */
     private boolean affordable() {
-        return this.machine != null && MatchView.purse() >= Costs.of(this.machine);
+        return this.machine != null && MatchView.purse() >= this.price();
+    }
+
+    /** 選んでいる機体を選んでいるプリセットで出す値段。核を吊るプリセットは機体の値段に足す（{@link Costs#of(Loadout)}）。 */
+    private int price() {
+        if (this.machine == null) {
+            return 0;
+        }
+
+        int extra = this.presets.isEmpty() ? 0 : this.presets.get(this.presetIndex).surcharge();
+
+        return Costs.of(this.machine) + extra;
     }
 
     private boolean overButton(int mouseX, int mouseY) {

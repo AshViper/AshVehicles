@@ -77,6 +77,7 @@ public final class AiConfig {
     private static final ModConfigSpec.DoubleValue WATER_ENTERED;
     private static final ModConfigSpec.DoubleValue UNDERWATER;
     private static final ModConfigSpec.IntValue UNDERWATER_TICKS;
+    private static final ModConfigSpec.DoubleValue STALLED;
 
     private static final ModConfigSpec.BooleanValue MAP_MEMORY;
     private static final ModConfigSpec.DoubleValue MAP_KEEP;
@@ -117,7 +118,7 @@ public final class AiConfig {
     public record Rewards(double enemyDestroyed, double objectiveCaptured, double objectiveRecaptured,
             double objectiveDefended, double allySupported, double goodFlank, double vehicleDestroyed,
             double objectiveLost, double unnecessaryDeath, double longExposure, int longExposureTicks,
-            double waterEntered, double underwater, int underwaterTicks) {
+            double waterEntered, double underwater, int underwaterTicks, double stalled) {
     }
 
     /** 試合を重ねて覚える物（{@code learning/MapMemory}）。 */
@@ -227,6 +228,9 @@ public final class AiConfig {
         UNDERWATER = builder.comment("Charged again every underwaterTicks for as long as it stays under.")
                 .defineInRange("underwater", -20.0, -1000.0, 1000.0);
         UNDERWATER_TICKS = builder.defineInRange("underwaterTicks", 40, 5, 6000);
+        STALLED = builder.comment("Charged once each time an AI aircraft's wing stops flying: past its stall angle, or",
+                "slower than its stall speed. Charged again only after it has flown clean for two seconds.")
+                .defineInRange("stalled", -40.0, -1000.0, 1000.0);
         builder.pop();
 
         builder.comment("What the AI learns from battle to battle and keeps with the world.").push("learning");
@@ -337,7 +341,7 @@ public final class AiConfig {
                         value(VEHICLE_DESTROYED, defaults), value(OBJECTIVE_LOST, defaults),
                         value(UNNECESSARY_DEATH, defaults), value(LONG_EXPOSURE, defaults),
                         value(LONG_EXPOSURE_TICKS, defaults), value(WATER_ENTERED, defaults),
-                        value(UNDERWATER, defaults), value(UNDERWATER_TICKS, defaults)),
+                        value(UNDERWATER, defaults), value(UNDERWATER_TICKS, defaults), value(STALLED, defaults)),
                 new Learning(value(MAP_MEMORY, defaults), value(MAP_KEEP, defaults)),
                 new Versions(value(DEFAULT_VERSION, defaults), value(PROMOTE_MIN_BATTLES, defaults),
                         value(PROMOTE_WIN_RATE, defaults), value(SELF_PLAY_COOLDOWN, defaults),

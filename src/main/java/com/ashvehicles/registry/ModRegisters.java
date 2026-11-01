@@ -18,7 +18,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
  *
  * <p>{@link DeferredRegister} は作るときに名前空間を1つ決め、以後その1つでしか登録できない。MOD 本体の
  * 機体は全部 {@code ashvehicles} なのでそれで足りていたが、コンテンツパックは自分の名前で物を出す
- * ——{@code data/mypack/aircraft/foo.json} は {@code mypack:foo} になる——ので、名前空間の数だけ
+ * ——{@code data/mypack/ashvehicles/aircraft/foo.json} は {@code mypack:foo} になる——ので、名前空間の数だけ
  * DeferredRegister が要る。ここはその置き場で、初めてその名前空間を見たときに1つ作り、その場で MOD の
  * イベントバスへ繋ぐ。
  *
