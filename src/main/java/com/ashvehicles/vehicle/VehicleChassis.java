@@ -328,17 +328,21 @@ public final class VehicleChassis {
      * @param height 縦幅（ブロック）
      * @param tilt 鉛直から奥へ寝かせる角度（度）。上端がパイロットから離れる向きが正
      * @param yaw 中心へ向ける振り角（度）。右が正。左の画面は少し右を向くので正
-     * @param page 映す頁。{@code pfd}（姿勢と速度）・{@code nav}（方位と位置）・{@code radar}・
-     *             {@code sms}（兵装）・{@code eng}（推力・燃料・機体の状態）
+     * @param page 起動時に映す頁。{@code pfd}（姿勢と速度）・{@code nav}（方位と位置）・{@code radar}・
+     *             {@code sms}（兵装）・{@code eng}（推力・燃料・機体の状態）。押しボタンで切り替わる
+     * @param buttons 画面の縁の押しボタン（模型の小さな四角）の中心。機体軸でブロック単位。役割は位置から
+     *                決まる——{@link com.ashvehicles.client.CockpitControls} 参照
      */
-    public record Display(Vec3 pos, float width, float height, float tilt, float yaw, String page) {
+    public record Display(Vec3 pos, float width, float height, float tilt, float yaw, String page,
+            List<Vec3> buttons) {
         public static final Codec<Display> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Vec3.CODEC.fieldOf("pos").forGetter(Display::pos),
                 Codec.FLOAT.optionalFieldOf("width", 0.22F).forGetter(Display::width),
                 Codec.FLOAT.optionalFieldOf("height", 0.22F).forGetter(Display::height),
                 Codec.FLOAT.optionalFieldOf("tilt", 20.0F).forGetter(Display::tilt),
                 Codec.FLOAT.optionalFieldOf("yaw", 0.0F).forGetter(Display::yaw),
-                Codec.STRING.optionalFieldOf("page", "pfd").forGetter(Display::page)
+                Codec.STRING.optionalFieldOf("page", "pfd").forGetter(Display::page),
+                Vec3.CODEC.listOf().optionalFieldOf("buttons", List.of()).forGetter(Display::buttons)
         ).apply(instance, Display::new));
     }
 

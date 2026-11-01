@@ -39,7 +39,12 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class CockpitDisplays {
     /** 仮想の画面の横幅（画素）。 */
-    private static final int PX = 128;
+    static final int PX = 128;
+    /** 縁の札の文字の大きさ。頁の文字より一回り小さい。 */
+    private static final float LABEL = 0.75F;
+    /** 札の並ぶ縁で、頁を内側へ寄せる幅（画素）。左右と上下。 */
+    private static final float INSET_SIDE = 16.0F;
+    private static final float INSET_END = 8.0F;
 
     private static final int BACKGROUND = 0xF0050A08;
     private static final int FRAME = 0xFF1E3A26;
@@ -65,6 +70,8 @@ public final class CockpitDisplays {
     private static int heightPx;
     /** 重ねる層。後から描く物ほど目の側へ少しずつ寄せる。 */
     private static float layer;
+    /** レーダー頁の表示距離。到達距離に掛ける割合で、RNG のボタンが変える。 */
+    private static float rangeScale = 1.0F;
 
     private CockpitDisplays() {
     }
@@ -89,30 +96,50 @@ public final class CockpitDisplays {
         buffers = bufferSource;
 
         Quaternionf attitude = aircraft.getAttitude(partialTick);
+        CockpitControls.aim(aircraft, displays, attitude, partialTick);
 
-        for (VehicleChassis.Display display : displays) {
-            poseStack.pushPose();
-            // 搭載物と同じ入り方。半回転の後は +X が右、+Z が機尾方向。
-            poseStack.mulPose(attitude);
-            poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
-            poseStack.translate(display.pos().x, display.pos().y, -display.pos().z);
-            poseStack.mulPose(Axis.YP.rotationDegrees(-display.yaw()));
-            poseStack.mulPose(Axis.XP.rotationDegrees(-display.tilt()));
-            poseStack.translate(0.0F, 0.0F, LIFT);
+        poseStack.pushPose();
+        // 搭載物と同じ入り方。半回転の後は +X が右、+Z が機尾方向。
+        poseStack.mulPose(attitude);
+        poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
+        Matrix4f body = poseStack.last().pose();
 
-            float scale = display.width() / PX;
-            heightPx = Math.max(16, Math.round(display.height() / scale));
-            // 画素の座標系へ。x 右、y 下、左上が原点。
-            poseStack.scale(scale, -scale, scale);
-            poseStack.translate(-PX / 2.0F, -heightPx / 2.0F, 0.0F);
+        for (int index = 0; index < displays.size(); index++) {
+            VehicleChassis.Display display = displays.get(index);
+            int height = heightOf(display);
+            Matrix4f frame = frame(display, height);
+            Matrix4f screen = new Matrix4f(body).mul(frame);
+            List<CockpitControls.Button> buttons =
+                    CockpitControls.layout(aircraft, index, display, frame, height);
 
-            matrix = poseStack.last().pose();
+            matrix = screen;
+            heightPx = height;
             layer = 0.0F;
 
             fill(-2, -2, PX + 2, heightPx + 2, FRAME);
             fill(0, 0, PX, heightPx, BACKGROUND);
 
-            switch (display.page()) {
+            // 頁は札の内側へ縮めて描く。札の並ぶ縁だけ空ける。
+            float left = 0.0F;
+            float right = 0.0F;
+            float top = 0.0F;
+            float bottom = 0.0F;
+
+            for (CockpitControls.Button button : buttons) {
+                switch (button.edge()) {
+                    case LEFT -> left = INSET_SIDE;
+                    case RIGHT -> right = INSET_SIDE;
+                    case TOP -> top = INSET_END;
+                    case BOTTOM -> bottom = INSET_END;
+                }
+            }
+
+            float shrink = (PX - left - right) / PX;
+            matrix = new Matrix4f(screen).translate(left, top, 0.0F).scale(shrink, shrink, 1.0F);
+            heightPx = Math.max(16, Math.round((height - top - bottom) / shrink));
+            rangeScale = CockpitControls.rangeScale(aircraft, index);
+
+            switch (CockpitControls.page(aircraft, index, display)) {
                 case "nav" -> nav(aircraft, attitude);
                 case "radar" -> radar(aircraft);
                 case "sms" -> sms(aircraft);
@@ -120,13 +147,127 @@ public final class CockpitDisplays {
                 default -> pfd(aircraft, attitude);
             }
 
-            poseStack.popPose();
+            matrix = screen;
+            heightPx = height;
+            layer();
+            buttons(index, buttons);
+            pointer(index);
         }
+
+        poseStack.popPose();
 
         matrix = null;
         quads = null;
         buffers = null;
         font = null;
+    }
+
+    /** 画面の縦の画素数。横は常に {@link #PX}。 */
+    static int heightOf(VehicleChassis.Display display) {
+        return Math.max(16, Math.round(display.height() / (display.width() / PX)));
+    }
+
+    /**
+     * 画面の画素（左上が原点、x 右・y 下）から、機体の描画座標系（姿勢と半回転の後、+X 右・+Z 機尾）への変換。
+     * 板を描くのにも、視線を画素へ戻すのにも、ボタンの位置を画素へ写すのにもこれ1つを使う。
+     */
+    static Matrix4f frame(VehicleChassis.Display display, int height) {
+        float scale = display.width() / PX;
+
+        return new Matrix4f()
+                .translate((float) display.pos().x, (float) display.pos().y, (float) -display.pos().z)
+                .rotateY((float) Math.toRadians(-display.yaw()))
+                .rotateX((float) Math.toRadians(-display.tilt()))
+                .translate(0.0F, 0.0F, LIFT)
+                .scale(scale, -scale, scale)
+                .translate(-PX / 2.0F, -height / 2.0F, 0.0F);
+    }
+
+    // ---- ボタン ----
+
+    /**
+     * 縁のボタンの札と、見ているボタンの印。
+     *
+     * <p>札は実機の MFD と同じく、ボタンの隣の画面の縁に出す。点いている状態（映している頁、下りている脚）は
+     * 反転させる。見ているボタンは模型の四角そのものを枠で囲む——指がどこに掛かっているかを、画面の中では
+     * なくボタンの上で見せるためだ。
+     */
+    private static void buttons(int index, List<CockpitControls.Button> buttons) {
+        for (int i = 0; i < buttons.size(); i++) {
+            CockpitControls.Button button = buttons.get(i);
+            boolean hovered = CockpitControls.hovered(index, i);
+            boolean flashing = CockpitControls.flashing(index, i);
+
+            if (hovered || flashing) {
+                float r = 8.0F;
+                int colour = flashing ? WHITE : AMBER;
+                outline(Math.round(button.x() - r), Math.round(button.y() - r), Math.round(button.x() + r),
+                        Math.round(button.y() + r), colour);
+            }
+
+            if (button.label().isEmpty()) {
+                continue;
+            }
+
+            float width = font.width(button.label()) * LABEL;
+            float height = 8.0F * LABEL;
+            float x;
+            float y;
+
+            switch (button.edge()) {
+                case TOP -> {
+                    x = button.x() - width / 2.0F;
+                    y = 1.0F;
+                }
+                case BOTTOM -> {
+                    x = button.x() - width / 2.0F;
+                    y = heightPx - height - 1.0F;
+                }
+                case LEFT -> {
+                    x = 1.0F;
+                    y = button.y() - height / 2.0F;
+                }
+                default -> {
+                    x = PX - width - 1.0F;
+                    y = button.y() - height / 2.0F;
+                }
+            }
+
+            x = Mth.clamp(x, 0.0F, PX - width);
+            y = Mth.clamp(y, 0.0F, heightPx - height);
+
+            boolean inverse = button.lit() || flashing;
+            int ink = inverse ? 0xFF051008 : hovered ? AMBER : GREEN;
+
+            if (inverse) {
+                fill(x - 1.0F, y - 1.0F, x + width + 1.0F, y + height + 1.0F, flashing ? WHITE : GREEN);
+            } else if (hovered) {
+                outline(Math.round(x - 1.0F), Math.round(y - 1.0F), Math.round(x + width + 1.0F),
+                        Math.round(y + height + 1.0F), AMBER);
+            }
+
+            label(button.label(), x, y, ink);
+        }
+    }
+
+    /** 視線の当たっている点に小さな十字。見回しているときだけ。 */
+    private static void pointer(int index) {
+        float[] at = CockpitControls.cursor(index);
+
+        if (at == null) {
+            return;
+        }
+
+        layer();
+        fill(at[0] - 3.0F, at[1] - 0.5F, at[0] + 3.0F, at[1] + 0.5F, WHITE);
+        fill(at[0] - 0.5F, at[1] - 3.0F, at[0] + 0.5F, at[1] + 3.0F, WHITE);
+    }
+
+    /** 札の小さな文字。 */
+    private static void label(String text, float x, float y, int colour) {
+        layer();
+        Matrix4f at = new Matrix4f(matrix).translate(x, y, -layer).scale(LABEL, LABEL, 1.0F);
+        font.drawInBatch(text, 0.0F, 0.0F, colour, false, at, buffers, Font.DisplayMode.POLYGON_OFFSET, 0, LIGHT);
     }
 
     // ---- 頁 ----
@@ -146,7 +287,9 @@ public final class CockpitDisplays {
         int cx = (left + right) / 2;
         int cy = (top + bottom) / 2;
         float perDegree = (bottom - top) / 50.0F;
-        float slope = (float) Math.tan(Math.toRadians(Mth.clamp(bank, -80.0F, 80.0F)));
+        // 水平線は機体と逆へ傾く。画面の y は下向きなので、描くときはバンクの符号を返す。
+        float tilt = -bank;
+        float slope = (float) Math.tan(Math.toRadians(Mth.clamp(tilt, -80.0F, 80.0F)));
         boolean inverted = Math.abs(bank) > 90.0F;
 
         for (int x = left; x < right; x++) {
@@ -161,7 +304,7 @@ public final class CockpitDisplays {
         layer();
 
         // ピッチの梯子。10度ごとに、バンクに合わせて傾けた短い線。
-        double radians = Math.toRadians(bank);
+        double radians = Math.toRadians(tilt);
         float cos = (float) Math.cos(radians);
         float sin = (float) Math.sin(radians);
 
@@ -271,7 +414,9 @@ public final class CockpitDisplays {
         int cx = (left + right) / 2;
 
         text("RDR", 2, 3, DIM);
-        String reach = distance(radar.range());
+        // 表示距離は RNG のボタンで到達距離の 1・1/2・1/4。外の接触は端へ寄せずに描かない。
+        float shown = Math.max(radar.range() * rangeScale, 1.0F);
+        String reach = distance(shown);
         text(reach, PX - 2 - font.width(reach), 3, DIM);
 
         // 枠と距離の環（1/4・1/2・3/4）と、方位の目盛り。
@@ -289,8 +434,12 @@ public final class CockpitDisplays {
         float arc = Math.max(radar.arc(), 1.0F);
 
         for (Contact contact : contacts) {
+            if (contact.range() > shown) {
+                continue;
+            }
+
             float across = Mth.clamp(contact.bearing() / arc, -1.0F, 1.0F);
-            float out = Mth.clamp(contact.range() / Math.max(radar.range(), 1.0F), 0.0F, 1.0F);
+            float out = Mth.clamp(contact.range() / shown, 0.0F, 1.0F);
             int x = cx + Math.round(across * ((right - left) / 2.0F - 4.0F));
             int y = bottom - 3 - Math.round(out * (bottom - top - 6));
             int colour = AircraftHud.contactColour(contact.iff(), contact.locked());

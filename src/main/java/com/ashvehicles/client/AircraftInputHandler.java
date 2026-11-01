@@ -107,8 +107,14 @@ public final class AircraftInputHandler {
 
         // トリガーは攻撃ボタンで、放っておけばバニラはそれをキャノピー内側への殴打に費やす。クリックではなく押し
         // 続けで読む。銃は押している間ずっと撃つからだ。
+        //
+        // ただし視線が計器盤の上にある間は、攻撃ボタンは指だ。1回押すたびに見ているボタンを押し、引き金は
+        // 引かない。CockpitControls 参照。
         while (minecraft.options.keyAttack.consumeClick()) {
+            CockpitControls.press(flown);
         }
+
+        boolean trigger = minecraft.options.keyAttack.isDown() && !CockpitControls.pointing(flown);
 
         // これらのキーが供給する移動インパルスではなく、専用のバインドから読む。既定では同じ2キー・同じ操縦桿だが、
         // 今やパイロットが動かせる操縦桿だ。ここでバインドすれば、ピッチとロールが機体の他の項目と並んで操作設定
@@ -133,7 +139,7 @@ public final class AircraftInputHandler {
                 (keyYaw != 0.0F ? keyYaw : aim.yaw()) * grip,
                 axis(ModKeyMappings.THROTTLE_UP, ModKeyMappings.THROTTLE_DOWN),
                 ModKeyMappings.AIR_BRAKE.isDown(),
-                minecraft.options.keyAttack.isDown(),
+                trigger,
                 // クリックではなく押し続け。ディスペンサーはハンドルを引いている間1発ずつ放出し、その速さは自身
                 // の間隔が決める。
                 ModKeyMappings.RELEASE_FLARE.isDown(),
@@ -153,6 +159,12 @@ public final class AircraftInputHandler {
 
             return;
         }
+
+        // MFD の押しボタンはキーと同じ切り替えに乗る。サーバーから見ればキーを押したのと区別が無い。
+        toggleGear |= CockpitControls.takeGear();
+        toggleFlaps |= CockpitControls.takeFlaps();
+        toggleBay |= CockpitControls.takeBay();
+        cycleWeapon += CockpitControls.takeWeaponSteps();
 
         aircraft.setInput(input);
         // 速度も同送する。サーバーには見えないからだ。ここから操縦される機体はサーバー上でtickの合間に届く
