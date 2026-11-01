@@ -1,0 +1,45 @@
+{
+  "type": "missile",
+  "nation": "us",
+  "item": true,
+  "ammo": 1,
+  "mass": 1100,
+  "firing": {
+    "rounds_per_second": 0.5,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 600.0,
+    "speed": 0.6,
+    "thrust": 0.08,
+    "burn_ticks": 6000,
+    "spool_ticks": 40,
+    "top_speed": 13.5,
+    "gravity": 0.0004,
+    "range": 0,
+    "explosion": 9.0,
+    "blast": 450.0,
+    "penetration": 400.0,
+    "tracer": "FFD0A0",
+    "trail": {
+      "colour": "D0CCC2",
+      "exhaust": "6B655A",
+      "density": 0.8,
+      "size": 0.8
+    }
+  },
+  "guidance": {
+    "turn_rate": 2.5,
+    "lock_angle": 20.0,
+    "lock_range": 7000.0,
+    "lock_ticks": 12,
+    "track_angle": 90.0,
+    "proximity": 2.0,
+    "seeker": "radar"
+  },
+  "sound": {
+    "volume": 1.0,
+    "pitch": 0.8
+  }
+}

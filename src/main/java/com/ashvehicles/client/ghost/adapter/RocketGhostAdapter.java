@@ -96,7 +96,9 @@ public final class RocketGhostAdapter implements GhostAdapter<RocketEntity> {
         poseStack.mulPose(Axis.YP.rotationDegrees(snapshot.yaw()));
         poseStack.mulPose(Axis.XP.rotationDegrees(snapshot.pitch()));
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
-        EntityGhostRenderer.drawModel(ghost, snapshot, context, null);
+        // ゴーストになるほど遠くまで飛んだ弾の翼は開いている
+        EntityGhostRenderer.drawModel(ghost, snapshot, context,
+                (model, unused, partialTick) -> com.ashvehicles.client.model.FoldingWings.pose(model, 1.0F));
         poseStack.popPose();
     }
 }

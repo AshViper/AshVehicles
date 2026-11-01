@@ -106,6 +106,14 @@ public final class MountedStore implements GeoAnimatable {
         protected String folder(MountedStore animatable) {
             return animatable.folder();
         }
+
+        /** 吊られている間の翼は畳んだまま。{@link FoldingWings} 参照。 */
+        @Override
+        public void setCustomAnimations(MountedStore animatable, long instanceId,
+                software.bernie.geckolib.animation.AnimationState<MountedStore> animationState) {
+            super.setCustomAnimations(animatable, instanceId, animationState);
+            com.ashvehicles.client.model.FoldingWings.pose(this, 0.0F);
+        }
     }
 
     /**

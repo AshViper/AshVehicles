@@ -1,6 +1,7 @@
 package com.ashvehicles.client.renderer;
 
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
+import com.ashvehicles.client.model.FoldingWings;
 import com.ashvehicles.client.model.WeaponModel;
 import com.ashvehicles.client.model.obj.MeshBone;
 import com.ashvehicles.entity.RocketEntity;
@@ -15,6 +16,7 @@ import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
+import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 
@@ -134,6 +136,13 @@ public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
         @Override
         protected ResourceLocation weaponId(RocketEntity animatable) {
             return animatable.getWeaponId();
+        }
+
+        @Override
+        public void setCustomAnimations(RocketEntity animatable, long instanceId,
+                AnimationState<RocketEntity> animationState) {
+            super.setCustomAnimations(animatable, instanceId, animationState);
+            FoldingWings.afterLaunch(this, animatable.flightTime(animationState.getPartialTick()));
         }
     }
 }

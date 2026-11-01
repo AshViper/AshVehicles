@@ -1,0 +1,37 @@
+{
+  "type": "bomb",
+  "nation": "us",
+  "item": true,
+  "ammo": 1,
+  "mass": 13600,
+  "requires": "targeting_pod",
+  "firing": {
+    "rounds_per_second": 1.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 2000.0,
+    "speed": 0.15,
+    "gravity": 0.0245,
+    "range": 4000.0,
+    "explosion": 16.0,
+    "blast": 1800.0,
+    "penetration": 2000.0,
+    "tracer": "6E7268",
+    "trail": false
+  },
+  "sound": {
+    "volume": 1.0,
+    "pitch": 0.5
+  },
+  "guidance": {
+    "turn_rate": 1.6,
+    "lock_angle": 30.0,
+    "lock_range": 400.0,
+    "lock_ticks": 10,
+    "track_angle": 140.0,
+    "proximity": 2.0,
+    "seeker": "laser"
+  }
+}
