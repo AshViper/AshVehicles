@@ -18,6 +18,7 @@ import com.ashvehicles.item.DroneTerminalItem;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.GroundVehicleItem;
+import com.ashvehicles.item.HmdItem;
 import com.ashvehicles.item.RackItem;
 import com.ashvehicles.item.TargetDroneItem;
 import com.ashvehicles.item.TeamSpawnItem;
@@ -67,6 +68,13 @@ public final class ModItems {
      */
     public static final DeferredItem<DroneTerminalItem> DRONE_TERMINAL =
             ITEMS.registerItem("drone_terminal", DroneTerminalItem::new, new Item.Properties().stacksTo(1));
+
+    /**
+     * ヘルメット装着型表示器。頭に被ると、機体の中央の計器と B スコープ・警戒受信機が画面に出る
+     * （{@link HmdItem} 参照）。
+     */
+    public static final DeferredItem<HmdItem> HMD =
+            ITEMS.registerItem("hmd", HmdItem::new, new Item.Properties().stacksTo(1));
 
     /**
      * 標的ドローンの投入器。これも機体に付く物ではなく、撃つ相手を空へ上げる道具。

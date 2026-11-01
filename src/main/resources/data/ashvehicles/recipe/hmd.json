@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "#": {
+      "tag": "c:ingots/iron"
+    },
+    "A": {
+      "item": "ashvehicles:avionics"
+    },
+    "G": {
+      "tag": "c:glass_panes"
+    }
+  },
+  "pattern": ["###", "#A#", " G "],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:hmd"
+  }
+}

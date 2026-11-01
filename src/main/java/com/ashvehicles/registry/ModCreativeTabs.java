@@ -73,6 +73,7 @@ public final class ModCreativeTabs {
         shelf.heading("tools");
         shelf.item(ModItems.WRENCH);
         shelf.item(ModItems.FUEL_CAN);
+        shelf.item(ModItems.HMD);
         shelf.item(ModItems.DRONE_TERMINAL);
         shelf.item(ModItems.TARGET_DRONE);
         shelf.item(ModItems.BLAST_WAND);

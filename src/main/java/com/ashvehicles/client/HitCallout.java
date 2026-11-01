@@ -165,6 +165,22 @@ final class HitCallout {
         }
     }
 
+    /**
+     * まだ消えていない行を新しい順に、文と色で。HUD のガラス板（{@link CockpitDisplays#drawHud}）が読む。
+     * 寿命の切れた行を捨てるのは {@link #draw} の役目なので、ここは数えるだけで消さない。
+     */
+    static void forEachLive(java.util.function.BiConsumer<String, Integer> sink) {
+        long now = Util.getMillis();
+
+        for (Line line : LINES) {
+            if (now - line.at > LINGER) {
+                return;
+            }
+
+            sink.accept(text(line), colour(line));
+        }
+    }
+
     /** その行が読み上げる文。 */
     private static String text(Line line) {
         String rounds = line.rounds > 1 ? " x" + line.rounds : "";
