@@ -297,6 +297,14 @@ public final class GhostRenderDispatcher {
                 continue;
             }
 
+            // 一人称のカメラ自身は描かない。ゲームのループも同じ条件で飛ばしている（LevelRenderer.renderLevel の
+            // entity != camera.getEntity() || camera.isDetached()）。これが無いと、区画が未構築の場所では
+            // ゴーストが自分の体を目の位置へ描いた。
+            if (!camera.isDetached() && ghost.uuid().equals(camera.getEntity().getUUID())) {
+                ghost.record(ghost.lod(), ghost.distanceSq(), GhostVerdict.GAME);
+                continue;
+            }
+
             // 階層はtick位置から決める。ゲームのレンダラーが claims() で測るのもそれだ。描画自体は補間後の位置で行う。
             double distanceSq = ghost.current().position().distanceToSqr(eye);
             GhostLOD lod = GhostLOD.of(distanceSq);

@@ -33,6 +33,8 @@ public final class Dispenser {
 
     /** 機体のどれだけ後方・下方から出るか。機体自身の軸で。 */
     private static final Vec3 PORT = new Vec3(0.0, -0.6, -2.0);
+    /** 一斉放出の左右の投射口が、真ん中からどれだけ横に離れているか（ブロック）。 */
+    private static final double PORT_SPACING = 1.0;
     /** 機体の速度をどれだけ受け継ぐか。撃ち出すのではなく放り出す物なので。 */
     private static final double CARRIED = 0.55;
     /** そして射出時にどれだけ散らすか。連続放出が線ではなく雲になるように。 */
@@ -72,7 +74,22 @@ public final class Dispenser {
             boolean sendChaff = !sendFlare && chaff && this.aircraft.getCountermeasures(false) > 0;
 
             if (sendFlare || sendChaff) {
-                this.release(level, setup, sendFlare);
+                // 一斉放出。左右の投射口から交互に。
+                int salvo = Math.max(setup.salvo(), 1);
+
+                for (int i = 0; i < salvo; i++) {
+                    float side = salvo == 1 ? 0.0F : (i % 2 == 0 ? 1.0F : -1.0F);
+
+                    this.release(level, setup, sendFlare, side);
+                }
+
+                // 弾倉は一斉放出1回につき1つ減る。撒く数（salvo）は見た目の問題で、消費とは別。
+                this.aircraft.setCountermeasures(sendFlare, this.aircraft.getCountermeasures(sendFlare) - 1);
+
+                // 音は放出1回につき1つ。1発ずつ鳴らすと一斉放出が音の塊になる。
+                level.playSound(null, this.aircraft.getX(), this.aircraft.getY(), this.aircraft.getZ(),
+                        SoundEvent.createVariableRangeEvent(RELEASE_SOUND), SoundSource.NEUTRAL,
+                        RELEASE_VOLUME, RELEASE_PITCH);
                 this.cooldown = Math.max(setup.intervalTicks(), 1);
             }
         }
@@ -80,13 +97,19 @@ public final class Dispenser {
         this.reload(setup);
     }
 
-    /** 1発を機体から離れた場所へ放り出し、近くの全員にそれを知らせる。 */
-    private void release(ServerLevel level, AircraftDefinition.Countermeasures setup, boolean flare) {
+    /**
+     * 1発を機体から離れた場所へ放り出す。
+     *
+     * @param side どちらの投射口か。右が正、左が負、0 は機体の真ん中（一斉放出でない機体）
+     */
+    private void release(ServerLevel level, AircraftDefinition.Countermeasures setup, boolean flare, float side) {
         RandomSource random = this.aircraft.getRandom();
-        Vec3 at = this.aircraft.toWorld(PORT, 1.0F);
-        // 機体自身の軸で下後方へ。デコイが常に南へ落ちるのではなく、機体から出る物らしく機体から出る
-        // ように。
-        Vec3 away = Attitude.toWorld(this.aircraft.getAttitude(), new Vec3(0.0, -1.0, -0.35)).normalize();
+        Vec3 at = this.aircraft.toWorld(PORT.add(side * PORT_SPACING, 0.0, 0.0), 1.0F);
+        // 機体自身の軸で下後方へ、扇があればそこから出る側の外へばらける。デコイが常に南へ落ちるのではなく、
+        // 機体から出る物らしく機体から出るように。オフセットの x は右向き（Attitude.toWorld）。
+        double fan = Math.toRadians(setup.spread() * random.nextFloat());
+        Vec3 away = Attitude.toWorld(this.aircraft.getAttitude(),
+                new Vec3(side * Math.sin(fan), -Math.cos(fan), -0.35)).normalize();
 
         CountermeasureEntity decoy = new CountermeasureEntity(ModEntities.COUNTERMEASURE.get(), level);
 
@@ -98,11 +121,6 @@ public final class Dispenser {
                         random.nextGaussian() * SCATTER));
 
         level.addFreshEntity(decoy);
-        this.aircraft.setCountermeasures(flare, this.aircraft.getCountermeasures(flare) - 1);
-
-        level.playSound(null, this.aircraft.getX(), this.aircraft.getY(), this.aircraft.getZ(),
-                SoundEvent.createVariableRangeEvent(RELEASE_SOUND), SoundSource.NEUTRAL,
-                RELEASE_VOLUME, RELEASE_PITCH);
     }
 
     /**

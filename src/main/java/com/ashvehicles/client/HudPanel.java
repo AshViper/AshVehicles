@@ -27,15 +27,15 @@ import net.minecraft.util.Mth;
  */
 final class HudPanel {
     /** 枠の内側と文字の隙間。 */
-    private static final int PADDING = 6;
+    private static final int PADDING = 4;
     /** 1行の高さ。 */
-    private static final int ROW = 11;
+    private static final int ROW = 10;
     /** 区切り1本に割く高さ。 */
-    private static final int RULE = 7;
+    private static final int RULE = 5;
     /** 見出し1行に割く高さ。文字の下に罫線が入る分だけ広い。 */
-    private static final int TITLE = 15;
+    private static final int TITLE = 13;
     /** 中身が細くても枠がこれより狭くならない幅。右端の数字の列を留めるため。 */
-    private static final int MIN_WIDTH = 134;
+    private static final int MIN_WIDTH = 112;
     /** 名前と値の間に必ず空ける幅。 */
     private static final int GAP = 10;
     /** 目盛りの1目とその隙間。 */
@@ -45,7 +45,7 @@ final class HudPanel {
     private static final int BAR_MIN = 40;
 
     /** 枠の地。真っ黒ではなく僅かに緑を含んだ暗色で、計器の色と地続きに見える。 */
-    private static final int BACKGROUND = 0xC8040E06;
+    private static final int BACKGROUND = 0x8C040E06;
     /** 目盛りの、まだ埋まっていない側。 */
     private static final int TRACK = 0x2E3BE86A;
     /** 区切りの点線。 */
@@ -168,10 +168,10 @@ final class HudPanel {
         for (Row row : rows) {
             if (row instanceof Title title) {
                 graphics.drawString(font, title.text(), inner, y, AircraftHud.GREEN, false);
-                graphics.fill(inner, y + 11, edge, y + 12, AircraftHud.DIM);
+                graphics.fill(inner, y + 10, edge, y + 11, AircraftHud.DIM);
                 y += TITLE;
             } else if (row instanceof Divider) {
-                dashes(graphics, inner, edge, y + 3);
+                dashes(graphics, inner, edge, y + 2);
                 y += RULE;
             } else if (row instanceof Line line) {
                 int text = inner + (line.crew() ? 9 : 0);

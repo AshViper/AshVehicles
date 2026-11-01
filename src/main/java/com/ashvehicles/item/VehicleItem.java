@@ -6,6 +6,8 @@ import com.ashvehicles.entity.VehicleEntityBase;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -157,6 +159,14 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
 
         if (vehicle == null) {
             return InteractionResult.FAIL;
+        }
+
+        // 状態ごと畳まれたアイテム（レンチのシフト回収・中ボタンの写し）は、その状態で起こす。居場所と向きは
+        // その後に書くので、写した側の向きは持ち越さない。
+        CustomData saved = held.get(DataComponents.ENTITY_DATA);
+
+        if (saved != null) {
+            EntityType.updateCustomEntityTag(level, player, vehicle, saved);
         }
 
         vehicle.moveTo(x, y, z, yaw, 0.0F);

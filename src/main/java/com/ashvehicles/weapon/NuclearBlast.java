@@ -7,6 +7,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.VehicleEntityBase;
@@ -18,6 +20,16 @@ import com.ashvehicles.particle.Effects;
 import com.ashvehicles.registry.ModParticles;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.BaseFireBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -76,6 +88,28 @@ public final class NuclearBlast {
     private static final float SIREN_VOLUME = 1.0F;
     private static final float SIREN_PITCH = 0.6F;
 
+    /**
+     * 焦土。爆心から {@code crater} のこの倍率までは全ての柱を焼く（砂はガラスに、土は荒れた土に、草木は消える）。
+     *
+     * <p>トリニタイト——爆心の砂が火球の熱で溶けて固まった緑のガラス——は核実験の跡で最も見分けの付く物だ。ここは
+     * 抜き取りではなく全部の柱を回る。斑に焼けた爆心は、焼けたのではなく虫食いに見える。
+     */
+    private static final double SEARED_WITHIN = 4.0;
+    /** 1 tick に焼く柱の数。爆心の焦土を何 tick かに分ける。 */
+    private static final int SEARS_PER_TICK = 1500;
+    /**
+     * 熱線で火の付く所。{@code fire} の範囲から抜き取る柱の総数と、1 tick あたり。
+     *
+     * <p>全部の柱は回らない——半径450の円は60万本ある。抜き取った柱に燃える物（草・葉・木）が上を向いていれば
+     * 火を置き、そこから先はバニラの延焼に任せる。近いほど当たりやすい。
+     */
+    private static final int KINDLE_SAMPLES = 5000;
+    private static final int KINDLES_PER_TICK = 500;
+    /** 火が付く見込み。爆心で最大、{@code fire} の縁で0。 */
+    private static final float MOST_KINDLE = 0.55F;
+    /** 熱線で葉が焼け落ち、草が枯れる範囲。{@code fire} に対する割合。 */
+    private static final double SCORCHED_WITHIN = 0.5;
+
     private static final List<NuclearBlast> LIVE = new ArrayList<>();
 
     private final ServerLevel level;
@@ -88,16 +122,27 @@ public final class NuclearBlast {
     private double front;
     /** {@link #caught} の、まだ打っていない最初の位置。 */
     private int next;
+    /** 地形を焼くか。試合中の会場は焼かない（{@link Deathmatch#protectsTerrain}）。 */
+    private final boolean burnsGround;
+    /** 焦土の、次に焼く柱の通し番号と総数。爆心を囲む正方形を行ごとに回る。 */
+    private int seared;
+    private final int searedSide;
+    /** 熱線の抜き取りの、済んだ数。 */
+    private int kindled;
 
     private record Caught(Entity entity, double distance) {
     }
 
-    private NuclearBlast(ServerLevel level, Vec3 at, DamageSource source, WeaponDefinition.Nuclear nuke) {
+    private NuclearBlast(ServerLevel level, Vec3 at, DamageSource source, WeaponDefinition.Nuclear nuke,
+            boolean burnsGround) {
         this.level = level;
         this.at = at;
         this.source = source;
         this.nuke = nuke;
+        this.burnsGround = burnsGround;
+        this.searedSide = burnsGround ? Mth.ceil(nuke.crater() * SEARED_WITHIN) * 2 + 1 : 0;
         this.caught = this.gather();
+        this.thermalPulse();
     }
 
     /**
@@ -146,7 +191,7 @@ public final class NuclearBlast {
             Effects.blast(level, bomb, at, nuke.crater(), colour);
         }
 
-        LIVE.add(new NuclearBlast(level, at, source, nuke));
+        LIVE.add(new NuclearBlast(level, at, source, nuke, !keepGround));
     }
 
     /**
@@ -225,10 +270,153 @@ public final class NuclearBlast {
             this.next++;
         }
 
-        return this.next >= this.caught.size();
+        boolean burnt = this.burnGround();
+
+        return this.next >= this.caught.size() && burnt;
     }
 
-    /** 1人（1機）を打つ。火を付け、打撃を渡し、生き残った生き物を外へ突き飛ばす。 */
+    /**
+     * 熱線。光の速さで来るので、波を待たずに起爆の瞬間に届く。空が見えている生き物に火を付ける。
+     *
+     * <p>屋根の下、壁の陰にいる者は焼けない——熱線は光で、遮る物があれば止まる。その判定は足元の柱に空が
+     * 見えるか（{@code canSeeSky}）だけにする。爆心へ向かう光線は引かない（{@link NuclearBlast} の割り切り）。
+     */
+    private void thermalPulse() {
+        for (Caught each : this.caught) {
+            if (each.entity() instanceof LivingEntity living && each.distance() <= this.nuke.fire()
+                    && this.level.canSeeSky(BlockPos.containing(living.getEyePosition()))) {
+                living.igniteForSeconds(BURNS_FOR);
+            }
+        }
+    }
+
+    /**
+     * 地形を焼くこの tick 分。焼き終わったら true。
+     *
+     * <p>ロード済み（{@code getChunkNow} が返す）チャンクの柱だけを触る。爆発と同じく、ここでチャンクを
+     * 生成させてはいけない（[[explosions-generate-chunks]]）。
+     */
+    private boolean burnGround() {
+        if (!this.burnsGround) {
+            return true;
+        }
+
+        int total = this.searedSide * this.searedSide;
+        int half = this.searedSide / 2;
+        double within = this.nuke.crater() * SEARED_WITHIN;
+
+        for (int i = 0; i < SEARS_PER_TICK && this.seared < total; i++, this.seared++) {
+            int dx = this.seared % this.searedSide - half;
+            int dz = this.seared / this.searedSide - half;
+
+            if (dx * dx + dz * dz <= within * within) {
+                this.sear(Mth.floor(this.at.x) + dx, Mth.floor(this.at.z) + dz);
+            }
+        }
+
+        RandomSource random = this.level.getRandom();
+        double fire = this.nuke.fire();
+
+        for (int i = 0; i < KINDLES_PER_TICK && this.kindled < KINDLE_SAMPLES; i++, this.kindled++) {
+            double turn = random.nextDouble() * Mth.TWO_PI;
+            // 面積で一様に。sqrt を通さないと爆心に寄る。
+            double out = fire * Math.sqrt(random.nextDouble());
+
+            this.kindle(Mth.floor(this.at.x + Math.cos(turn) * out), Mth.floor(this.at.z + Math.sin(turn) * out),
+                    out / fire, random);
+        }
+
+        return this.seared >= total && this.kindled >= KINDLE_SAMPLES;
+    }
+
+    /** 爆心近くの1柱。草木を払い、砂をガラスに、土を荒れた土にする。 */
+    private void sear(int x, int z) {
+        BlockPos top = this.topOf(x, z);
+
+        if (top == null) {
+            return;
+        }
+
+        top = this.strip(top, true);
+
+        BlockState ground = this.level.getBlockState(top);
+
+        if (ground.is(BlockTags.SAND)) {
+            this.level.setBlock(top, Blocks.GLASS.defaultBlockState(), Block.UPDATE_CLIENTS);
+        } else if (ground.is(BlockTags.DIRT) && !ground.is(Blocks.COARSE_DIRT) && !ground.is(Blocks.MUD)) {
+            this.level.setBlock(top, Blocks.COARSE_DIRT.defaultBlockState(), Block.UPDATE_CLIENTS);
+        }
+    }
+
+    /**
+     * 熱線の1本。爆心寄りなら葉を焼き落とし草を枯らし、燃える物が上を向いていれば火を置く。
+     *
+     * @param out 爆心からの距離の {@code fire} に対する割合。0〜1
+     */
+    private void kindle(int x, int z, double out, RandomSource random) {
+        BlockPos top = this.topOf(x, z);
+
+        if (top == null) {
+            return;
+        }
+
+        if (out <= SCORCHED_WITHIN) {
+            top = this.strip(top, random.nextFloat() < 1.0 - out / SCORCHED_WITHIN);
+
+            BlockState ground = this.level.getBlockState(top);
+
+            if (ground.is(Blocks.GRASS_BLOCK) || ground.is(Blocks.PODZOL) || ground.is(Blocks.MYCELIUM)) {
+                this.level.setBlock(top, Blocks.COARSE_DIRT.defaultBlockState(), Block.UPDATE_CLIENTS);
+            }
+        }
+
+        BlockPos above = top.above();
+        BlockState ground = this.level.getBlockState(top);
+
+        if (random.nextFloat() >= MOST_KINDLE * (1.0 - out) || !this.level.getBlockState(above).isAir()
+                || !(ground.isFlammable(this.level, top, Direction.UP) || ground.is(Blocks.GRASS_BLOCK)
+                        || ground.is(Blocks.COARSE_DIRT))) {
+            return;
+        }
+
+        this.level.setBlock(above, BaseFireBlock.getState(this.level, above), Block.UPDATE_ALL);
+    }
+
+    /**
+     * 柱の一番上から、草花（置き換えられる物）を払う。{@code leaves} なら葉も焼き落とす。払った後の一番上を返す。
+     * 3つより深くは掘らない——ここは地面を焼くのであって、林を伐るのではない。
+     */
+    private BlockPos strip(BlockPos top, boolean leaves) {
+        for (int i = 0; i < 3; i++) {
+            BlockState state = this.level.getBlockState(top);
+            boolean plant = state.canBeReplaced() && state.getFluidState().isEmpty() && !state.isAir();
+
+            if (!plant && !(leaves && state.is(BlockTags.LEAVES))) {
+                break;
+            }
+
+            this.level.setBlock(top, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
+            top = top.below();
+        }
+
+        return top;
+    }
+
+    /** 柱の一番上の固い物。ロード済みでなければ null。 */
+    @Nullable
+    private BlockPos topOf(int x, int z) {
+        LevelChunk chunk = this.level.getChunkSource().getChunkNow(x >> 4, z >> 4);
+
+        if (chunk == null) {
+            return null;
+        }
+
+        int surface = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x & 15, z & 15);
+
+        return surface <= this.level.getMinBuildHeight() ? null : new BlockPos(x, surface, z);
+    }
+
+    /** 1人（1機）を打つ。打撃を渡し、生き残った生き物を外へ突き飛ばす。 */
     private void strike(Entity entity) {
         if (entity.isRemoved() || entity.level() != this.level) {
             return;
@@ -241,10 +429,7 @@ public final class NuclearBlast {
             return;
         }
 
-        if (entity instanceof LivingEntity living && distance <= this.nuke.fire()) {
-            living.igniteForSeconds(BURNS_FOR);
-        }
-
+        // 火は波ではなく熱線が付ける（thermalPulse）。波が着く頃には、焼ける者はもう燃えている。
         entity.hurt(this.source, (float) amount);
 
         // 機体は押さない。操縦中の機体の速度はパイロットのクライアントが持っていて、サーバーが足した分は巻き戻される

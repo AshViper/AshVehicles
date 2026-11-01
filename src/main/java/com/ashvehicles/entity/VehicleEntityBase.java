@@ -1,8 +1,10 @@
 package com.ashvehicles.entity;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 
@@ -17,13 +19,16 @@ import com.ashvehicles.network.VehicleGonePayload;
 import com.ashvehicles.particle.Effects;
 import com.ashvehicles.sensor.Sensors;
 import com.ashvehicles.weapon.TargetLock;
+import com.ashvehicles.network.ShovePayload;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.vehicle.Hitbox;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.vehicle.WreckEffects;
 
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
@@ -57,6 +62,7 @@ import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
@@ -100,6 +106,14 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      */
     private static final EntityDataAccessor<Boolean> DATA_WRECKED =
             SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.BOOLEAN);
+
+    /** 鎖で引いている機体のエンティティ番号。居なければ -1。描く側が鎖を引くために（{@link TowChain}）。 */
+    private static final EntityDataAccessor<Integer> DATA_TOWED =
+            SynchedEntityData.defineId(VehicleEntityBase.class, EntityDataSerializers.INT);
+
+    /** 鎖で引いている機体。保存して持ち歩く。サーバー側。 */
+    @Nullable
+    private UUID towing;
 
     /**
      * どの乗員がどの座席にいるか。両者を切り離すための情報。
@@ -221,6 +235,14 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * 決まり、{@link #wreckLifetime} が持つ。
      */
     private static final int WRECK_LIFETIME = 6000;
+    /** 爆風の押し。爆発の強さ1・爆心のすぐ脇で、1トンの機体が得る速度（ブロック/tick）。 */
+    private static final double BLAST_PUSH = 0.75;
+    /** 爆風がどれだけ上へ逃げるか。押す向きに足す鉛直成分。 */
+    private static final double BLAST_HEAVE = 0.5;
+    /** 押しの上限。軽い機体が至近弾で吹き飛ぶのは良いが、世界の外まで飛ばしはしない。 */
+    private static final double BLAST_MAX_SPEED = 0.6;
+    /** 撃破の誘爆が自分の車体を持ち上げる速さ。強さ1・1トンあたり。 */
+    private static final double WRECK_HEAVE = 0.9;
 
     protected VehiclePart[] parts = new VehiclePart[0];
     /** 前回配置した時点で全ての箱がどこにあったか。{@link #placedBounds} 参照。 */
@@ -365,6 +387,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         if (!this.level().isClientSide) {
             this.tickFuel();
             this.spillOldHold();
+            TowChain.tick(this);
         }
 
         if (!this.isWrecked() || !(this.level() instanceof ServerLevel level)) {
@@ -671,6 +694,128 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
     /** 機体の本当の速度（1tickあたりブロック）。訊いている側がどちらでも同じ値。 */
     public abstract Vec3 getVelocity();
 
+    /**
+     * 機体の質量（kg）。押す力をどれだけの速度に変えるかと、ぶつかった2台がどう押し合うかを決める。
+     */
+    public abstract double mass();
+
+    /**
+     * 機体を押す。爆風・被弾・衝突から、サーバーで呼ぶ。
+     *
+     * <p>物理を回しているのが運転しているクライアントなら、ここで足しても次の報告で巻き戻される。だから
+     * {@link ShovePayload} で追跡している全員へ配り、物理を回している側だけが {@link #applyShove} する。
+     *
+     * @param impulse 速度の変化（ブロック/tick）。呼ぶ側が質量で割ってある
+     * @param at      押された点。重心から外れているほど車体が回る
+     */
+    public void shove(Vec3 impulse, Vec3 at) {
+        this.shove(impulse, at, true);
+    }
+
+    /**
+     * @param tilts 押しが車体を傾け・転がしてよいか。鎖の引きは false——向きは変えるが、倒れた車体を起こしも
+     *              倒しもしない。起こすのはレンチ（{@code GroundVehicleEntity.right}）
+     */
+    public void shove(Vec3 impulse, Vec3 at, boolean tilts) {
+        if (!(this.level() instanceof ServerLevel) || this.isRemoved() || impulse.lengthSqr() < 1.0E-8) {
+            return;
+        }
+
+        if (this.isControlledByLocalInstance()) {
+            this.applyShove(impulse, at, tilts);
+        } else {
+            PacketDistributor.sendToPlayersTrackingEntity(this,
+                    new ShovePayload(this.getId(), impulse, at, tilts));
+        }
+    }
+
+    /**
+     * 爆心から押す。打撃（エネルギーの目安）を距離で薄め、質量で割って速度にする。押す点は爆心に一番近い
+     * 箱の表面の側——横で炸裂した榴弾は車体を傾け、腹の下の地雷は持ち上げる。
+     *
+     * @param power  爆発の強さ（バニラの explosion の数字）
+     * @param reach  届く半径。ここで押しが0になる
+     */
+    public void blastFrom(Vec3 centre, double power, double reach) {
+        if (power <= 0.0 || reach <= 0.0) {
+            return;
+        }
+
+        double distance = this.distanceToShape(centre);
+
+        if (distance >= reach) {
+            return;
+        }
+
+        double falloff = 1.0 - distance / reach;
+        Vec3 middle = this.position().add(0.0, this.getBbHeight() * 0.5, 0.0);
+        Vec3 away = middle.subtract(centre);
+        away = away.lengthSqr() < 1.0E-6 ? new Vec3(0.0, 1.0, 0.0) : away.normalize();
+        // 地面で炸裂した爆風は横より上へ抜ける。押しは少し持ち上げる向きへ寄せる。
+        away = away.add(0.0, BLAST_HEAVE, 0.0).normalize();
+        double speed = Math.min(BLAST_PUSH * power * falloff * falloff / Math.max(this.mass() / 1000.0, 1.0),
+                BLAST_MAX_SPEED);
+        // 押す点は爆心と重心の間、機体の大きさの半分まで。中心を押せば回らず、端を押せば回る。
+        Vec3 at = middle.add(centre.subtract(middle).normalize().scale(Math.min(this.reach() * 0.5,
+                middle.distanceTo(centre))));
+
+        this.shove(away.scale(speed), at);
+    }
+
+    /**
+     * 爆風の届く範囲の機体を全部押す。半径は強さの2倍——バニラの爆発がブロックを読む範囲と同じ。
+     *
+     * @param except 押さない機体（爆発の元になった残骸自身など）。無ければ null
+     */
+    public static void blastAll(ServerLevel level, Vec3 centre, double power, @Nullable Entity except) {
+        double reach = power * 2.0;
+
+        if (reach <= 0.0) {
+            return;
+        }
+
+        Set<VehicleEntityBase> seen = new HashSet<>();
+
+        for (Entity entity : level.getEntities(except, new AABB(centre, centre).inflate(reach + 1.0))) {
+            Entity subject = entity instanceof VehiclePart part ? part.getParent() : entity;
+
+            if (subject instanceof VehicleEntityBase machine && machine != except && !machine.isRemoved()
+                    && seen.add(machine)) {
+                machine.blastFrom(centre, power, reach);
+            }
+        }
+    }
+
+    /** 鎖で引いている機体の UUID。サーバー側。 */
+    @Nullable
+    public UUID getTowing() {
+        return this.towing;
+    }
+
+    /** 鎖をつなぐ・外す。サーバー側。 */
+    public void setTowing(@Nullable VehicleEntityBase towed) {
+        this.towing = towed == null ? null : towed.getUUID();
+        this.publishTowed(towed == null ? -1 : towed.getId());
+    }
+
+    void publishTowed(int id) {
+        this.entityData.set(DATA_TOWED, id);
+    }
+
+    /** 鎖で引いている機体。どちらの側でも。居なければ null。 */
+    @Nullable
+    public VehicleEntityBase getTowed() {
+        int id = this.entityData.get(DATA_TOWED);
+
+        return id >= 0 && this.level().getEntity(id) instanceof VehicleEntityBase towed ? towed : null;
+    }
+
+    /**
+     * 押しを実際に足す。物理を回している側でだけ呼ばれる。既定では何もしない。
+     */
+    public void applyShove(Vec3 impulse, Vec3 at, boolean tilts) {
+    }
+
     /** レーダーと警戒受信機。サーバー側で、操縦席にいる者へ画面が送られる。 */
     private final Sensors sensors = new Sensors(this);
 
@@ -780,6 +925,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         // 時点で訊ける機体がまだ無いから。本当の値はコンストラクタが埋める。
         builder.define(DATA_HEALTH, DEFAULT_HEALTH);
         builder.define(DATA_WRECKED, false);
+        builder.define(DATA_TOWED, -1);
         builder.define(DATA_SEATS, "");
         builder.define(DATA_HOLD, new Vector3f());
         // 耐久と同じ理由で0から始める。これはコンストラクタの中から走るのでまだ機体に訊けない。本当の量は
@@ -1166,6 +1312,11 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         // で起きる」ことを意味する。兵装が既にそれについてやっていること全部を、機体も同じ理由で欲しがる。
         Effects.blast(level, this, pos, power, Effects.EMBER);
         WreckEffects.destroyed(level, pos, this.getAttitude(), power, reach);
+        // 誘爆は車体を自分で持ち上げる。中心から外れた所で起きるので、残骸は跳ねて転がる。周りの機体も押す。
+        Vec3 off = new Vec3(this.random.nextGaussian(), 0.0, this.random.nextGaussian()).scale(reach * 0.25);
+        double heave = Math.min(WRECK_HEAVE * power / Math.max(this.mass() / 1000.0, 1.0), BLAST_MAX_SPEED);
+        this.shove(new Vec3(-off.x, 1.0, -off.z).normalize().scale(heave), pos.add(off));
+        blastAll(level, pos, power, this);
     }
 
     /**
@@ -2101,6 +2252,7 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      */
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
+        this.towing = tag.hasUUID("Towing") ? tag.getUUID("Towing") : null;
         this.setWrecked(tag.getBoolean("Wrecked"));
         this.wreckAge = tag.getInt("WreckAge");
         // 期限を持つ前に保存された残骸は5分のまま。
@@ -2121,6 +2273,9 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
 
     @Override
     protected void addAdditionalSaveData(CompoundTag tag) {
+        if (this.towing != null) {
+            tag.putUUID("Towing", this.towing);
+        }
         tag.putBoolean("Wrecked", this.isWrecked());
         tag.putInt("WreckAge", this.wreckAge);
         tag.putInt("WreckLifetime", this.wreckLifetime);
@@ -2142,8 +2297,31 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         return BuiltInRegistries.ITEM.get(this.getVehicleId());
     }
 
+    /**
+     * 中ボタン（クリエイティブのピック）は、兵装も燃料も含めて今の状態をそのまま写したアイテムを返す。
+     * 置けば {@link com.ashvehicles.item.VehicleItem} が同じ状態で起こす。
+     */
     @Override
     public ItemStack getPickResult() {
-        return new ItemStack(this.getDropItem());
+        return this.packedItem();
+    }
+
+    /**
+     * この機体を状態ごと畳んだアイテム。中身はバニラの ENTITY_DATA で、居場所・向き・速度・UUID・搭乗者は
+     * 写さない。それは置いた先が決めることで、UUID を持ち越せば写しと元が同じ機体を名乗る。
+     */
+    public ItemStack packedItem() {
+        ItemStack stack = new ItemStack(this.getDropItem());
+        CompoundTag tag = new CompoundTag();
+        this.saveWithoutId(tag);
+
+        for (String key : new String[] {"Pos", "Motion", "Rotation", "UUID", "Passengers", "FallDistance",
+                "OnGround", "Air", "Fire", "PortalCooldown", "Hold", "Attitude", "HeldChunks", "Towing"}) {
+            tag.remove(key);
+        }
+
+        tag.putString("id", BuiltInRegistries.ENTITY_TYPE.getKey(this.getType()).toString());
+        stack.set(DataComponents.ENTITY_DATA, CustomData.of(tag));
+        return stack;
     }
 }

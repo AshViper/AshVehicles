@@ -72,9 +72,9 @@ public final class PodCamera {
      * <p>頭ではなくジンバルだ。パイロンの先端のボールなのでほぼ全周を回れるし、大きく下を見られて上はほとんど見ない。
      * 用途が地面だからだ。ゲーム内の他の仰角と同様、下が正。
      */
-    private static final float YAW_LIMIT = 150.0F;
-    private static final float PITCH_UP_LIMIT = -20.0F;
-    private static final float PITCH_DOWN_LIMIT = 89.0F;
+    static final float YAW_LIMIT = 150.0F;
+    static final float PITCH_UP_LIMIT = -20.0F;
+    static final float PITCH_DOWN_LIMIT = 89.0F;
 
     /** ポッドを上げたときの初期指向。前下方の地面。 */
     private static final float REST_PITCH = 30.0F;
@@ -245,6 +245,16 @@ public final class PodCamera {
     @Nullable
     public static Entity designated() {
         return aircraft == null ? null : aircraft.getDesignated();
+    }
+
+    /** ジンバルの旋回角（度、機首から右が負）。MFD の TGP 頁がボールの向きを描くために読む。 */
+    static float gimbalYaw() {
+        return yaw;
+    }
+
+    /** ジンバルの俯角（度、下が正）。 */
+    static float gimbalPitch() {
+        return pitch;
     }
 
     /** 捕捉対象がジンバルの向けられる範囲の外にいる間 true。計器がそう表示するためにある。 */

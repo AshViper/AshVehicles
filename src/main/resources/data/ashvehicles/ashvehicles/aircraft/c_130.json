@@ -2963,11 +2963,13 @@
     "heat": 3
   },
   "countermeasures": {
-    "flares": 60,
-    "chaff": 60,
-    "interval_ticks": 5,
+    "flares": 120,
+    "chaff": 120,
+    "interval_ticks": 8,
     "reload_ticks": 400,
-    "speed": 0.35
+    "speed": 0.35,
+    "salvo": 4,
+    "spread": 120
   },
   "hardpoints": [
     {

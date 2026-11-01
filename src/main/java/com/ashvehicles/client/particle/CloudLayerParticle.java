@@ -50,21 +50,34 @@ public class CloudLayerParticle extends WeaponParticle {
      */
     private static final float MOST_TILT = 0.96F;
 
-    /** 現れ切るまでの、寿命に対する割合。大きい板が突然現れると、雲ではなく板に見える。 */
-    private static final float FADES_IN = 0.06F;
+    /**
+     * 現れ切るまでの tick 数。大きい板が突然現れると、雲ではなく板に見える。
+     *
+     * <p>寿命に対する割合ではなく tick にしてあるのは、核の層が1分以上生きるからだ。割合のままだと柱の1枚が
+     * 現れ切るのに5秒かかり、立ち上がる柱の先端が見えない。
+     */
+    private static final float FADES_IN = 18.0F;
 
     /** 漂って流れていく雲。通常のキノコ雲と、核の凝結の棚。どちらも光らない。 */
-    public static final Look DRIFT = new Look(220, 140, 1.55F, 0.96F, -0.006F, 0.58F, NEVER_GLOWS, 0.0F);
+    public static final Look DRIFT = new Look(220, 140, 1.55F, 0.96F, -0.006F, 0.58F, NEVER_GLOWS, 0.0F, false);
     /**
-     * 核の柱と傘。生まれた時点で内側が灼熱していて、十数秒かけてただの煙になる。
+     * 核の柱と傘。生まれた時点で内側が灼熱していて、9秒ほどでただの煙になり、そこから1分以上残って風に流れる。
      *
-     * <p>{@link #DRIFT} より遥かに長生きするのは、核の演出が柱の立ち上がりだけで10秒近くかかるからだ。
-     * 短い寿命では、傘が完成する頃に柱の根元が消えていて雲が地面と繋がらない。
+     * <p>{@link #DRIFT} より遥かに長生きするのは、実物の雲が<b>立ち上がってから何分も空に居座る</b>からだ。
+     * 20秒で消えるキノコ雲は「大きな爆発の煙」で、空に残って傾き、崩れながら流れていく雲が核の後の空である。
+     * 灼熱の時間（{@code cools} × 寿命）は寿命を伸ばす前と同じ 180 tick に揃えてある。
      */
     public static final Look BURNING =
-            new Look(400, 220, 1.60F, 0.97F, -0.004F, 0.62F, Effects.FURNACE, 0.45F);
+            new Look(1500, 300, 2.30F, 0.97F, -0.004F, 0.62F, Effects.FURNACE, 0.12F, true);
 
     private final Look look;
+    /**
+     * 風に流される量（1tickあたりブロック）。{@link Look#windborne} の層だけが持つ。
+     *
+     * <p>速度に入れると摩擦で数秒のうちに止まる。風は止まらないので、速度とは別に毎 tick 位置を動かす。
+     */
+    private final double driftX;
+    private final double driftZ;
     /**
      * 寝かせ方。粒ごとに1つ持つ。
      *
@@ -84,9 +97,12 @@ public class CloudLayerParticle extends WeaponParticle {
         this.gravity = look.gravity();
         // 雲は物質ではない。地形で跳ね返る筋合いが無い。
         this.hasPhysics = false;
-        this.xd = xd;
+        // 風に乗る層では、渡された水平速度は風そのもの。速度としては持たない。
+        this.driftX = look.windborne() ? xd : 0.0;
+        this.driftZ = look.windborne() ? zd : 0.0;
+        this.xd = look.windborne() ? 0.0 : xd;
         this.yd = yd;
-        this.zd = zd;
+        this.zd = look.windborne() ? 0.0 : zd;
         // 自分の面の中で回す。円なので向きは見えないが、同じ絵が並ぶのは見える。
         this.roll = this.random.nextFloat() * Mth.TWO_PI;
         this.oRoll = this.roll;
@@ -98,11 +114,15 @@ public class CloudLayerParticle extends WeaponParticle {
     public void tick() {
         super.tick();
 
+        if (this.driftX != 0.0 || this.driftZ != 0.0) {
+            this.move(this.driftX, 0.0, this.driftZ);
+        }
+
         float lived = this.lived(0.0F);
 
         // 現れるときは急がず、消えるときは最後まで粘る。層が一斉に薄くなると雲全体が点滅して見える。
         this.alpha = this.look.opacity()
-                * Math.min(lived / FADES_IN, 1.0F)
+                * Math.min(this.age / FADES_IN, 1.0F)
                 * (1.0F - lived * lived * lived);
         this.coolTowards(lived);
     }
@@ -157,9 +177,10 @@ public class CloudLayerParticle extends WeaponParticle {
      *                濃い板を重ねると雲ではなく塗り潰しになる
      * @param hot 生まれた時点の色。{@link WeaponParticle#NEVER_GLOWS} なら光らない
      * @param cools 本来の色へ移りきる、寿命に対する割合
+     * @param windborne 渡された水平速度を風として毎 tick 足し続けるか
      */
     public record Look(int life, int lifeJitter, float growth, float friction, float gravity,
-            float opacity, int hot, float cools) {
+            float opacity, int hot, float cools, boolean windborne) {
     }
 
     public static ParticleProvider<TintedParticleOption> provider(SpriteSet sprites, Look look) {

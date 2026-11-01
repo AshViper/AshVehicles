@@ -62,8 +62,10 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
             AnimationState<GroundVehicleEntity> animationState) {
         super.setCustomAnimations(animatable, instanceId, animationState);
 
-        applyPose(this, Setup.of(animatable.getStats()),
-                Pose.of(animatable, animationState.getPartialTick()));
+        float partialTick = animationState.getPartialTick();
+
+        applyPose(this, Setup.of(animatable.getStats()), Pose.of(animatable, partialTick),
+                WheelGround.update(this, animatable), partialTick);
     }
 
     /**
@@ -172,6 +174,14 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
 
     /** 地上車両のモデルにポーズを付ける。 */
     public static void applyPose(GeoModel<?> model, Setup figures, Pose pose) {
+        applyPose(model, figures, pose, WheelGround.NONE, 1.0F);
+    }
+
+    /**
+     * 同じポーズに、転輪ごとの地面への追従（{@link WheelGround}）を重ねる版。地面を読める生きた車両から。
+     */
+    public static void applyPose(GeoModel<?> model, Setup figures, Pose pose, WheelGround ground,
+            float partialTick) {
         VehicleChassis.Model setup = figures.model();
         String turretBone = setup.bone(GroundVehicleDefinition.Bone.TURRET);
 
@@ -224,7 +234,8 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
             model.getBone(wheel).ifPresent(found ->
                     turnAboutX(found, WHEEL_SIGN * (machineSideX(found) > 0.0F
                             ? pose.wheelRight() : pose.wheelLeft())));
-            plant(model, wheel, pose.ride(), setup.scale(), figures.wheelTravel());
+            plant(model, wheel, pose.ride(), setup.scale(), figures.wheelTravel(),
+                    ground.liftOf(wheel, partialTick));
         }
 
         // そして操舵輪を、自身の鉛直軸周りに回す。車輪は大抵両方のリストに入っており、2つの回転が1つのボーンに載る
@@ -253,7 +264,8 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
      * される1つのオブジェクトなので、「今フレームはやることが無かった」からとずらしたまま残した車輪は、次に描かれる
      * 車両でもずれたままになる。履帯の敷設がリンクを戻すのと同じ理由だ。
      */
-    private static void plant(GeoModel<?> model, String bone, Ride ride, float scale, float travel) {
+    private static void plant(GeoModel<?> model, String bone, Ride ride, float scale, float travel,
+            float groundLift) {
         if (bone.isEmpty()) {
             return;
         }
@@ -268,7 +280,11 @@ public class GroundVehicleModel extends VehicleGeoModel<GroundVehicleEntity> {
                 lift = Mth.clamp(ride.liftOf(centre.x(), centre.z(), scale), -stop, stop);
             }
 
-            slideAlongY(found, -lift * BakedGeometry.UNITS);
+            // 地面への追従は車体の揺れの戻しに足す。転輪全体の可動域はそちらより広い（WheelGround.reachOf）。
+            float reach = WheelGround.reachOf(travel) / Math.max(scale, 0.01F);
+            float shift = Mth.clamp(groundLift - lift, -reach, reach);
+
+            slideAlongY(found, shift * BakedGeometry.UNITS);
         });
     }
 }

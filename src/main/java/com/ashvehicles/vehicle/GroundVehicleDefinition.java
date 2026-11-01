@@ -90,7 +90,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
             Launcher.NONE,
             new Hull(Hull.DEFAULT_HEALTH, 3.0F, 0, 0.0F,
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 1.0, 0.0))), false, Optional.empty(),
-                    1.0F, 0),
+                    1.0F, 0, 0.0F),
             VehicleChassis.CameraMount.DEFAULT,
             VehicleChassis.Sound.DEFAULT,
             VehicleChassis.Radar.NONE,
@@ -740,7 +740,7 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
      */
     public record Hull(float health, float explosionPower, int salvage, float armour,
             List<VehicleChassis.Seat> seats, boolean crewed, Optional<Handles> handles,
-            float damageTaken, int cost) {
+            float damageTaken, int cost, float mass) {
         public static final float DEFAULT_HEALTH = 300.0F;
 
         public static final Codec<Hull> CODEC = RecordCodecBuilder.create(instance -> instance.group(
@@ -766,7 +766,10 @@ public record GroundVehicleDefinition(VehicleChassis.Hitbox hitbox, VehicleChass
                 //
                 // <p><b>強い車両ほど高い。</b> チケットが陣営の残機なら、こちらは個人の財布だ。書くのは
                 // ここ——車両ごとの数値であり、車両ファイルは既にその類の数値を全部持っている。
-                Codec.INT.optionalFieldOf("cost", 0).forGetter(Hull::cost)
+                Codec.INT.optionalFieldOf("cost", 0).forGetter(Hull::cost),
+                // 車体の質量（kg）。爆風にどれだけ押されるか、ぶつかった相手とどう押し合うか。0 なら
+                // 当たり判定の大きさから見積もる（{@code GroundVehicleEntity.mass}）。
+                Codec.FLOAT.optionalFieldOf("mass", 0.0F).forGetter(Hull::mass)
         ).apply(instance, Hull::new));
     }
 

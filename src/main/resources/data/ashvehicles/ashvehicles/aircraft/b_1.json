@@ -4878,7 +4878,9 @@
       "bay_left_2": "LHatch",
       "bay_right_2": "RHatch",
       "bay_left_3": "LBHatch",
-      "bay_right_3": "RBHatch"
+      "bay_right_3": "RBHatch",
+      "stick": "stick",
+      "throttle": "throttle"
     },
     "bay_travel": 95,
     "bay_cycle_ticks": 40
@@ -4991,11 +4993,13 @@
     "heat": 0.9
   },
   "countermeasures": {
-    "flares": 60,
-    "chaff": 90,
-    "interval_ticks": 5,
+    "flares": 120,
+    "chaff": 120,
+    "interval_ticks": 8,
     "reload_ticks": 400,
-    "speed": 0.35
+    "speed": 0.35,
+    "salvo": 4,
+    "spread": 120
   },
   "hardpoints": [
     {

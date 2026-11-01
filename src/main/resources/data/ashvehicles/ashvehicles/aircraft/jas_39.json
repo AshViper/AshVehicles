@@ -2544,7 +2544,9 @@
       "nose_gear": "FGear",
       "left_gear": "LGear",
       "right_gear": "RGear",
-      "nose_gear_door": "CHatch"
+      "nose_gear_door": "CHatch",
+      "stick": "stick",
+      "throttle": "throttle"
     }
   },
   "engine": {

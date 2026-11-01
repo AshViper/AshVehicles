@@ -13,11 +13,14 @@ import io.netty.buffer.ByteBuf;
  *
  * @param bearing 機首からの角度（度）。右が正
  * @param kind 関心がどの段階まで進んでいるか
+ * @param symbol 受信機が出す発信源の記号。実機の RWR と同じく、地対空は型の数字、戦闘機は F、ヘリは H、
+ *               艦は N、対空砲は A、誘導弾は M
  */
-public record Threat(float bearing, Kind kind) {
+public record Threat(float bearing, Kind kind, String symbol) {
     public static final StreamCodec<ByteBuf, Threat> STREAM_CODEC = StreamCodec.composite(
             ByteBufCodecs.FLOAT, Threat::bearing,
             ByteBufCodecs.idMapper(Kind::byId, Kind::ordinal), Threat::kind,
+            ByteBufCodecs.stringUtf8(4), Threat::symbol,
             Threat::new);
 
     /** 知らせる価値のある3段階を、普通に起きる順で。 */

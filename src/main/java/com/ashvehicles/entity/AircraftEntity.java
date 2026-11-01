@@ -149,6 +149,20 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     private static final EntityDataAccessor<Boolean> DATA_RAMP_OPEN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
+    /**
+     * 外部灯火のスイッチ。{@link #LIGHT_NAV} などのビットの組。
+     *
+     * <p>倉の扉と同じく、サーバーが持つ値を乗員が MFD から切り替える。点いているかどうかしか持たず、
+     * 明滅の位相は両側が世界の時刻から自分で出す。{@code NavLights} 参照。
+     */
+    private static final EntityDataAccessor<Byte> DATA_LIGHTS =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BYTE);
+    /** 航法灯。左翼端の赤、右翼端の緑、尾部の白。 */
+    public static final int LIGHT_NAV = 1;
+    /** 衝突防止灯。胴体の上下で赤く明滅する。 */
+    public static final int LIGHT_BEACON = 2;
+    /** ストロボ。翼端と尾部で白く閃く。 */
+    public static final int LIGHT_STROBE = 4;
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /**
@@ -448,6 +462,42 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
     /** 迎角リミッターが効き始める点。保持する限界値に対する割合。 */
     private static final float ALPHA_LIMITER_BITE = 0.6F;
+
+    /**
+     * 操縦桿を一杯に引いている間、1G のトリムへ戻す尾翼の復元のうち黙る割合。1にしないのは、引いた分の
+     * 手応え——離せば機首が戻る感触——を少し残すため。
+     */
+    private static final double HELD_TRIM = 0.9;
+
+    /** 失速角の手前のどれだけの幅（失速角に対する割合）で {@link #HELD_TRIM} を戻し始めるか。 */
+    private static final double HELD_TRIM_FADE = 0.25;
+
+    /**
+     * 失速を越え、推力偏向が機首を握っているとき、水平尾翼の復元のうち失われる割合。1 なので尾翼は完全に
+     * 黙り、立てた機首は離しても立ったまま——戻すのはパイロットの押しとノズルの仕事。0.85 で離した瞬間に
+     * 機首が気流へ戻るようにしていたが、ポストストール機動の最中に勝手に姿勢を戻されると読まれた。
+     */
+    private static final double POST_STALL_TAIL_LOSS = 1.0;
+    /** ハイG旋回の補助で昇降舵の指令に掛ける倍率。 */
+    private static final float HIGH_G_BOOST = 1.4F;
+    /** 補助に入る操縦桿の引き。キーの引き切りは1で、G で握りが抜けた分を少し見込む。 */
+    private static final float HIGH_G_TRIGGER = 0.9F;
+
+    /**
+     * 推力偏向が効き始める速さ（失速速度に対する倍率）。これより速い間、ノズルを持つ機体も他の戦闘機と
+     * 同じに飛ぶ。ここから失速速度へ向けて効きが増え、失速速度以下で満額になる。以前は動圧に反比例して
+     * 薄れる形だったが、それでは 2 倍の速さでも 1/4 が残り、普段の機動まで他の機体より鋭かった。
+     */
+    private static final double NOZZLE_ONSET = 1.2;
+
+    /** 推力偏向のうちヨーに回る割合。ピッチだけを振るノズル（F-22）もあるので、ヨーは半分に留める。 */
+    private static final float NOZZLE_YAW_SHARE = 0.5F;
+
+    /**
+     * 胴体の横力が満額になる速さ（失速速度に対する倍率）。それより遅いと横滑りを殺す力は速さに比例して弱まり、
+     * 機体は横へ流れ続ける。横力は動圧の力なので、遅い機体ほど慣性に負ける。
+     */
+    private static final double SLIP_REFERENCE = 3.0;
     /**
      * 昇降舵が機首を押さえる力がフェードインし始める、ローテーション速度に対する割合。滑走の終盤で機体が軽く
      * なる形にし、操縦桿が段階的に急に効き出さないようにする。
@@ -465,8 +515,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private static final double TOUCHDOWN_SINK = 0.25;
     /** 尾部が滑走路を擦る前に車輪が許す機首上げ姿勢。 */
     private static final float GROUND_PITCH_LIMIT = 15.0F;
-    /** 降着装置が機体を地面の線へ引き戻す強さ（1tickあたり）。 */
-    private static final float GROUND_LEVELLING = 0.25F;
+    /** 前脚から主脚までの半分（機体の幅に対する割合）。F-16（幅6）で 2.1、実機の脚間 4 m の半分。 */
+    private static final double GEAR_BASE = 0.35;
+    /** 主脚の輪距の半分（幅に対する割合）。F-16 で 1.2、実機 2.4 m の半分。 */
+    private static final double GEAR_TRACK = 0.2;
+    /** ピッチとロールの回転半径（幅に対する割合）。機体の質量の広がり。 */
+    private static final double PITCH_GYRATION = 0.4;
+    private static final double ROLL_GYRATION = 0.3;
+    /** 脚のばねの強さ（1/tick²）と、臨界に対する減衰の比。減衰が弱いので接地や段差で少し揺れる。 */
+    private static final float GEAR_STIFFNESS = 0.2F;
+    private static final float GEAR_DAMPING_RATIO = 0.45F;
+    /** 接地の一撃の跳ね返り。オレオが受け止める分だけ1より小さい。 */
+    private static final double GEAR_RESTITUTION = 0.3;
     /**
      * 降着装置が沿う地面の傾きの上限（度）。これを超える斜面は車輪が寝る相手ではなく、機体が突っ込む相手だ。
      * 上限があることで、プローブの読み違え1つが機体を機首で立たせることもない。
@@ -547,6 +607,20 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * かなり進み、真下に落ちたヘリは持ち込む速度が無いので一切進まない。大抵は計算より先に地形が決着させる。
      */
     private static final double WRECK_FRICTION = 0.92;
+    /** 地面が残骸の回りを、滑る向きの転がりへ1tickで寄せる割合。 */
+    private static final double WRECK_ROLL_GRIP = 0.25;
+    /** 宙で回る残骸の回りの減衰。 */
+    private static final double WRECK_SPIN_DRAG = 0.995;
+    /** これより遅く地面を滑る残骸は回りを失い、平らに寝る（ブロック/tick）。 */
+    private static final double WRECK_REST_SPEED = 0.05;
+    private static final double WRECK_SPIN_STOP = 0.7;
+    private static final float WRECK_LAY_FLAT = 0.15F;
+    /** 残骸の回りの上限（ラジアン/tick）。毎秒 1.5 回転ほど。 */
+    private static final double WRECK_SPIN_MAX = 0.5;
+    /** 地上で横転した機体が倒れ始める回り（ラジアン/tick）。 */
+    private static final double GROUND_TIP_SPIN = 0.12;
+    /** 生きている機体を爆風が一度に揺する角の上限（ラジアン）。 */
+    private static final double SHOVE_JOLT_MAX = 0.15;
 
     /**
      * 乗員を抱えた残骸が「着いた」と見なされる、地形までの距離（ブロック）。
@@ -624,10 +698,17 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 離陸滑走の終盤は浮上の瞬間まで食い付き続けるのではなく、主翼が引き受けるにつれて軽くなる。
      */
     private float weightOnWheels = 1.0F;
+    /** 脚の上の姿勢の角速度（度/tick）。{@link #settleOnGear}。 */
+    private float gearPitchRate;
+    private float gearBankRate;
+    /** 最後に脚で地面に立っていた tick。空いていれば次に立つ tick が接地。 */
+    private int lastOnGear = Integer.MIN_VALUE / 2;
     /** 直前1tickの方位変化。パイロットの視界が機体と共に回るよう渡す。 */
     private float deltaRotation;
     // 角速度（度/tick）。tickをまたいで保持し、操縦に重みを持たせる。
     private float pitchVelocity;
+    /** このtick、ハイG旋回の補助（エアブレーキ＋引き切り）が掛かっているか。 */
+    private boolean highG;
     private float rollVelocity;
     private float yawVelocity;
     /** 主翼が気流に対して成す角（度）。失速角を超えると厄介なことになる。 */
@@ -679,6 +760,14 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 駐機していた機体と同じ値になる。両者で違うのは実際にどれだけ進んだかであり、それをここで測る。
      */
     private Vec3 lastTravel = Vec3.ZERO;
+    /** 直前の飛行1tickでの回り方（ワールド座標の角速度、ラジアン/tick）。残骸が引き継ぐ。 */
+    private Vec3 lastSpin = Vec3.ZERO;
+    /** 地上で横転した tick に足す回り。倒れた翼の側へ回り始める。 */
+    private Vec3 tipSpin = Vec3.ZERO;
+    /** 残骸の角速度（ワールド座標、ラジアン/tick）。 */
+    private Vec3 spin = Vec3.ZERO;
+    /** 残骸が壊れた瞬間の回転を引き継いだか。 */
+    private boolean spinTaken;
     /** 飛行中この機体が開いたまま保持しているチャンク（あれば）。 */
     private Set<ChunkPos> heldChunks = Set.of();
     /**
@@ -1262,6 +1351,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         builder.define(DATA_GEAR_DOWN, true);
         builder.define(DATA_BAY_OPEN, false);
         builder.define(DATA_RAMP_OPEN, false);
+        builder.define(DATA_LIGHTS, (byte) (LIGHT_NAV | LIGHT_BEACON));
         builder.define(DATA_FLAPS_DOWN, false);
         builder.define(DATA_VTOL, false);
         builder.define(DATA_WEAPONS, new CompoundTag());
@@ -1825,6 +1915,20 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.entityData.set(DATA_RAMP_OPEN, !this.isRampOpen());
     }
 
+    /** その灯火のスイッチが入っているか。 */
+    public boolean isLightOn(int light) {
+        return (this.entityData.get(DATA_LIGHTS) & light) != 0;
+    }
+
+    /** 灯火のスイッチを切り替える。{@code lights} は切り替えるビットの組。 */
+    public void toggleLights(int lights) {
+        if (this.level().isClientSide || lights == 0) {
+            return;
+        }
+
+        this.entityData.set(DATA_LIGHTS, (byte) (this.entityData.get(DATA_LIGHTS) ^ lights));
+    }
+
     /** ハッチが行き先まで動き終えたか。 */
     public boolean isRampSettled() {
         return this.rampProgress == (this.isRampOpen() ? 1.0F : 0.0F);
@@ -2237,6 +2341,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 this.wreckTick();
             } else {
                 this.flightTick();
+                // 壊れた瞬間の回転を残骸へ引き継ぐため、毎 tick の回り方を覚えておく（ワールド座標の角速度）。
+                Vector3f turned = Attitude.rotationVector(
+                        new Quaternionf(this.attitude).mul(new Quaternionf(attitudeBefore).conjugate()).normalize());
+                this.lastSpin = new Vec3(turned.x(), turned.y(), turned.z()).add(this.tipSpin);
+                this.tipSpin = Vec3.ZERO;
             }
 
             Vec3 impactVelocity = this.getDeltaMovement();
@@ -3085,6 +3194,27 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 低速域の救済まで薄くなり、最も操縦を必要とする場面が最も効かなくなる。
         float control = Math.max(authority / damping * CONTROL_SCALE, TURN_RATE_FLOOR);
 
+        // 推力偏向。ノズルは空気ではなく排気を曲げるので、効きは動圧ではなくエンジンの実出力に比例し、気流の
+        // 減衰も受けない。昇降舵と方向舵の軸だけ——ノズルは補助翼の代わりにはならない。失速後の機体を
+        // 機首から回せるのはこれだけで、ポストストール機動（コブラ・クルビット）はここから来る。
+        //
+        // 舵の効きに<em>足す</em>。大きい方を取ると、400 km/h 前後では空力が既に勝っていてノズルが何も足さず、
+        // 機首の回る速さ（約1.7度/tick）が主翼が飛行経路を曲げる速さ（約3.3度/tick）に届かない——迎角は失速の
+        // 手前で止まり、機体はただ宙返りする。ポストストール機動は機首が経路を追い越して初めて起きる。
+        //
+        // 効くのは失速速度の近くから下だけ（NOZZLE_ONSET）。それより速い間は他の戦闘機と同じに飛び、
+        // ポストストール機動は失速速度まで減速して初めて入る。
+        double relative = speed / reference;
+        float vectored = handling.thrustVectoring() * this.thrustLevel
+                * (float) Mth.clamp((NOZZLE_ONSET - relative) / (NOZZLE_ONSET - 1.0), 0.0, 1.0);
+        float steering = control + vectored;
+
+        // 空力の効きに対してノズルが占める割合。1に近いほど機首を握っているのは尾翼ではなくノズルで、迎角
+        // リミッターも尾翼の復元もそれだけ道を譲る。
+        float nozzleShare = vectored <= 0.0F
+                ? 0.0F
+                : Mth.clamp(vectored / Math.max(aeroAuthority / damping * CONTROL_SCALE, 1.0E-3F), 0.0F, 1.0F);
+
         float previousYRot = this.getYRot();
         float weathervaneYaw = 0.0F;
         float weathervanePitch = 0.0F;
@@ -3092,10 +3222,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 指令角速度。即座にではなく数tickかけて到達する。舵面は機体の質量を相手にするからだ。これらはワールド
         // 軸ではなく機体自身の軸周りの角速度だ。昇降舵は機首をキャノピー天頂の向きへ振るので、バンクした機体は
         // 上昇せず旋回へ引き込まれる。
-        float lag = Mth.clamp(handling.controlLag(), 0.02F, 1.0F);
+        // 吊り物は翼の上の重りで、機体を回すのに要る力も増える（回転の慣性）。満載の機体は舵への応えも、
+        // 舵を戻した後の止まりも鈍い。重さの比で割るので、何も吊っていない機体は従来通り。
+        float lag = Mth.clamp(handling.controlLag() / (float) Math.max(this.getBurden(), 1.0), 0.02F, 1.0F);
 
         float commandedPitch = this.limitToWing(
-                this.input.pitch() * handling.pitchRate() * control, lifting);
+                this.input.pitch() * handling.pitchRate() * steering, Math.max(lifting, nozzleShare));
 
         // 接地中は、水平尾翼を持ち上げるだけの空気が流れるまで機首は上がらない。その速度こそ離陸を離陸たらしめ
         // る。機体は走り、操縦桿はどれだけ引いても何も起きず、そして数ノットのうちに機首が軽くなって上がる——その
@@ -3122,9 +3254,19 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             commandedRoll *= wheels;
         }
 
+        // ハイG旋回の補助。エアブレーキを握ったまま操縦桿を引き切ると、昇降舵の効きが上がり、尾翼もトリム迎角へ
+        // 戻そうとしなくなる。機首を決め打ちで回すのではなく効きを足すだけなので、迎角リミッターは残り、
+        // 引けるGは機体と速度が決める。減速はブレーキの抗力がそのまま担う。
+        // AI は速すぎるとブレーキを握ったまま引くので外す。
+        this.highG = !rolling && !this.isBotDriven() && this.input.brake() && this.input.pitch() >= HIGH_G_TRIGGER;
+
+        if (this.highG) {
+            commandedPitch *= HIGH_G_BOOST;
+        }
+
         this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
         this.rollVelocity += (commandedRoll - this.rollVelocity) * lag;
-        this.yawVelocity += (this.input.yaw() * handling.yawRate() * control - this.yawVelocity) * lag;
+        this.yawVelocity += (this.input.yaw() * handling.yawRate() * (control + vectored * NOZZLE_YAW_SHARE) - this.yawVelocity) * lag;
 
         // 前輪操舵。これはまったく別物で、機体が駐機場から自走で向きを変えられる理由だ。地上の車輪は垂直尾翼を
         // 流れる空気の速さを気にしないので、気流が与える操舵権限を迂回し、操縦ラグを通さず即座に応える。方向舵が
@@ -3183,10 +3325,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             this.angleOfAttack = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(up), -1.0, 1.0)));
             // 主翼の素の係数に掛かる分。フラップ、後退角、地面効果。トリム（下）が同じ翼について解くので、
             // 係数と分けて保持する。
-            double liftGain = (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
-                    * this.sweepLift()
-                    * this.groundEffect();
-            double liftCoefficient = wing.liftCoefficient(this.angleOfAttack) * liftGain;
+            double liftGain = this.sweepLift() * this.groundEffect();
+            // フラップは翼の反りを足す物で、係数に掛かる倍率ではない。flapCamber 参照。
+            double camber = this.flapCamber(wing, this.angleOfAttack);
+            double liftCoefficient = (wing.liftCoefficient(this.angleOfAttack) + camber) * liftGain;
 
             // 揚力は気流に直角に働き、主翼と共に傾く。その傾きが機体を旋回させる。バンクすれば、支えていた
             // のと同じ力が機体を回し始める。
@@ -3212,6 +3354,21 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                     * (this.input.brake() ? wing.airBrakeDrag() : 1.0);
             double drag = parasitic + wing.inducedDrag() * liftCoefficient * liftCoefficient;
             forces = forces.add(flow.scale(-drag * speed * speed * density));
+
+            // 失速の先では主翼は翼ではなく板になる。揚力係数は失速角の2倍で0へ落ちるので、それだけだと迎角90度の
+            // 機体は揚力も誘導抗力も失い、腹で空気を受けているのに抵抗が減る——コブラで速度が抜けない。板が受ける
+            // 力は板の法線に沿い、気流の法線成分の2乗に比例する。分解すれば迎角45度で最大の揚力と、90度で最大の
+            // 抗力が自ずと出る。失速を越えた分だけ入れるので、失速角までは今まで通り翼として飛ぶ。
+            double plate = Mth.clamp((Math.abs(this.angleOfAttack) - wing.stallAngle())
+                    / Math.max(wing.stallAngle(), 1.0F), 0.0, 1.0);
+
+            if (plate > 0.0) {
+                double normal = -flow.dot(up);
+                double peak = wing.liftCoefficient(wing.stallAngle());
+
+                forces = forces.add(up.scale(normal * Math.abs(normal) * wing.lift() * peak * liftGain
+                        * plate * speed * speed * density));
+            }
 
             this.checkStructuralLoad(motion);
 
@@ -3240,13 +3397,41 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 // 続け、操縦桿を引きっぱなしにしなければ真っ直ぐ飛べない」機体で、それは実機で言えばトリムが
                 // 取れていない状態そのものだ。実機の水平尾翼は迎角0を向いてなどおらず、水平安定板が据えられた
                 // 角度——つまり1G を支える迎角——を向いている。{@link #trimAngleOfAttack} 参照。
-                double trim = this.trimAngleOfAttack(wing, speed, density, liftGain);
+                double trim = this.trimAngleOfAttack(wing, speed, density, liftGain, this.flapCamber(wing, 0.0F));
 
                 weathervanePitch = (float) (Math.sin(Math.toRadians(trim - this.angleOfAttack))
                         * handling.weathervane() * aeroAuthority / damping);
 
-                // そして胴体は横向きに飛ぶことを拒む。
-                motion = motion.subtract(right.scale(motion.dot(right) * wing.lateralDrag()));
+                // 引いている間、尾翼は引いた迎角を新しいトリムとして受け入れる。実機の昇降舵はトリム迎角そのもの
+                // を動かす舵であり、尾翼はパイロットが据えた迎角を守るのであって、1G の迎角へ戻そうと争いはしない。
+                // 争わせると操縦桿の効きの大半が尾翼に食われ、F-16 が 430 km/h で 5G、580 km/h でも 7G しか
+                // 引けなかった——ハイG旋回が成立しない。
+                //
+                // 主翼が翼として働いている間だけ。失速角に近づくにつれ戻し、失速の先では従来通り尾翼が機首を
+                // 気流へ引き戻す。そこで黙らせると、引きっぱなしの失速機は抜け出す手段を失う。
+                if (weathervanePitch * this.input.pitch() < 0.0F) {
+                    double stall = Math.max(wing.stallAngle(), 1.0F);
+                    // ノズルが機首を握っている機体は失速の先でも同じ。失速角で尾翼が全力に戻ると、そこが壁になって
+                    // ポストストール機動が失速角で止まる。
+                    double inside = Math.max(Mth.clamp(
+                            (stall - Math.abs(this.angleOfAttack)) / (stall * HELD_TRIM_FADE), 0.0, 1.0), nozzleShare);
+
+                    weathervanePitch *= (float) (1.0 - Math.abs(this.input.pitch()) * HELD_TRIM * inside);
+                }
+
+                // 失速の先で、ノズルが機首を握っている分だけ尾翼は黙る。主翼の後流に沈んだ水平尾翼は実機でも
+                // ほとんど効かない。操縦桿を離しても戻らない——機首を気流へ下ろすのはパイロットの押しだ。
+                // ノズルを持たない機体（share 0）は従来通り尾翼が戻す。
+                weathervanePitch *= (float) (1.0 - nozzleShare * plate * POST_STALL_TAIL_LOSS);
+
+                // そして胴体は横向きに飛ぶことを拒む——ただしそれは空気の力で、空気の力は動圧に比例し、重さで
+                // 割られる。毎tick決まった割合を消していた頃は、遅くても重くても横滑りが0.3秒で消え、機体は
+                // 機首の向いた方へ線路の上のように進んだ。今は遅いほど、重いほど横へ流れ続ける。
+                double grip = wing.lateralDrag() * density
+                        * Math.min(1.0, speed / (SLIP_REFERENCE * Math.max(wing.stallSpeed(), 1.0E-4F)))
+                        / Math.max(this.getBurden(), 1.0);
+
+                motion = motion.subtract(right.scale(motion.dot(right) * Math.min(grip, 1.0)));
             }
         } else {
             this.angleOfAttack = 0.0F;
@@ -3256,6 +3441,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // ずに軽くなるのはこれのおかげだ。満載の機体はここで長く重いままになる——同じ主翼が同じ揚力を作って
         // いても、支えるべき機体が重いのだから。
         this.weightOnWheels = (float) Mth.clamp(1.0 - lift / burden / GRAVITY, 0.0, 1.0);
+
+        // 補助中は尾翼が引いた迎角と争わない（機首下げ側の復元だけ消す）。
+        if (this.highG && weathervanePitch < 0.0F) {
+            weathervanePitch = 0.0F;
+        }
 
         this.applyBodyRotation(this.rollVelocity, this.pitchVelocity + weathervanePitch,
                 this.yawVelocity + weathervaneYaw + nosewheel);
@@ -3963,10 +4153,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             rotation = approach(rotation, 0.0F, 2.0F);
         }
 
-        this.setAttitude(new Quaternionf(this.attitude).slerp(
-                Attitude.of(this.getYRot(), rest + rotation)
-                        .rotateZ((float) Math.toRadians(slope.bank())),
-                GROUND_LEVELLING));
+        this.settleOnGear(rest + rotation, slope.bank(), motion);
 
         AircraftDefinition.Undercarriage gear = this.getStats().landingGear();
 
@@ -4011,11 +4198,103 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 接している物が車輪である間のみ。胴体着陸では押し付ける先が無いし、そこでの接地は依然として「到達」だ。
         double onto = this.onWheels() ? -GRAVITY : 0.0;
 
+        this.checkGroundTip(ground, slope);
+
         return new Vec3(ground.x, Math.max(motion.y, onto), ground.z);
     }
 
     /** 車輪の下の地面が機体へ与える傾き（度）。機首上げが正、右翼下げが正。 */
     private record Slope(float pitch, float bank) {
+    }
+
+    /**
+     * 降着装置の上の機体を、地面が求める姿勢へ寄せる。寄せ方はばね——脚のオレオが機体を支えている。
+     *
+     * <p>以前は毎 tick 目標へ一定の割合で寄せていたので、片脚から接地しても機首から落ちても機体は同じ速さで
+     * 静かに水平へ戻るだけだった。ここでは姿勢の角速度を持ち、
+     *
+     * <ul>
+     * <li><b>接地の一撃。</b> 空中から地面に着いた tick、先に地面に触れた脚（今の姿勢と地面の差で、低い側の
+     * 主脚、あるいは機首上げなら主脚・機首下げなら前脚）が沈下速度を受け止め、重心のまわりに機体を回す。
+     * 片翼を下げて降りた機体は残りの脚へ叩き付けられて少し行き過ぎ、機首上げで降りた機体は前脚へ落ちる。
+     * 大きさは「沈下速度 × 腕の長さ ÷ 回転半径²」で、強く降りるほど強い。
+     * <li><b>ばね。</b> その後は減衰の弱いばねで地面の姿勢へ戻る。段差や窪みを越えるたびに目標が変わるので、
+     * 凸凹の上では機体が揺すられる。
+     * </ul>
+     *
+     * @param targetX 目標の X 回転（Minecraft の向き。負が機首上げ）
+     * @param targetBank 目標のバンク（右翼下げが正）
+     * @param motion この tick の速度。接地の tick に沈下速度を読む
+     */
+    private void settleOnGear(float targetX, float targetBank, Vec3 motion) {
+        float x = Attitude.elevation(this.attitude);
+        float bank = Attitude.bank(this.attitude);
+        boolean touchdown = this.tickCount - this.lastOnGear > 1;
+        this.lastOnGear = this.tickCount;
+
+        if (touchdown) {
+            this.gearPitchRate = 0.0F;
+            this.gearBankRate = 0.0F;
+
+            double sink = Math.max(-motion.y, 0.0);
+            double width = Math.max(this.getStats().hitbox().width(), 1.0F);
+            float pitchError = targetX - x;
+            float bankError = targetBank - bank;
+
+            this.gearPitchRate = touchdownKick(sink, width * GEAR_BASE, width * PITCH_GYRATION, pitchError);
+            this.gearBankRate = touchdownKick(sink, width * GEAR_TRACK, width * ROLL_GYRATION, bankError);
+        }
+
+        float damping = 2.0F * Mth.sqrt(GEAR_STIFFNESS) * GEAR_DAMPING_RATIO;
+        this.gearPitchRate += (targetX - x) * GEAR_STIFFNESS - this.gearPitchRate * damping;
+        this.gearBankRate += Mth.wrapDegrees(targetBank - bank) * GEAR_STIFFNESS - this.gearBankRate * damping;
+
+        this.setAttitude(Attitude.of(this.getYRot(), x + this.gearPitchRate)
+                .rotateZ((float) Math.toRadians(bank + this.gearBankRate)));
+    }
+
+    /**
+     * 接地の一撃が生む角速度（度/tick）。先に触れた脚が沈下速度を受け止め、機体を地面の姿勢の側へ回す。
+     * 地面との差より大きく回しはしない（行き過ぎは半分まで）。差が1度未満なら全部の脚が同時に着いたので回らない。
+     */
+    private static float touchdownKick(double sink, double lever, double gyration, float error) {
+        if (Math.abs(error) < 1.0F || sink <= 0.0) {
+            return 0.0F;
+        }
+
+        float kick = (float) Math.toDegrees(sink * lever * (1.0 + GEAR_RESTITUTION) / (gyration * gyration));
+
+        return Math.copySign(Math.min(kick, Math.abs(error) * 1.5F), error);
+    }
+
+    /**
+     * 車輪の上での横転。重心に掛かる横向きの加速度——旋回の遠心力と斜面の重力——が、主脚の輪距と重心の高さが
+     * 決める限界（{@code g × 半輪距 / 重心高}、地上車両の {@link com.ashvehicles.vehicle.Tumble} と同じ式）を
+     * 超えたら、外側の主脚を支点に倒れる。翼が地面を打つので、それは墜落として扱う。残骸は倒れた側へ回り始め、
+     * そのまま転がる（{@link #wreckTick}）。
+     *
+     * <p>機体ファイルは輪距を持たないので、素の直方体の幅の4分の1を半輪距、高さの半分を重心高と見積もる。
+     * 戦闘機で横 1g ほど——高速の地上旋回で初めて届く値で、普通のタキシングでは倒れない。
+     */
+    private void checkGroundTip(Vec3 ground, Slope slope) {
+        if (!this.onWheels() || this.weightOnWheels < 0.5F || this.crashing) {
+            return;
+        }
+
+        double speed = ground.horizontalDistance();
+        double yawRate = Math.toRadians(Mth.wrapDegrees(this.getYRot() - this.yRotO));
+        // 右旋回の遠心力は左（負）へ。右翼下げの斜面は右へ引く。
+        double lateral = -speed * yawRate + GRAVITY * Math.sin(Math.toRadians(slope.bank()));
+        double halfTrack = Math.max(this.getStats().hitbox().width(), 1.0F) * 0.25;
+        double height = Math.max(this.getStats().hitbox().height(), 1.0F) * 0.5;
+
+        if (Math.abs(lateral) <= GRAVITY * halfTrack / height) {
+            return;
+        }
+
+        this.crashing = true;
+        // 左へ倒れるなら機首の逆まわり（右側が持ち上がる）、右へなら機首まわり。
+        this.tipSpin = this.getNoseVector().scale(Math.signum(lateral) * GROUND_TIP_SPIN);
     }
 
     /**
@@ -4034,20 +4313,72 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 丸1ブロック変化する読み値も、機体の上では滑らかな動きになる。
      */
     private Slope groundSlope() {
-        double half = Math.max(this.getStats().hitbox().width(), 1.0F) * 0.5;
+        // 読む範囲は脚の並び——前脚から主脚までの長さと、主脚の輪距。素の直方体の幅をそのまま使うと、F-16 で
+        // 主翼の端の外まで読み、脚の下に無い段差で機体が傾いていた。機体ファイルは脚の位置を持たないので、幅
+        // から見積もる（{@link #GEAR_BASE}・{@link #GEAR_TRACK}）。
+        double width = Math.max(this.getStats().hitbox().width(), 1.0F);
+        double halfBase = width * GEAR_BASE;
+        double halfTrack = width * GEAR_TRACK;
         float radians = (float) Math.toRadians(this.getYRot());
         Vec3 forward = new Vec3(-Mth.sin(radians), 0.0, Mth.cos(radians));
         Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
-
         Vec3 centre = this.position();
-        double frontLeft = this.groundUnder(centre.add(forward.scale(half)).subtract(right.scale(half)));
-        double frontRight = this.groundUnder(centre.add(forward.scale(half)).add(right.scale(half)));
-        double rearLeft = this.groundUnder(centre.subtract(forward.scale(half)).subtract(right.scale(half)));
-        double rearRight = this.groundUnder(centre.subtract(forward.scale(half)).add(right.scale(half)));
+
+        // 3×3 の読み値に最小二乗で平面を当てる。4隅の平均では1つの隅が段を跨ぐたびに角度が丸ごと跳ねた。
+        // 平面なら1点の跳ねは9分の1に薄まり、階段の坂は坂として読める。読めなかった点は外す。
+        double n = 0.0, ms = 0.0, mt = 0.0, mh = 0.0;
+        double[] s = new double[9];
+        double[] t = new double[9];
+        double[] h = new double[9];
+
+        for (int i = 0; i < 9; i++) {
+            s[i] = (i / 3 - 1) * halfBase;
+            t[i] = (i % 3 - 1) * halfTrack;
+            h[i] = this.groundUnder(centre.add(forward.scale(s[i])).add(right.scale(t[i])));
+
+            if (!Double.isNaN(h[i])) {
+                n++;
+                ms += s[i];
+                mt += t[i];
+                mh += h[i];
+            }
+        }
+
+        float pitch = 0.0F;
+        float bank = 0.0F;
 
         // 下に何も無ければ水平と読む。車輪が何にも載っていない機体が向かうべき姿勢はそれだ。
-        float pitch = slopeAngle(mean(frontLeft, frontRight), mean(rearLeft, rearRight), half * 2.0);
-        float bank = slopeAngle(mean(frontLeft, rearLeft), mean(frontRight, rearRight), half * 2.0);
+        if (n >= 3.0) {
+            ms /= n;
+            mt /= n;
+            mh /= n;
+            double ss = 0.0, tt = 0.0, st = 0.0, sh = 0.0, th = 0.0;
+
+            for (int i = 0; i < 9; i++) {
+                if (Double.isNaN(h[i])) {
+                    continue;
+                }
+
+                double ds = s[i] - ms;
+                double dt = t[i] - mt;
+                double dh = h[i] - mh;
+                ss += ds * ds;
+                tt += dt * dt;
+                st += ds * dt;
+                sh += ds * dh;
+                th += dt * dh;
+            }
+
+            double det = ss * tt - st * st;
+
+            if (det > 1.0E-6) {
+                double alongSlope = (sh * tt - th * st) / det;
+                double acrossSlope = (th * ss - sh * st) / det;
+                pitch = (float) Math.toDegrees(Math.atan(alongSlope));
+                // 右（+t）が低ければ右翼下げ。
+                bank = (float) Math.toDegrees(Math.atan(-acrossSlope));
+            }
+        }
 
         // 上限を設けるのは、読み違え1つが機体を機首で立たせないため。これを超える地形は降着装置が沿う相手では
         // なく、機体が突っ込む相手だ。
@@ -4080,24 +4411,6 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         double ground = hit.getLocation().y;
 
         return ground > this.getY() + this.getStats().landingGear().climbHeight() ? Double.NaN : ground;
-    }
-
-    /** ある区間の高低差から傾斜角（度）を求める。 */
-    private static float slopeAngle(double high, double low, double span) {
-        if (Double.isNaN(high) || Double.isNaN(low) || span <= 0.0) {
-            return 0.0F;
-        }
-
-        return (float) (Math.atan2(high - low, span) * (180.0 / Math.PI));
-    }
-
-    /** 2つの読み値の平均。片方しか有効でなければその値。 */
-    private static double mean(double a, double b) {
-        if (Double.isNaN(a)) {
-            return b;
-        }
-
-        return Double.isNaN(b) ? a : (a + b) * 0.5;
     }
 
     /**
@@ -4289,8 +4602,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         AircraftDefinition.Wing wing = this.getStats().wing();
         Vec3 flow = velocity.scale(1.0 / speed);
         float angle = (float) Math.toDegrees(Math.asin(Mth.clamp(-flow.dot(this.getLiftVector()), -1.0, 1.0)));
-        double coefficient = wing.liftCoefficient(angle) * (1.0 + this.flapsProgress * this.getFlapsLiftBonus())
-                * this.sweepLift();
+        double coefficient = (wing.liftCoefficient(angle) + this.flapCamber(wing, angle)) * this.sweepLift();
 
         return (float) (wing.lift() * coefficient * speed * speed / GRAVITY);
     }
@@ -4316,7 +4628,8 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      *             同じ値でなければならない——違う値で解けば、機体は自分が実際に作る揚力とは別の迎角へ
      *             トリムされる
      */
-    private double trimAngleOfAttack(AircraftDefinition.Wing wing, double speed, double density, double gain) {
+    private double trimAngleOfAttack(AircraftDefinition.Wing wing, double speed, double density, double gain,
+            double camber) {
         double pressure = wing.lift() * speed * speed * density * gain;
 
         if (pressure <= 1.0E-8) {
@@ -4325,7 +4638,32 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         double slope = Math.max(wing.liftSlope(), 1.0E-4F);
 
-        return Math.min(Math.toDegrees(GRAVITY / pressure / slope), wing.stallAngle());
+        // フラップの反りが既に作っている分は迎角で作らなくてよい。だからフラップを下ろした機体は機首を下げて
+        // 同じ速さを飛ぶ——下回ればその分だけ負の迎角を向く。
+        return Math.min(Math.toDegrees((GRAVITY / pressure - camber) / slope), wing.stallAngle());
+    }
+
+    /**
+     * フラップが翼に足す揚力係数。
+     *
+     * <p>以前は係数への倍率（1 + lift_bonus）だった。倍率では迎角0の翼に何も足さず、トリムがその倍率で解き
+     * 直すので、下ろした瞬間に機首が少し下がるだけで機体は何も変わらなかった——「効かない」の正体はそれだ。
+     * 実機のフラップは翼の反りを増やす物で、同じ迎角で揚力を足す。下ろせば機体は浮き上がろうとし、同じ速さ
+     * をより低い迎角で飛べ、失速速度が下がる。
+     *
+     * <p>量は {@code lift_bonus} × 失速角での揚力係数。0.4 なら最大揚力が4割増える。失速の先では翼の揚力と
+     * 一緒に薄れる。
+     */
+    private double flapCamber(AircraftDefinition.Wing wing, float angleOfAttack) {
+        if (this.flapsProgress <= 0.0F) {
+            return 0.0;
+        }
+
+        double stall = Math.max(wing.stallAngle(), 1.0F);
+        double beyond = Math.max(0.0, Math.abs(angleOfAttack) - stall) / stall;
+
+        return this.flapsProgress * this.getFlapsLiftBonus() * wing.liftCoefficient(wing.stallAngle())
+                * Math.max(0.0, 1.0 - beyond);
     }
 
     /** 揚力の作用方向。キャノピーを貫いて上向き。その向きがどこであれ。 */
@@ -4941,7 +5279,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             return;
         }
 
-        if (!this.level().noCollision(this, plain) || !this.hasRoomHere(-margin)) {
+        // 空中で他の機体に当たった報告も受ける。ブロックだけの検算はそれを必ず捨てていた。
+        if (!this.level().noCollision(this, plain) || !this.hasRoomHere(-margin)
+                || Hitboxes.touchedMachine(this, margin) != null) {
             this.crashing = true;
         }
     }
@@ -4977,6 +5317,11 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     protected void crash() {
         if (this.level().isClientSide || this.isWrecked()) {
             return;
+        }
+
+        // 空中衝突は相手の機体も落とす。相手は自分の移動で触れに来ていないので、自分では墜落を立てない。
+        if (Hitboxes.touchedMachine(this, CRASH_CONTACT) instanceof AircraftEntity other && !other.isWrecked()) {
+            other.crashing = true;
         }
 
         this.destroy(this.damageSources().flyIntoWall());
@@ -5127,6 +5472,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * が真であり続けるには、それを毎tick床へ押し込む必要がある。
      */
     private void wreckTick() {
+        this.tumble();
         Vec3 carried = this.lastTravel;
         // 何かの上に落ちている。判定は onGround だけではない。あのフラグは素の直方体の物で、素の直方体は車輪
         // の位置にある——背面で横たわった機体や翼端で支えられた機体は、車輪の線を空中に残したまま自分の箱で
@@ -5134,6 +5480,112 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         double slide = this.onGround() || this.verticalCollision ? WRECK_FRICTION : WRECK_DRAG;
 
         this.setDeltaMovement(carried.x * slide, carried.y * WRECK_DRAG - GRAVITY, carried.z * slide);
+    }
+
+    /**
+     * 残骸の回転。壊れた瞬間の回り方を引き継ぎ、宙では保ち、地面に触れたら転がる。
+     *
+     * <p>地面に接した残骸は、滑る向きに転がる回り（{@code 上 × 速度 / 半径}）へ引き寄せられる——地面との摩擦が
+     * 回転を滑りに合わせる。ばらばらに回っていた機体は、着地すると進む向きに側転し始める。速さが落ちたら回りも
+     * 抜け、腹か背中のうち近い方で平らに寝る。
+     */
+    private void tumble() {
+        if (!this.spinTaken) {
+            this.spinTaken = true;
+            this.spin = this.spin.add(this.lastSpin);
+        }
+
+        boolean touching = this.onGround() || this.verticalCollision;
+
+        if (touching) {
+            Vec3 ground = new Vec3(this.lastTravel.x, 0.0, this.lastTravel.z);
+            double radius = Math.max(this.getStats().hitbox().height(), 1.0F) * 0.5;
+            Vec3 rolling = new Vec3(0.0, 1.0, 0.0).cross(ground).scale(1.0 / radius);
+            this.spin = this.spin.add(rolling.subtract(this.spin).scale(WRECK_ROLL_GRIP));
+
+            if (ground.length() < WRECK_REST_SPEED) {
+                this.spin = this.spin.scale(WRECK_SPIN_STOP);
+                this.layFlat();
+            }
+        } else {
+            this.spin = this.spin.scale(WRECK_SPIN_DRAG);
+        }
+
+        double rate = this.spin.length();
+
+        if (rate > WRECK_SPIN_MAX) {
+            this.spin = this.spin.scale(WRECK_SPIN_MAX / rate);
+            rate = WRECK_SPIN_MAX;
+        }
+
+        if (rate > 1.0E-5) {
+            Vec3 axis = this.spin.scale(1.0 / rate);
+            this.setAttitude(new Quaternionf().rotateAxis((float) rate, (float) axis.x, (float) axis.y,
+                    (float) axis.z).mul(this.attitude));
+        }
+    }
+
+    /** 止まりかけた残骸を、腹か背中のうち近い方へ寝かせる。方位はそのまま。 */
+    private void layFlat() {
+        float bank = Attitude.bank(this.attitude);
+        float flat = Math.abs(bank) > 90.0F ? 180.0F : 0.0F;
+        Quaternionf target = Attitude.of(Attitude.heading(this.attitude), 0.0F)
+                .rotateZ((float) Math.toRadians(flat));
+
+        this.setAttitude(new Quaternionf(this.attitude).slerp(target, WRECK_LAY_FLAT));
+    }
+
+    @Override
+    public double mass() {
+        float written = this.getStats().airframe().mass();
+
+        if (written > 0.0F) {
+            return written;
+        }
+
+        // 書かれていなければ箱から。F-16（6×3）でおよそ 10 トン。
+        float width = Math.max(this.getStats().hitbox().width(), 1.0F);
+
+        return Math.max(width * width * this.getStats().hitbox().height() * 95.0, 300.0);
+    }
+
+    /**
+     * 押しを足す。速度へそのまま、重心から外れた分は回りへ。生きている機体は一度だけ揺すられ、残骸は回り続ける。
+     */
+    @Override
+    public void applyShove(Vec3 impulse, Vec3 at, boolean tilts) {
+        if (this.isCargo()) {
+            return;
+        }
+
+        this.setDeltaMovement(this.getDeltaMovement().add(impulse));
+
+        if (this.isWrecked()) {
+            this.lastTravel = this.lastTravel.add(impulse);
+        }
+
+        Vec3 centre = this.position().add(Attitude.toWorld(this.attitude,
+                new Vec3(0.0, this.getStats().hitbox().height() * 0.5, 0.0)));
+        double inertia = Math.max(this.reach() * this.reach() / 3.0, 1.0);
+        Vec3 kick = at.subtract(centre).cross(impulse).scale(1.0 / inertia);
+
+        if (!tilts) {
+            return;
+        }
+
+        if (this.isWrecked()) {
+            this.spin = this.spin.add(kick);
+
+            return;
+        }
+
+        double angle = Math.min(kick.length(), SHOVE_JOLT_MAX);
+
+        if (angle > 1.0E-4) {
+            Vec3 axis = kick.normalize();
+            this.setAttitude(new Quaternionf().rotateAxis((float) angle, (float) axis.x, (float) axis.y,
+                    (float) axis.z).mul(this.attitude));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -5152,6 +5604,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 全てに yes を返し、実際に何が起きたかはサーバーが決める。
         if (this.level().isClientSide) {
             return InteractionResult.SUCCESS;
+        }
+
+        // 鎖か鋏を持っていれば、それは牽引の操作。TowChain 参照。
+        InteractionResult chained = TowChain.interact(this, player, hand);
+
+        if (chained != null) {
+            return chained;
         }
 
         // 視線がパイロンを貫いたクリックは、ゲームがどの箱へ渡したかに関わらずそのパイロンへのクリックだ。
@@ -5262,6 +5721,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 翼の下のパイロンを外す作業の邪魔にもならない。
         if (this.crewAboard() > 0 || !this.isParked()) {
             return InteractionResult.PASS;
+        }
+
+        // シフトを添えたレンチは外さずに畳む。兵装・弾・燃料はアイテムの中に残り、置けばそのまま戻る。
+        if (player.isShiftKeyDown()) {
+            ItemStack packed = this.packedItem();
+            this.discard();
+
+            if (!player.addItem(packed)) {
+                player.drop(packed, false);
+            }
+
+            return InteractionResult.CONSUME;
         }
 
         if (this.weapons.hasRemovable()) {
@@ -5949,6 +6420,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.bayProgress = this.isBayOpen() ? 1.0F : 0.0F;
         this.bayProgressO = this.bayProgress;
         this.entityData.set(DATA_RAMP_OPEN, tag.getBoolean("RampOpen"));
+
+        if (tag.contains("Lights")) {
+            this.entityData.set(DATA_LIGHTS, tag.getByte("Lights"));
+        }
         this.rampProgress = this.isRampOpen() ? 1.0F : 0.0F;
         this.rampProgressO = this.rampProgress;
         this.entityData.set(DATA_FLAPS_DOWN, tag.getBoolean("FlapsDown"));
@@ -5993,6 +6468,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         tag.putBoolean("FlapsDown", this.isFlapsDown());
         tag.putBoolean("BayOpen", this.isBayOpen());
         tag.putBoolean("RampOpen", this.isRampOpen());
+        tag.putByte("Lights", this.entityData.get(DATA_LIGHTS));
         tag.putBoolean("Vtol", this.isVtolSelected());
         tag.put("Weapons", this.weapons.save());
         tag.put("Stations", this.stations.save());

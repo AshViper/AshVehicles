@@ -1,15 +1,27 @@
 package com.ashvehicles.client;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
+import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.DesignationEntity;
 import com.ashvehicles.sensor.Contact;
+import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.sensor.Threat;
 import com.ashvehicles.vehicle.Attitude;
 import com.ashvehicles.vehicle.VehicleChassis;
+import com.ashvehicles.vehicle.VehicleShape;
+import com.ashvehicles.weapon.EquipmentDefinition;
+import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -22,7 +34,9 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.Team;
 
 /**
  * 計器盤の多機能表示器（MFD）。一人称で乗っている機体にだけ、その計器盤の面へ生きた画面を描く。
@@ -96,6 +110,7 @@ public final class CockpitDisplays {
         buffers = bufferSource;
 
         Quaternionf attitude = aircraft.getAttitude(partialTick);
+        FuelWatch.update(aircraft);
         CockpitControls.aim(aircraft, displays, attitude, partialTick);
 
         poseStack.pushPose();
@@ -144,7 +159,20 @@ public final class CockpitDisplays {
                 case "radar" -> radar(aircraft);
                 case "sms" -> sms(aircraft);
                 case "eng" -> eng(aircraft);
+                case "plan" -> plan(aircraft, index, partialTick);
+                case "iff" -> iff(aircraft);
+                case "rwr" -> rwr(aircraft);
+                case "tpod" -> tpod(aircraft);
+                case "map" -> map(aircraft, attitude);
                 default -> pfd(aircraft, attitude);
+            }
+
+            // 帰投燃料を切った直後は、どの頁を映していても上に帯を出す。
+            if (FuelWatch.justCrossed() && blink()) {
+                layer();
+                fill(PX / 2 - 22, 1, PX / 2 + 22, 12, WARNING);
+                layer();
+                centred("BINGO", PX / 2, 3, 0xFF051008);
             }
 
             matrix = screen;
@@ -434,7 +462,8 @@ public final class CockpitDisplays {
         float arc = Math.max(radar.arc(), 1.0F);
 
         for (Contact contact : contacts) {
-            if (contact.range() > shown) {
+            // IFF 頁の絞りで隠した所属は描かない。ロックしている物だけは隠さない。
+            if (contact.range() > shown || !contact.locked() && !CockpitControls.shows(contact.iff())) {
                 continue;
             }
 
@@ -442,7 +471,7 @@ public final class CockpitDisplays {
             float out = Mth.clamp(contact.range() / shown, 0.0F, 1.0F);
             int x = cx + Math.round(across * ((right - left) / 2.0F - 4.0F));
             int y = bottom - 3 - Math.round(out * (bottom - top - 6));
-            int colour = AircraftHud.contactColour(contact.iff(), contact.locked());
+            int colour = AircraftHud.contactColour(CockpitControls.identify(contact.iff()), contact.locked());
 
             if (contact.aircraft()) {
                 fill(x - 2, y - 2, x + 2, y + 2, colour);
@@ -526,27 +555,783 @@ public final class CockpitDisplays {
                 aircraft.getFuelFraction() < 0.2F ? WARNING : GREEN);
     }
 
-    /** 機体の状態。推力・燃料・損傷の棒と、脚・フラップ・後燃器の札。 */
+    /**
+     * エンジンと燃料。N1 と EGT の円形計器、BINGO の印を付けた燃料の棒、今の減り方での残り時間、脚とフラップ。
+     *
+     * <p>飛行モデルは回転数も排気温度も持たないので、N1 と EGT は推力と後燃器と燃料から組んだ計器の上の値。
+     * 回り上がりと冷え方に遅れを付けて、スロットルを動かしたときに計器らしく追い付かせる。
+     */
     private static void eng(AircraftEntity aircraft) {
         centred("ENG", PX / 2, 3, DIM);
+        spool(aircraft);
 
-        bar("THR", 15, aircraft.getThrottle(), aircraft.isAfterburning() ? AMBER : GREEN);
+        int radius = Mth.clamp((heightPx - 62) / 2, 9, 18);
+        int cy = 15 + radius;
+        int egtColour = egt > 850.0F ? WARNING : egt > 780.0F ? AMBER : GREEN;
+
+        dial("N1", PX / 4, cy, radius, n1, String.format("%.0f", n1 * 100.0F), n1 > 1.0F ? AMBER : GREEN);
+        dial("EGT", PX * 3 / 4, cy, radius, egt / 950.0F, String.format("%.0f", egt), egtColour);
+
         float fuel = aircraft.getFuelFraction();
-        bar("FUEL", 33, fuel, fuel < 0.2F ? WARNING : GREEN);
-        float health = aircraft.getHealthFraction();
-        bar("HP", 51, health, health < 0.3F ? WARNING : GREEN);
+        float bingo = FuelWatch.bingo();
+        boolean low = FuelWatch.belowBingo();
+        int y = cy + radius + 13;
 
-        int y = 71;
-        flag("GEAR", aircraft.isGearDown(), 2, y);
-        flag("FLAP", aircraft.isFlapsDown(), 44, y);
-        flag("A/B", aircraft.isAfterburning(), 86, y);
+        bar("FUEL", y, fuel, aircraft.isOutOfFuel() || low ? WARNING : fuel < bingo + 0.1F ? AMBER : GREEN);
+        layer();
+        // 棒の上の BINGO の印。bar() と同じ左右の端。
+        int mark = 31 + Math.round((PX - 62) * bingo);
+        fill(mark, y - 3, mark + 1, y + 11, AMBER);
+
+        y += 12;
+        text(String.format("BNG %d%%", Math.round(bingo * 100.0F)), 2, y, low ? WARNING : AMBER);
+        float left = FuelWatch.secondsLeft(fuel);
+        String endurance = "END " + (left < 0.0F ? "--:--" : clock(left));
+        text(endurance, PX - 2 - font.width(endurance), y, low ? WARNING : GREEN);
+
+        y += 13;
+
+        if (y + 10 < heightPx - 12) {
+            flag("GEAR", aircraft.isGearDown(), 2, y);
+            flag("FLAP", aircraft.isFlapsDown(), 44, y);
+            flag("A/B", aircraft.isAfterburning(), 86, y);
+        }
 
         if (aircraft.isOutOfFuel()) {
             centred("FUEL OUT", PX / 2, heightPx - 11, WARNING);
+        } else if (low && blink()) {
+            centred("BINGO FUEL", PX / 2, heightPx - 11, WARNING);
+        }
+    }
+
+    // ENG 頁の計器の値。描画のたびに1 tick ぶん目標へ寄せる。
+    private static float n1;
+    private static float egt = 15.0F;
+    private static long spooledAt = Long.MIN_VALUE;
+
+    private static void spool(AircraftEntity aircraft) {
+        Minecraft minecraft = Minecraft.getInstance();
+        long now = minecraft.level == null ? 0L : minecraft.level.getGameTime();
+
+        if (now == spooledAt) {
+            return;
+        }
+
+        long ticks = spooledAt == Long.MIN_VALUE ? 1000L : Math.min(now - spooledAt, 1000L);
+        spooledAt = now;
+
+        boolean running = aircraft.hasFuel() && !aircraft.isWrecked();
+        float throttle = aircraft.getThrottle();
+        float wantN1 = !running ? 0.0F : aircraft.isAfterburning() ? 1.02F : 0.62F + 0.38F * throttle;
+        float wantEgt = !running ? 15.0F : 420.0F + 380.0F * throttle + (aircraft.isAfterburning() ? 120.0F : 0.0F);
+
+        n1 += (wantN1 - n1) * (1.0F - (float) Math.pow(1.0F - 0.08F, ticks));
+        egt += (wantEgt - egt) * (1.0F - (float) Math.pow(1.0F - 0.05F, ticks));
+    }
+
+    /**
+     * 上から見た機体の輪郭。当たり判定の箱をそれぞれ真上から潰した凸包で、機首が上。
+     *
+     * <p>模型ではなく箱から組む。画面は計器盤の面に貼る板で、そこへ模型をもう1機描くのは重いし、損傷を読む
+     * 計器としては被弾を受ける形そのもの（箱）のほうが正しい。開いた倉の扉・ランプ・可変翼は今の角度で振れて
+     * 描かれる。パイロンは点で、吊っていれば塗り、選んでいる兵装なら琥珀。輪郭の色は機体の耐久。
+     */
+    private static void plan(AircraftEntity aircraft, int index, float partialTick) {
+        centred("PLAN", PX / 2, 3, DIM);
+
+        List<VehicleShape.Box> boxes = aircraft.getShape().boxes();
+
+        if (boxes.isEmpty()) {
+            centred("NO OUTLINE", PX / 2, heightPx / 2 - 4, DIM);
+
+            return;
+        }
+
+        // 平面の点は {右, 前}（ブロック）。箱ファイルの +x は機体の右。
+        List<float[][]> hulls = new ArrayList<>();
+        float half = 0.5F;
+        float front = -Float.MAX_VALUE;
+        float back = Float.MAX_VALUE;
+
+        for (VehicleShape.Box box : boxes) {
+            Vec3 swing = aircraft.swingOf(box, partialTick);
+            Vec3 offset = AircraftEntity.swung(box, swing);
+            // 描く側（VehicleShapeRenderer）と同じ順。この回転は +X が左の座標系で効く。
+            Quaternionf turn = swing.lengthSqr() == 0.0 ? box.orientation()
+                    : new Quaternionf(AircraftEntity.swingOf(swing)).mul(box.orientation());
+            Vec3 size = box.size().scale(0.5);
+            float[][] corners = new float[8][];
+
+            for (int c = 0; c < 8; c++) {
+                Vector3f r = turn.transform(new Vector3f((c & 1) == 0 ? (float) -size.x : (float) size.x,
+                        (c & 2) == 0 ? (float) -size.y : (float) size.y,
+                        (c & 4) == 0 ? (float) -size.z : (float) size.z));
+                float x = (float) offset.x - r.x;
+                float z = (float) offset.z + r.z;
+
+                corners[c] = new float[] {x, z};
+                half = Math.max(half, Math.abs(x));
+                front = Math.max(front, z);
+                back = Math.min(back, z);
+            }
+
+            hulls.add(hull(corners));
+        }
+
+        List<AircraftDefinition.Hardpoint> hardpoints = aircraft.getStats().hardpoints();
+
+        for (AircraftDefinition.Hardpoint hardpoint : hardpoints) {
+            half = Math.max(half, (float) Math.abs(hardpoint.pos().x));
+            front = Math.max(front, (float) hardpoint.pos().z);
+            back = Math.min(back, (float) hardpoint.pos().z);
+        }
+
+        // 吊っている兵装の種類。種類ごとに色を分け、下に凡例を出す。
+        WeaponMounts weapons = aircraft.getWeapons();
+        ResourceLocation selected = weapons.selected();
+        List<ResourceLocation> kinds = new ArrayList<>();
+
+        for (int slot = 0; slot < hardpoints.size(); slot++) {
+            ResourceLocation weapon = weapons.weaponAt(slot);
+
+            if (weapon != null && !kinds.contains(weapon)) {
+                kinds.add(weapon);
+            }
+        }
+
+        int legend = Math.min(kinds.size(), STORE_COLOURS.length);
+        int left = 4;
+        int right = PX - 4;
+        int top = 14;
+        int bottom = heightPx - 14 - legend * 8;
+        float cx = (left + right) / 2.0F;
+        float cy = (top + bottom) / 2.0F;
+        float middle = (front + back) / 2.0F;
+        float scale = Math.min((right - left) / (2.0F * half), (bottom - top) / Math.max(front - back, 0.5F));
+
+        float health = aircraft.getHealthFraction();
+        int colour = health < 0.3F ? WARNING : health < 0.6F ? AMBER : GREEN;
+
+        int w = right - left;
+        int h = Math.max(bottom - top, 1);
+        int shape = Arrays.deepHashCode(hulls.toArray(new float[0][][]));
+        Outline cached = OUTLINES.get(index);
+
+        if (cached == null || cached.aircraft() != aircraft.getId() || cached.shape() != shape
+                || cached.width() != w || cached.height() != h) {
+            cached = new Outline(aircraft.getId(), shape, w, h, outline(hulls, w, h, left, top, cx, cy, middle,
+                    scale));
+            OUTLINES.put(index, cached);
+        }
+
+        int[] runs = cached.runs();
+
+        for (int i = 0; i < runs.length; i += 3) {
+            fill(left + runs[i], top + runs[i + 1], left + runs[i + 2], top + runs[i + 1] + 1, colour);
+        }
+
+        layer();
+
+        drawStores(aircraft, hardpoints, weapons, selected, kinds, legend, cx, cy, middle, scale, bottom, health,
+                colour);
+    }
+
+    /**
+     * 上面図の外周を、行ごとの横の連なり {x0, y, x1} の並びとして。
+     *
+     * <p>箱の外形は重なり合うので、画素へ塗ってから外周の画素だけを残す。内側の継ぎ目は出ない。画素ごとに全部の
+     * 箱を訊くので重く、結果は形と大きさが変わるまで {@link #OUTLINES} に取っておく。可動部が動いている間だけ
+     * 毎フレーム組み直す。
+     */
+    private static int[] outline(List<float[][]> hulls, int w, int h, int left, int top, float cx, float cy,
+            float middle, float scale) {
+        boolean[] solid = new boolean[w * h];
+
+        for (int py = 0; py < h; py++) {
+            float z = middle - (top + py + 0.5F - cy) / scale;
+
+            for (int px = 0; px < w; px++) {
+                float x = (left + px + 0.5F - cx) / scale;
+
+                for (float[][] hull : hulls) {
+                    if (contains(hull, x, z)) {
+                        solid[py * w + px] = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        List<Integer> runs = new ArrayList<>();
+
+        for (int py = 0; py < h; py++) {
+            int run = -1;
+
+            for (int px = 0; px <= w; px++) {
+                boolean edge = px < w && solid[py * w + px]
+                        && (px == 0 || px == w - 1 || py == 0 || py == h - 1 || !solid[py * w + px - 1]
+                                || !solid[py * w + px + 1] || !solid[(py - 1) * w + px] || !solid[(py + 1) * w + px]);
+
+                if (edge && run < 0) {
+                    run = px;
+                } else if (!edge && run >= 0) {
+                    runs.add(run);
+                    runs.add(py);
+                    runs.add(px);
+                    run = -1;
+                }
+            }
+        }
+
+        return runs.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    /** 上面図の外周の取り置き。画面ごとに1つ。 */
+    private record Outline(int aircraft, int shape, int width, int height, int[] runs) {
+    }
+
+    private static final Map<Integer, Outline> OUTLINES = new HashMap<>();
+
+    /** 上面図のパイロンの弾と凡例と下の行。 */
+    private static void drawStores(AircraftEntity aircraft, List<AircraftDefinition.Hardpoint> hardpoints,
+            WeaponMounts weapons, ResourceLocation selected, List<ResourceLocation> kinds, int legend, float cx,
+            float cy, float middle, float scale, int bottom, float health, int colour) {
+        int loaded = 0;
+
+        for (int slot = 0; slot < hardpoints.size(); slot++) {
+            Vec3 at = hardpoints.get(slot).pos();
+            float x = cx + (float) at.x * scale;
+            float y = cy - ((float) at.z - middle) * scale;
+            ResourceLocation weapon = weapons.weaponAt(slot);
+
+            if (weapon == null) {
+                outline(Math.round(x - 1), Math.round(y - 1), Math.round(x + 2), Math.round(y + 2), DIM);
+                continue;
+            }
+
+            loaded++;
+            int kind = kinds.indexOf(weapon);
+            int ink = kind < STORE_COLOURS.length ? STORE_COLOURS[kind] : WHITE;
+
+            // 機首を上にした細長い弾の形。選んでいる兵装は枠で囲む。
+            fill(x - 0.5F, y - 4.0F, x + 0.5F, y + 4.0F, ink);
+            fill(x - 1.5F, y + 2.0F, x + 1.5F, y + 3.0F, ink);
+
+            if (weapon.equals(selected)) {
+                outline(Math.round(x - 3), Math.round(y - 6), Math.round(x + 4), Math.round(y + 6), AMBER);
+            }
+        }
+
+        for (int i = 0; i < legend; i++) {
+            ResourceLocation weapon = kinds.get(i);
+            int count = 0;
+
+            for (int slot = 0; slot < hardpoints.size(); slot++) {
+                if (weapon.equals(weapons.weaponAt(slot))) {
+                    count += weapons.ammoAt(slot);
+                }
+            }
+
+            float y = bottom + 2 + i * 8;
+            fill(4, y + 1, 9, y + 5, STORE_COLOURS[i]);
+            label(shorten(weapon.getPath().toUpperCase(), 18) + " x" + count, 12, y,
+                    weapon.equals(selected) ? AMBER : STORE_COLOURS[i]);
+        }
+
+        text(String.format("HP %d%%", Math.round(health * 100.0F)), 2, heightPx - 11, colour);
+        String stores = loaded + "/" + hardpoints.size() + " STA";
+        text(stores, PX - 2 - font.width(stores), heightPx - 11, GREEN);
+    }
+
+    /** 上面図で兵装の種類を分ける色。これより多い種類は白で、凡例には出さない。 */
+    private static final int[] STORE_COLOURS = {CYAN, WHITE, 0xFFC792EA, 0xFFFF8A65};
+
+    /** 反時計回りの凸包の内側か。 */
+    private static boolean contains(float[][] hull, float x, float z) {
+        if (hull.length < 3) {
+            return false;
+        }
+
+        float[] p = {x, z};
+
+        for (int i = 0; i < hull.length; i++) {
+            if (cross(hull[i], hull[(i + 1) % hull.length], p) < 0.0F) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * IFF の管理。自分の名乗る所属、質問機の入切、レーダー頁の絞り、今の接触を所属ごとに数えて近い順に。
+     *
+     * <p>ここで変えるのは計器の表示だけ。シーカーは今も味方をロックできる（{@code iff-is-display-only-by-choice}）。
+     */
+    private static void iff(AircraftEntity aircraft) {
+        centred("IFF", PX / 2, 3, DIM);
+
+        Team own = aircraft.getTeam();
+
+        if (own == null && Minecraft.getInstance().player != null) {
+            own = Minecraft.getInstance().player.getTeam();
+        }
+
+        text("OWN", 2, 15, DIM);
+        text(own == null ? "NO TEAM" : shorten(own.getName().toUpperCase(), 14), 26, 15, own == null ? AMBER : CYAN);
+
+        boolean on = CockpitControls.interrogating();
+        text(on ? "INTG ON" : "INTG OFF", 2, 25, on ? GREEN : AMBER);
+        String shown = "SHOW " + CockpitControls.filterName();
+        text(shown, PX - 2 - font.width(shown), 25, CockpitControls.filterName().equals("ALL") ? GREEN : AMBER);
+
+        List<Contact> contacts = new ArrayList<>(RadarReadout.contacts());
+        contacts.sort(Comparator.comparingDouble(Contact::range));
+        int[] counts = new int[Iff.values().length];
+
+        for (Contact contact : contacts) {
+            counts[CockpitControls.identify(contact.iff()).ordinal()]++;
+        }
+
+        fill(2, 36, PX - 2, 37, DIM);
+        text("F " + counts[Iff.FRIEND.ordinal()], 4, 40, AircraftHud.contactColour(Iff.FRIEND, false));
+        centred("U " + counts[Iff.UNKNOWN.ordinal()], PX / 2, 40, AircraftHud.contactColour(Iff.UNKNOWN, false));
+        String hostile = "H " + counts[Iff.HOSTILE.ordinal()];
+        text(hostile, PX - 4 - font.width(hostile), 40, AircraftHud.contactColour(Iff.HOSTILE, false));
+
+        int y = 53;
+
+        for (Contact contact : contacts) {
+            if (y > heightPx - 22) {
+                break;
+            }
+
+            Iff iff = CockpitControls.identify(contact.iff());
+            int colour = AircraftHud.contactColour(iff, contact.locked());
+            String kind = contact.aircraft() ? "AIR" : "GND";
+
+            text(iff.name().substring(0, 1) + " " + kind, 4, y, colour);
+            String where = String.format("%s %+d", distance(contact.range()), Math.round(contact.altitude()));
+            text(where, PX - 4 - font.width(where), y, colour);
+            y += 10;
+        }
+
+        if (contacts.isEmpty()) {
+            centred("NO CONTACT", PX / 2, 55, DIM);
+        }
+
+        if (own == null) {
+            centred("NO TEAM: ALL UNKNOWN", PX / 2, heightPx - 11, DIM);
+        } else if (!on) {
+            centred("INTERROGATOR OFF", PX / 2, heightPx - 11, AMBER);
+        }
+    }
+
+    /**
+     * 警戒受信機。機首を上にした円に、発信源の記号を方位に置く。半径は危険の度合いで、内側ほど危ない
+     * （捜索は外、ロックは中、飛んでくる誘導弾は内）。一番危ない1件は菱形で囲む。
+     *
+     * <p>誘導弾が1発でも来ていれば、上に赤い LAUNCH を他の何より先に出す。下は残っている対抗手段。
+     */
+    private static void rwr(AircraftEntity aircraft) {
+        text("RWR", 2, 3, DIM);
+
+        List<Threat> threats = new ArrayList<>(RadarReadout.threats());
+        Threat priority = threats.isEmpty() ? null : threats.get(0);
+        boolean launch = priority != null && priority.kind() == Threat.Kind.MISSILE;
+
+        if (!CockpitControls.searchShown()) {
+            threats.removeIf(threat -> threat.kind() == Threat.Kind.SEARCH && threat != priority);
+        }
+
+        String count = threats.size() + " EMT";
+        text(count, PX - 2 - font.width(count), 3, threats.isEmpty() ? DIM : GREEN);
+
+        int cx = PX / 2;
+        int cy = 13 + (heightPx - 27) / 2;
+        int radius = Math.max(10, Math.min(PX / 2 - 6, (heightPx - 27) / 2));
+
+        // 外周と内側の2つの環を点線で、機首と左右と後ろに目盛り。
+        for (int step = 0; step < 36; step++) {
+            double angle = Math.toRadians(step * 10.0);
+            float sx = (float) Math.sin(angle);
+            float sy = (float) -Math.cos(angle);
+
+            fill(cx + sx * radius - 0.5F, cy + sy * radius - 0.5F, cx + sx * radius + 0.5F, cy + sy * radius + 0.5F,
+                    DIM);
+
+            if (step % 2 == 0) {
+                float inner = radius * 0.45F;
+                fill(cx + sx * inner - 0.5F, cy + sy * inner - 0.5F, cx + sx * inner + 0.5F,
+                        cy + sy * inner + 0.5F, 0x803BE86A);
+            }
+
+            if (step % 9 == 0) {
+                line(cx + sx * (radius - 4), cy + sy * (radius - 4), cx + sx * radius, cy + sy * radius, GREEN);
+            }
+        }
+
+        // 自機。
+        line(cx, cy - 3, cx, cy + 3, WHITE);
+        line(cx - 3, cy, cx + 3, cy, WHITE);
+        layer();
+
+        // 危なくない物から描き、危ない物を上に重ねる。
+        threats.sort(Comparator.comparingInt(threat -> threat.kind().ordinal()));
+
+        for (Threat threat : threats) {
+            float out = switch (threat.kind()) {
+                case SEARCH -> 0.8F;
+                case LOCK -> 0.55F;
+                case MISSILE -> 0.3F;
+            };
+            double angle = Math.toRadians(threat.bearing());
+            int x = cx + Math.round((float) Math.sin(angle) * radius * out);
+            int y = cy - Math.round((float) Math.cos(angle) * radius * out);
+            int colour = switch (threat.kind()) {
+                case SEARCH -> GREEN;
+                case LOCK -> AMBER;
+                case MISSILE -> WARNING;
+            };
+
+            if (threat.kind() == Threat.Kind.MISSILE && !blink()) {
+                continue;
+            }
+
+            if (threat == priority) {
+                int d = 7;
+                line(x, y - d, x + d, y, colour);
+                line(x + d, y, x, y + d, colour);
+                line(x, y + d, x - d, y, colour);
+                line(x - d, y, x, y - d, colour);
+            }
+
+            // ロックは記号の上に弧の代わりの帽子を載せる。実機の「追尾されている」印。
+            if (threat.kind() == Threat.Kind.LOCK) {
+                line(x - 4, y - 5, x, y - 8, colour);
+                line(x, y - 8, x + 4, y - 5, colour);
+            }
+
+            centred(threat.symbol(), x, y - 3, colour);
+        }
+
+        if (launch) {
+            layer();
+            fill(PX / 2 - 24, 12, PX / 2 + 24, 23, blink() ? WARNING : 0xFF5A0A0A);
+            layer();
+            centred("LAUNCH", PX / 2, 14, WHITE);
+        } else if (threats.isEmpty()) {
+            centred("CLEAR", cx, cy + 6, DIM);
+        }
+
+        int flares = aircraft.getCountermeasures(true);
+        int chaff = aircraft.getCountermeasures(false);
+
+        text("FLR " + flares, 2, heightPx - 11, flares > 0 ? GREEN : WARNING);
+        String ch = "CHF " + chaff;
+        text(ch, PX - 2 - font.width(ch), heightPx - 11, chaff > 0 ? GREEN : WARNING);
+    }
+
+    /**
+     * ターゲティングポッド。ジンバルの向けられる範囲の中にボールの向き、捕捉していれば照準枠、下に照射の状態と
+     * 距離、選んでいる兵装が誘導で落とせるか。
+     *
+     * <p>映像は描かない。計器盤の板にもう1つ世界を描くのは重く、映像は照準キーで上がるポッド視界が持っている。
+     * この頁が答えるのは「今投下したら誘導されるか」だけ。
+     */
+    private static void tpod(AircraftEntity aircraft) {
+        text("TGP", 2, 3, DIM);
+
+        WeaponMounts weapons = aircraft.getWeapons();
+
+        if (!weapons.hasPod(EquipmentDefinition.Kind.TARGETING)) {
+            centred("NO POD", PX / 2, heightPx / 2 - 4, DIM);
+
+            return;
+        }
+
+        Entity mark = aircraft.getDesignated();
+        boolean limited = mark != null && PodCamera.isGimbalLimited();
+        String view = PodCamera.isActive() ? "VIEW" : "STBY";
+        text(view, PX - 2 - font.width(view), 3, PodCamera.isActive() ? GREEN : DIM);
+
+        int left = 4;
+        int right = PX - 4;
+        int top = 14;
+        int bottom = Math.max(top + 20, heightPx - 36);
+        int cx = (left + right) / 2;
+        float span = PodCamera.PITCH_DOWN_LIMIT - PodCamera.PITCH_UP_LIMIT;
+        int horizon = top + Math.round((bottom - top) * -PodCamera.PITCH_UP_LIMIT / span);
+
+        // ジンバルの向けられる範囲。縦の線が機首、横の線が水平。
+        outline(left, top, right, bottom, DIM);
+        fill(cx, top + 1, cx + 1, bottom - 1, 0x603BE86A);
+        fill(left + 1, horizon, right - 1, horizon + 1, 0x603BE86A);
+        layer();
+
+        float yaw = PodCamera.gimbalYaw();
+        float pitch = PodCamera.gimbalPitch();
+        int x = cx - Math.round(yaw / PodCamera.YAW_LIMIT * ((right - left) / 2.0F - 3.0F));
+        int y = top + 2 + Math.round((pitch - PodCamera.PITCH_UP_LIMIT) / span * (bottom - top - 4));
+
+        if (mark == null) {
+            line(x - 4, y, x + 4, y, WHITE);
+            line(x, y - 4, x, y + 4, WHITE);
+        } else {
+            int colour = limited ? AMBER : GREEN;
+            int r = 6;
+            int arm = 3;
+
+            for (int sx = -1; sx <= 1; sx += 2) {
+                for (int sy = -1; sy <= 1; sy += 2) {
+                    int ax = x + sx * r;
+                    int ay = y + sy * r;
+
+                    line(ax, ay, ax - sx * arm, ay, colour);
+                    line(ax, ay, ax, ay - sy * arm, colour);
+                }
+            }
+
+            fill(x - 1, y - 1, x + 1, y + 1, colour);
+        }
+
+        // 照射は捕捉していてボールが向いている間だけ。範囲の端で止まっていれば遮られている。
+        int row = bottom + 3;
+        String laser = mark == null ? "LSR STBY" : limited ? "LSR MASK" : "LASING";
+        text(laser, 2, row, mark == null ? DIM : limited ? AMBER : blink() ? WARNING : AMBER);
+
+        String range = mark == null ? "RNG ---"
+                : "RNG " + distance((float) aircraft.position().distanceTo(aircraft.getDesignatedPoint()));
+        text(range, PX - 2 - font.width(range), row, mark == null ? DIM : GREEN);
+
+        row += 10;
+        WeaponDefinition selected = weapons.selectedWeapon();
+        boolean laserGuided = selected != null
+                && selected.requires().orElse(null) == EquipmentDefinition.Kind.TARGETING;
+        String release;
+        int releaseColour;
+
+        if (!laserGuided) {
+            release = "NO LGB SEL";
+            releaseColour = DIM;
+        } else if (mark == null) {
+            release = "NO DESIG";
+            releaseColour = AMBER;
+        } else if (limited) {
+            release = "GIMBAL";
+            releaseColour = AMBER;
+        } else {
+            release = "GUIDED RDY";
+            releaseColour = GREEN;
+        }
+
+        text(release, 2, row, releaseColour);
+
+        if (mark != null) {
+            String kind = mark instanceof DesignationEntity ? "POINT" : "MOVING";
+            text(kind, PX - 2 - font.width(kind), row, DIM);
+        }
+
+        if (laserGuided && weapons.selected() != null) {
+            String name = shorten(weapons.selected().getPath().toUpperCase(), 12) + " " + weapons.selectedAmmo();
+            text(name, 2, heightPx - 11, weapons.selectedAmmo() > 0 ? GREEN : AMBER);
+        }
+    }
+
+    /**
+     * 地図。機首を上にして自機を下寄りに置き、航路点と航路の線を描く。下に選んでいる点への方位・距離・到達予想
+     * と、着いたときに残る燃料（今の減り方で）。航路点の編集は全部この頁の縁のボタン（{@link Waypoints}）。
+     */
+    private static void map(AircraftEntity aircraft, Quaternionf attitude) {
+        text("MAP", 2, 3, DIM);
+
+        float shown = 8000.0F * rangeScale;
+        String reach = distance(shown);
+        text(reach, PX - 2 - font.width(reach), 3, DIM);
+
+        int left = 3;
+        int right = PX - 3;
+        int top = 13;
+        int bottom = Math.max(top + 20, heightPx - 25);
+        int cx = (left + right) / 2;
+        int cy = top + Math.round((bottom - top) * 0.7F);
+        float scale = (cy - top - 2) / shown;
+        int heading = heading(attitude);
+        Vec3 at = aircraft.position();
+
+        outline(left, top, right, bottom, 0x603BE86A);
+
+        // 表示距離の半分と全部の環を、枠の内側だけ点で。
+        for (float ring : new float[] {0.5F, 1.0F}) {
+            float r = shown * ring * scale;
+
+            for (int step = 0; step < 72; step++) {
+                double angle = Math.toRadians(step * 5.0);
+                float px = cx + (float) Math.sin(angle) * r;
+                float py = cy - (float) Math.cos(angle) * r;
+
+                if (inside(px, py, left + 1, top + 1, right - 1, bottom - 1)) {
+                    fill(px - 0.5F, py - 0.5F, px + 0.5F, py + 0.5F, DIM);
+                }
+            }
+        }
+
+        // 北の向き。
+        double north = Math.toRadians(-heading);
+        float nx = cx + (float) Math.sin(north) * (cy - top - 8);
+        float ny = cy - (float) Math.cos(north) * (cy - top - 8);
+
+        if (inside(nx, ny, left + 4, top + 4, right - 4, bottom - 4)) {
+            label("N", nx - 2, ny - 3, AMBER);
+        }
+
+        layer();
+
+        List<Vec3> points = Waypoints.points();
+        int chosen = Waypoints.selectedIndex();
+        float[][] screen = new float[points.size()][];
+
+        for (int i = 0; i < points.size(); i++) {
+            Vec3 point = points.get(i);
+            double dx = point.x - at.x;
+            double dz = point.z - at.z;
+            double relative = Math.toRadians(Math.toDegrees(Math.atan2(dx, -dz)) - heading);
+            float range = (float) Math.sqrt(dx * dx + dz * dz) * scale;
+
+            screen[i] = new float[] {cx + (float) Math.sin(relative) * range, cy - (float) Math.cos(relative) * range};
+        }
+
+        for (int i = 0; i + 1 < screen.length; i++) {
+            if (inside(screen[i][0], screen[i][1], left, top, right, bottom)
+                    && inside(screen[i + 1][0], screen[i + 1][1], left, top, right, bottom)) {
+                line(screen[i][0], screen[i][1], screen[i + 1][0], screen[i + 1][1], i + 1 == chosen ? CYAN : DIM);
+            }
+        }
+
+        // 選んでいる点へは自機から線を引く。
+        if (chosen >= 0 && inside(screen[chosen][0], screen[chosen][1], left, top, right, bottom)) {
+            line(cx, cy, screen[chosen][0], screen[chosen][1], 0x804FC3F7);
+        }
+
+        layer();
+
+        for (int i = 0; i < screen.length; i++) {
+            float px = Mth.clamp(screen[i][0], left + 2, right - 2);
+            float py = Mth.clamp(screen[i][1], top + 2, bottom - 2);
+            boolean off = px != screen[i][0] || py != screen[i][1];
+            int colour = i == chosen ? CYAN : GREEN;
+
+            if (off) {
+                outline(Math.round(px - 2), Math.round(py - 2), Math.round(px + 2), Math.round(py + 2), colour);
+            } else {
+                fill(px - 2, py - 2, px + 2, py + 2, colour);
+            }
+
+            label(String.valueOf(i + 1), Mth.clamp(px + 3, left, right - 5), Mth.clamp(py - 7, top, bottom - 6),
+                    colour);
+        }
+
+        // 自機。機首が上の三角。
+        line(cx, cy - 5, cx - 4, cy + 3, WHITE);
+        line(cx, cy - 5, cx + 4, cy + 3, WHITE);
+        line(cx - 4, cy + 3, cx + 4, cy + 3, WHITE);
+
+        Vec3 target = Waypoints.selected();
+
+        if (target == null) {
+            centred("NO WPT", PX / 2, bottom + 3, DIM);
+            centred("MARK TO ADD", PX / 2, heightPx - 11, DIM);
+
+            return;
+        }
+
+        double dx = target.x - at.x;
+        double dz = target.z - at.z;
+        float distance = (float) Math.sqrt(dx * dx + dz * dz);
+        int bearing = Math.floorMod((int) Math.round(Math.toDegrees(Math.atan2(dx, -dz))), 360);
+        Vec3 velocity = aircraft.getVelocity();
+        float speed = (float) Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z) * 20.0F;
+
+        text("WP" + (chosen + 1), 2, bottom + 3, CYAN);
+        String where = String.format("%03d %s", bearing, distance(distance));
+        text(where, PX - 2 - font.width(where), bottom + 3, GREEN);
+
+        float eta = speed > 1.0F ? distance / speed : -1.0F;
+        text("ETA " + (eta < 0.0F ? "--:--" : clock(eta)), 2, heightPx - 11, GREEN);
+
+        if (eta >= 0.0F) {
+            float fuel = aircraft.getFuelFraction() - FuelWatch.perSecond() * eta;
+            String arrive = String.format("FUEL %d%%", Math.max(0, Math.round(fuel * 100.0F)));
+            text(arrive, PX - 2 - font.width(arrive), heightPx - 11,
+                    fuel <= 0.0F ? WARNING : fuel < FuelWatch.bingo() ? AMBER : GREEN);
         }
     }
 
     // ---- 部品 ----
+
+    /** 平面の点の凸包（反時計回り）。8 点しか来ないので単純な単調鎖で足りる。 */
+    private static float[][] hull(float[][] points) {
+        float[][] sorted = points.clone();
+        Arrays.sort(sorted, (a, b) -> a[0] != b[0] ? Float.compare(a[0], b[0]) : Float.compare(a[1], b[1]));
+        float[][] out = new float[sorted.length * 2][];
+        int k = 0;
+
+        for (int pass = 0; pass < 2; pass++) {
+            int start = k;
+
+            for (int n = 0; n < sorted.length; n++) {
+                float[] p = sorted[pass == 0 ? n : sorted.length - 1 - n];
+
+                while (k >= start + 2 && cross(out[k - 2], out[k - 1], p) <= 0.0F) {
+                    k--;
+                }
+
+                out[k++] = p;
+            }
+
+            k--;
+        }
+
+        return Arrays.copyOf(out, Math.max(k, 1));
+    }
+
+    private static float cross(float[] o, float[] a, float[] b) {
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    }
+
+    /** 警告の点滅。0.5 秒ごと。 */
+    private static boolean blink() {
+        Minecraft minecraft = Minecraft.getInstance();
+
+        return minecraft.level == null || minecraft.level.getGameTime() % 10 < 6;
+    }
+
+    private static String clock(float seconds) {
+        int whole = Math.round(seconds);
+
+        return whole >= 3600 ? String.format("%d:%02d:%02d", whole / 3600, whole / 60 % 60, whole % 60)
+                : String.format("%02d:%02d", whole / 60, whole % 60);
+    }
+
+    /** 円形の計器。7時から5時まで 270 度を振る針と、中に数値。 */
+    private static void dial(String name, int cx, int cy, int radius, float fraction, String value, int colour) {
+        for (int step = 0; step <= 27; step++) {
+            double angle = Math.toRadians(225.0 - step * 10.0);
+            float sx = (float) Math.cos(angle);
+            float sy = (float) -Math.sin(angle);
+            float inner = step % 9 == 0 ? radius - 4 : radius - 2;
+            int ink = step >= 25 ? WARNING : DIM;
+
+            line(cx + sx * inner, cy + sy * inner, cx + sx * radius, cy + sy * radius, ink);
+        }
+
+        layer();
+        double needle = Math.toRadians(225.0 - Mth.clamp(fraction, 0.0F, 1.05F) * 270.0);
+        line(cx, cy, cx + (float) Math.cos(needle) * (radius - 2), cy - (float) Math.sin(needle) * (radius - 2),
+                colour);
+        centred(value, cx, cy + 3, colour);
+        centred(name, cx, cy + radius + 2, DIM);
+    }
 
     private static int heading(Quaternionf attitude) {
         return Math.floorMod(Math.round(Attitude.heading(attitude)) + 180, 360);

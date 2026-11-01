@@ -586,7 +586,13 @@ public final class VehicleChassis {
             float working = idle + (1.0F - idle) * Mth.clamp(load, 0.0F, 1.0F);
             float burner = 1.0F + Mth.clamp(reheat, 0.0F, 1.0F) * (Math.max(this.afterburnerRate, 1.0F) - 1.0F);
 
-            return Math.max(this.burnRate, 0.0F) * working * burner;
+            return Math.max(this.burnRate, 0.0F) * working * burner * BURN_SCALE;
         }
+
+        /**
+         * 全機械の消費に一律で掛ける倍率。定義ファイルの burn_rate を1つずつ書き換えずに燃費全体を
+         * 動かすためのもの。0.5 で、各機体の燃料はファイルに書いた想定の2倍もつ。
+         */
+        private static final float BURN_SCALE = 0.5F;
     }
 }

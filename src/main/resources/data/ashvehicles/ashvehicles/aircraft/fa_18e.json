@@ -3201,7 +3201,9 @@
       "right_gear": "RGear",
       "nose_gear_door": "CGearHatch",
       "left_gear_door": "BLGearHatch",
-      "right_gear_door": "BRGearHatch"
+      "right_gear_door": "BRGearHatch",
+      "stick": "stick",
+      "throttle": "throttle"
     }
   },
   "engine": {

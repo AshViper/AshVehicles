@@ -520,5 +520,7 @@
   "message.ashvehicles.ai.selfplay_next": "自己対戦 %s / %s 戦目まで %s 秒",
   "entity.ashvehicles.bot": "%s（%s AI）",
   "message.ashvehicles.match.not_deployable": "その機体は座席から動かす物ではない",
-  "message.ashvehicles.match.unknown_preset": "その機体にその搭載プリセットは無い: %s"
+  "message.ashvehicles.match.unknown_preset": "その機体にその搭載プリセットは無い: %s",
+  "message.ashvehicles.chain.first": "鎖を掛けた。引く相手をクリック",
+  "message.ashvehicles.chain.linked": "鎖でつないだ"
 }

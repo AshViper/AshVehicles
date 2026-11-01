@@ -174,7 +174,7 @@ public final class AircraftInputHandler {
                 input, aircraft.getThrottle(), aircraft.getAfterburner(),
                 aircraft.getAttitude(), aircraft.getVelocity(),
                 aircraft.isCrashing(), toggleGear, toggleFlaps, toggleVtol, toggleBay, toggleRamp,
-                cycleWeapon, jettison));
+                cycleWeapon, jettison, CockpitControls.takeLights()));
     }
 
     /**

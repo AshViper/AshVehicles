@@ -2800,7 +2800,9 @@
       "aileron_right": "RFlap",
       "nose_gear": "FGear",
       "left_gear": "LGear",
-      "right_gear": "RGear"
+      "right_gear": "RGear",
+      "stick": "stick",
+      "throttle": "throttle"
     },
     "steered_wheels": ["WHEEL", "WHEEL2", "WHEEL3", "WHEEL4"],
     "steer_lock": 28
@@ -2902,8 +2904,10 @@
     "heat": 0.3
   },
   "countermeasures": {
-    "flares": 24,
-    "chaff": 24
+    "flares": 120,
+    "chaff": 120,
+    "salvo": 2,
+    "spread": 100
   },
   "hardpoints": [
     {

@@ -170,6 +170,16 @@ public final class TrackBelt {
      */
     public static boolean draw(BakedGeoModel model, VehicleChassis.Model setup, GeoBone link,
             float wheelLeft, float wheelRight, Ride ride, float wheelTravel, LinkDrawer drawer) {
+        return draw(model, setup, link, wheelLeft, wheelRight, ride, wheelTravel, WheelGround.NONE, 1.0F, drawer);
+    }
+
+    /**
+     * 同じ周回を、転輪ごとの地面への追従（{@link WheelGround}）に沿わせて敷く版。周回の下側——地面を踏んで
+     * いる側——は同じ側の転輪の持ち上がりを前後で補間した分だけ上下し、上側（上部転輪の上を戻る側）は動かない。
+     */
+    public static boolean draw(BakedGeoModel model, VehicleChassis.Model setup, GeoBone link,
+            float wheelLeft, float wheelRight, Ride ride, float wheelTravel, WheelGround ground, float partialTick,
+            LinkDrawer drawer) {
         Shape shape = shapeOf(model, setup, link);
 
         if (shape.belts().isEmpty()) {
@@ -182,24 +192,69 @@ public final class TrackBelt {
         Vector3f fromPivot = new Vector3f();
         Matrix4f turn = new Matrix4f();
         boolean sprung = !ride.isLevel() && wheelTravel > 0.0F;
+        boolean grounded = ground != WheelGround.NONE;
 
         for (Belt belt : shape.belts()) {
+            float low = Float.MAX_VALUE;
+            float high = -Float.MAX_VALUE;
+
+            for (float y : belt.y()) {
+                low = Math.min(low, y);
+                high = Math.max(high, y);
+            }
+
+            float height = Math.max(high - low, 1.0E-3F);
+
             // 帯は自分の側の履帯として流れる。旋回中の左右は違う距離を送り、超信地旋回では逆向きに流れる。
             // どちら側かは帯自身の横位置と、模型の X 軸が車体のどちらを向いているかの積で決まる。
             float wheelAngle = shape.travelSign() * belt.x() > 0.0F ? wheelRight : wheelLeft;
             float travel = TRAVEL_SIGN * shape.travelSign() * wheelAngle * DEG_TO_RAD * belt.rollRadius();
 
-            for (int i = 0; i < belt.links(); i++) {
-                float along = travel + i * belt.pitch();
+            if (!sprung && !grounded) {
+                for (int i = 0; i < belt.links(); i++) {
+                    float along = travel + i * belt.pitch();
 
-                belt.pointAt(along, here);
-                belt.pointAt(along + belt.pitch(), next);
+                    belt.pointAt(along, here);
+                    belt.pointAt(along + belt.pitch(), next);
+                    place(link, shape.linkCentre(), belt.x(), here, next, pivot, fromPivot, turn);
+                    drawer.draw(link);
+                }
+
+                continue;
+            }
+
+            // 上下させた周回は元より長い。元の周回の距離のままリンクを並べると、持ち上がった所でリンクの間が
+            // 開き、下側が鋸の歯に折れた。上下させた後の周回を細かく取り直し、その道のりで等間隔に並べる。
+            float length = belt.run()[belt.run().length - 1];
+            int samples = Math.max(belt.links() * 3, 64);
+            float[] pz = new float[samples + 1];
+            float[] py = new float[samples + 1];
+            float[] arc = new float[samples + 1];
+
+            for (int j = 0; j <= samples; j++) {
+                belt.pointAt(length * j / samples, here);
 
                 if (sprung) {
                     here.y -= plant(shape, belt, here.x(), ride, setup.scale(), wheelTravel);
-                    next.y -= plant(shape, belt, next.x(), ride, setup.scale(), wheelTravel);
                 }
 
+                if (grounded) {
+                    here.y += follow(shape, belt, here, ground, partialTick, low, height);
+                }
+
+                pz[j] = here.x();
+                py[j] = here.y();
+                arc[j] = j == 0 ? 0.0F
+                        : arc[j - 1] + (float) Math.hypot(pz[j] - pz[j - 1], py[j] - py[j - 1]);
+            }
+
+            float stretch = arc[samples] / Math.max(length, 1.0E-4F);
+
+            for (int i = 0; i < belt.links(); i++) {
+                float along = (travel + i * belt.pitch()) * stretch;
+
+                liftedAt(pz, py, arc, along, here);
+                liftedAt(pz, py, arc, along + belt.pitch() * stretch, next);
                 place(link, shape.linkCentre(), belt.x(), here, next, pivot, fromPivot, turn);
                 drawer.draw(link);
             }
@@ -219,6 +274,49 @@ public final class TrackBelt {
      *
      * @param z 周回上のどこに点があるか。帯自身の軸で
      */
+    /**
+     * 周回上の1点を、転輪の地面への追従に合わせて動かす量。下側の走りは全部、上側へ向かって薄れて0。
+     * 点の前後位置は {@code here.x()}（帯は z を x に入れて持ち回っている。{@link Belt#pointAt}）。
+     */
+    private static float follow(Shape shape, Belt belt, Vector3f point, WheelGround ground, float partialTick,
+            float low, float height) {
+        float upward = (point.y() - low) / height;
+        float weight = Mth.clamp((0.7F - upward) / 0.4F, 0.0F, 1.0F);
+
+        if (weight <= 0.0F) {
+            return 0.0F;
+        }
+
+        return weight * ground.beltLift(shape.travelSign() * belt.x(), shape.travelSign() * point.x(), partialTick);
+    }
+
+    /** 取り直した周回（道のり {@code arc}）を、折り返しありで {@code distance} 進んだ点。 */
+    private static void liftedAt(float[] pz, float[] py, float[] arc, float distance, Vector3f into) {
+        float total = arc[arc.length - 1];
+        float along = total <= 0.0F ? 0.0F : distance % total;
+
+        if (along < 0.0F) {
+            along += total;
+        }
+
+        int low = 0;
+        int high = arc.length - 1;
+
+        while (low + 1 < high) {
+            int mid = (low + high) >>> 1;
+
+            if (arc[mid] <= along) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+
+        float span = arc[low + 1] - arc[low];
+        float t = span <= 0.0F ? 0.0F : (along - arc[low]) / span;
+        into.set(pz[low] + (pz[low + 1] - pz[low]) * t, py[low] + (py[low + 1] - py[low]) * t, 0.0F);
+    }
+
     private static float plant(Shape shape, Belt belt, float z, Ride ride, float scale, float wheelTravel) {
         float lift = ride.liftOf(shape.travelSign() * belt.x(), shape.travelSign() * z, scale);
         float stop = wheelTravel / Math.max(scale, 0.01F);

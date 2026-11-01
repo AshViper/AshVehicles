@@ -216,8 +216,8 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         float roll = pose.aileron() / AILERON_TRAVEL;
 
         rotateX(model, setup, AircraftDefinition.Bone.STICK, pitch * STICK_PITCH_TRAVEL);
-        // 符号は焼いた模型の軸から。−Z が機首・+X が左なので、X の正は上端を後ろへ、Z の正は上端を右へ倒す。
-        rotateZ(model, setup, AircraftDefinition.Bone.STICK, roll * STICK_ROLL_TRAVEL);
+        // 符号はゲーム内で確かめた。軸からの導出では Z を逆に読んでいた。
+        rotateZ(model, setup, AircraftDefinition.Bone.STICK, -roll * STICK_ROLL_TRAVEL);
         rotateX(model, setup, AircraftDefinition.Bone.THROTTLE, -pose.throttle() * THROTTLE_TRAVEL);
 
         if (pose.sweepGear()) {

@@ -10,6 +10,7 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.vehicle.VehicleChassis;
 
 import net.minecraft.client.Camera;
@@ -30,13 +31,15 @@ import net.minecraft.world.phys.Vec3;
  * 画面のどの縁に並んでいるかで組に分け、最初の組（上の列、無ければ左の列）が頁の切り替え、残りの組が
  * 今映している頁の操作になる。機体ごとに配線を書かずに、模型の通りに並んだボタンがそのまま働く。
  *
- * <p>頁とレーダーの表示距離はこのクライアントだけの状態で、送らない。脚・フラップ・倉と兵装の選択は、
+ * <p>頁とレーダーの表示距離はこのクライアントだけの状態で、送らない。脚・フラップ・倉・灯火と兵装の選択は、
  * キーと同じ入力パケットに乗せる（{@link AircraftInputHandler}）。サーバーから見ればキーを押したのと区別が無い。
  */
 public final class CockpitControls {
     /** 頁の名前。定義ファイルの {@code page} と同じ綴り。 */
-    static final String[] PAGES = {"pfd", "nav", "radar", "sms", "eng"};
-    private static final String[] TABS = {"PFD", "NAV", "RDR", "SMS", "ENG"};
+    static final String[] PAGES = {"pfd", "nav", "radar", "sms", "eng", "plan", "iff", "rwr", "tpod", "map"};
+    private static final String[] TABS = {"PFD", "NAV", "RDR", "SMS", "ENG", "PLN", "IFF", "RWR", "TGP", "MAP"};
+    /** IFF 頁の表示の絞り。レーダー頁が隠す所属。 */
+    static final String[] FILTERS = {"ALL", "NO FRND", "HOSTILE"};
     /** レーダーの表示距離。到達距離に掛ける割合。 */
     private static final float[] RANGES = {1.0F, 0.5F, 0.25F};
     /** ボタンの中心からこの画素以内を見ていれば、そのボタンを見ている。 */
@@ -48,7 +51,9 @@ public final class CockpitControls {
 
     enum Edge { TOP, LEFT, RIGHT, BOTTOM }
 
-    enum Action { NONE, PAGE, RANGE_OUT, RANGE_IN, PREV, NEXT, GEAR, FLAP, BAY }
+    enum Action { NONE, PAGE, RANGE_OUT, RANGE_IN, PREV, NEXT, GEAR, FLAP, BAY, NAV, BEACON, STROBE, INTERROGATE,
+        FILTER, BINGO_UP, BINGO_DOWN, SEARCH_SHOWN, POD_VIEW, MARK_TARGET, WP_NEXT, WP_PREV, WP_MARK, WP_DELETE,
+        WP_NORTH, WP_SOUTH, WP_EAST, WP_WEST }
 
     /**
      * 1つのボタン。座標はその画面の画素（左上が原点、右と下が正）。
@@ -77,9 +82,44 @@ public final class CockpitControls {
     private static boolean gear;
     private static boolean flaps;
     private static boolean bay;
+    private static int lights;
     private static int weaponSteps;
 
+    // IFF 頁の設定。表示だけを変え、送らない。シーカーも発射も触らない（味方をロックできるのは決定事項）。
+    private static boolean interrogating = true;
+    private static int filter;
+    /** RWR 頁が捜索だけの相手（記号を出すだけで何もしていない）を描くか。 */
+    private static boolean searchShown = true;
+
     private CockpitControls() {
+    }
+
+    // ---- IFF ----
+
+    /** 計器に出す所属。質問機を切っていれば誰も名乗らない。 */
+    static Iff identify(Iff iff) {
+        return interrogating ? iff : Iff.UNKNOWN;
+    }
+
+    /** レーダー頁にその所属の接触を描くか。 */
+    static boolean shows(Iff iff) {
+        return switch (filter) {
+            case 1 -> identify(iff) != Iff.FRIEND;
+            case 2 -> identify(iff) == Iff.HOSTILE;
+            default -> true;
+        };
+    }
+
+    static boolean interrogating() {
+        return interrogating;
+    }
+
+    static String filterName() {
+        return FILTERS[filter];
+    }
+
+    static boolean searchShown() {
+        return searchShown;
     }
 
     // ---- 状態 ----
@@ -160,11 +200,20 @@ public final class CockpitControls {
         List<Button> buttons = new ArrayList<>();
         List<float[]> tabRow = edges.get(tabs.ordinal());
 
+        // 頁の数よりボタンが少なければ、最後の1つが溢れた頁を順に回す。映していればその頁の札、でなければ MORE。
+        int current = Arrays.asList(PAGES).indexOf(page);
+        int direct = tabRow.size() >= PAGES.length ? PAGES.length : tabRow.size() - 1;
+
         for (int i = 0; i < tabRow.size(); i++) {
             float[] p = tabRow.get(i);
 
-            if (i < PAGES.length) {
-                buttons.add(new Button(p[0], p[1], tabs, TABS[i], Action.PAGE, i, PAGES[i].equals(page)));
+            if (i < direct) {
+                buttons.add(new Button(p[0], p[1], tabs, TABS[i], Action.PAGE, i, i == current));
+            } else if (i == direct && direct < PAGES.length) {
+                boolean showing = current >= direct;
+                int target = showing && current + 1 < PAGES.length ? current + 1 : direct;
+                buttons.add(new Button(p[0], p[1], tabs, showing ? TABS[current] : "MORE", Action.PAGE, target,
+                        showing));
             } else {
                 buttons.add(new Button(p[0], p[1], tabs, "", Action.NONE, -1, false));
             }
@@ -211,6 +260,33 @@ public final class CockpitControls {
                 if (aircraft.hasBay()) {
                     verbs.add(verb("BAY", Action.BAY, aircraft.isBayOpen()));
                 }
+
+                verbs.add(verb("NAV", Action.NAV, aircraft.isLightOn(AircraftEntity.LIGHT_NAV)));
+                verbs.add(verb("BCN", Action.BEACON, aircraft.isLightOn(AircraftEntity.LIGHT_BEACON)));
+                verbs.add(verb("STRB", Action.STROBE, aircraft.isLightOn(AircraftEntity.LIGHT_STROBE)));
+                verbs.add(verb("BNG+", Action.BINGO_UP, false));
+                verbs.add(verb("BNG-", Action.BINGO_DOWN, false));
+            }
+            case "rwr" -> verbs.add(verb("SRCH", Action.SEARCH_SHOWN, searchShown));
+            case "tpod" -> {
+                verbs.add(verb("VIEW", Action.POD_VIEW, PodCamera.isActive()));
+                verbs.add(verb("WPT", Action.MARK_TARGET, false));
+            }
+            case "map" -> {
+                verbs.add(verb("WP+", Action.WP_NEXT, false));
+                verbs.add(verb("WP-", Action.WP_PREV, false));
+                verbs.add(verb("MARK", Action.WP_MARK, false));
+                verbs.add(verb("DEL", Action.WP_DELETE, false));
+                verbs.add(verb("RNG+", Action.RANGE_OUT, ranges[index] == 0));
+                verbs.add(verb("RNG-", Action.RANGE_IN, ranges[index] == RANGES.length - 1));
+                verbs.add(verb("N+", Action.WP_NORTH, false));
+                verbs.add(verb("S+", Action.WP_SOUTH, false));
+                verbs.add(verb("E+", Action.WP_EAST, false));
+                verbs.add(verb("W+", Action.WP_WEST, false));
+            }
+            case "iff" -> {
+                verbs.add(verb("INTG", Action.INTERROGATE, interrogating));
+                verbs.add(verb("FILT", Action.FILTER, filter != 0));
             }
             default -> {
             }
@@ -368,6 +444,32 @@ public final class CockpitControls {
             case GEAR -> gear = true;
             case FLAP -> flaps = true;
             case BAY -> bay = true;
+            case NAV -> lights ^= AircraftEntity.LIGHT_NAV;
+            case BEACON -> lights ^= AircraftEntity.LIGHT_BEACON;
+            case STROBE -> lights ^= AircraftEntity.LIGHT_STROBE;
+            case INTERROGATE -> interrogating = !interrogating;
+            case FILTER -> filter = (filter + 1) % FILTERS.length;
+            case BINGO_UP -> FuelWatch.adjustBingo(1);
+            case BINGO_DOWN -> FuelWatch.adjustBingo(-1);
+            case SEARCH_SHOWN -> searchShown = !searchShown;
+            case POD_VIEW -> PodCamera.toggle();
+            case MARK_TARGET -> {
+                Vec3 point = aircraft.getDesignatedPoint();
+
+                if (point == null) {
+                    return;
+                }
+
+                Waypoints.add(point);
+            }
+            case WP_NEXT -> Waypoints.step(1);
+            case WP_PREV -> Waypoints.step(-1);
+            case WP_MARK -> Waypoints.add(aircraft.position());
+            case WP_DELETE -> Waypoints.remove();
+            case WP_NORTH -> Waypoints.nudge(0.0, -Waypoints.NUDGE);
+            case WP_SOUTH -> Waypoints.nudge(0.0, Waypoints.NUDGE);
+            case WP_EAST -> Waypoints.nudge(Waypoints.NUDGE, 0.0);
+            case WP_WEST -> Waypoints.nudge(-Waypoints.NUDGE, 0.0);
             case NONE -> {
                 return;
             }
@@ -399,6 +501,14 @@ public final class CockpitControls {
     static boolean takeBay() {
         boolean taken = bay;
         bay = false;
+
+        return taken;
+    }
+
+    /** 切り替える灯火のビット。同じボタンを2度押せば打ち消し合う。 */
+    static int takeLights() {
+        int taken = lights;
+        lights = 0;
 
         return taken;
     }

@@ -158,8 +158,8 @@
     "heat": 0.6
   },
   "countermeasures": {
-    "flares": 0,
-    "chaff": 0,
+    "flares": 120,
+    "chaff": 120,
     "interval_ticks": 6,
     "reload_ticks": 600,
     "speed": 0.35

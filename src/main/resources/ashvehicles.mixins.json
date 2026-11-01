@@ -26,6 +26,7 @@
     "MatchGlowMixin",
     "MountHintMixin",
     "MouseLookMixin",
+    "NarratorHotkeyMixin",
     "ObjModelLoadMixin",
     "PilotChunkGateMixin",
     "PlayerDrawDistanceMixin",

@@ -80,6 +80,18 @@ public class ShockwaveParticle extends WeaponParticle {
     private static final int STEADY_FADES = 30;
     /** 核の環の、走っている間の不透明度。 */
     private static final float STEADY_OPACITY = 0.45F;
+    /**
+     * 核の環が引きずる土煙の壁。1tickあたりの粒数、総数、粒の大きさ（到達距離に対する割合）。
+     *
+     * <p>普通の環の土埃は {@link #MOST_PUFFS} と {@link #DUST_BUDGET} で抑えてあり、核の環の周長（4km 近く）に
+     * 撒くと点線にしかならない。核の映像の衝撃波は、地平線へ向かって走る<b>土煙の壁</b>で、建物も林もそこに
+     * 呑まれる。色はサーバーが渡す環の色のまま（白に近い）——壁の頭は巻き上がった塵と凝結で白っぽく見える。粒を大きく長生きする雲（{@code ModParticles.CLOUD}）にして、数も上げる。
+     */
+    private static final int STEADY_PUFFS = 40;
+    private static final int STEADY_BUDGET = 1400;
+    private static final float STEADY_DUST = 0.018F;
+    /** その壁が立ち上がる速さ。普通の環より高く、土煙が「壁」として見える高さまで。 */
+    private static final double STEADY_LIFT = 0.22;
 
     private final int dust;
     private final float radius;
@@ -133,9 +145,13 @@ public class ShockwaveParticle extends WeaponParticle {
         double speed = (this.steady ? WeaponDefinition.Nuclear.WAVE_SPEED : this.frontSpeed(lived)) * DUST_DRAG;
         // 総量に収まる範囲で、環の長さに見合う数。長生きする環ほど1tickあたりを薄くして、撒き切らずに
         // 最後まで壁を引きずれるようにする。
-        int spread = (int) Math.min(this.radius * DUST_PER_BLOCK, (double) DUST_BUDGET / this.raisingDust);
-        int puffs = Mth.clamp(spread, FEWEST_PUFFS, MOST_PUFFS);
-        TintedParticleOption puff = ModParticles.BLAST_SMOKE.get().of(this.dust, DUST_SIZE);
+        int spread = (int) Math.min(this.radius * DUST_PER_BLOCK,
+                (double) (this.steady ? STEADY_BUDGET : DUST_BUDGET) / this.raisingDust);
+        int puffs = Mth.clamp(spread, FEWEST_PUFFS, this.steady ? STEADY_PUFFS : MOST_PUFFS);
+        TintedParticleOption puff = this.steady
+                ? ModParticles.CLOUD.get().of(this.dust, this.radius * STEADY_DUST)
+                : ModParticles.BLAST_SMOKE.get().of(this.dust, DUST_SIZE);
+        double lift = this.steady ? STEADY_LIFT : DUST_LIFT;
 
         for (int i = 0; i < puffs; i++) {
             double angle = this.random.nextDouble() * Mth.TWO_PI;
@@ -145,7 +161,7 @@ public class ShockwaveParticle extends WeaponParticle {
 
             this.level.addParticle(puff,
                     this.x + along * out, this.y + this.random.nextDouble() * 0.5, this.z + across * out,
-                    along * speed, DUST_LIFT, across * speed);
+                    along * speed, lift, across * speed);
         }
     }
 

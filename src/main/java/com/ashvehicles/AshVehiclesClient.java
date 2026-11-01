@@ -150,6 +150,8 @@ public class AshVehiclesClient {
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.CLOUD));
         event.registerSpriteSet(ModParticles.NUCLEAR_CLOUD.get(),
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.NUCLEAR));
+        event.registerSpriteSet(ModParticles.FALLOUT.get(),
+                sprites -> SmokeParticle.provider(sprites, SmokeParticle.FALLOUT));
         event.registerSpriteSet(ModParticles.CLOUD_LAYER.get(),
                 sprites -> CloudLayerParticle.provider(sprites, CloudLayerParticle.DRIFT));
         event.registerSpriteSet(ModParticles.NUCLEAR_LAYER.get(),

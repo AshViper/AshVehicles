@@ -520,5 +520,7 @@
   "message.ashvehicles.ai.selfplay_next": "Self-play battle %s of %s starts in %s seconds",
   "entity.ashvehicles.bot": "%s (%s AI)",
   "message.ashvehicles.match.not_deployable": "That machine is not flown or driven from a seat",
-  "message.ashvehicles.match.unknown_preset": "No such loadout for that machine: %s"
+  "message.ashvehicles.match.unknown_preset": "No such loadout for that machine: %s",
+  "message.ashvehicles.chain.first": "Chain fastened. Click the vehicle to tow.",
+  "message.ashvehicles.chain.linked": "Chain linked."
 }

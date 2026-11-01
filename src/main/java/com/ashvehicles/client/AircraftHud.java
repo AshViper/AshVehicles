@@ -126,6 +126,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
     private static final float PIXELS_PER_DEGREE = 5.0F;
     /** ピッチラダーの目盛り間隔（度）。 */
     private static final int LADDER_STEP = 5;
+    /** 機首から上下この角度までの段だけを描く。 */
+    private static final int LADDER_SPAN = 15;
     /** 段の外端までの幅と、中央の飛行経路マーカーのために空ける幅。 */
     private static final int LADDER_WIDTH = 40;
     private static final int RUNG_GAP = 14;
@@ -770,9 +772,16 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         Font font = Minecraft.getInstance().font;
 
+        // 描くのは今の機首から上下 LADDER_SPAN 度の段だけ。全段を並べると梯子が画面の縦を埋め尽くし、
+        // 外を見る窓が無くなっていた。読む段は機首のすぐ近くにしか無い。
         for (int rung = LADDER_STEP; rung <= 85; rung += LADDER_STEP) {
-            drawRung(graphics, font, rung);
-            drawRung(graphics, font, -rung);
+            if (Math.abs(rung - elevation) <= LADDER_SPAN) {
+                drawRung(graphics, font, rung);
+            }
+
+            if (Math.abs(-rung - elevation) <= LADDER_SPAN) {
+                drawRung(graphics, font, -rung);
+            }
         }
 
         pose.popPose();
@@ -1050,9 +1059,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
         List<Entity> aboard = aircraft.getPassengers();
         boolean remote = aircraft.isUnmanned();
 
-        panel.title(remote ? "LINK / STATUS" : "CREW / STATUS");
+        // 1人きりで乗っているなら、その1人は画面の持ち主だ。言うまでもない行は外の景色を1行ぶん塞ぐだけなので出さない。
+        boolean alone = aboard.size() == 1 && aboard.get(0) == Minecraft.getInstance().player;
 
-        if (!aboard.isEmpty()) {
+        if (!aboard.isEmpty() && !alone) {
             Entity pilot = aircraft.getControllingPassenger();
 
             for (Entity rider : aboard) {
@@ -1097,10 +1107,12 @@ public final class AircraftHud implements LayeredDraw.Layer {
         panel.divider();
 
         if (!aircraft.isRotorcraft()) {
-            panel.pair("GEAR", DIM, aircraft.isGearDown() ? "DOWN" : "UP", GREEN,
-                    aircraft.isGearDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
-            panel.pair("FLAP", DIM, aircraft.isFlapsDown() ? "DOWN" : "UP", GREEN,
-                    aircraft.isFlapsDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
+            // 脚とフラップは1行に並べる。どちらも上か下かの2値で、左右に分けても読み違えようがない。
+            boolean gear = aircraft.isGearDown();
+            boolean flaps = aircraft.isFlapsDown();
+
+            panel.pair("GEAR " + (gear ? "DN" : "UP"), gear ? GREEN : DIM, "FLAP " + (flaps ? "DN" : "UP"),
+                    flaps ? GREEN : DIM);
         }
 
         // 兵装倉を持つ機体のみ。開いている間だけ倉の中身がレーダーに映るので、これは形態の表示であると
@@ -1184,8 +1196,6 @@ public final class AircraftHud implements LayeredDraw.Layer {
     private static HudPanel arms(Minecraft minecraft, AircraftEntity aircraft) {
         HudPanel panel = new HudPanel();
 
-        panel.title("STORES / WEAPONS");
-
         // 矢印は1つだけ。意味は「今この画面の持ち主が引き金を引いたら出て行く物」で、それ以外の意味を
         // 持たせない。
         //
@@ -1213,7 +1223,6 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int flares = aircraft.getCountermeasures(true);
         int chaff = aircraft.getCountermeasures(false);
 
-        panel.divider();
         panel.pair("CM", DIM, String.format("FL %d   CH %d", flares, chaff),
                 flares > 0 && chaff > 0 ? GREEN : WARNING);
 
@@ -1340,7 +1349,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
         float carried = aircraft.getStoreMass();
         float capacity = aircraft.getPayloadCapacity();
 
-        if (carried <= 0.0F && capacity <= 0.0F) {
+        // 搭載重量を問うのは吊る時、つまり地上だけだ。空では満載に近い時だけ残す。
+        boolean near = capacity > 0.0F && carried >= capacity * 0.95F;
+
+        if (carried <= 0.0F && capacity <= 0.0F || !aircraft.onGround() && !near) {
             return;
         }
 
@@ -1349,7 +1361,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
                 : String.format(java.util.Locale.ROOT, "%.0f KG", carried);
         // 満載に近づいたら琥珀。残りが最も軽い兵装1発を切っている、という以上のことは言わない——どの1発が
         // 載るかは兵装ごとの重さの問題であり、地上で吊ろうとすれば分かる。
-        int colour = capacity > 0.0F && carried >= capacity * 0.95F ? WARNING : DIM;
+        int colour = near ? WARNING : DIM;
 
         panel.pair("LOAD", DIM, text, colour);
     }

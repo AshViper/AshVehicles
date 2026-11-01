@@ -1441,6 +1441,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
             return false;
         }
 
+        // 同じ機体から出たミサイルには当たらない。斉射の僚弾同士や、自分の機関砲が今撃ったミサイルを
+        // 落とさないため。他人のミサイルは RocketEntity.canBeHitByProjectile が通す。
+        if (target instanceof VehicleProjectile other && other.wasFiredBy(vehicle)) {
+            return false;
+        }
+
         if (!super.canHitEntity(target)) {
             return false;
         }
@@ -1733,6 +1739,8 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
                 if (round.explosion() > 0.0F) {
                     WeaponEffects.blast(level, this, where, round);
+                    // 爆風は機体も押す。バニラの爆発の押しは運転している側に届かない（ShovePayload）。
+                    VehicleEntityBase.blastAll(level, where, round.explosion(), null);
                 }
 
                 if (round.blast() > 0.0F) {

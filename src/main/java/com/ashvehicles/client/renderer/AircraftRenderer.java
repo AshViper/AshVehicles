@@ -77,6 +77,7 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
             MultiBufferSource bufferSource, int packedLight) {
         super.render(aircraft, yaw, partialTick, poseStack, bufferSource, packedLight);
         AfterburnerPlume.draw(aircraft, partialTick, poseStack, bufferSource);
+        NavLights.draw(aircraft, partialTick, poseStack, bufferSource);
 
         if (!this.drawingGhost) {
             CockpitDisplays.draw(aircraft, partialTick, poseStack, bufferSource);

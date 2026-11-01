@@ -209,6 +209,29 @@ public abstract class WeaponParticle extends TextureSheetParticle {
     // ------------------------------------------------------------------
 
     /**
+     * 向きを決めて板を描く。中身はバニラの {@code SingleQuadParticle.render} と同一。
+     *
+     * <p><b>同一の物をわざわざ書き直しているのは Sodium のためだ。</b>Sodium（0.8）は
+     * {@code SingleQuadParticle.render} の先頭に割り込んで取り消し、カメラの左・上ベクトルで組んだ板を自前で書く。
+     * そこでは {@link #renderRotatedQuad} が呼ばれない——つまり遠方面の外の粒の引き寄せも霧の畳み込みも
+     * 素通りされ、ロード済みの世界の外の煙・火球・航跡は全部、遠方面で切られるか霧に塗られて消えていた。しかも
+     * {@code getFacingCameraMode} も読まれないので、地面に寝かせた衝撃波と雲の層まで正面を向いて立っていた。
+     * 子クラスで上書きして親を呼ばなければ、割り込まれた親の本体はこの粒では走らない。
+     */
+    @Override
+    public void render(VertexConsumer buffer, Camera camera, float partialTick) {
+        Quaternionf quaternion = new Quaternionf();
+
+        this.getFacingCameraMode().setRotation(quaternion, camera, partialTick);
+
+        if (this.roll != 0.0F) {
+            quaternion.rotateZ(Mth.lerp(partialTick, this.oRoll, this.roll));
+        }
+
+        this.renderRotatedQuad(buffer, camera, quaternion, partialTick);
+    }
+
+    /**
      * バニラと同じ板を、遠方面より遠ければ引き寄せて描く。理由と写像は {@link ParticleReach}。
      *
      * <p>板の組み立て自体はバニラの {@code renderRotatedQuad} と同一だ。自前で書いているのは、引き寄せが

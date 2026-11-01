@@ -51,6 +51,8 @@ public final class ModParticles {
     /** その核用。同じ煙だが、20秒かけて立ち上がる雲に付き合えるだけ長生きする。 */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> NUCLEAR_CLOUD =
             register("nuclear_cloud");
+    /** 核の傘から風下へ落ちてくる灰。{@code SmokeParticle.FALLOUT} 参照。 */
+    public static final DeferredHolder<ParticleType<?>, TintedParticleType> FALLOUT = register("fallout");
     /**
      * 雲を作る水平な1枚。高さと大きさを変えて重ねるとキノコ雲になる。
      * {@link com.ashvehicles.client.particle.CloudLayerParticle} 参照。
