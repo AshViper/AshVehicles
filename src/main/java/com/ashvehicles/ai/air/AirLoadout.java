@@ -72,9 +72,15 @@ public final class AirLoadout {
     private AirLoadout() {
     }
 
-    /** その兵装を AI が使えるなら、その分類。使わない物（ロケット・対地ミサイル・誘導爆弾・増槽）は null。 */
+    /** その兵装を AI が使えるなら、その分類。使わない物（ロケット・対地ミサイル・誘導爆弾・増槽・核）は null。 */
     @Nullable
     public static Store storeOf(WeaponDefinition weapon) {
+        // 核は AI に渡さない。1発で試合が終わる物で、試合中は出撃盤で買った人の機体だけが放せる
+        // （{@code match/Deathmatch.mayRelease}）。自由落下爆弾として数えると、合計の威力で選ぶ爆撃機の AI が全部核を吊る。
+        if (weapon.isNuclear()) {
+            return null;
+        }
+
         return switch (weapon.type()) {
             case GUN -> Store.GUN;
             case BOMB -> weapon.isGuided() ? null : Store.BOMB;

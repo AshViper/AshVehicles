@@ -17,11 +17,13 @@ import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.RackItem;
 import com.ashvehicles.item.WeaponItem;
+import com.ashvehicles.match.Deathmatch;
 import com.ashvehicles.registry.ModEntities;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
@@ -1353,6 +1355,8 @@ public final class WeaponMounts {
         this.triggerHeld = trigger;
 
         GunStations stations = this.aircraft.getStations();
+        // この tick に核を断ったか。同じ核を吊った倉が並んでいても、断りの1行は1回だけ出す。
+        boolean refused = false;
 
         pylons:
         for (int slot = 0; slot < this.mounts.length; slot++) {
@@ -1379,6 +1383,20 @@ public final class WeaponMounts {
                 boolean pull = laid
                         ? pressed && (weapon.isAutomatic() || !mount.held)
                         : armed && load.weapon.equals(this.selected);
+
+                // 試合の核は、出撃盤で買った機体からしか放せない（{@code match/Deathmatch.mayRelease}）。核は1押し1発
+                // なので、断りの1行も1押しに1回で済む。
+                if (pull && !Deathmatch.mayRelease(this.aircraft, weapon)) {
+                    if (!refused && this.aircraft.getAviator() instanceof Player told) {
+                        told.displayClientMessage(
+                                Component.translatable("message.ashvehicles.match.nuclear_denied"), true);
+                    }
+
+                    refused = true;
+                    load.cooldown = Math.max(0.0F, load.cooldown - 1.0F);
+
+                    continue;
+                }
 
                 // 閉じた扉を弾は通らない。倉の中の物は、扉が開ききるまで撃てない。乗員には計器の BAY 行と
                 // 兵装一覧の SHUT が理由を言う——引き金が黙る理由が画面のどこにも無いのは不具合に見える。
@@ -1584,6 +1602,11 @@ public final class WeaponMounts {
 
             shot.setup(weaponId, ammunition, this.aircraft, pilot);
             shot.setPos(muzzle);
+
+            // 核は放した瞬間に知らせる。地上への警報と、試合なら放した陣営の控え（{@link NuclearBlast#released}）。
+            if (weapon.isNuclear()) {
+                NuclearBlast.released(level, this.aircraft, shot);
+            }
             // setDeltaMovement ではなく launch。速度がクライアントへ届く必要があり、通常それを運ぶ
             // パケットには速すぎるから。VehicleProjectile 参照。
             shot.launch(velocity);

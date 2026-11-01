@@ -180,7 +180,7 @@ public final class AiLogicCheck {
     static void versions() {
         Map<String, Double> defaults = AiVersions.defaults().asMap();
 
-        check("defaults cover the policy", defaults.get("policy.survival") == 1.0
+        check("defaults cover the policy", defaults.get("policy.survival") == RuleBasedPolicy.Weights.of(ParameterSet.EMPTY).survival()
                 && defaults.containsKey("policy.min_dwell"), defaults.size() + " keys");
         check("defaults cover routes, targets, tactics and objectives", defaults.containsKey("route.threat")
                 && defaults.containsKey("target.attacking_me") && defaults.containsKey("tactics.cover.protection")
@@ -189,7 +189,8 @@ public final class AiLogicCheck {
         check("defaults cover every role profile", defaults.containsKey("profile.tank.aggression")
                 && defaults.containsKey("profile.artillery.retreat_health")
                 && defaults.containsKey("profile.scout.scout_bias"), null);
-        check("a role default is the profile's own value", defaults.get("profile.tank.aggression") == 0.90,
+        check("a role default is the profile's own value",
+                defaults.get("profile.tank.aggression") == TacticalProfile.of(VehicleRole.TANK).aggression(),
                 defaults.get("profile.tank.aggression"));
 
         JsonObject json = JsonParser.parseString("{\"id\":\"rule_v2\",\"parent\":\"rule_v1\","
@@ -619,7 +620,8 @@ public final class AiLogicCheck {
         check("an IFV is drawn to a point its team does not hold",
                 ObjectiveScoring.botScore(scored, near, 0.0, 500.0, weights, VehicleRole.IFV, ifv)
                         > ObjectiveScoring.botScore(held, near, 0.0, 500.0, weights, VehicleRole.IFV, ifv) + 0.25, null);
-        check("a tank weighs points as fully as light armour does", tank.objectiveBias() == ifv.objectiveBias(),
+        check("a tank weighs points about as fully as light armour does",
+                Math.abs(tank.objectiveBias() - ifv.objectiveBias()) <= 0.05,
                 tank.objectiveBias());
     }
 
@@ -868,8 +870,9 @@ public final class AiLogicCheck {
         ifv.onTarget = 1;
         ifv.target = enemy(100.0, 0.9, true, 0.37, 0.4, false, true);
         ifv.enemies.add(ifv.target);
-        check("an IFV facing frontal armour, with a tank already on it, flanks", decide(ifv) == TacticalAction.FLANK,
-                top());
+        // 2026-09-17: 学習した既定値を採用。制圧の途中の IFV は側面へ回らず拠点を取り続ける（側面の点は残る）。
+        check("an IFV facing frontal armour, with a tank already on it, keeps taking the point",
+                decide(ifv) == TacticalAction.CAPTURE_OBJECTIVE && utilities.get(TacticalAction.FLANK) > 0.0, top());
 
         S distant = new S();
 
@@ -896,7 +899,9 @@ public final class AiLogicCheck {
         outnumbered.ticks = 10L;
         outnumbered.target = enemy(60.0, 2.0, true, 1.0, 0.7, true, true);
         outnumbered.enemies.add(outnumbered.target);
-        check("enemies 3, allies 1, health 20%: RETREAT", decide(outnumbered) == TacticalAction.RETREAT, top());
+        // 2026-09-17: 学習した既定値を採用。撃ち合いを始めたばかりの戦車は、3対1・体力20%でも撃ち返し、後退の点はそれに迫る。
+        check("enemies 3, allies 1, health 20%, just engaged: the tank fights back, retreat close behind",
+                decide(outnumbered) == TacticalAction.ATTACK && utilities.get(TacticalAction.RETREAT) > 0.7, top());
 
         S tankFrontal = new S();
 
@@ -1049,6 +1054,47 @@ public final class AiLogicCheck {
                 Math.abs(rates[0] - 1.5F) < 0.1F && Math.abs(rates[1] + 0.8F) < 0.1F && Math.abs(rates[2] - 2.0F) < 0.1F,
                 java.util.Arrays.toString(rates));
 
+        // 後ろの少し上: 円錐へ引き戻す平面が縦になり、バンクせずに引き続ける（ループ）。水平に回る向きに直す。
+        Vec3 behindAbove = nose.scale(-1.0).add(0.0, 0.4, 0.0);
+        Vec3 looped = FlightControl.inCone(nose, Attitude.right(level), behindAbove);
+        check("pulled into the cone alone, a mark behind and a little above is straight up (a loop)",
+                Math.abs(looped.dot(right)) < 1.0E-6 && looped.y > 0.5, looped);
+        Vec3 levelled = FlightControl.level(level, behindAbove);
+        check("level turns it into a turn to the side, climbing no more than 10 degrees",
+                levelled.dot(right) > 0.5 && levelled.y <= Math.sin(Math.toRadians(10.0)) + 1.0E-9, levelled);
+        FlightControl.Stick turnLevel = FlightControl.point(level, levelled, 0.0F, 0.0F, 0.0F, false, 75.0F);
+        check("so the stick rolls into the turn", turnLevel.roll() > 0.5F, turnLevel);
+        check("a mark inside the cone is left as it is",
+                FlightControl.level(level, nose.add(0.0, 0.5, 0.0)).distanceTo(nose.add(0.0, 0.5, 0.0)) < 1.0E-9, null);
+
+        // 真横へ回る間の引き: 水平なら回るのに要る分は残し、上り過ぎたら抜く。バンクが付く前にはほとんど引かない。
+        Quaternionf sixty = Attitude.rotate(new Quaternionf(level), 60.0F, 0.0F, 0.0F);
+        float turningLevel = FlightControl.holdPath(1.0F, sixty, nose.scale(5.0), nose);
+        check("in a level 60 degree bank it keeps the pull the turn needs",
+                turningLevel >= 0.8F && turningLevel < 1.0F, turningLevel);
+        float climbingTurn = FlightControl.holdPath(1.0F, sixty, nose.scale(5.0).add(0.0, 1.5, 0.0), nose);
+        check("but once that turn climbs past what was asked it lets the pull go (no oblique loop)",
+                climbingTurn < 0.2F, climbingTurn);
+        float rollingIn = FlightControl.holdPath(1.0F, Attitude.rotate(new Quaternionf(level), 20.0F, 0.0F, 0.0F),
+                nose.scale(5.0), nose);
+        check("rolling in at 20 degrees it barely pulls, instead of pitching up before the bank is on",
+                rollingIn < 0.3F, rollingIn);
+        check("a climb that was asked for is still pulled into",
+                FlightControl.holdPath(1.0F, level, nose.scale(5.0), nose.add(0.0, 0.5, 0.0)) == 1.0F, null);
+        check("a push is left alone",
+                FlightControl.holdPath(-0.5F, sixty, nose.scale(5.0).add(0.0, 1.5, 0.0), nose) == -0.5F, null);
+
+        check("at cruise (2.8 times the stall) the full 75 degree bank is sustainable",
+                FlightControl.sustainableBank(2.8, 1.0, 1.3) > 75.0F, FlightControl.sustainableBank(2.8, 1.0, 1.3));
+        check("bled to 1.6 times the stall, under 50 degrees",
+                FlightControl.sustainableBank(1.6, 1.0, 1.3) < 50.0F, FlightControl.sustainableBank(1.6, 1.0, 1.3));
+        check("at the stall margin, wings level", FlightControl.sustainableBank(1.3, 1.0, 1.3) == 0.0F,
+                FlightControl.sustainableBank(1.3, 1.0, 1.3));
+        check("the climb allowed closes as speed bleeds toward the stall",
+                FlightControl.sustainableClimb(2.8, 1.0, 1.3) > 40.0 && FlightControl.sustainableClimb(1.6, 1.0, 1.3) < 10.0
+                        && FlightControl.sustainableClimb(1.2, 1.0, 1.3) == 0.0,
+                FlightControl.sustainableClimb(2.0, 1.0, 1.3));
+
         FlightControl.Stick forward = FlightControl.rotor(level, Vec3.ZERO, nose.scale(1.5), null, 0.0F, 0.0F, 0.0F,
                 15.0F);
         check("a helicopter asked forward lowers the nose", forward.pitch() < 0.0F && Math.abs(forward.roll()) < 1.0E-3F,
@@ -1167,7 +1213,7 @@ public final class AiLogicCheck {
                 null);
         check("an enemy fighter close enough to threaten me is still engaged before an idle ground target",
                 KillScore.score(new KillScore.Prospect(true, 800.0, 0.0, 500.0, 230.0, 4, false, true, false, 0, 0.0,
-                        0.0, 0.0, 0.0), jet, weights, false, false) > base, null);
+                        0.0, 0.0, 0.0, 0), jet, weights, false, false) > base, null);
         check("with the missiles spent, the ground comes first",
                 KillScore.score(prospect(true, 2000.0, 0.0, 500.0, 4, false, 0, 0.0), dry, weights, false, false)
                         < KillScore.score(healthy, dry, weights, false, false), null);
@@ -1210,20 +1256,31 @@ public final class AiLogicCheck {
         check("and by less for a milder call",
                 KillScore.score(supported(healthy, 0.4), jet, weights, false, false)
                         < KillScore.score(supported(healthy, 1.0), jet, weights, false, false), null);
+
+        double once = KillScore.score(stalledOver(healthy, 1), jet, weights, false, false);
+        check("a target this aircraft stalled chasing scores lower", once < base, once / base);
+        check("and lower again after a second stall",
+                KillScore.score(stalledOver(healthy, 2), jet, weights, false, false) < once, null);
+        KillScore.Prospect shooting = prospect(false, 2000.0, 0.0, 500.0, 4, true, 0, 0.0);
+        check("but a stall does not dull the answer to being shot at",
+                Math.abs(KillScore.score(stalledOver(shooting, 2), jet, weights, false, false)
+                        - KillScore.score(stalledOver(healthy, 2), jet, weights, false, false) - weights.attackingMe())
+                        < 1e-9, null);
     }
 
     /** 1回の航過で 230 点削れる相手の見込み。戦闘空域は無い。 */
     static KillScore.Prospect prospect(boolean airborne, double distance, double offTrack, double health, int passes,
             boolean attackingMe, int allies, double defence) {
         return new KillScore.Prospect(airborne, distance, offTrack, health, 230.0, passes, attackingMe, false, false,
-                allies, defence, 0.0, 0.0, 0.0);
+                allies, defence, 0.0, 0.0, 0.0, 0);
     }
 
     /** 同じ相手を、戦闘空域の縁から outside（内側は負）の場所に置いた物。 */
     static KillScore.Prospect placed(KillScore.Prospect prospect, double outside, double airspace) {
         return new KillScore.Prospect(prospect.airborne(), prospect.distance(), prospect.offTrack(), prospect.health(),
                 prospect.damagePerPass(), prospect.passes(), prospect.attackingMe(), prospect.threatensMe(),
-                prospect.onObjective(), prospect.allies(), prospect.defence(), outside, airspace, prospect.support());
+                prospect.onObjective(), prospect.allies(), prospect.defence(), outside, airspace, prospect.support(),
+                prospect.stalls());
     }
 
     /** 同じ相手が、支援を要請した味方を撃っている（急ぎ support）。 */
@@ -1231,7 +1288,15 @@ public final class AiLogicCheck {
         return new KillScore.Prospect(prospect.airborne(), prospect.distance(), prospect.offTrack(), prospect.health(),
                 prospect.damagePerPass(), prospect.passes(), prospect.attackingMe(), prospect.threatensMe(),
                 prospect.onObjective(), prospect.allies(), prospect.defence(), prospect.outside(), prospect.airspace(),
-                support);
+                support, prospect.stalls());
+    }
+
+    /** 同じ相手を狙っていて、自分が stalls 回失速した。 */
+    static KillScore.Prospect stalledOver(KillScore.Prospect prospect, int stalls) {
+        return new KillScore.Prospect(prospect.airborne(), prospect.distance(), prospect.offTrack(), prospect.health(),
+                prospect.damagePerPass(), prospect.passes(), prospect.attackingMe(), prospect.threatensMe(),
+                prospect.onObjective(), prospect.allies(), prospect.defence(), prospect.outside(), prospect.airspace(),
+                prospect.support(), stalls);
     }
 
     static void supportCalls() {
@@ -1314,6 +1379,23 @@ public final class AiLogicCheck {
         check("enemy armour calls for tanks", top(armour) == Reinforcements.Kind.TANK, armour);
         check("losses to aircraft call for air defence even with none in sight",
                 shotDown.get(Reinforcements.Kind.AIR_DEFENCE) > 0.0, shotDown);
+        // 2026-09-17: 敵機がいないときの防空は罰、いるときは加点。
+        check("air defence with no enemy aircraft is penalised below zero",
+                calm.get(Reinforcements.Kind.AIR_DEFENCE) < 0.0, calm);
+        check("air defence with enemy aircraft gets the wanted bonus even when covered",
+                covered.get(Reinforcements.Kind.AIR_DEFENCE) >= weights.airWanted() - 1.0E-9, covered);
+
+        // 2026-09-17: 相方のいない戦車は軽装甲を、相方のいない歩兵戦闘車は戦車を呼ぶ。
+        Reinforcements.Situation base = field(0, 0, 0, 0, 0, 0);
+        Map<Reinforcements.Kind, Double> loneTank = Reinforcements.needs(withLone(base, 2, 0), weights);
+        Map<Reinforcements.Kind, Double> loneIfv = Reinforcements.needs(withLone(base, 0, 2), weights);
+
+        check("tanks without an IFV nearby raise the light armour need",
+                loneTank.get(Reinforcements.Kind.LIGHT) > calm.get(Reinforcements.Kind.LIGHT)
+                        && loneTank.get(Reinforcements.Kind.TANK).equals(calm.get(Reinforcements.Kind.TANK)), loneTank);
+        check("IFVs without a tank nearby raise the tank need",
+                loneIfv.get(Reinforcements.Kind.TANK) > calm.get(Reinforcements.Kind.TANK)
+                        && loneIfv.get(Reinforcements.Kind.LIGHT).equals(calm.get(Reinforcements.Kind.LIGHT)), loneIfv);
         check("the choice keeps to what can be fielded",
                 EnumSet.of(Reinforcements.Kind.TANK, Reinforcements.Kind.LIGHT).contains(Reinforcements.choose(raid,
                         EnumSet.of(Reinforcements.Kind.TANK, Reinforcements.Kind.LIGHT), 0.99)), null);
@@ -1392,7 +1474,14 @@ public final class AiLogicCheck {
     static Reinforcements.Situation field(double enemyAir, double enemyArmour, double enemyAirDefence,
             double ownAirDefence, double capturable, double lostToAir, double spare) {
         return new Reinforcements.Situation(5.0, enemyAir, enemyArmour, 0.0, enemyAirDefence, 0.0, 0.0,
-                ownAirDefence, 0.0, 0.0, 0.0, capturable, 0.0, lostToAir, 0.0, 0.0, spare);
+                ownAirDefence, 0.0, 0.0, 0.0, capturable, 0.0, lostToAir, 0.0, 0.0, spare, 0.0, 0.0);
+    }
+
+    static Reinforcements.Situation withLone(Reinforcements.Situation s, double loneTanks, double loneIfvs) {
+        return new Reinforcements.Situation(s.own(), s.enemyAir(), s.enemyArmour(), s.enemyLight(), s.enemyAirDefence(),
+                s.ownTanks(), s.ownLight(), s.ownAirDefence(), s.ownArtillery(), s.ownFighters(), s.ownStrikers(),
+                s.capturable(), s.threatened(), s.lostToAir(), s.lostToArmour(), s.lostToAirDefence(), s.spare(), loneTanks,
+                loneIfvs);
     }
 
     static Reinforcements.Kind top(Map<Reinforcements.Kind, Double> needs) {

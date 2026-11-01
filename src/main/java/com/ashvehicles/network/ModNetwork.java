@@ -57,6 +57,8 @@ public final class ModNetwork {
                 HitReportPayload::handle);
         registrar.playToClient(VehicleGonePayload.TYPE, VehicleGonePayload.STREAM_CODEC,
                 VehicleGonePayload::handle);
+        // 爆風と衝突の一撃。物理を回している側だけが受け取って足す。
+        registrar.playToClient(ShovePayload.TYPE, ShovePayload.STREAM_CODEC, ShovePayload::handle);
         // 戦闘 AI の可視化。/tdm ai debug を開いた運営にだけ届く。
         registrar.playToClient(AiDebugPayload.TYPE, AiDebugPayload.STREAM_CODEC, AiDebugPayload::handle);
     }

@@ -1,0 +1,31 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_bomb",
+  "tab": "weapon",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 12
+    },
+    {
+      "item": "ashvehicles:high_explosive",
+      "count": 32
+    },
+    {
+      "item": "ashvehicles:fuze",
+      "count": 4
+    },
+    {
+      "item": "ashvehicles:circuit_board",
+      "count": 8
+    },
+    {
+      "item": "minecraft:nether_star",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:nuclear_bomb"
+  }
+}

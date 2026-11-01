@@ -21,7 +21,8 @@ import org.joml.Quaternionf;
  */
 public record AircraftInputPayload(AircraftInput input, float throttle, float afterburner,
         Quaternionf attitude, Vec3 velocity, boolean crashed, boolean toggleGear, boolean toggleFlaps,
-        boolean toggleVtol, boolean toggleBay, boolean toggleRamp, int cycleWeapon, boolean jettison)
+        boolean toggleVtol, boolean toggleBay, boolean toggleRamp, int cycleWeapon, boolean jettison,
+        int toggleLights)
         implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<AircraftInputPayload> TYPE =
@@ -55,12 +56,14 @@ public record AircraftInputPayload(AircraftInput input, float throttle, float af
                 buf.writeByte(payload.cycleWeapon());
                 // 増槽の投棄。他の単発操作と同じ形なのは、同じ物だからだ——押した瞬間に1度だけ起きる。
                 buf.writeBoolean(payload.jettison());
+                // 切り替える灯火のビット。MFD の押しボタンからしか来ない。
+                buf.writeByte(payload.toggleLights());
             },
             buf -> new AircraftInputPayload(AircraftInput.read(buf), buf.readFloat(), buf.readFloat(),
                     new Quaternionf(buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat()),
                     new Vec3(buf.readFloat(), buf.readFloat(), buf.readFloat()),
                     buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
-                    buf.readBoolean(), buf.readBoolean(), buf.readByte(), buf.readBoolean()));
+                    buf.readBoolean(), buf.readBoolean(), buf.readByte(), buf.readBoolean(), buf.readByte()));
 
     @Override
     public CustomPacketPayload.Type<AircraftInputPayload> type() {
@@ -114,6 +117,8 @@ public record AircraftInputPayload(AircraftInput input, float throttle, float af
             if (payload.jettison()) {
                 aircraft.jettisonTanks();
             }
+
+            aircraft.toggleLights(payload.toggleLights());
         });
     }
 }

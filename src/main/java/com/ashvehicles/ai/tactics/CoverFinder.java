@@ -91,13 +91,13 @@ public final class CoverFinder {
             double approach, double height) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("tactics.cover.protection", 1.2),
-                    parameters.get("tactics.cover.fire", 0.8),
-                    parameters.get("tactics.cover.danger", 0.6),
-                    parameters.get("tactics.cover.exposure", 0.4),
-                    parameters.get("tactics.cover.distance", 0.35),
-                    parameters.get("tactics.cover.approach", 0.3),
-                    parameters.get("tactics.cover.height", 0.2));
+                    parameters.get("tactics.cover.protection", 0.962119),
+                    parameters.get("tactics.cover.fire", 0.949434),
+                    parameters.get("tactics.cover.danger", 0.692283),
+                    parameters.get("tactics.cover.exposure", 0.348176),
+                    parameters.get("tactics.cover.distance", 0.377002),
+                    parameters.get("tactics.cover.approach", 0.308036),
+                    parameters.get("tactics.cover.height", 0.197545));
         }
     }
 

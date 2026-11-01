@@ -23,7 +23,7 @@
     showTerrain: true, terrainLight: 0.75, learnedMode: "combined", learnedAlpha: 0.8, fadeUnsure: true,
     weights: { trap: 3, water: 6, death: 1, flow: 0.2, risk: 1 },
     showPoints: true, showAnchor: true, showTracks: true, showAircraft: true, showStuck: true, showWater: true,
-    showDeaths: true, showCaptures: true, showReleases: true, showKills: true,
+    showDeaths: true, showCaptures: true, showReleases: true, showKills: true, showStalls: true,
     time: null, trail: true, selectedCell: null,
   };
 
@@ -466,6 +466,8 @@
         return settings.showReleases;
       case "EnemyDestroyed":
         return settings.showKills;
+      case "Stalled":
+        return settings.showStalls;
       default:
         return false;
     }
@@ -506,6 +508,16 @@
         context.strokeStyle = "#4f9dff";
         context.beginPath();
         context.arc(at.x, at.y, r, 0, Math.PI * 2);
+        context.stroke();
+        break;
+      case "Stalled":
+        // 下向きの三角——翼が飛ぶのをやめて落ちた所。
+        context.strokeStyle = "#ffae42";
+        context.beginPath();
+        context.moveTo(at.x - r, at.y - r);
+        context.lineTo(at.x + r, at.y - r);
+        context.lineTo(at.x, at.y + r);
+        context.closePath();
         context.stroke();
         break;
       case "VehicleDestroyed":

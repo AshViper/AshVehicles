@@ -7,6 +7,7 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 import com.ashvehicles.AshVehicles;
+import com.google.common.collect.MapMaker;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -262,15 +263,15 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
      */
     protected static void elevate(GeoModel<?> model, String bone, float degrees) {
         pose(model, bone, found -> {
-            Vector3f bore = boreOf(found);
+            float across = signs(found).elevateAboutZ();
 
-            if (Math.abs(bore.z()) >= Math.abs(bore.x())) {
+            if (across == 0.0F) {
                 turnAboutX(found, degrees);
 
                 return;
             }
 
-            found.setRotZ(rest(found).getRotZ() + sign(bore.x()) * degrees * DEG_TO_RAD);
+            found.setRotZ(rest(found).getRotZ() + across * degrees * DEG_TO_RAD);
         });
     }
 
@@ -349,7 +350,7 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
      * はボーンの軸ではなく親の軸で起きるからだ。
      */
     private static float machineSignYSlide(GeoBone bone) {
-        return sign(intoMachine(bone, new Vector3f(0.0F, 1.0F, 0.0F)).y());
+        return signs(bone).slideY();
     }
 
 
@@ -361,17 +362,12 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
      * ボーン自身の X を他の2つに通した物になる。
      */
     private static float machineSignX(GeoBone bone) {
-        BoneSnapshot rest = rest(bone);
-        Vector3f axis = new Vector3f(1.0F, 0.0F, 0.0F).rotateY(rest.getRotY()).rotateZ(rest.getRotZ());
-
-        return sign(intoMachine(bone, axis).x());
+        return signs(bone).turnX();
     }
 
     /** {@link #machineSignX} と同様、Y 軸周りの回転用。外側にあるのはボーン自身の Z 回転だけ。 */
     private static float machineSignY(GeoBone bone) {
-        Vector3f axis = new Vector3f(0.0F, 1.0F, 0.0F).rotateZ(rest(bone).getRotZ());
-
-        return sign(intoMachine(bone, axis).y());
+        return signs(bone).turnY();
     }
 
     /**
@@ -381,7 +377,7 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
      * {@code RenderUtil.prepMatrixForBone}——ので、移動はボーンの軸ではなく親の軸で起きる。
      */
     private static float machineSignZ(GeoBone bone) {
-        return sign(intoMachine(bone, new Vector3f(0.0F, 0.0F, 1.0F)).z());
+        return signs(bone).slideZ();
     }
 
     /**
@@ -392,7 +388,44 @@ public abstract class VehicleGeoModel<T extends Entity & GeoEntity> extends GeoM
      * どちら向きへ運ぶかの積だ。半回転したルートの下では両方が同時に裏返るので、積は正しい側へ戻る。
      */
     protected static float machineSideX(GeoBone bone) {
-        return sign(bone.getPivotX()) * sign(intoMachine(bone, new Vector3f(1.0F, 0.0F, 0.0F)).x());
+        return signs(bone).side();
+    }
+
+    /**
+     * 上の符号をボーンごとに一度だけ求めたもの。
+     *
+     * <p>どれも静止ポーズとジオメトリだけから決まり、フレームごとには変わらない。それを毎フレーム、姿勢を付ける
+     * ボーンの数だけ親の連鎖を辿り直してベクトルを作っていた——転輪を20個持つ戦車を試合に並べると、描画の
+     * たびにそれが数百回になる。答えは同じなので、{@link BakedGeometry} と同じく算出元のボーンを鍵に持つ。
+     *
+     * <p>鍵はボーンの同一性（{@code MapMaker().weakKeys()}）。{@link GeoBone#equals} は名前と数しか比べない
+     * ので、{@code WeakHashMap} では別の機体の同名ボーンの符号が返る。リロードは新しいボーンを焼くので、
+     * 古い答えは鍵と一緒に消える。
+     *
+     * @param elevateAboutZ 0 なら砲身が Z に沿い {@link #elevate} は X 軸周りに回す。そうでなければ Z 軸周りに
+     *                      回すときの符号
+     */
+    private record Signs(float turnX, float turnY, float slideY, float slideZ, float side, float elevateAboutZ) {
+        static Signs of(GeoBone bone) {
+            BoneSnapshot rest = rest(bone);
+            Vector3f turnX = new Vector3f(1.0F, 0.0F, 0.0F).rotateY(rest.getRotY()).rotateZ(rest.getRotZ());
+            Vector3f turnY = new Vector3f(0.0F, 1.0F, 0.0F).rotateZ(rest.getRotZ());
+            Vector3f bore = boreOf(bone);
+
+            return new Signs(
+                    sign(intoMachine(bone, turnX).x()),
+                    sign(intoMachine(bone, turnY).y()),
+                    sign(intoMachine(bone, new Vector3f(0.0F, 1.0F, 0.0F)).y()),
+                    sign(intoMachine(bone, new Vector3f(0.0F, 0.0F, 1.0F)).z()),
+                    sign(bone.getPivotX()) * sign(intoMachine(bone, new Vector3f(1.0F, 0.0F, 0.0F)).x()),
+                    Math.abs(bore.z()) >= Math.abs(bore.x()) ? 0.0F : sign(bore.x()));
+        }
+    }
+
+    private static final Map<GeoBone, Signs> SIGNS = new MapMaker().weakKeys().makeMap();
+
+    private static Signs signs(GeoBone bone) {
+        return SIGNS.computeIfAbsent(bone, Signs::of);
     }
 
     /** ボーンの親の軸で表された方向を、親の連鎖を辿って機体の軸へ運ぶ。 */

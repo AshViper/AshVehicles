@@ -64,6 +64,11 @@ public final class AirPresets {
         BOMBS("bombs"),
         /** 翼下に誘導爆弾と照準ポッド。固定翼機だけ。 */
         PRECISION("precision"),
+        /**
+         * 核を1発とデコイのポッド。兵装ファイルの {@code nuclear.match.carriers} に名前のある機体だけ（同梱では B-2・B-52・B-1）。
+         * 値段は機体の値段に核の分が足される（{@link Costs#of(Loadout)}）。
+         */
+        NUCLEAR("nuclear"),
         /** 何も吊らない。デコイのポッドだけ。 */
         CLEAN("clean");
 
@@ -97,8 +102,9 @@ public final class AirPresets {
      * @param loadout サーバーが吊る注文書。数は数え済みで、{@link Loadout#apply} は同じ数を吊る
      * @param mass 吊る物の合計（kg）。ファイルが最初から付けている金具を含む
      * @param payload 機体の搭載可能重量（kg）。0 なら無制限
+     * @param surcharge 機体の値段に足す出撃ポイント。核を吊るプリセットでだけ0でない（{@link Costs#surcharge}）
      */
-    public record Preset(Role role, Loadout loadout, List<Line> lines, float mass, float payload) {
+    public record Preset(Role role, Loadout loadout, List<Line> lines, float mass, float payload, int surcharge) {
     }
 
     /** 役割が吊る物の分類。空対空・対地ミサイル・ロケット・自由落下爆弾・誘導爆弾。 */
@@ -221,6 +227,7 @@ public final class AirPresets {
             // 回転翼機は爆弾を吊らない（AI も同じ、{@code AirLoadout.equip}）。
             case BOMBS -> main = rotor ? 0 : ground(plan, tips, pylons, specials, Kind.BOMB);
             case PRECISION -> main = rotor ? 0 : ground(plan, tips, pylons, specials, Kind.GUIDED_BOMB);
+            case NUCLEAR -> main = rotor ? 0 : nuclear(plan, aircraft, pylons, specials);
             case CLEAN -> {
                 pod(plan, specials, EquipmentDefinition.Kind.DECOY);
                 main = 1;
@@ -232,8 +239,45 @@ public final class AirPresets {
             return null;
         }
 
-        return new Preset(role, new Loadout(aircraft, List.copyOf(plan.entries)), lines(plan.entries),
-                plan.mass(), definition.airframe().payload());
+        Loadout loadout = new Loadout(aircraft, List.copyOf(plan.entries));
+
+        return new Preset(role, loadout, lines(plan.entries), plan.mass(), definition.airframe().payload(),
+                Costs.surcharge(loadout));
+    }
+
+    /**
+     * 核攻撃の組み方。デコイのポッドと、核を1発。機内の倉を先に。
+     *
+     * <p><b>1発だけ。</b> 1発で試合が終わる物で、2発目は値段だけ払って使う場面が来ない。B-52 と B-1 の倉は金具を持たず、
+     * そこに付く一番多く載る金具は4連の投下ラックなので、数を縛らなければ1本の倉に4発吊られる。
+     *
+     * <p>倉を先にするのは、外に吊ればレーダー反射が増えるから（[[stealth-needs-real-rcs-and-internal-bays]]）。
+     *
+     * <p><b>他の役割はこれを吊らない</b>（{@link #kindOf} が核を分類しない）。「爆撃」は合計の威力で選ぶので、分類に入れた
+     * 瞬間に全ての爆撃機の「爆撃」が核になる。
+     */
+    private static int nuclear(Plan plan, ResourceLocation aircraft, List<Integer> pylons, List<Integer> specials) {
+        List<Integer> slots = new ArrayList<>(pylons);
+
+        slots.sort((a, b) -> Boolean.compare(!plan.definition.hardpoints().get(a).internal(),
+                !plan.definition.hardpoints().get(b).internal()));
+        pod(plan, specials, EquipmentDefinition.Kind.DECOY);
+
+        for (ResourceLocation weapon : ModItems.weapons().keySet()) {
+            WeaponDefinition fitted = Definitions.weapon(weapon);
+
+            if (!fitted.nuclear().map(nuke -> nuke.match().carries(aircraft)).orElse(false)) {
+                continue;
+            }
+
+            for (int slot : slots) {
+                if (Loadout.choicesFor(plan.definition, slot).contains(weapon) && plan.hang(slot, weapon, 1) > 0) {
+                    return 1;
+                }
+            }
+        }
+
+        return 0;
     }
 
     /**
@@ -410,6 +454,11 @@ public final class AirPresets {
      */
     @Nullable
     private static Kind kindOf(WeaponDefinition weapon) {
+        // 核はどの分類にも入れない。吊るのは {@link #nuclear} だけ。
+        if (weapon.isNuclear()) {
+            return null;
+        }
+
         return switch (weapon.type()) {
             case MISSILE -> weapon.guidance().map(AirLoadout::hitsAir).orElse(false) ? Kind.AAM : Kind.AGM;
             case ROCKET -> Kind.ROCKET;
@@ -631,6 +680,11 @@ public final class AirPresets {
          * {@link Loadout#apply} も付けない。
          */
         int hang(int slot, ResourceLocation weapon) {
+            return this.hang(slot, weapon, Integer.MAX_VALUE);
+        }
+
+        /** 同じ物を、吊る数に上限を付けて。 */
+        int hang(int slot, ResourceLocation weapon, int most) {
             AircraftDefinition.Hardpoint hardpoint = this.definition.hardpoints().get(slot);
 
             if (!hardpoint.isWeaponPylon() || this.loaded[slot] > 0) {
@@ -655,7 +709,7 @@ public final class AirPresets {
             int hung = 0;
 
             if (carrier.takes(fitted)) {
-                while (hung < carrier.capacity() && this.fits(fitted.mass())) {
+                while (hung < carrier.capacity() && hung < most && this.fits(fitted.mass())) {
                     this.spend(fitted.mass());
                     hung++;
                 }

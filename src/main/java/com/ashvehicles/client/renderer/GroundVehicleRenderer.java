@@ -4,6 +4,7 @@ import javax.annotation.Nullable;
 
 import com.ashvehicles.client.model.GroundVehicleModel;
 import com.ashvehicles.client.model.TrackBelt;
+import com.ashvehicles.client.model.WheelGround;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.vehicle.Ride;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -90,6 +91,7 @@ public class GroundVehicleRenderer extends VehicleRenderer<GroundVehicleEntity> 
                         animatable.getWheelAngle(partialTick, false),
                         animatable.getWheelAngle(partialTick, true), animatable.getRide(partialTick),
                         animatable.getStats().suspension().travel(),
+                        WheelGround.of(animatable), partialTick,
                         link -> super.renderRecursively(poseStack, animatable, link, renderType, bufferSource,
                                 buffer, isReRender, partialTick, packedLight, packedOverlay, colour))) {
             return;

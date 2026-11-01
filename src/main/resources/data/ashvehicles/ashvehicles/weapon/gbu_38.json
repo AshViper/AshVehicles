@@ -1,0 +1,26 @@
+{
+  "type": "bomb",
+  "nation": "us",
+  "item": true,
+  "ammo": 1,
+  "mass": 253,
+  "firing": {
+    "rounds_per_second": 2.0,
+    "spread": 0.0,
+    "salvo": 1
+  },
+  "projectile": {
+    "damage": 500.0,
+    "speed": 0.15,
+    "gravity": 0.0245,
+    "range": 4000.0,
+    "explosion": 8.1,
+    "blast": 300.0,
+    "tracer": "A9ACA0",
+    "trail": false
+  },
+  "sound": {
+    "volume": 1.0,
+    "pitch": 0.7
+  }
+}

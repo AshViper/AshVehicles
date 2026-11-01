@@ -301,19 +301,49 @@ public final class VehicleChassis {
      *                <p>自前の目を持たない座席はこの目を使う。座席が目を持てるようになる以前は、全機体の
      *                ファイルがこれだけを書いていた——{@link Seat} 参照
      */
-    public record CameraMount(Vec3 pos, float tilt, Vec3 cockpit) {
+    public record CameraMount(Vec3 pos, float tilt, Vec3 cockpit, Optional<List<Display>> displays) {
         public static final CameraMount DEFAULT =
-                new CameraMount(new Vec3(0.0, 2.5, -24.0), 0.0F, new Vec3(0.0, 2.5, 3.4));
+                new CameraMount(new Vec3(0.0, 2.5, -24.0), 0.0F, new Vec3(0.0, 2.5, 3.4), Optional.empty());
 
         public static final Codec<CameraMount> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Vec3.CODEC.fieldOf("pos").forGetter(CameraMount::pos),
                 Codec.FLOAT.optionalFieldOf("tilt", 0.0F).forGetter(CameraMount::tilt),
-                Vec3.CODEC.fieldOf("cockpit").forGetter(CameraMount::cockpit)
+                Vec3.CODEC.fieldOf("cockpit").forGetter(CameraMount::cockpit),
+                Display.CODEC.listOf().optionalFieldOf("displays").forGetter(CameraMount::displays)
         ).apply(instance, CameraMount::new));
 
         // 照準ポッド用の3つ目のカメラは意図的に置いていない。あの映像が撮られるのは機体上の場所では
         // なくポッド上の場所であり、ポッドがどのステーションに吊られているかは機体ファイルではなく機体を
         // 武装させた者が決めるから。EquipmentDefinition.lensAt 参照。
+    }
+
+    /**
+     * 計器盤の多機能表示器（MFD）1枚。{@link com.ashvehicles.client.CockpitDisplays} が一人称のときだけ
+     * その面へ生きた画面を描く。
+     *
+     * <p>{@code camera.displays} を書かない機体には画面を描かない。位置は模型の画面の面から取る。
+     *
+     * @param pos 画面の中心。機体軸（x 右、y 上、z 前）でブロック単位
+     * @param width 横幅（ブロック）
+     * @param height 縦幅（ブロック）
+     * @param tilt 鉛直から奥へ寝かせる角度（度）。上端がパイロットから離れる向きが正
+     * @param yaw 中心へ向ける振り角（度）。右が正。左の画面は少し右を向くので正
+     * @param page 起動時に映す頁。{@code pfd}（姿勢と速度）・{@code nav}（方位と位置）・{@code radar}・
+     *             {@code sms}（兵装）・{@code eng}（推力・燃料・機体の状態）。押しボタンで切り替わる
+     * @param buttons 画面の縁の押しボタン（模型の小さな四角）の中心。機体軸でブロック単位。役割は位置から
+     *                決まる——{@link com.ashvehicles.client.CockpitControls} 参照
+     */
+    public record Display(Vec3 pos, float width, float height, float tilt, float yaw, String page,
+            List<Vec3> buttons) {
+        public static final Codec<Display> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Vec3.CODEC.fieldOf("pos").forGetter(Display::pos),
+                Codec.FLOAT.optionalFieldOf("width", 0.22F).forGetter(Display::width),
+                Codec.FLOAT.optionalFieldOf("height", 0.22F).forGetter(Display::height),
+                Codec.FLOAT.optionalFieldOf("tilt", 20.0F).forGetter(Display::tilt),
+                Codec.FLOAT.optionalFieldOf("yaw", 0.0F).forGetter(Display::yaw),
+                Codec.STRING.optionalFieldOf("page", "pfd").forGetter(Display::page),
+                Vec3.CODEC.listOf().optionalFieldOf("buttons", List.of()).forGetter(Display::buttons)
+        ).apply(instance, Display::new));
     }
 
     /**
@@ -556,7 +586,13 @@ public final class VehicleChassis {
             float working = idle + (1.0F - idle) * Mth.clamp(load, 0.0F, 1.0F);
             float burner = 1.0F + Mth.clamp(reheat, 0.0F, 1.0F) * (Math.max(this.afterburnerRate, 1.0F) - 1.0F);
 
-            return Math.max(this.burnRate, 0.0F) * working * burner;
+            return Math.max(this.burnRate, 0.0F) * working * burner * BURN_SCALE;
         }
+
+        /**
+         * 全機械の消費に一律で掛ける倍率。定義ファイルの burn_rate を1つずつ書き換えずに燃費全体を
+         * 動かすためのもの。0.5 で、各機体の燃料はファイルに書いた想定の2倍もつ。
+         */
+        private static final float BURN_SCALE = 0.5F;
     }
 }

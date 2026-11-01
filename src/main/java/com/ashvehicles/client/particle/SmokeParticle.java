@@ -43,17 +43,27 @@ public class SmokeParticle extends WeaponParticle {
     /**
      * 核のキノコ雲を作る煙。
      *
-     * <p>{@link #CLOUD} と違うのは寿命だけで、そしてそれが全てだ。核の演出は柱が立ち上がるだけで10秒近く、
-     * 傘が開ききるまで含めると20秒かかる。通常のキノコ雲の煙（最長12秒）では、傘が完成する頃に柱の根元が
-     * 消えていて、雲が地面と繋がらない。ここは20〜30秒もつので、最も見応えのある瞬間——柱と傘が同時にそこに
-     * ある瞬間——に全部が揃っている。
+     * <p>{@link #CLOUD} と違うのは寿命と風で、そしてそれが全てだ。傘が開ききるまでに20秒かかり、開いた後も
+     * 実物の雲は何分も空に居座って風下へ傾いていく。ここは75〜90秒もち、渡された水平速度を風として足し続ける
+     * （{@link CloudLayerParticle#BURNING} と同じ）。灼熱している時間は寿命を伸ばす前と同じ 180 tick。
      */
-    public static final Shape NUCLEAR = new Shape(400, 220, 0.90F, 2.4F, 0.95F, -0.010F, 0.90F,
-            Effects.FURNACE, 0.45F);
+    public static final Shape NUCLEAR = new Shape(1500, 300, 0.90F, 3.0F, 0.95F, -0.010F, 0.90F,
+            Effects.FURNACE, 0.12F, true);
+    /**
+     * 放射性降下物。傘の下から風下へ落ちてくる灰の帯——「黒い雨」。
+     *
+     * <p>落ちるのは煙ではなく粒なので重力が正で、摩擦が高いので終端速度（毎 tick 0.3 ブロック）で落ち続ける。
+     * 1粒は小さく薄いが、何百粒も同じ風に流されるので、傘から地面へ斜めに垂れる幕として見える。
+     */
+    public static final Shape FALLOUT = new Shape(520, 160, 1.6F, 1.5F, 0.98F, 0.15F, 0.50F,
+            NEVER_GLOWS, 0.0F, true);
 
     private final SpriteSet sprites;
     private final Shape shape;
     private final float spin;
+    /** 風に流される量（1tickあたりブロック）。{@link Shape#windborne} の粒だけが持つ。 */
+    private final double driftX;
+    private final double driftZ;
 
     private SmokeParticle(ClientLevel level, double x, double y, double z, double xd, double yd, double zd,
             TintedParticleOption options, SpriteSet sprites, Shape shape) {
@@ -66,9 +76,12 @@ public class SmokeParticle extends WeaponParticle {
         this.gravity = shape.gravity();
         // 煙が地形で跳ね返る筋合いは無い。物質ではないからだ。
         this.hasPhysics = false;
-        this.xd = xd;
+        // 風に乗る粒では、渡された水平速度は風そのもの。速度に入れると摩擦で止まる。
+        this.driftX = shape.windborne() ? xd : 0.0;
+        this.driftZ = shape.windborne() ? zd : 0.0;
+        this.xd = shape.windborne() ? 0.0 : xd;
         this.yd = yd;
-        this.zd = zd;
+        this.zd = shape.windborne() ? 0.0 : zd;
         this.spin = (this.random.nextFloat() - 0.5F) * 0.08F;
         this.roll = this.random.nextFloat() * Mth.TWO_PI;
         this.oRoll = this.roll;
@@ -79,6 +92,11 @@ public class SmokeParticle extends WeaponParticle {
     @Override
     public void tick() {
         super.tick();
+
+        if (this.driftX != 0.0 || this.driftZ != 0.0) {
+            this.move(this.driftX, 0.0, this.driftZ);
+        }
+
         this.setSpriteFromAge(this.sprites);
         this.oRoll = this.roll;
         this.roll += this.spin;
@@ -116,9 +134,14 @@ public class SmokeParticle extends WeaponParticle {
      * @param opacity 最も濃いときの不透明度
      * @param hot 生まれた時点の色。{@link WeaponParticle#NEVER_GLOWS} なら光らず、最初から自分の色をしている
      * @param cools 生まれた時の色から本来の色へ移りきる、寿命に対する割合。0なら移らない
+     * @param windborne 渡された水平速度を風として毎 tick 足し続けるか
      */
     public record Shape(int life, int lifeJitter, float size, float growth,
-            float friction, float gravity, float opacity, int hot, float cools) {
+            float friction, float gravity, float opacity, int hot, float cools, boolean windborne) {
+        public Shape(int life, int lifeJitter, float size, float growth,
+                float friction, float gravity, float opacity, int hot, float cools) {
+            this(life, lifeJitter, size, growth, friction, gravity, opacity, hot, cools, false);
+        }
     }
 
     public static ParticleProvider<TintedParticleOption> provider(SpriteSet sprites, Shape shape) {

@@ -615,8 +615,6 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         HudPanel panel = new HudPanel();
         List<Entity> aboard = vehicle.getPassengers();
 
-        panel.title("CREW / STATUS");
-
         if (!aboard.isEmpty()) {
             Entity commander = vehicle.getControllingPassenger();
 
@@ -663,8 +661,6 @@ public final class GroundVehicleHud implements LayeredDraw.Layer {
         boolean gun = vehicle.getStats().armament().exists();
         // 選べる物が2つ以上あって初めて、選択に意味がある。
         int carried = (gun ? 1 : 0) + (vehicle.hasCoaxial() ? 1 : 0) + (vehicle.hasMissiles() ? 1 : 0);
-
-        panel.title("WEAPONS / STATUS");
 
         // 2種以上積む車両では、トリガーが何を撃つか。1種しか積まない車両では何も出さない。答えが疑わしく
         // なることは無いからだ。

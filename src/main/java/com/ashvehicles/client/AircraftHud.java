@@ -125,8 +125,12 @@ public final class AircraftHud implements LayeredDraw.Layer {
      */
     private static final float PIXELS_PER_DEGREE = 5.0F;
     /** ピッチラダーの目盛り間隔（度）。 */
-    private static final int[] LADDER = {5, 10, 15, 20, 30, 45, 60};
-    private static final int LADDER_WIDTH = 46;
+    private static final int LADDER_STEP = 5;
+    /** 機首から上下この角度までの段だけを描く。 */
+    private static final int LADDER_SPAN = 15;
+    /** 段の外端までの幅と、中央の飛行経路マーカーのために空ける幅。 */
+    private static final int LADDER_WIDTH = 40;
+    private static final int RUNG_GAP = 14;
     /**
      * 水平線の長さ。機体シンボルの翼より長い。
      *
@@ -140,6 +144,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * <p>0でも重なりはしないが、隣り合った2本の縦線は1本の太い線に見える。外を見る帯はここから始まる。
      */
     private static final int TAPE_GAP = 22;
+    /** 速度と高度の箱の幅（計器の座標系）。 */
+    private static final int BOX_WIDTH = 34;
     /**
      * 爆弾の着弾環の地上での幅（ブロック）。画面上の大きさではなくワールド上の大きさで描くので、乗っている地面と同様に
      * 距離とともに縮むし、意味も持つ——爆弾が到達したときおおよそ何を吹き飛ばすか、である。
@@ -189,7 +195,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
 
         // 先に、窓の外に合わせて描かれる印。水平線もラダーも照準も、そこに在る物と同じ場所に乗っている
         // ことに意味があるので、大きさは本体の座標系のまま動かさない。{@link HudScale} 参照。
-        drawAttitude(graphics, attitude, centreX, centreY);
+        int[] path = speed < 0.05 ? null : project(minecraft, velocity.scale(1.0 / speed),
+                focalLength(minecraft, graphics), centreX, centreY);
+
+        drawAttitude(graphics, attitude, centreX, centreY, path);
         drawMarkers(graphics, minecraft, aircraft, attitude, velocity, speed, centreX, centreY);
         drawGunSight(graphics, minecraft, aircraft, partialTick, centreX, centreY);
         drawLock(graphics, minecraft, aircraft, partialTick, centreX, centreY);
@@ -734,7 +743,8 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * 逆さまになった機体でも、爪の向きだけで空がどちらかが分かる。これは実機の作法そのままで、そうなっている
      * 理由も同じだ。パイロットが姿勢を見失うのは、姿勢の情報が無いときではなく、あるが読むのに一拍かかるときだ。
      */
-    private static void drawAttitude(GuiGraphics graphics, Quaternionf attitude, int centreX, int centreY) {
+    private static void drawAttitude(GuiGraphics graphics, Quaternionf attitude, int centreX, int centreY,
+            int[] path) {
         float bank = Attitude.bank(attitude);
         float elevation = -Attitude.elevation(attitude);
 
@@ -742,57 +752,112 @@ public final class AircraftHud implements LayeredDraw.Layer {
         pose.pushPose();
         pose.translate(centreX, centreY, 0.0F);
         pose.mulPose(Axis.ZP.rotationDegrees(-bank));
+
+        // 梯子は飛行経路マーカーの横に付いて動く。水平線に沿って滑らせるだけなので、段が窓の外の角度に
+        // 乗っていることは崩れない。横滑りしても、読むべき梯子は目を置いている輪の上にある。
+        if (path != null) {
+            double radians = Math.toRadians(-bank);
+            float dx = path[0] - centreX;
+            float dy = path[1] - centreY;
+            float along = (float) (dx * Math.cos(radians) + dy * Math.sin(radians));
+
+            pose.translate(along, 0.0F, 0.0F);
+        }
+
         pose.translate(0.0F, elevation * PIXELS_PER_DEGREE, 0.0F);
 
-        // 水平線本体。中央に隙間を空け、機体シンボルを隠さないようにする。
-        graphics.fill(-HORIZON_WIDTH, -1, -20, 0, GREEN);
-        graphics.fill(20, -1, HORIZON_WIDTH, 0, GREEN);
+        // 水平線本体。中央を空け、飛行経路マーカーを隠さない。
+        graphics.fill(-HORIZON_WIDTH, -1, -RUNG_GAP, 0, GREEN);
+        graphics.fill(RUNG_GAP, -1, HORIZON_WIDTH, 0, GREEN);
 
         Font font = Minecraft.getInstance().font;
 
-        for (int rung : LADDER) {
-            drawRung(graphics, font, rung);
-            drawRung(graphics, font, -rung);
+        // 描くのは今の機首から上下 LADDER_SPAN 度の段だけ。全段を並べると梯子が画面の縦を埋め尽くし、
+        // 外を見る窓が無くなっていた。読む段は機首のすぐ近くにしか無い。
+        for (int rung = LADDER_STEP; rung <= 85; rung += LADDER_STEP) {
+            if (Math.abs(rung - elevation) <= LADDER_SPAN) {
+                drawRung(graphics, font, rung);
+            }
+
+            if (Math.abs(-rung - elevation) <= LADDER_SPAN) {
+                drawRung(graphics, font, -rung);
+            }
         }
 
         pose.popPose();
 
-        // 機体シンボル。画面に固定する。動くのは水平線であってこちらではない。長い翼にしてあるのは、これが
-        // 「機首がどこを向いているか」ではなく「機体のどこが正面か」の基準線だからで、短い印では水平線と
-        // 見分けが付かない。
-        graphics.fill(centreX - 74, centreY - 1, centreX - 16, centreY, GREEN);
-        graphics.fill(centreX + 16, centreY - 1, centreX + 74, centreY, GREEN);
-        graphics.fill(centreX - 74, centreY - 1, centreX - 73, centreY + 4, GREEN);
-        graphics.fill(centreX + 73, centreY - 1, centreX + 74, centreY + 4, GREEN);
+        waterline(graphics, centreX, centreY);
     }
 
-    /** ラダー1段。左右の棒、端の爪、そしてその外側の度数。 */
+    /**
+     * ラダー1段。左右の棒、内端の爪、外端の度数。
+     *
+     * <p>棒は角度の半分だけ水平線の側へ折れる。上の段は外へ向かって下がり、下の段は外へ向かって上がる——
+     * どの段を見ても、外端が指す側に水平線がある。背面でも縦の急降下でも、1段見えれば空の向きが分かる。
+     */
     private static void drawRung(GuiGraphics graphics, Font font, int degrees) {
-        int y = Math.round(-degrees * PIXELS_PER_DEGREE);
-        int half = LADDER_WIDTH;
-        int gap = 16;
-        int claw = degrees < 0 ? -4 : 4;
+        float y = -degrees * PIXELS_PER_DEGREE;
+        float length = LADDER_WIDTH - RUNG_GAP;
+        float drop = (float) Math.tan(Math.toRadians(degrees / 2.0)) * length;
+        int colour = degrees > 0 ? GREEN : DIM;
+        int claw = degrees > 0 ? 4 : -4;
 
-        if (degrees >= 0) {
-            graphics.fill(-half, y, -gap, y + 1, DIM);
-            graphics.fill(gap, y, half, y + 1, DIM);
-        } else {
-            // 水平線より下ではラダーを破線にする。実物と同じだ。
-            for (int dash = 0; dash < 4; dash++) {
-                int from = gap + dash * 8;
+        for (int side = -1; side <= 1; side += 2) {
+            float inner = side * RUNG_GAP;
+            float outer = side * LADDER_WIDTH;
 
-                graphics.fill(-Math.min(from + 6, half), y, -from, y + 1, DIM);
-                graphics.fill(from, y, Math.min(from + 6, half), y + 1, DIM);
+            if (degrees > 0) {
+                line(graphics, inner, y, outer, y + drop, colour);
+            } else {
+                // 水平線より下は破線。実物と同じだ。
+                for (int dash = 0; dash < 4; dash++) {
+                    float from = dash / 4.0F;
+                    float to = from + 0.16F;
+
+                    line(graphics, inner + (outer - inner) * from, y + drop * from,
+                            inner + (outer - inner) * to, y + drop * to, colour);
+                }
             }
+
+            int ix = Math.round(inner);
+            int iy = Math.round(y);
+            graphics.fill(Math.min(ix, ix + side), Math.min(iy, iy + claw), Math.max(ix, ix + side),
+                    Math.max(iy + 1, iy + claw), colour);
         }
 
-        graphics.fill(-half, Math.min(y, y + claw), -half + 1, Math.max(y + 1, y + claw), DIM);
-        graphics.fill(half - 1, Math.min(y, y + claw), half, Math.max(y + 1, y + claw), DIM);
+        String text = String.valueOf(Math.abs(degrees));
+        int labelY = Math.round(y + drop) - 4;
 
-        String text = String.valueOf(degrees);
+        graphics.drawString(font, text, Math.round(-LADDER_WIDTH) - 3 - font.width(text), labelY, colour, false);
+        graphics.drawString(font, text, Math.round(LADDER_WIDTH) + 3, labelY, colour, false);
+    }
 
-        graphics.drawString(font, text, -half - 5 - font.width(text), y - 3, DIM, false);
-        graphics.drawString(font, text, half + 5, y - 3, DIM, false);
+    /** 機首の基準線（W 字）。画面に固定する。動くのは梯子であってこちらではない。 */
+    private static void waterline(GuiGraphics graphics, int x, int y) {
+        line(graphics, x - 16, y, x - 8, y, GREEN);
+        line(graphics, x - 8, y, x - 4, y + 5, GREEN);
+        line(graphics, x - 4, y + 5, x, y, GREEN);
+        line(graphics, x, y, x + 4, y + 5, GREEN);
+        line(graphics, x + 4, y + 5, x + 8, y, GREEN);
+        line(graphics, x + 8, y, x + 16, y, GREEN);
+    }
+
+    /** 太さ1の斜めの線。GuiGraphics の fill は軸に沿った四角しか描けないので、回して描く。 */
+    static void line(GuiGraphics graphics, float x0, float y0, float x1, float y1, int colour) {
+        float dx = x1 - x0;
+        float dy = y1 - y0;
+        float length = (float) Math.sqrt(dx * dx + dy * dy);
+
+        if (length < 0.5F) {
+            return;
+        }
+
+        PoseStack pose = graphics.pose();
+        pose.pushPose();
+        pose.translate(x0, y0, 0.0F);
+        pose.mulPose(Axis.ZP.rotation((float) Math.atan2(dy, dx)));
+        graphics.fill(0, 0, Math.round(length), 1, colour);
+        pose.popPose();
     }
 
     /** 機首の指す方向と、機体が実際に進んでいる方向。 */
@@ -834,10 +899,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
     }
 
     /**
-     * 動く目盛り。左に対気速度、右に高度、上端に方位。
+     * 梯子の周りの数字。左の箱に対気速度、右の箱に高度、上に方位の目盛り。
      *
-     * <p>3本とも同じ作りで、同じ読み方をする。箱が今の値、その下を流れる目盛りが変化。パイロットが覚える
-     * のは1つの読み方だけで済む。
+     * <p>以前は画面の両端を流れる目盛りだったが、実機の HUD に倣って梯子のすぐ外の小さな箱にした。数字は
+     * 箱で読み、変化は梯子と飛行経路マーカーで見る——目を中央から大きく離さずに全部読める。
      */
     private static void drawNumbers(GuiGraphics graphics, Font font, AircraftEntity aircraft,
             Quaternionf attitude, Vec3 velocity, double speed) {
@@ -854,20 +919,105 @@ public final class AircraftHud implements LayeredDraw.Layer {
         // スコープを描かない機体では、その分の場所も空けない。空けておくと、何も無い帯を避けるために
         // 目盛りが内側へ寄り、レーダーの無い機体ほど画面が狭くなる。
         int leftEdge = aircraft.radar().fitted() ? RadarDisplay.SCOPE_RIGHT : RadarDisplay.EDGE;
-        int clear = HudScale.at(HORIZON_WIDTH + TAPE_GAP) + HudTape.RIGHT_REACH;
-        int room = centreX - leftEdge - TAPE_GAP - HudTape.LEFT_REACH;
-        int offset = Math.max(Math.min(clear, room), HudTape.RIGHT_REACH + TAPE_GAP);
+        // 箱は梯子のすぐ外。窓の外を見る帯を計器で埋めず、目を梯子から少し動かすだけで読める所に置く。
+        int offset = Math.min(HudScale.at(LADDER_WIDTH + 34) + BOX_WIDTH, centreX - leftEdge - 8);
 
         // 1ブロック=1m、1秒=20tick。
         int kmh = (int) Math.round(speed * 20.0 * 3.6);
         int climb = (int) Math.round(velocity.y * 20.0);
         int heading = Math.floorMod(Math.round(Attitude.heading(attitude)) + 180, 360);
 
-        HudTape.vertical(graphics, font, centreX - offset, centreY, "SPD", kmh, "km/h", null, null);
-        HudTape.vertical(graphics, font, centreX + offset - 40, centreY, "ALT", aircraft.getY(), "m",
-                "V/S", String.format("%+d m/s", climb));
+        int left = centreX - offset;
+        int right = centreX + offset - BOX_WIDTH;
+        int boxTop = centreY - 6;
 
-        HudTape.horizontal(graphics, font, centreX, 12, heading, true, heading + "  " + cardinal(heading));
+        box(graphics, font, left, boxTop, String.valueOf(kmh), GREEN);
+        box(graphics, font, right, boxTop, String.valueOf(Math.round(aircraft.getY())), GREEN);
+
+        // 箱の下の数字。左は機体を引いている量（迎角・荷重・推力）と今の構え、右は高さの変化と燃料。
+        float alpha = angleOfAttack(attitude, velocity, speed);
+        float load = aircraft.getLoadFactor(velocity);
+        int thrust = Math.round(aircraft.getThrottle() * 100.0F);
+        int y = boxTop + 20;
+
+        graphics.drawString(font, String.format("α %.0f°", alpha), left, y, GREEN, false);
+        graphics.drawString(font, String.format("G %.1f", load), left, y + 10,
+                Math.abs(load) > 7.0F ? WARNING : GREEN, false);
+        graphics.drawString(font, (aircraft.isAfterburning() ? "T AB " : "T ") + thrust + "%", left, y + 20,
+                GREEN, false);
+        graphics.drawString(font, mode(aircraft), left, y + 36, GREEN, false);
+
+        String vs = String.format("VS %+d", climb);
+        String fuel = String.format("F %d%%", Math.round(aircraft.getFuelFraction() * 100.0F));
+        int boxRight = right + BOX_WIDTH;
+
+        graphics.drawString(font, vs, boxRight - font.width(vs), y, climb < -15 ? WARNING : GREEN, false);
+        graphics.drawString(font, fuel, boxRight - font.width(fuel), y + 10,
+                aircraft.getFuelFraction() < BINGO_FUEL ? WARNING : GREEN, false);
+
+        heading(graphics, font, centreX, centreY - HudScale.at(LADDER_WIDTH * 3), heading);
+    }
+
+    /** 数字の箱。値は右に寄せる——桁が増えても末尾の位置が動かない。 */
+    private static void box(GuiGraphics graphics, Font font, int x, int y, String value, int colour) {
+        graphics.fill(x, y, x + BOX_WIDTH, y + 1, colour);
+        graphics.fill(x, y + 13, x + BOX_WIDTH, y + 14, colour);
+        graphics.fill(x, y, x + 1, y + 14, colour);
+        graphics.fill(x + BOX_WIDTH - 1, y, x + BOX_WIDTH, y + 14, colour);
+        graphics.drawString(font, value, x + BOX_WIDTH - 4 - font.width(value), y + 3, colour, false);
+    }
+
+    /**
+     * 方位の目盛り。梯子の上に短く、5度ごとの刻みと30度ごとの数字（10度単位の2桁）。今の方位は上の箱に、
+     * その真下に向きの印。
+     */
+    private static void heading(GuiGraphics graphics, Font font, int centreX, int y, int heading) {
+        float perDegree = 2.4F;
+        int span = 30;
+
+        for (int mark = heading - span; mark <= heading + span; mark++) {
+            if (Math.floorMod(mark, 5) != 0) {
+                continue;
+            }
+
+            int x = Math.round(centreX + (mark - heading) * perDegree);
+            boolean major = Math.floorMod(mark, 10) == 0;
+
+            graphics.fill(x, y - (major ? 5 : 3), x + 1, y, GREEN);
+
+            if (Math.floorMod(mark, 30) == 0) {
+                String text = String.format("%02d", Math.floorMod(mark, 360) / 10);
+                graphics.drawString(font, text, x - font.width(text) / 2, y - 14, GREEN, false);
+            }
+        }
+
+        // 向きの印と今の方位。
+        graphics.fill(centreX, y + 1, centreX + 1, y + 5, GREEN);
+        String now = String.format("%03d", heading);
+        int width = font.width(now) + 6;
+        int top = y - 30;
+
+        graphics.fill(centreX - width / 2, top, centreX + width / 2, top + 1, GREEN);
+        graphics.fill(centreX - width / 2, top + 11, centreX + width / 2, top + 12, GREEN);
+        graphics.fill(centreX - width / 2, top, centreX - width / 2 + 1, top + 12, GREEN);
+        graphics.fill(centreX + width / 2 - 1, top, centreX + width / 2, top + 12, GREEN);
+        graphics.drawString(font, now, centreX - font.width(now) / 2, top + 2, GREEN, false);
+    }
+
+    /** 今の構え。選んでいる兵装の種類から。何も選んでいなければ航法。 */
+    private static String mode(AircraftEntity aircraft) {
+        WeaponDefinition weapon = aircraft.getWeapons().selectedWeapon();
+
+        if (weapon == null) {
+            return "NAV";
+        }
+
+        return switch (weapon.type()) {
+            case GUN -> "GUN";
+            case MISSILE -> weapon.guidance().map(g -> g.seeker().laid()).orElse(false) ? "A-G" : "A-A";
+            case BOMB, ROCKET -> "A-G";
+            default -> "NAV";
+        };
     }
 
     /**
@@ -909,9 +1059,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
         List<Entity> aboard = aircraft.getPassengers();
         boolean remote = aircraft.isUnmanned();
 
-        panel.title(remote ? "LINK / STATUS" : "CREW / STATUS");
+        // 1人きりで乗っているなら、その1人は画面の持ち主だ。言うまでもない行は外の景色を1行ぶん塞ぐだけなので出さない。
+        boolean alone = aboard.size() == 1 && aboard.get(0) == Minecraft.getInstance().player;
 
-        if (!aboard.isEmpty()) {
+        if (!aboard.isEmpty() && !alone) {
             Entity pilot = aircraft.getControllingPassenger();
 
             for (Entity rider : aboard) {
@@ -956,10 +1107,12 @@ public final class AircraftHud implements LayeredDraw.Layer {
         panel.divider();
 
         if (!aircraft.isRotorcraft()) {
-            panel.pair("GEAR", DIM, aircraft.isGearDown() ? "DOWN" : "UP", GREEN,
-                    aircraft.isGearDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
-            panel.pair("FLAP", DIM, aircraft.isFlapsDown() ? "DOWN" : "UP", GREEN,
-                    aircraft.isFlapsDown() ? HudPanel.Mark.DOWN : HudPanel.Mark.UP);
+            // 脚とフラップは1行に並べる。どちらも上か下かの2値で、左右に分けても読み違えようがない。
+            boolean gear = aircraft.isGearDown();
+            boolean flaps = aircraft.isFlapsDown();
+
+            panel.pair("GEAR " + (gear ? "DN" : "UP"), gear ? GREEN : DIM, "FLAP " + (flaps ? "DN" : "UP"),
+                    flaps ? GREEN : DIM);
         }
 
         // 兵装倉を持つ機体のみ。開いている間だけ倉の中身がレーダーに映るので、これは形態の表示であると
@@ -1043,8 +1196,6 @@ public final class AircraftHud implements LayeredDraw.Layer {
     private static HudPanel arms(Minecraft minecraft, AircraftEntity aircraft) {
         HudPanel panel = new HudPanel();
 
-        panel.title("STORES / WEAPONS");
-
         // 矢印は1つだけ。意味は「今この画面の持ち主が引き金を引いたら出て行く物」で、それ以外の意味を
         // 持たせない。
         //
@@ -1072,7 +1223,6 @@ public final class AircraftHud implements LayeredDraw.Layer {
         int flares = aircraft.getCountermeasures(true);
         int chaff = aircraft.getCountermeasures(false);
 
-        panel.divider();
         panel.pair("CM", DIM, String.format("FL %d   CH %d", flares, chaff),
                 flares > 0 && chaff > 0 ? GREEN : WARNING);
 
@@ -1199,7 +1349,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
         float carried = aircraft.getStoreMass();
         float capacity = aircraft.getPayloadCapacity();
 
-        if (carried <= 0.0F && capacity <= 0.0F) {
+        // 搭載重量を問うのは吊る時、つまり地上だけだ。空では満載に近い時だけ残す。
+        boolean near = capacity > 0.0F && carried >= capacity * 0.95F;
+
+        if (carried <= 0.0F && capacity <= 0.0F || !aircraft.onGround() && !near) {
             return;
         }
 
@@ -1208,7 +1361,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
                 : String.format(java.util.Locale.ROOT, "%.0f KG", carried);
         // 満載に近づいたら琥珀。残りが最も軽い兵装1発を切っている、という以上のことは言わない——どの1発が
         // 載るかは兵装ごとの重さの問題であり、地上で吊ろうとすれば分かる。
-        int colour = capacity > 0.0F && carried >= capacity * 0.95F ? WARNING : DIM;
+        int colour = near ? WARNING : DIM;
 
         panel.pair("LOAD", DIM, text, colour);
     }

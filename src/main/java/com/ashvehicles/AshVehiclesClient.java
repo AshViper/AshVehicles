@@ -150,6 +150,8 @@ public class AshVehiclesClient {
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.CLOUD));
         event.registerSpriteSet(ModParticles.NUCLEAR_CLOUD.get(),
                 sprites -> SmokeParticle.provider(sprites, SmokeParticle.NUCLEAR));
+        event.registerSpriteSet(ModParticles.FALLOUT.get(),
+                sprites -> SmokeParticle.provider(sprites, SmokeParticle.FALLOUT));
         event.registerSpriteSet(ModParticles.CLOUD_LAYER.get(),
                 sprites -> CloudLayerParticle.provider(sprites, CloudLayerParticle.DRIFT));
         event.registerSpriteSet(ModParticles.NUCLEAR_LAYER.get(),
@@ -162,6 +164,7 @@ public class AshVehiclesClient {
                 sprites -> CinderParticle.provider(sprites, CinderParticle.RUBBLE));
         event.registerSpriteSet(ModParticles.FIRE.get(), FlameParticle::provider);
         event.registerSpriteSet(ModParticles.SHOCKWAVE.get(), ShockwaveParticle::provider);
+        event.registerSpriteSet(ModParticles.NUCLEAR_WAVE.get(), ShockwaveParticle::nuclear);
         event.registerSpriteSet(ModParticles.SPARK.get(), sprites -> SparkParticle.provider(sprites, true));
         event.registerSpriteSet(ModParticles.DEBRIS.get(), sprites -> SparkParticle.provider(sprites, false));
         event.registerSpriteSet(ModParticles.VAPOUR.get(),

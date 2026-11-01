@@ -17,6 +17,7 @@
     ObjectiveCaptured: "拠点を制圧", ObjectiveRecaptured: "拠点を奪還", ObjectiveLost: "拠点を失った",
     ObjectiveDefended: "拠点を防衛", UnnecessaryDeath: "避けられた撃破", LongExposure: "露出し続けた",
     AllySupported: "味方を援護", GoodFlank: "側面から命中", Escape: "抜け出し（来た道を戻った）", WeaponReleased: "撃った",
+    Stalled: "失速した",
   };
 
   const ACTIONS = {
@@ -340,7 +341,8 @@
         + card("地上の1出撃あたりの報酬", fixed(reward, 1));
 
     if (air.length || aircraft) {
-      html += card("航空機が撃破", counts.airKills || 0) + card("航空機が撃った（まとまり）", counts.WeaponReleased || 0);
+      html += card("航空機が撃破", counts.airKills || 0) + card("航空機が撃った（まとまり）", counts.WeaponReleased || 0)
+          + card("航空機が失速", counts.Stalled || 0);
     }
 
     html += "</div>";
@@ -552,6 +554,7 @@
         + chart("詰まり3回以上の判断の行", points(metric("jammed")), 0)
         + chart("制圧＋奪還", points((header) => header.lives.reduce((sum, life) => sum + (life.captures || 0) + (life.recaptures || 0), 0)), 0)
         + chart("航空機が撃破した数", points(metric("airKills")), 0)
+        + chart("航空機が失速した回数", points(metric("Stalled")), 0)
         + chart("地上の1出撃あたりの生存（秒）", points((header) => perLife(header, "survival_seconds")), 0);
 
     if (state.stats.size) {

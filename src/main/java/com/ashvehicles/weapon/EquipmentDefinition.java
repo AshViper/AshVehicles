@@ -10,7 +10,7 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * 撃つのではなく積むポッド。照準ポッド、ジャマー、デコイ発射機など。
- * {@code data/ashvehicles/equipment/} にファイルを置けば起動時に MOD がアイテムを登録し、どの機体の専用
+ * {@code data/ashvehicles/ashvehicles/equipment/} にファイルを置けば起動時に MOD がアイテムを登録し、どの機体の専用
  * ステーションにも取り付けられるようになる。
  *
  * <p>これらは兵装パイロンではなく専用ステーションに吊る。ポッドはステーションへ直付けで、ラックは無い。

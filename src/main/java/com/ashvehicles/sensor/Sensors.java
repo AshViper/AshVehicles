@@ -187,7 +187,7 @@ public final class Sensors {
             // 1つだけだ。
             if (other instanceof RocketEntity missile && missile.getTarget() == this.vehicle
                     && distance <= radar.warningRange()) {
-                warnings.add(new Threat(bearing, Threat.Kind.MISSILE));
+                warnings.add(new Threat(bearing, Threat.Kind.MISSILE, "M"));
             }
 
             Iff identity = Iff.between(this.vehicle, other);
@@ -203,7 +203,7 @@ public final class Sensors {
                 Threat.Kind attention = this.attentionFrom(hostile);
 
                 if (attention != null) {
-                    warnings.add(new Threat(bearing, attention));
+                    warnings.add(new Threat(bearing, attention, symbolOf(hostile)));
                 }
             }
 
@@ -278,6 +278,34 @@ public final class Sensors {
         } finally {
             LateWorld.restore(was);
         }
+    }
+
+    /**
+     * 警戒受信機に出す発信源の記号。受信機は電波の型で相手を聞き分けるので、型の分かる地対空には実機の呼び名の
+     * 数字を、それ以外は種類の頭文字を出す。表に無いレーダー車両は S（型不明の地対空）。
+     */
+    private static String symbolOf(VehicleEntityBase other) {
+        if (other instanceof AircraftEntity aircraft) {
+            return aircraft.isRotorcraft() ? "H" : "F";
+        }
+
+        if (other instanceof GroundVehicleEntity ground) {
+            if (ground.getStats().isShip()) {
+                return "N";
+            }
+
+            if (ground.radar().fitted()) {
+                return switch (ground.getVehicleId().getPath()) {
+                    case "pantsir_s1" -> "22";
+                    case "ciws_phalanx" -> "PH";
+                    default -> "S";
+                };
+            }
+
+            return "A";
+        }
+
+        return "U";
     }
 
     /**

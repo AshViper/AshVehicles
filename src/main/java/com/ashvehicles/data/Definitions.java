@@ -31,7 +31,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
  */
 @EventBusSubscriber(modid = AshVehicles.MODID)
 public final class Definitions {
-    /** 機体性能ファイルは {@code data/<namespace>/aircraft/} にある。 */
+    /** 機体性能ファイルは {@code data/<namespace>/ashvehicles/aircraft/} にある。以下同じく {@code ashvehicles/} の下。 */
     public static final DefinitionRegistry<AircraftDefinition> AIRCRAFT = DefinitionRegistry.of(
             "aircraft", AircraftDefinition.CODEC, AircraftDefinition.FALLBACK, "aircraft");
     /** 地上車両は {@code vehicle/}。 */

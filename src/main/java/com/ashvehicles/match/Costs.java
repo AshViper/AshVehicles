@@ -49,4 +49,42 @@ public final class Costs {
 
         return AIRCRAFT;
     }
+
+    /**
+     * その注文書で出す値段。機体の値段に、吊る物の試合での値段（核の {@code nuclear.match.cost}）を足す。
+     *
+     * <p>出撃盤の表示もサーバーの勘定もここを通る。注文書はプリセットの名前からサーバーが組み直す物なので
+     * （{@link AirPresets#order}）、画面が見せた値段とサーバーが引く値段は同じ規則から出る。
+     */
+    public static int of(Loadout loadout) {
+        return of(loadout.vehicle()) + surcharge(loadout);
+    }
+
+    /** 吊る物の試合での値段の合計。核を吊らない注文書では0。 */
+    public static int surcharge(Loadout loadout) {
+        int extra = 0;
+
+        for (Loadout.Entry entry : loadout.entries()) {
+            if (ModItems.weapons().containsKey(entry.weapon())) {
+                extra += Definitions.weapon(entry.weapon()).nuclear()
+                        .map(nuke -> nuke.match().cost() * entry.count())
+                        .orElse(0);
+            }
+        }
+
+        return extra;
+    }
+
+    /** 注文書が吊る核の数。 */
+    public static int nuclear(Loadout loadout) {
+        int count = 0;
+
+        for (Loadout.Entry entry : loadout.entries()) {
+            if (ModItems.weapons().containsKey(entry.weapon()) && Definitions.weapon(entry.weapon()).isNuclear()) {
+                count += entry.count();
+            }
+        }
+
+        return count;
+    }
 }

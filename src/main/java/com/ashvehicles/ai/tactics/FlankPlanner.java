@@ -68,12 +68,12 @@ public final class FlankPlanner {
             double danger) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("tactics.flank.weakness", 1.0),
-                    parameters.get("tactics.flank.fire", 0.7),
-                    parameters.get("tactics.flank.protection", 0.4),
-                    parameters.get("tactics.flank.approach", 0.8),
-                    parameters.get("tactics.flank.travel", 0.5),
-                    parameters.get("tactics.flank.danger", 0.4));
+                    parameters.get("tactics.flank.weakness", 0.76973),
+                    parameters.get("tactics.flank.fire", 0.743267),
+                    parameters.get("tactics.flank.protection", 0.35392),
+                    parameters.get("tactics.flank.approach", 1.101579),
+                    parameters.get("tactics.flank.travel", 0.372504),
+                    parameters.get("tactics.flank.danger", 0.428549));
         }
     }
 

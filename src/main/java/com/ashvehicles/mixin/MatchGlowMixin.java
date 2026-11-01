@@ -11,7 +11,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
 
 /**
- * 試合中の味方を、バニラの光る効果と同じ輪郭で光らせる。
+ * 試合中の味方（陣営に入っていない者には全陣営）を、バニラの光る効果と同じ輪郭で光らせる。
  *
  * <p><b>描画は1行も書かない。</b> ゲーム本体は「光って見えるか」を1つの述語で決めており
  * （{@code Minecraft.shouldEntityAppearGlowing}）、真を返せばそのエンティティはアウトラインバッファへ
@@ -20,13 +20,13 @@ import net.minecraft.world.entity.Entity;
  * <p>色は別の場所が決める。{@code MatchGlowColourMixin} 参照。
  *
  * <p><b>世界の全エンティティについて毎フレーム訊かれる。</b> 弾も破片も薬莢もここを通るので、
- * {@link MatchMarks#isFriendly} は型で落とせるものを名簿より先に落としている。
+ * {@link MatchMarks#glows} は型で落とせるものを名簿より先に落としている。
  */
 @Mixin(Minecraft.class)
 public class MatchGlowMixin {
     @Inject(method = "shouldEntityAppearGlowing", at = @At("HEAD"), cancellable = true)
     private void ashvehicles$glowFriendlies(Entity entity, CallbackInfoReturnable<Boolean> callback) {
-        if (MatchMarks.isFriendly(entity)) {
+        if (MatchMarks.glows(entity)) {
             callback.setReturnValue(true);
         }
     }

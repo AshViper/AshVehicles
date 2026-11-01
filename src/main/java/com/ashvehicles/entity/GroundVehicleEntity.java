@@ -1,5 +1,6 @@
 package com.ashvehicles.entity;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +15,7 @@ import com.ashvehicles.item.FuelItem;
 import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.vehicle.GroundVehicleDefinition;
 import com.ashvehicles.vehicle.Ride;
+import com.ashvehicles.vehicle.Tumble;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.weapon.AmmoKind;
 import com.ashvehicles.weapon.BuiltInGun;
@@ -33,6 +35,8 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -224,6 +228,25 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     /** ブロック/tick^2。バニラの値だが、車両を自前で動かすので自前で適用する。 */
     private static final double GRAVITY = 0.08;
+    /** この角度（ラジアン、約29度）を超えて転がった車体は、履帯で走れも曲がれもしない。 */
+    private static final double OVERTURNED = 0.5;
+    /** 物理を引き継いだとき、これ（度）を超える傾きは地面ではなく転倒と読む。 */
+    private static final float TIP_EVIDENT = 45.0F;
+    /** 質量が書かれていない車両の見積もり（kg / 接地面積×車高）。 */
+    private static final double ESTIMATED_DENSITY = 850.0;
+    /**
+     * 支えの面から「乗り越えられる段差＋これ」だけ下までの読み値は、まだ車体を支えていると数える（ブロック）。
+     * この世界の坂は階段なので、段の下の読み値を「支えなし」と数えると、坂を走るだけで支えの広さが毎 tick
+     * 跳ね、車体が勝手にのめったり傾いたりした。
+     */
+    private static final double SUPPORT_DEPTH = 0.25;
+    /** 転輪の可動域の下限（ブロック）。車両の suspension.travel が小さすぎるか 0 のときの下限。 */
+    private static final float MIN_WHEEL_REACH = 0.3F;
+    /** 当たり判定の箱のうち、最も低い底からこの高さ（ブロック）以内に底を持つ物を接地面と読む。 */
+    private static final double BASE_BAND = 0.5;
+    private static final double EDGE_SMOOTHING = 0.25;
+    /** 押しが車体の向きを変える割合。残りは履帯が地面に食い込んで受け止める。 */
+    private static final float YAW_GIVE = 0.5F;
     /** 終端速度。崖から落ちた車両が世界を突き抜けないように。 */
     private static final double MAX_FALL = 3.0;
 
@@ -241,6 +264,22 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     private static final double PROBE_ABOVE = 2.0;
     private static final double PROBE_BELOW = 3.0;
+
+    /** 姿勢のばねの減衰比。1 未満なので段差の後に1〜2回揺り返す。 */
+    private static final float SUSPENSION_DAMPING_RATIO = 0.35F;
+    /** 段差に乗り上げた高さのうち、上向きの速度として車体に残る割合（全速のとき）。 */
+    private static final double STEP_KICK = 0.35;
+    /** この速さ（ブロック/tick）で段差の跳ね上げが満額になる。 */
+    private static final double KICK_FULL_SPEED = 0.5;
+    /** 着地の速度のうち跳ね返る割合。 */
+    private static final double LANDING_RESTITUTION = 0.25;
+    /** これより遅い着地は跳ねずに止まる。 */
+    private static final double LANDING_SETTLE = 0.06;
+    /** 着地の衝撃（ブロック/tick）1あたりに車首を揺する角速度（度/tick）。 */
+    private static final float LANDING_NOD = 12.0F;
+
+    /** 履帯に沿って地面を読む間隔の上限（ブロック）。ブロック1つの起伏を取りこぼさない細かさ。 */
+    private static final double TRACK_SAMPLE_SPACING = 0.9;
 
     /**
      * 読み値を「地表」ではなく「プローブ自身の上限」と見なすための、上端からの許容幅（ブロック）。
@@ -341,6 +380,36 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private float hullPitch;
     /** 右側が左側よりどれだけ下か（度）。同じ読み値から。 */
     private float hullBank;
+    /** 姿勢の角速度（度/tick）。サスペンションのばねが揺り戻す分。 */
+    private float hullPitchRate;
+    private float hullBankRate;
+
+    /**
+     * 地面に沿って寝た姿勢の上に重なる、転がりの分。横転（ロール）と前転（ピッチ）。
+     *
+     * <p>ばねの姿勢（{@link #hullBank}）は「履帯の下の地面が向いている角度」で、地面から離れることが無い。
+     * こちらは片側の履帯が浮いて縁を支点に回る分で、重心の外へ合力が出たときだけ動く——急斜面の横切り、
+     * 坂での急旋回、爆風。{@link Tumble} 参照。ロールの正は右側が持ち上がる向き（{@code hullBank} とは逆）。
+     */
+    private final Tumble tipRoll = new Tumble();
+    private final Tumble tipPitch = new Tumble();
+    /** 転がりが原点を地面から持ち上げている高さ。地面の読みはこれを引いた高さで行う。 */
+    private double tipLift;
+    /** この側が物理を回し始めたか。回し始めた最初の tick に、届いていた姿勢から転がりを拾い直す。 */
+    private boolean drivenHere;
+    /**
+     * 地面が実際に車体を支えている範囲（車体中心から、前・後・右・左へのブロック）。全面で支えられていれば
+     * 接地面の端そのもの。{@link #settleOnGround} が測り、{@link #tip} が支点として読む。
+     */
+    private double supportAhead;
+    private double supportBehind;
+    private double supportRight;
+    private double supportLeft;
+    /** 支えの縁の偏りを数 tick で均した物。読み値は1ブロック単位で跳ぶので、そのまま使うと車体が震える。 */
+    private double edgeAlong;
+    private double edgeAcross;
+    /** サーバーが前の tick に見た車首方向の速度。衝突を「急に止まった」ことから読む（{@link VehicleCollisions}）。 */
+    private float speedLastTick;
 
     /** 車首方向の速度（ブロック/tick）。負は後進。 */
     private float speed;
@@ -1891,6 +1960,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             // 置き直す方の側だからだ。AircraftEntity.tickHold 参照。
             this.stowed();
         } else if (this.isControlledByLocalInstance()) {
+            if (!this.drivenHere) {
+                this.drivenHere = true;
+                this.takeTip();
+            }
+
             // 座席が空: ブレーキが掛かり惰性で停止する。運転手が降りた時点の動きを引き継ぎ、足元で急停止
             // したりはしない。残骸も同じ扱いが恒久化した物で——座る席がもう無い——被弾地点ではなく自分の
             // 履帯の上で止まる。
@@ -1908,6 +1982,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 this.entityData.set(DATA_SPEED, this.speed);
             }
         } else {
+            // 転がりは物理を回している側の物。手放したら忘れ、取り戻したときに姿勢から拾い直す。
+            this.drivenHere = false;
+            this.tipRoll.set(0.0, 0.0);
+            this.tipPitch.set(0.0, 0.0);
+            this.tipLift = 0.0;
             this.tickLerp();
             this.attitude = new Quaternionf(this.entityData.get(DATA_ATTITUDE));
             this.heading = Attitude.heading(this.attitude);
@@ -1947,6 +2026,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             // 車外の操作者も同じ理由で確かめる。あちらは降車という区切りを持たないので、居なくなったことに
             // 気付く手段は報告が途切れたことしかない。
             this.tickCrew();
+
+            // 他の機体にぶつかった・押しているなら、その分を相手と分け合う。前の tick の速さと比べるので毎 tick 覚える。
+            VehicleCollisions.tick(this, this.speedLastTick);
+            this.speedLastTick = this.speed;
 
             // 焼け落ちた車体には装填する砲も、捜索するシーカーも、それらを向ける対象も無い。
             if (!this.isWrecked()) {
@@ -2048,7 +2131,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     private void driveTick() {
         GroundVehicleDefinition definition = this.getStats();
-
         this.steer(definition.powertrain());
         this.accelerate(definition.powertrain(), definition.suspension());
         this.travel();
@@ -2059,7 +2141,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         if (definition.isShip()) {
             this.settleOnWater(definition.buoyancy());
         } else {
+            // 地面は転がりが持ち上げる前の高さで読む。持ち上げたまま読めば、横倒しの車体は毎tick宙に居る。
+            this.setPos(this.getX(), this.getY() - this.tipLift, this.getZ());
             this.settleOnGround(definition.suspension());
+            this.tip();
         }
 
         this.attitude = this.buildAttitude();
@@ -2094,13 +2179,20 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return;
         }
 
+        // 履帯が地面を離れた車体も同じ。
+        if (this.overturned()) {
+            return;
+        }
+
         if (this.input.steer() == 0.0F) {
             return;
         }
 
         float top = Math.max(powertrain.maxSpeed(), STANDSTILL);
         float fraction = Mth.clamp(Math.abs(this.speed) / top, 0.0F, 1.0F);
-        float rate = Mth.lerp(fraction, powertrain.pivotRate(), powertrain.steerRate());
+        float rate = powertrain.pivotRate() <= 0.0F && !this.getStats().isShip()
+                ? wheeledSteerRate(fraction, powertrain.steerRate())
+                : Mth.lerp(fraction, powertrain.pivotRate(), powertrain.steerRate());
         // 大きさは速度から、符号は進行方向から取る。大きさだけを取ると——上の abs が残すのがそれだ——後進中の
         // 車両が前進時と同じ向きに曲がってしまい、後退でコーナーを回ると舵が逆になる。
         float astern = this.speed < -STANDSTILL ? -1.0F : 1.0F;
@@ -2113,6 +2205,25 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // これがスタビライザーの全てだ。無ければ車体が曲がるたび砲が目標から外れ、砲手は戦闘中ずっと据え直す
         // ことになる。
         this.turretYaw = Mth.wrapDegrees(this.turretYaw - turn);
+    }
+
+    /** 装輪車両の旋回率が最大になる速度（最高速に対する比）。 */
+    private static final float WHEELED_STEER_KNEE = 0.25F;
+    /** 最高速での旋回率の、最大値に対する比。 */
+    private static final float WHEELED_STEER_AT_TOP = 0.35F;
+
+    /**
+     * 装輪車両の旋回率。{@code steer_rate} を最大値として、転がり出してから急に立ち上がり（平方根）、
+     * {@link #WHEELED_STEER_KNEE} で頂点に達した後は高速ほど鈍る。実車の旋回は低速では舵角の、
+     * 高速ではタイヤの横グリップの限界で決まり、後者は速度に反比例するからだ。最高速では
+     * {@link #WHEELED_STEER_AT_TOP} 倍まで落ちる。
+     */
+    private static float wheeledSteerRate(float fraction, float steerRate) {
+        if (fraction < WHEELED_STEER_KNEE) {
+            return steerRate * Mth.sqrt(fraction / WHEELED_STEER_KNEE);
+        }
+        float past = (fraction - WHEELED_STEER_KNEE) / (1.0F - WHEELED_STEER_KNEE);
+        return steerRate * Mth.lerp(past, 1.0F, WHEELED_STEER_AT_TOP);
     }
 
     /**
@@ -2128,6 +2239,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 乗り上げた地面で船体が擦れて止まる形で失われる。
         if (this.getStats().isShip() && !this.afloat) {
             this.speed = approach(this.speed, 0.0F, powertrain.braking());
+
+            if (Math.abs(this.speed) < STANDSTILL) {
+                this.speed = 0.0F;
+            }
+
+            return;
+        }
+
+        // 倒れた車体の履帯は空を掻く。残った惰性は車体が地面を擦って失う。
+        if (this.overturned()) {
+            this.speed = approach(this.speed, 0.0F, powertrain.braking() * 2.0F);
 
             if (Math.abs(this.speed) < STANDSTILL) {
                 this.speed = 0.0F;
@@ -2266,17 +2388,36 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return movement;
         }
 
-        Vec3[] corners = footprint.corners(this.position(), this.headingVector());
+        // 段差は履帯と車輪（接地面の箱）の四隅から読む。車体の張り出しの四隅で読むと、履帯がまだ触れていない
+        // 段を車首の下で「登る段」と数え、手前で止まったり宙で持ち上がったりした。張り出しの四隅は、その下の
+        // 隙間（底の高さ）ぶん高い段まで素通りさせる。
+        GroundVehicleDefinition.Suspension suspension = this.getStats().suspension();
+        Vec3[] baseCorners = footprint.baseCorners(this.position(), this.headingVector(), suspension);
+        Vec3[] hullCorners = footprint.corners(this.position(), this.headingVector());
+        Vec3[] corners = new Vec3[baseCorners.length + hullCorners.length];
+        double[] allowance = new double[corners.length];
+        double climbHeight = suspension.climbHeight();
+
+        for (int i = 0; i < baseCorners.length; i++) {
+            corners[i] = baseCorners[i];
+            allowance[i] = climbHeight;
+        }
+
+        for (int i = 0; i < hullCorners.length; i++) {
+            corners[baseCorners.length + i] = hullCorners[i];
+            allowance[baseCorners.length + i] = Math.max(climbHeight,
+                    footprint.clearance(i < 2) - footprint.bottom());
+        }
+
         double[] before = new double[corners.length];
 
         for (int i = 0; i < corners.length; i++) {
             before[i] = this.groundUnder(corners[i]);
         }
 
-        double climb = this.getStats().suspension().climbHeight();
-        double x = this.canStep(new Vec3(movement.x, 0.0, 0.0), corners, before, footprint, climb)
+        double x = this.canStep(new Vec3(movement.x, 0.0, 0.0), corners, before, footprint, allowance)
                 ? movement.x : 0.0;
-        double z = this.canStep(new Vec3(0.0, 0.0, movement.z), corners, before, footprint, climb)
+        double z = this.canStep(new Vec3(0.0, 0.0, movement.z), corners, before, footprint, allowance)
                 ? movement.z : 0.0;
 
         return new Vec3(x, movement.y, z);
@@ -2291,12 +2432,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * だからだ。よって頭上空間は別途、局所地面の段差1つ上から車両上端までを見て、その隙間にある物は車体が
      * ぶつかる物として扱う。
      */
-    private boolean canStep(Vec3 step, Vec3[] corners, double[] before, Footprint footprint, double climb) {
+    private boolean canStep(Vec3 step, Vec3[] corners, double[] before, Footprint footprint, double[] allowance) {
         if (step.lengthSqr() == 0.0) {
             return true;
         }
 
         for (int i = 0; i < corners.length; i++) {
+            double climb = allowance[i];
             Vec3 to = corners[i].add(step);
             double ground = this.groundUnder(to);
 
@@ -2440,12 +2582,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * @param front 車首方向への張り出し。戦車では砲口ではなく車体前面
      * @param back 同じく後方への張り出し。負値
      */
-    private record Footprint(double halfWidth, double front, double back, double top) {
+    private record Footprint(double halfWidth, double front, double back, double top, List<double[]> undersides,
+            double baseHalfWidthOrZero, double baseFrontOrZero, double baseBackOrZero, double bottom) {
         static Footprint of(VehicleShape shape) {
             double halfWidth = 0.0;
             double front = 0.0;
             double back = 0.0;
             double top = 0.0;
+            List<double[]> undersides = new ArrayList<>();
 
             for (VehicleShape.Box box : shape.boxes()) {
                 Vec3 half = box.size().scale(0.5);
@@ -2458,13 +2602,95 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 halfWidth = Math.max(halfWidth, Math.abs(box.offset().x) + half.x);
                 front = Math.max(front, box.offset().z + half.z);
                 back = Math.min(back, box.offset().z - half.z);
+
+                // 箱の底の四隅 {前へ s, 右へ t, 底の高さ}。箱の +x は左なので t はその符号反転。
+                double bottom = box.offset().y - half.y;
+
+                for (int i = 0; i < 4; i++) {
+                    double s = box.offset().z + ((i & 1) == 0 ? half.z : -half.z);
+                    double t = -(box.offset().x + ((i & 2) == 0 ? half.x : -half.x));
+                    undersides.add(new double[] {s, t, bottom});
+                }
             }
 
-            return new Footprint(halfWidth, front, back, top);
+            // 接地面: 車体の箱のうち、いちばん低い底から BASE_BAND 以内に底を持つ物の広がり。履帯・車輪・船底の
+            // 箱がこれに当たる。
+            double floor = Double.MAX_VALUE;
+
+            for (double[] corner : undersides) {
+                floor = Math.min(floor, corner[2]);
+            }
+
+            double baseHalfWidth = 0.0;
+            double baseFront = 0.0;
+            double baseBack = 0.0;
+
+            for (double[] corner : undersides) {
+                if (corner[2] > floor + BASE_BAND) {
+                    continue;
+                }
+
+                baseHalfWidth = Math.max(baseHalfWidth, Math.abs(corner[1]));
+                baseFront = Math.max(baseFront, corner[0]);
+                baseBack = Math.min(baseBack, corner[0]);
+            }
+
+            return new Footprint(halfWidth, front, back, top, List.copyOf(undersides), baseHalfWidth, baseFront,
+                    baseBack, undersides.isEmpty() ? 0.0 : floor);
+        }
+
+        private boolean hasBase() {
+            return this.baseHalfWidthOrZero > 0.0 && this.baseFrontOrZero - this.baseBackOrZero > 0.0;
+        }
+
+        /** 接地面の半幅。箱が無ければ定義ファイルの contact_width から。 */
+        double baseHalfWidth(GroundVehicleDefinition.Suspension suspension) {
+            return this.hasBase() ? this.baseHalfWidthOrZero : suspension.contactWidth() * 0.5;
+        }
+
+        double baseFront(GroundVehicleDefinition.Suspension suspension) {
+            return this.hasBase() ? this.baseFrontOrZero : suspension.contactLength() * 0.5;
+        }
+
+        double baseBack(GroundVehicleDefinition.Suspension suspension) {
+            return this.hasBase() ? this.baseBackOrZero : -suspension.contactLength() * 0.5;
+        }
+
+        double baseLength(GroundVehicleDefinition.Suspension suspension) {
+            return this.baseFront(suspension) - this.baseBack(suspension);
         }
 
         boolean isEmpty() {
             return this.halfWidth <= 0.0 || this.top <= 0.0;
+        }
+
+        /**
+         * 張り出しの下の隙間の高さ（箱の座標）。接地面の前端より前（{@code nose}）か後端より後ろにある箱の底の
+         * 最低値。張り出しが無ければ接地面の底。
+         */
+        double clearance(boolean nose) {
+            double edge = nose ? this.baseFrontOrZero : this.baseBackOrZero;
+            double lowest = Double.MAX_VALUE;
+
+            for (double[] corner : this.undersides) {
+                if (nose ? corner[0] > edge + 1.0E-3 : corner[0] < edge - 1.0E-3) {
+                    lowest = Math.min(lowest, corner[2]);
+                }
+            }
+
+            return lowest == Double.MAX_VALUE ? this.bottom : lowest;
+        }
+
+        /** 接地面（履帯・車輪の箱）の四隅（ワールド座標）。順は {@link #corners} と同じ。 */
+        Vec3[] baseCorners(Vec3 at, Vec3 forward, GroundVehicleDefinition.Suspension suspension) {
+            Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
+            Vec3 nose = forward.scale(this.baseFront(suspension));
+            Vec3 tail = forward.scale(this.baseBack(suspension));
+            Vec3 side = right.scale(this.baseHalfWidth(suspension));
+
+            return new Vec3[] {
+                    at.add(nose).subtract(side), at.add(nose).add(side),
+                    at.add(tail).subtract(side), at.add(tail).add(side)};
         }
 
         /** ある位置・方位における設置面積の四隅（ワールド座標）。 */
@@ -2531,6 +2757,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 ? (this.getStats().isShip() ? this.limitAfloat(movement) : this.limitToShape(movement))
                 : movement;
 
+        // 他の機体は地面プローブの四隅の間を抜けてくるので、箱でも止める。Hitboxes.betweenMachines 参照。
+        if (type == MoverType.SELF && !(this.level().isClientSide && !this.isControlledByLocalInstance())) {
+            allowed = Hitboxes.betweenMachines(this, allowed,
+                    this.getStats().isShip() ? 0.0 : this.getStats().suspension().climbHeight());
+        }
+
         this.setPos(this.getX() + allowed.x, this.getY() + allowed.y, this.getZ() + allowed.z);
         this.horizontalCollision = allowed.x != movement.x || allowed.z != movement.z;
     }
@@ -2548,27 +2780,336 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private void settleOnGround(GroundVehicleDefinition.Suspension suspension) {
         Vec3 forward = this.headingVector();
         Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
-        double halfLength = suspension.contactLength() * 0.5;
-        double halfWidth = suspension.contactWidth() * 0.5;
+        // 接地面は定義ファイルの数字ではなく当たり判定の箱から取る（{@link Footprint#base}）。
+        Footprint base = this.footprint();
+        double baseFront = base.baseFront(suspension);
+        double baseBack = base.baseBack(suspension);
+        double halfLength = (baseFront - baseBack) * 0.5;
+        double halfWidth = base.baseHalfWidth(suspension);
 
+        // 四隅だけでは履帯の中ほどの起伏が見えない。稜線を跨いだ戦車は前後の平均の高さに置かれ、腹が丘に
+        // 埋まっていた。そこで左右の履帯それぞれに沿って約1ブロックおきに地面を読む。
+        int along = Math.max(2, Mth.ceil(halfLength * 2.0 / TRACK_SAMPLE_SPACING) + 1);
+        int count = along * 2;
+        double[] s = new double[count];
+        double[] t = new double[count];
+        double[] h = new double[count];
         Vec3 centre = this.position();
-        double frontLeft = this.groundUnder(centre.add(forward.scale(halfLength)).subtract(right.scale(halfWidth)));
-        double frontRight = this.groundUnder(centre.add(forward.scale(halfLength)).add(right.scale(halfWidth)));
-        double rearLeft = this.groundUnder(centre.subtract(forward.scale(halfLength)).subtract(right.scale(halfWidth)));
-        double rearRight = this.groundUnder(centre.subtract(forward.scale(halfLength)).add(right.scale(halfWidth)));
 
-        // 下に何も無ければ水平と読む。空中の車両が向かうべき姿勢はそれだ。今離れた斜面の角度を保つ理由は
-        // 無い。
-        float targetPitch = slopeAngle(mean(frontLeft, frontRight), mean(rearLeft, rearRight), halfLength * 2.0);
-        float targetBank = slopeAngle(mean(frontLeft, rearLeft), mean(frontRight, rearRight), halfWidth * 2.0);
+        for (int side = 0; side < 2; side++) {
+            double across = side == 0 ? -halfWidth : halfWidth;
 
-        float rate = Mth.clamp(suspension.settleRate(), 0.0F, 1.0F);
-        this.hullPitch = Mth.lerp(rate, this.hullPitch, targetPitch);
-        this.hullBank = Mth.lerp(rate, this.hullBank, targetBank);
+            for (int i = 0; i < along; i++) {
+                int k = side * along + i;
+                s[k] = baseBack + halfLength * 2.0 * i / (along - 1);
+                t[k] = across;
+                h[k] = this.groundUnder(centre.add(forward.scale(s[k])).add(right.scale(across)));
+            }
+        }
+
+        // 姿勢は読み値に最小二乗で当てた平面から取る。下に何も無ければ水平と読む。空中の車両が向かうべき
+        // 姿勢はそれだ。今離れた斜面の角度を保つ理由は無い。
+        double[] plane = fitPlane(s, t, h);
+
+        // 車体の箱の底の四隅の下の地面。箱の底が地面に乗るなら、そこも車体を支える点になる。持ち上げるだけ
+        // では1つの角が段に掛かっただけで車体ごと宙へ浮いたので、傾き（restingSlope）と高さの両方に入れる。
+        List<double[]> undersides = this.footprint().undersides();
+        double[][] under = new double[undersides.size()][];
+
+        for (int k = 0; k < under.length; k++) {
+            double[] corner = undersides.get(k);
+            double ground = this.groundUnder(centre.add(forward.scale(corner[0])).add(right.scale(corner[1])));
+            under[k] = new double[] {corner[0], ground - corner[2], corner[1], ground};
+        }
+        // ハーフブロックのような小さな段は転輪が縮んで呑む（描画は client/model/WheelGround）。平面からの
+        // はみ出しが転輪の可動域に収まる間は、車体は均した平面のまま動かさない。収まらない段だけが、凸包で
+        // 車体を傾け持ち上げる。
+        double reach = wheelReach(suspension);
+        boolean absorbed = deviationFrom(plane, s, t, h) <= reach;
+        float targetPitch = (float) Math.toDegrees(Math.atan(absorbed ? plane[0]
+                : restingSlope(s, h, along, under, Math.tan(Math.toRadians(this.hullPitch)), plane[0])));
+        // ロールは左が高いときを正とし、t は右向き。
+        float targetBank = (float) Math.toDegrees(Math.atan(-plane[1]));
+
+        // 姿勢は追従ではなくばね。settle_rate をばね定数に読み、減衰を臨界より弱くすると、段差を越えた車体は
+        // 目標の角度を少し行き過ぎて揺り返す。
+        float stiffness = Mth.clamp(suspension.settleRate(), 0.0F, 1.0F);
+        float damping = 2.0F * Mth.sqrt(stiffness) * SUSPENSION_DAMPING_RATIO;
+        this.hullPitchRate += (targetPitch - this.hullPitch) * stiffness - this.hullPitchRate * damping;
+        this.hullBankRate += (targetBank - this.hullBank) * stiffness - this.hullBankRate * damping;
+        this.hullPitch = Mth.clamp(this.hullPitch + this.hullPitchRate, -60.0F, 60.0F);
+        this.hullBank = Mth.clamp(this.hullBank + this.hullBankRate, -60.0F, 60.0F);
         this.setXRot(-this.hullPitch);
 
-        // 接地面の中心。車体が同じ平面に沿って寝ている以上、車両の原点はここに属する。
-        this.rest(mean(mean(frontLeft, frontRight), mean(rearLeft, rearRight)), suspension);
+        // 高さは平均ではなく「今描いている車体の平面がどの読み値の下にも潜らない最低の高さ」。履帯は一番高い
+        // 所に乗るのであって、地面の平均に乗るのではない。姿勢がまだ追い付いていない間も、潜るより浮く側へ
+        // 倒れる。
+        double tanPitch = Math.tan(Math.toRadians(this.hullPitch));
+        double tanBank = Math.tan(Math.toRadians(this.hullBank));
+        double support = Double.NaN;
+
+        for (int k = 0; k < count; k++) {
+            if (Double.isNaN(h[k])) {
+                continue;
+            }
+
+            double origin = h[k] - s[k] * tanPitch + t[k] * tanBank;
+            support = Double.isNaN(support) ? origin : Math.max(support, origin);
+        }
+
+        // いちばん高い読み値から可動域ぶんまでは転輪が縮んで受け、車体はその残りだけ持ち上がる。呑める段なら
+        // 車体は下の地面の高さに留まり、1ブロックの丸太なら転輪が縮み切った残りぶんだけ乗り上げる。
+        if (!Double.isNaN(support)) {
+            double lowest = Double.NaN;
+
+            for (int k = 0; k < count; k++) {
+                if (!Double.isNaN(h[k])) {
+                    double origin = h[k] - s[k] * tanPitch + t[k] * tanBank;
+                    lowest = Double.isNaN(lowest) ? origin : Math.min(lowest, origin);
+                }
+            }
+
+            support = Math.max(support - reach, lowest);
+        }
+
+        // 履帯の下だけを読むと、履帯より前後へ張り出した車体の箱が、傾いたときに斜面や段へ埋まった。箱の底の
+        // 四隅の下も読み、その底が地面に潜らない高さまで持ち上げる。登坂能力を超える持ち上げは壁なので採らない
+        // （そこへは limitToShape が入らせない）。
+        if (!Double.isNaN(support)) {
+            double hullSupport = support;
+
+            for (double[] corner : under) {
+                if (Double.isNaN(corner[3])) {
+                    continue;
+                }
+
+                double origin = corner[1] - corner[0] * tanPitch + corner[2] * tanBank;
+
+                if (origin > hullSupport && origin - support <= suspension.climbHeight() + CLIMB_SLACK) {
+                    hullSupport = origin;
+                }
+            }
+
+            support = hullSupport;
+        }
+
+        // 実際に車体を支えている読み値の広がり。崖の縁に乗り出した車体は後ろ半分でしか支えられておらず、
+        // 重心がその外へ出れば縁を支点に倒れる（{@link #tip}）。支えの面から少し下までを「支えている」と読む。
+        this.supportAhead = baseBack;
+        this.supportBehind = baseFront;
+        this.supportRight = -halfWidth;
+        this.supportLeft = halfWidth;
+        boolean any = false;
+
+        for (int k = 0; k < count; k++) {
+            if (Double.isNaN(h[k]) || Double.isNaN(support)
+                    || h[k] - s[k] * tanPitch + t[k] * tanBank
+                            < support - suspension.climbHeight() - SUPPORT_DEPTH) {
+                continue;
+            }
+
+            any = true;
+            this.supportAhead = Math.max(this.supportAhead, s[k]);
+            this.supportBehind = Math.min(this.supportBehind, s[k]);
+            this.supportRight = Math.max(this.supportRight, t[k]);
+            this.supportLeft = Math.min(this.supportLeft, t[k]);
+        }
+
+        if (!any) {
+            this.supportAhead = baseFront;
+            this.supportBehind = baseBack;
+            this.supportRight = halfWidth;
+            this.supportLeft = -halfWidth;
+        }
+
+        this.rest(support, suspension);
+    }
+
+    /** 転輪が車体に対して上下できる距離（ブロック）。client/model/WheelGround.reachOf と同じ値でなければならない。 */
+    public static float wheelReach(GroundVehicleDefinition.Suspension suspension) {
+        return Math.max(suspension.travel(), MIN_WHEEL_REACH);
+    }
+
+    /** 読み値が、当てた平面からいちばん上へはみ出した量。 */
+    private static double deviationFrom(double[] plane, double[] s, double[] t, double[] h) {
+        double sum = 0.0;
+        int n = 0;
+
+        for (int k = 0; k < h.length; k++) {
+            if (!Double.isNaN(h[k])) {
+                sum += h[k] - plane[0] * s[k] - plane[1] * t[k];
+                n++;
+            }
+        }
+
+        if (n == 0) {
+            return 0.0;
+        }
+
+        double c = sum / n;
+        double most = 0.0;
+
+        for (int k = 0; k < h.length; k++) {
+            if (!Double.isNaN(h[k])) {
+                most = Math.max(most, h[k] - (c + plane[0] * s[k] + plane[1] * t[k]));
+            }
+        }
+
+        return most;
+    }
+
+    /**
+     * 車体が前後方向に乗る傾き。最小二乗の平面は段差を均してしまい、段の縁に乗った車体を段の高さで浮かせたまま
+     * 車首を地面へ下ろさなかった。履帯は地面の上側の凸包に乗り、重心（s = 0）の真下にある凸包の辺がその傾きを
+     * 決める。重心が頂点（段の縁）の真上なら、その両側の辺の傾きの間ならどこでも釣り合うので今の傾きを保つ。
+     * 重心の前か後ろに支えが無ければ凸包は決まらないので平面の傾きのまま（その先は {@link #tip} が倒す）。
+     */
+    private static double restingSlope(double[] s, double[] h, int along, double[][] under, double current,
+            double fallback) {
+        double[] xs = new double[along + under.length];
+        double[] ys = new double[along + under.length];
+        int n = 0;
+
+        // 箱の底が地面より上にある所は支えにならないが、凸包に入れても車体の線より下に落ちるだけなので害は無い。
+        for (double[] corner : under) {
+            if (!Double.isNaN(corner[1])) {
+                xs[n] = corner[0];
+                ys[n] = corner[1];
+                n++;
+            }
+        }
+
+        for (int i = 0; i < along; i++) {
+            double a = h[i];
+            double b = h[along + i];
+            double top = Double.isNaN(a) ? b : Double.isNaN(b) ? a : Math.max(a, b);
+
+            if (Double.isNaN(top)) {
+                continue;
+            }
+
+            xs[n] = s[i];
+            ys[n] = top;
+            n++;
+        }
+
+        // s の昇順に並べる。
+        Integer[] order = new Integer[n];
+
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
+        }
+
+        java.util.Arrays.sort(order, (p, q) -> Double.compare(xs[p], xs[q]));
+        double[] sortedX = new double[n];
+        double[] sortedY = new double[n];
+
+        for (int i = 0; i < n; i++) {
+            sortedX[i] = xs[order[i]];
+            sortedY[i] = ys[order[i]];
+        }
+
+        System.arraycopy(sortedX, 0, xs, 0, n);
+        System.arraycopy(sortedY, 0, ys, 0, n);
+
+        if (n < 2 || xs[0] > 0.0 || xs[n - 1] < 0.0) {
+            return fallback;
+        }
+
+        // 上側の凸包（s は昇順に並んでいる）。
+        int[] hull = new int[n];
+        int m = 0;
+
+        for (int i = 0; i < n; i++) {
+            while (m >= 2) {
+                int p = hull[m - 2];
+                int q = hull[m - 1];
+                double cross = (xs[q] - xs[p]) * (ys[i] - ys[p]) - (ys[q] - ys[p]) * (xs[i] - xs[p]);
+
+                if (cross < 0.0) {
+                    break;
+                }
+
+                m--;
+            }
+
+            hull[m++] = i;
+        }
+
+        for (int k = 0; k + 1 < m; k++) {
+            double x0 = xs[hull[k]];
+            double x1 = xs[hull[k + 1]];
+
+            if (x1 < 0.0) {
+                continue;
+            }
+
+            double slope = (ys[hull[k + 1]] - ys[hull[k]]) / (x1 - x0);
+
+            if (Math.abs(x1) > 0.05 || k + 2 >= m) {
+                return slope;
+            }
+
+            // 重心が頂点の上: 後ろの辺の傾き（大きい側）と前の辺の傾きの間で釣り合う。
+            double ahead = (ys[hull[k + 2]] - ys[hull[k + 1]]) / (xs[hull[k + 2]] - x1);
+
+            return Mth.clamp(current, ahead, slope);
+        }
+
+        return fallback;
+    }
+
+    /**
+     * 読み値 h = c + a·s + b·t に最小二乗で当てた傾き {a, b}。NaN は除外する。片側の履帯しか地面を読んで
+     * いなければ横の傾きは決まらないので 0、点が足りなければ両方 0。
+     */
+    private static double[] fitPlane(double[] s, double[] t, double[] h) {
+        double n = 0.0, ms = 0.0, mt = 0.0, mh = 0.0;
+
+        for (int k = 0; k < h.length; k++) {
+            if (!Double.isNaN(h[k])) {
+                n++;
+                ms += s[k];
+                mt += t[k];
+                mh += h[k];
+            }
+        }
+
+        if (n < 2.0) {
+            return new double[] {0.0, 0.0};
+        }
+
+        ms /= n;
+        mt /= n;
+        mh /= n;
+        double ss = 0.0, tt = 0.0, st = 0.0, sh = 0.0, th = 0.0;
+
+        for (int k = 0; k < h.length; k++) {
+            if (Double.isNaN(h[k])) {
+                continue;
+            }
+
+            double ds = s[k] - ms;
+            double dt = t[k] - mt;
+            double dh = h[k] - mh;
+            ss += ds * ds;
+            tt += dt * dt;
+            st += ds * dt;
+            sh += ds * dh;
+            th += dt * dh;
+        }
+
+        double det = ss * tt - st * st;
+
+        if (det > 1.0E-6) {
+            return new double[] {(sh * tt - th * st) / det, (th * ss - sh * st) / det};
+        }
+
+        if (ss > 1.0E-6) {
+            return new double[] {sh / ss, 0.0};
+        }
+
+        return new double[] {0.0, tt > 1.0E-6 ? th / tt : 0.0};
     }
 
     /**
@@ -2587,7 +3128,34 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         double climb = suspension.climbHeight();
         double rise = support - this.getY();
 
-        if (Double.isNaN(support) || rise < -climb) {
+        if (Double.isNaN(support)) {
+            this.fall();
+
+            return;
+        }
+
+        // 跳ね上がっている最中か、既に宙にいる車両は、坂を下るように地面へ吸い付かせず放物線で落とす。
+        // 地面より下へ出たらそこが着地で、衝撃の一部を跳ね返し、車首を揺する。
+        if (this.fallSpeed > 0.0 || !this.onGround() && rise < 0.0) {
+            this.fall();
+
+            if (this.getY() < support) {
+                double impact = -this.fallSpeed;
+                this.setPos(this.getX(), Math.min(support, this.getY() + climb), this.getZ());
+
+                if (impact > LANDING_SETTLE) {
+                    this.fallSpeed = impact * LANDING_RESTITUTION;
+                    this.hullPitchRate -= (float) impact * LANDING_NOD;
+                } else {
+                    this.fallSpeed = 0.0;
+                    this.setOnGround(true);
+                }
+            }
+
+            return;
+        }
+
+        if (rise < -climb) {
             this.fall();
 
             return;
@@ -2595,8 +3163,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         // 段差へ乗り上げるか、坂を下る。登坂能力を超える高さは、ここへ来る前に水平方向で止められている。
         // 上限は、読み違えが車両を崖に沿って打ち上げるのを防ぐためのもの——本来は崖で止まるべきなのだ。
-        this.setPos(this.getX(), this.getY() + Math.min(rise, climb), this.getZ());
-        this.fallSpeed = 0.0;
+        double up = Math.min(rise, climb);
+        this.setPos(this.getX(), this.getY() + up, this.getZ());
+
+        // 速く段差へ乗り上げた車体は、持ち上げられた勢いのまま少し宙へ出る。坂の連続した持ち上げで跳ねない
+        // よう、1tick で目に見えるほど持ち上がったときだけ。
+        double pace = Mth.clamp(Math.abs(this.speed) / KICK_FULL_SPEED, 0.0, 1.0);
+        this.fallSpeed = up > 0.2 ? up * STEP_KICK * pace : 0.0;
         this.setOnGround(true);
     }
 
@@ -3061,7 +3634,216 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     /** 車体の回転。運転手が操る方位＋地面が与える2角から組む。 */
     private Quaternionf buildAttitude() {
-        return Attitude.of(this.heading, -this.hullPitch).rotateZ(this.hullBank * DEG_TO_RAD);
+        float pitch = this.hullPitch + (float) Math.toDegrees(this.tipPitch.angle());
+        float bank = this.hullBank - (float) Math.toDegrees(this.tipRoll.angle());
+
+        return Attitude.of(this.heading, -pitch).rotateZ(bank * DEG_TO_RAD);
+    }
+
+    // ------------------------------------------------------------------
+    // 転がり
+    // ------------------------------------------------------------------
+
+    /**
+     * 転がりの1tick。地面への接地（{@link #settleOnGround}）の後、地面の傾きの上で。
+     *
+     * <p>車体を断面の箱として、横向きの力が支点の外へ合力を出したときだけ傾く（{@link Tumble}）。横の力は
+     * 斜面の重力と旋回の遠心力、前後の力は斜面の重力と加減速。どちらも重心の高さに掛かるので、背の高い車両ほど
+     * 倒れやすい。止まった車体が履帯の上に戻ることは無い——転がる勢いが無ければ、横倒しは横倒しのまま。
+     *
+     * <p>加減速は入れない。{@code travel} は段差や壁に当たるたびに速度をその tick に進めた分まで切り詰める
+     * ので、速度の差を読むとブロックの縁ごとに急制動が起き、平地を走るだけで車首が上下に揺れ続けた。
+     */
+    private void tip() {
+        double g = GRAVITY;
+        double bank = Math.toRadians(this.hullBank);
+        double pitch = Math.toRadians(this.hullPitch);
+        double b = this.tipHeight();
+        double halfWidth = this.tipHalfWidth();
+        double halfLength = this.tipHalfLength();
+        double rollBefore = this.tipRoll.angle();
+        double pitchBefore = this.tipPitch.angle();
+        double across = 0.0;
+        double along = 0.0;
+
+        if (this.onGround()) {
+            double normal = g * Math.cos(bank) * Math.cos(pitch);
+            // 左が高い斜面は車体を右（+x）へ引く。右へ曲がる車体の遠心力は左へ。
+            double lateral = g * Math.sin(bank) * Math.cos(pitch) - this.speed * Math.toRadians(this.turned);
+            // 機首上げの坂は車体を後ろへ引く。
+            double forward = -g * Math.sin(pitch);
+
+            // 支えが接地面の端まで届いていなければ、支点はもっと内側にある。Tumble は支点を箱の角に置くので、
+            // 内側の支点が作るのと同じモーメントになるよう、重力の分を横向きの力に足して渡す。崖から車首を
+            // 突き出した車体では前の支えが重心より後ろへ下がり、重力だけで車首から落ちる。
+            this.edgeAlong += (((halfLength - this.supportAhead) - (halfLength + this.supportBehind))
+                    - this.edgeAlong) * EDGE_SMOOTHING;
+            this.edgeAcross += (((halfWidth - this.supportRight) - (halfWidth + this.supportLeft))
+                    - this.edgeAcross) * EDGE_SMOOTHING;
+            forward += normal * this.edgeAlong / b;
+            lateral += normal * this.edgeAcross / b;
+
+            across = this.tipRoll.step(halfWidth, b, lateral, normal);
+            along = this.tipPitch.step(halfLength, b, forward, normal);
+        } else {
+            this.tipRoll.drift();
+            this.tipPitch.drift();
+        }
+
+        // 支点が地面に留まるよう車体ごと横へずらす。原点（底面の中央）は重心から b だけ下にあり、傾けば横へ出る。
+        double right = across + b * (Math.sin(this.tipRoll.angle()) - Math.sin(rollBefore));
+        double ahead = along + b * (Math.sin(this.tipPitch.angle()) - Math.sin(pitchBefore));
+        Vec3 forward = this.headingVector();
+        Vec3 side = new Vec3(-forward.z, 0.0, forward.x);
+        Vec3 shift = side.scale(right).add(forward.scale(ahead));
+
+        this.tipLift = this.tipLiftFor(halfWidth, halfLength, b);
+        this.setPos(this.getX() + shift.x, this.getY() + this.tipLift, this.getZ() + shift.z);
+    }
+
+    /** 転がりが原点を持ち上げる高さ。立っていれば0、横倒しで半幅、屋根で車高。 */
+    private double tipLiftFor(double halfWidth, double halfLength, double b) {
+        return this.tipRoll.lift(halfWidth, b) - b + this.tipPitch.lift(halfLength, b) - b
+                + b - b * Math.cos(this.tipRoll.angle()) * Math.cos(this.tipPitch.angle());
+    }
+
+    /** 重心から車体の底面まで。車高の半分。 */
+    private double tipHeight() {
+        Footprint shape = this.footprint();
+        double height = shape.isEmpty() ? this.hitbox().height() : shape.top() - shape.bottom();
+
+        return Math.max(height, 0.5) * 0.5;
+    }
+
+    private double tipHalfWidth() {
+        return Math.max(this.footprint().baseHalfWidth(this.getStats().suspension()), 0.25);
+    }
+
+    private double tipHalfLength() {
+        return Math.max(this.footprint().baseLength(this.getStats().suspension()), 0.5) * 0.5;
+    }
+
+    /**
+     * 倒れた車体を履帯の上へ戻す。レンチから、サーバーで。
+     *
+     * <p>転がりを消して姿勢を地面の平面へ戻し、立っていた高さまで下ろす。物理を回しているのが運転席の
+     * クライアントだと、ここで直してもその側の転がりが次の報告で上書きするので、乗っている者は降ろす——
+     * 倒れた車両の中にいる者にできることは、もともと降りること以外に無い。
+     */
+    private InteractionResult right(Player player) {
+        if (Math.abs(this.speed) > STANDSTILL || this.isCargo()) {
+            return InteractionResult.PASS;
+        }
+
+        this.ejectPassengers();
+        this.setPos(this.getX(), this.getY() - this.tipLift, this.getZ());
+        this.tipRoll.set(0.0, 0.0);
+        this.tipPitch.set(0.0, 0.0);
+        this.tipLift = 0.0;
+        this.edgeAlong = 0.0;
+        this.edgeAcross = 0.0;
+        this.hullBank = 0.0F;
+        this.hullBankRate = 0.0F;
+        this.hullPitch = 0.0F;
+        this.hullPitchRate = 0.0F;
+        // 降ろした後はサーバーが物理を回す。拾い直し（takeTip）は届いていた倒れた姿勢を読むので、させない。
+        this.drivenHere = true;
+        this.attitude = this.buildAttitude();
+        this.attitudeO = new Quaternionf(this.attitude);
+        this.entityData.set(DATA_ATTITUDE, new Quaternionf(this.attitude));
+        this.setXRot(0.0F);
+        this.level().playSound(null, this.blockPosition(), SoundEvents.ANVIL_PLACE, SoundSource.NEUTRAL,
+                0.6F, 0.7F);
+
+        return InteractionResult.CONSUME;
+    }
+
+    /** 履帯が地面を噛めないほど傾いているか。 */
+    public boolean overturned() {
+        return Math.abs(this.tipRoll.angle()) > OVERTURNED || Math.abs(this.tipPitch.angle()) > OVERTURNED;
+    }
+
+    /**
+     * 物理を回し始めた側が、届いていた姿勢から転がりを拾い直す。地面の傾きでは説明できない角度——45度を
+     * 超える傾き——だけを転がりと読む。それ以下はばねの姿勢がすぐ地面へ寄せ直す。
+     */
+    private void takeTip() {
+        if (!this.tipRoll.upright() || !this.tipPitch.upright()) {
+            return;
+        }
+
+        float bank = Attitude.bank(this.attitude);
+        float pitch = -Attitude.elevation(this.attitude);
+
+        if (Math.abs(bank) > TIP_EVIDENT) {
+            this.tipRoll.set(-Math.toRadians(bank), 0.0);
+            this.hullBank = 0.0F;
+            this.hullBankRate = 0.0F;
+        }
+
+        if (Math.abs(pitch) > TIP_EVIDENT) {
+            this.tipPitch.set(Math.toRadians(pitch), 0.0);
+            this.hullPitch = 0.0F;
+            this.hullPitchRate = 0.0F;
+        }
+
+        this.tipLift = this.tipLiftFor(this.tipHalfWidth(), this.tipHalfLength(), this.tipHeight());
+    }
+
+    @Override
+    public double mass() {
+        float written = this.getStats().hull().mass();
+
+        if (written > 0.0F) {
+            return written;
+        }
+
+        // 書かれていなければ箱から。主力戦車（接地 3.7×6、車高 2.9）でおよそ 55 トンになる密度。
+        GroundVehicleDefinition.Suspension suspension = this.getStats().suspension();
+
+        return Math.max(suspension.contactWidth() * suspension.contactLength() * this.hitbox().height()
+                * ESTIMATED_DENSITY, 500.0);
+    }
+
+    /**
+     * 押しを足す。車首方向は速度へ、横は滑りへ、上は跳ね上がりへ。重心から外れた押しは転がりを回す。
+     */
+    @Override
+    public void applyShove(Vec3 impulse, Vec3 at, boolean tilts) {
+        if (this.isCargo()) {
+            return;
+        }
+
+        Vec3 forward = this.headingVector();
+        Vec3 side = new Vec3(-forward.z, 0.0, forward.x);
+
+        this.speed += (float) impulse.dot(forward);
+        Vec3 was = this.getDeltaMovement();
+        this.setDeltaMovement(was.add(side.scale(impulse.dot(side))));
+
+        if (impulse.y > 0.0) {
+            this.fallSpeed = Math.max(this.fallSpeed, 0.0) + impulse.y;
+            this.setOnGround(false);
+        }
+
+        double b = this.tipHeight();
+        double halfWidth = this.tipHalfWidth();
+        double halfLength = this.tipHalfLength();
+        Vec3 centre = this.position().add(0.0, this.tipLift + b, 0.0);
+        Vec3 torque = at.subtract(centre).cross(impulse);
+        // 断面の反時計回りは、ロールでは車首の逆まわり、ピッチでは右まわり。
+        if (tilts) {
+            this.tipRoll.kick(-torque.dot(forward) / (4.0 / 3.0 * (halfWidth * halfWidth + b * b)));
+            this.tipPitch.kick(torque.dot(side) / (4.0 / 3.0 * (halfLength * halfLength + b * b)));
+        }
+
+        // 鉛直まわりの分は向きを変える。鎖で横から引かれた車体は鎖の方へ首を振る。ヨーの正は右回り（上から見て
+        // 時計回り）で、上向きの軸まわりの回転とは逆。履帯の横の摩擦が大半を食うので、効くのは grip の残り。
+        float swing = (float) Math.toDegrees(-torque.y / ((halfLength * halfLength + halfWidth * halfWidth) / 3.0))
+                * YAW_GIVE;
+        this.heading = Mth.wrapDegrees(this.heading + swing);
+        this.setYRot(this.heading);
+        this.turretYaw = Mth.wrapDegrees(this.turretYaw - swing);
     }
 
     /** 車体の指向を水平面上の単位ベクトルで。 */
@@ -3267,6 +4049,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return InteractionResult.SUCCESS;
         }
 
+        // 鎖か鋏を持っていれば、それは牽引の操作。TowChain 参照。
+        InteractionResult chained = TowChain.interact(this, player, hand);
+
+        if (chained != null) {
+            return chained;
+        }
+
         ItemStack held = player.getItemInHand(hand);
 
         // 弾薬箱は搭乗より先に見る。砲弾を抱えて戦車へ歩み寄る者は装填したいのであって、乗り込みたいので
@@ -3297,6 +4086,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         }
 
         if (held.getItem() instanceof WrenchItem) {
+            // 倒れた車両にレンチを当てれば、畳むのではなく起こす。畳みたければ起こしてからもう一度。
+            // 転がりを持っているのは物理を回している側なので、運転席のクライアントが回していればサーバーの
+            // 転がりは0。届いている姿勢からも読む。
+            if (this.overturned() || Math.abs(Attitude.bank(this.attitude)) > TIP_EVIDENT
+                    || Math.abs(Attitude.elevation(this.attitude)) > TIP_EVIDENT) {
+                return this.right(player);
+            }
+
             return this.dismantle(player);
         }
 
@@ -3571,6 +4368,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         super.readAdditionalSaveData(tag);
 
         float storedHeading = tag.contains("Heading") ? tag.getFloat("Heading") : this.getYRot();
+        this.tipRoll.set(tag.getFloat("TipRoll"), 0.0);
+        this.tipPitch.set(tag.getFloat("TipPitch"), 0.0);
+        this.tipLift = tag.getDouble("TipLift");
         this.snapAttitude(storedHeading, tag.getFloat("HullPitch"), tag.getFloat("HullBank"));
         this.setHealth(tag.contains("Health") ? tag.getFloat("Health") : this.getMaxHealth());
         this.setTurret(tag.getFloat("TurretYaw"), tag.getFloat("GunPitch"));
@@ -3595,6 +4395,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         tag.putFloat("Heading", this.heading);
         tag.putFloat("HullPitch", this.hullPitch);
         tag.putFloat("HullBank", this.hullBank);
+        tag.putFloat("TipRoll", (float) this.tipRoll.angle());
+        tag.putFloat("TipPitch", (float) this.tipPitch.angle());
+        tag.putDouble("TipLift", this.tipLift);
         tag.putFloat("Health", this.getHealth());
         tag.putFloat("TurretYaw", this.turretYaw);
         tag.putFloat("GunPitch", this.gunPitch);

@@ -13,6 +13,7 @@ import com.ashvehicles.registry.ModParticles;
 import com.ashvehicles.vehicle.Hitbox;
 import com.ashvehicles.weapon.AmmunitionDefinition;
 import com.ashvehicles.weapon.Impact;
+import com.ashvehicles.weapon.NuclearBlast;
 import com.ashvehicles.weapon.Penetration;
 import com.ashvehicles.weapon.Ricochet;
 import com.ashvehicles.weapon.WeaponDefinition;
@@ -253,30 +254,6 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     private static final boolean TRACE = false;
     /** 一時的。上のトレースが兵装の飛行の何 tick 分を対象にするか。 */
     private static final int TRACE_TICKS = 8;
-    /**
-     * 炎の粒を何ブロック間隔で置くか、そして1tickあたり何粒までか。
-     *
-     * <p>粒数を固定しないのは、炎の長さが兵装ごとにも速度によっても変わるからだ。間隔で決めれば、TOW の
-     * 2ブロックの炎も弾道弾の17ブロックの炎も同じ密度になり、<b>炎の太さが速度で変わらない</b>——粒の
-     * 大きさは間隔から引くので、間隔が一定なら太さも一定になる。上限に当たるのは1tickに十数ブロック以上
-     * 飛ぶ物だけで、そこでは間隔が開くぶん太くなる（航跡と同じ妥協）。
-     */
-    private static final double FLAME_SPACING = 1.0;
-    private static final int FLAME_PUFFS = 14;
-    /** ただし短い炎でもこれだけは置く。3粒の炎は炎に見えない。 */
-    private static final int FLAME_PUFFS_LEAST = 4;
-    /** 炎の粒を飛行経路からどれだけ外して置くか（ブロック）。噴煙より締まっている。炎は柱だ。 */
-    private static final double FLAME_SCATTER = 0.05;
-    /** 炎の粒に残すミサイル速度の割合。ガスは置き去りにされるので、ほとんど残らない。 */
-    private static final double FLAME_DRIFT = 0.10;
-    /**
-     * 炎の粒の大きさの上限（{@link #TRAIL_SPREAD_MOST} と同じ尺度）。煙より低い。
-     *
-     * <p>高速で撒く粒を太らせるのは、隣に届かせて柱を繋ぐためだ。だが炎は噴煙の<em>内側</em>にある物なので、
-     * 煙と同じ太さまで許すと、ミサイルは自分の煙と同じ幅の白熱した筒を引くことになる。ここを煙より低く
-     * 抑えておけば、どれだけ速くても炎は煙の芯に留まる。
-     */
-    private static final double FLAME_SPREAD_MOST = 4.0;
     /**
      * 点火の瞬間、炎が何倍になるか。そして何 tick でそれが引くか。
      *
@@ -1420,53 +1397,16 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
                     blown.x, blown.y, blown.z);
         }
 
-        this.spawnFlame(trail, head, step, flown);
     }
 
     /**
-     * その煙が出てくる元の火。書いてある兵装だけが持つ。
+     * 炎が今、定義の何倍か。点火直後だけ大きい（{@link #IGNITION_FLARE}）。
      *
-     * <p>燃えているモーターは全部これを出す。兵装ファイルが {@code flame} を書いていなければ、寸法は煙の
-     * 大きさから引かれる（{@link WeaponDefinition.Trail#fire()}）。
-     *
-     * <p>煙と別に撒くのは、両者が長さで別物だからだ。煙はミサイルの後ろへ何百ブロックも伸びていく物だが、
-     * 火はノズルから数ブロックで終わる——実物でそう見えるのは、そこで火が消えるからではなく、そこまで来た
-     * ガスが暗くなるからだ。こちらでは粒の寿命がその役をする（{@code MotorFlameParticle} 参照）。
-     *
-     * <p><b>長さは兵装ファイルの値と、この tick に実際に飛んだ距離の大きい方。</b> 定義どおり数ブロックに
-     * 収めると、1tickに数十ブロック進むミサイルの炎は tick ごとに離れた位置へ点を打つだけになり、燃えている
-     * 物ではなく点滅する物に見える。飛んだ分まで伸ばせば、モーターが「その間ずっと燃えていた」という事実の
-     * 方が描かれる。これは航跡が速度に依らず一本の柱に見える理由と同じ理屈だ。
-     *
-     * @param head この tick の終わりのノズル位置
-     * @param step この tick に飛んだ線
-     * @param flown その長さ（ブロック）。0ではない
+     * <p>炎そのものはクライアントのレンダラーが形状で描く（{@code AfterburnerPlume.motor}）。以前はここで炎の
+     * 粒を撒いていたが、1tickに数十ブロック進むミサイルでは粒が点線になり、点火直後の短い間しか柱に見えなかった。
      */
-    private void spawnFlame(WeaponDefinition.Trail trail, Vec3 head, Vec3 step, double flown) {
-        WeaponDefinition.Flame flame = trail.fire();
-        RandomSource random = this.random;
-        // 点火直後だけ大きい。IGNITION_FLARE 参照。
-        double flare = 1.0 + (IGNITION_FLARE - 1.0)
-                * Math.max(0.0, 1.0 - this.age / (double) IGNITION_TICKS);
-        double reach = Math.max(flame.length() * flare, flown);
-        int puffs = Mth.clamp(Mth.ceil(reach / FLAME_SPACING), FLAME_PUFFS_LEAST, FLAME_PUFFS);
-        // 粒の大きさは間隔から引く。航跡と同じ理由で、隣に届かない大きさで置けば炎は点線になる。
-        float spread = (float) Mth.clamp(reach / puffs * TRAIL_SPREAD, 1.0, FLAME_SPREAD_MOST);
-        TintedParticleOption fire = ModParticles.MOTOR_FLAME.get()
-                .of(flame.colour(), flame.size() * spread);
-        Vec3 back = step.scale(-reach / flown);
-        Vec3 drift = step.scale(FLAME_DRIFT / flown);
-
-        for (int i = 0; i < puffs; i++) {
-            // ノズル側を濃く。平方根が粒の大半を手前へ寄せるので、炎は根元が明るく末端へ向かって細る。
-            Vec3 at = head.add(back.scale(Math.sqrt((i + random.nextDouble()) / puffs)));
-
-            this.level().addParticle(fire,
-                    at.x + random.nextGaussian() * FLAME_SCATTER,
-                    at.y + random.nextGaussian() * FLAME_SCATTER,
-                    at.z + random.nextGaussian() * FLAME_SCATTER,
-                    drift.x, drift.y, drift.z);
-        }
+    public double ignitionFlare(float partialTick) {
+        return 1.0 + (IGNITION_FLARE - 1.0) * Math.max(0.0, 1.0 - (this.age + partialTick) / IGNITION_TICKS);
     }
 
     /**
@@ -1498,6 +1438,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         Entity vehicle = this.firedFrom();
 
         if (vehicle != null && WeaponMounts.isPartOf(vehicle, target)) {
+            return false;
+        }
+
+        // 同じ機体から出たミサイルには当たらない。斉射の僚弾同士や、自分の機関砲が今撃ったミサイルを
+        // 落とさないため。他人のミサイルは RocketEntity.canBeHitByProjectile が通す。
+        if (target instanceof VehicleProjectile other && other.wasFiredBy(vehicle)) {
             return false;
         }
 
@@ -1782,16 +1728,24 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         this.bursting = true;
 
         WeaponDefinition.Projectile round = this.getRound();
+        WeaponDefinition.Nuclear nuclear = this.getWeapon().nuclear().orElse(null);
 
         if (this.level() instanceof ServerLevel level) {
-            WeaponEffects.detonation(level, where, this.getDeltaMovement(), round, struck, isMachine(into));
+            if (nuclear != null) {
+                // 核は炸裂の全部が別物。火球も穴も打撃も、弾頭の explosion ではなく核の数字で出す（{@link NuclearBlast}）。
+                NuclearBlast.detonate(level, this, this.damageSource(), where, nuclear, round.tracer());
+            } else {
+                WeaponEffects.detonation(level, where, this.getDeltaMovement(), round, struck, isMachine(into));
 
-            if (round.explosion() > 0.0F) {
-                WeaponEffects.blast(level, this, where, round);
-            }
+                if (round.explosion() > 0.0F) {
+                    WeaponEffects.blast(level, this, where, round);
+                    // 爆風は機体も押す。バニラの爆発の押しは運転している側に届かない（ShovePayload）。
+                    VehicleEntityBase.blastAll(level, where, round.explosion(), null);
+                }
 
-            if (round.blast() > 0.0F) {
-                this.blastMachines(level, where, round);
+                if (round.blast() > 0.0F) {
+                    this.blastMachines(level, where, round);
+                }
             }
         }
 

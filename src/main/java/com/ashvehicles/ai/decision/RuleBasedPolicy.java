@@ -53,20 +53,20 @@ public final class RuleBasedPolicy implements DecisionPolicy {
             double minDwell, double emergency) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("policy.survival", 1.0),
-                    parameters.get("policy.recapture", 0.9),
-                    parameters.get("policy.defend", 0.8),
-                    parameters.get("policy.capture", 0.7),
-                    parameters.get("policy.attack", 0.6),
-                    parameters.get("policy.flank", 0.62),
-                    parameters.get("policy.cover", 0.85),
-                    parameters.get("policy.support", 0.55),
-                    parameters.get("policy.call", 0.95),
-                    parameters.get("policy.advance", 0.4),
-                    parameters.get("policy.search", 0.25),
-                    parameters.get("policy.hysteresis", 0.08),
-                    parameters.get("policy.min_dwell", 40.0),
-                    parameters.get("policy.emergency", 0.8));
+                    parameters.get("policy.survival", 0.871221),
+                    parameters.get("policy.recapture", 1.190847),
+                    parameters.get("policy.defend", 0.786827),
+                    parameters.get("policy.capture", 0.710806),
+                    parameters.get("policy.attack", 0.689168),
+                    parameters.get("policy.flank", 0.511954),
+                    parameters.get("policy.cover", 0.628276),
+                    parameters.get("policy.support", 0.702194),
+                    parameters.get("policy.call", 1.101564),
+                    parameters.get("policy.advance", 0.30151),
+                    parameters.get("policy.search", 0.259136),
+                    parameters.get("policy.hysteresis", 0.085418),
+                    parameters.get("policy.min_dwell", 43.0),
+                    parameters.get("policy.emergency", 0.777938));
         }
     }
 

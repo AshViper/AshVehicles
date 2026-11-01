@@ -2,6 +2,7 @@ package com.ashvehicles.client.renderer;
 
 import com.ashvehicles.client.ThermalTargets;
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
+import com.ashvehicles.client.model.obj.MeshBone;
 import com.ashvehicles.entity.VehicleEntityBase;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -12,6 +13,7 @@ import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
+import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.model.GeoModel;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 import software.bernie.geckolib.util.Color;
@@ -135,6 +137,15 @@ public abstract class VehicleRenderer<T extends VehicleEntityBase & GeoEntity> e
 
         super.preRender(poseStack, animatable, model, bufferSource, buffer, isReRender, partialTick,
                 packedLight, packedOverlay, colour);
+    }
+
+    /** OBJ から焼いたボーンは頂点ごとの法線で描く。{@link MeshBone} 参照。 */
+    @Override
+    public void renderCubesOfBone(PoseStack poseStack, GeoBone bone, VertexConsumer buffer, int packedLight,
+            int packedOverlay, int colour) {
+        if (!MeshBone.draw(poseStack, bone, buffer, packedLight, packedOverlay, colour)) {
+            super.renderCubesOfBone(poseStack, bone, buffer, packedLight, packedOverlay, colour);
+        }
     }
 
     /** 動く機体の上に浮かぶ名前タグは、役に立つより気が散る。 */

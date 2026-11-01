@@ -581,6 +581,7 @@
     "show-terrain": "showTerrain", "fade-unsure": "fadeUnsure", "show-points": "showPoints", "show-anchor": "showAnchor",
     "show-tracks": "showTracks", "show-aircraft": "showAircraft", "show-stuck": "showStuck", "show-water": "showWater",
     "show-deaths": "showDeaths", "show-releases": "showReleases", "show-kills": "showKills", "show-captures": "showCaptures",
+    "show-stalls": "showStalls",
     "replay-trail": "trail",
   };
 

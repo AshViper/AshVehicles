@@ -24,6 +24,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Vector3f;
 import software.bernie.geckolib.animatable.GeoEntity;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -191,6 +192,22 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     private static final EntityDataAccessor<Optional<BlockPos>> DATA_AIM =
             SynchedEntityData.defineId(RocketEntity.class, EntityDataSerializers.OPTIONAL_BLOCK_POS);
 
+    /**
+     * 誘導中の弾の速度（ブロック/tick）。サーバーが {@link #STEER_SYNC_TICKS} ごとに書く。
+     *
+     * <p>飛行は両側で回るが、<b>何を追うかを決めるのはサーバーだけ</b>だ。フレアへの乗り換え、失探からの
+     * 捉え直し、クライアントに居ない相手（追跡範囲の外）への比例航法——どれもクライアントの複製は知らずに
+     * 前の針路を飛び続ける。位置の補正（{@code VehicleProjectile.lerpTo}）は届くが速度の補正は無い
+     * （速度パケットは切ってある）ので、複製は間違った向きのまま毎回引き戻され、横滑りと跳びとして見えて
+     * いた。向きが食い違ったときだけこれを採る。{@link #onSyncedDataUpdated} 参照。
+     */
+    private static final EntityDataAccessor<Vector3f> DATA_STEERED =
+            SynchedEntityData.defineId(RocketEntity.class, EntityDataSerializers.VECTOR3);
+    /** {@link #DATA_STEERED} を書く間隔。位置更新（ROCKET の updateInterval）と同じ。 */
+    private static final int STEER_SYNC_TICKS = 5;
+    /** クライアントの向きがこれ（ラジアン、約1.5度）より外れていたらサーバーの速度を採る。 */
+    private static final double STEER_DISAGREE = 0.026;
+
     @Nullable
     private Entity target;
     /**
@@ -236,6 +253,7 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         super.defineSynchedData(builder);
         builder.define(DATA_TARGET, -1);
         builder.define(DATA_AIM, Optional.empty());
+        builder.define(DATA_STEERED, new Vector3f());
     }
 
     /**
@@ -359,6 +377,38 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
         if (DATA_TARGET.equals(key) && this.level().isClientSide) {
             this.target = null;
         }
+
+        if (DATA_STEERED.equals(key) && this.level().isClientSide) {
+            this.adoptSteering();
+        }
+    }
+
+    /**
+     * サーバーが飛ばしている速度を、向きが食い違っているときだけ採る。
+     *
+     * <p>届く値は往復の半分ほど古いが、合っている複製まで毎回それで上書きすると、正しく曲がっている弾が
+     * 5tickごとに少し前の針路へ戻される。だから閾値を超えたときだけ——別の物を追っている、と読める
+     * ときだけ——置き換える。機首（{@link #axis}）も一緒に替える。替えなければ次の steer が古い機首から
+     * 舵を切り直す。
+     */
+    private void adoptSteering() {
+        Vec3 server = new Vec3(this.entityData.get(DATA_STEERED));
+        double speed = server.length();
+
+        if (speed < 1.0E-4) {
+            return;
+        }
+
+        Vec3 own = this.getDeltaMovement();
+        Vec3 heading = server.scale(1.0 / speed);
+
+        if (own.lengthSqr() > 1.0E-8
+                && Math.acos(Mth.clamp(own.normalize().dot(heading), -1.0, 1.0)) < STEER_DISAGREE) {
+            return;
+        }
+
+        this.axis = heading;
+        this.setDeltaMovement(server);
     }
 
     /** まだ動力飛行中か。加速も誘導もできるのはその間。 */
@@ -447,6 +497,11 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
 
         this.axis = wanted;
         this.setDeltaMovement(wanted.scale(speed));
+
+        // 追う相手を決めるのはこちらだけなので、誘導中の速度を配る。DATA_STEERED 参照。
+        if (guided && !this.level().isClientSide && this.age % STEER_SYNC_TICKS == 0) {
+            this.entityData.set(DATA_STEERED, this.getDeltaMovement().toVector3f());
+        }
     }
 
     /**
@@ -1308,6 +1363,17 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      */
     public boolean isInterceptable() {
         return this.isAlive() && this.getWeapon().type() == WeaponDefinition.Type.MISSILE;
+    }
+
+    /**
+     * 機関砲の弾で撃ち落とせる。弾の掃引（{@code ProjectileUtil.getEntityHitResult}）が拾うかどうかは
+     * {@code Projectile.canHitEntity} がこれを訊いて決める。親の {@link #isPickable} は false のままなので、
+     * 照準の十字線やプレイヤーの手には掛からない。迎撃の対象と同じ問いにしてあるので、無誘導ロケットは
+     * 撃っても素通りする。
+     */
+    @Override
+    public boolean canBeHitByProjectile() {
+        return this.isInterceptable();
     }
 
     /**

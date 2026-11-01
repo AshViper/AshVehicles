@@ -3,6 +3,7 @@ package com.ashvehicles.client.renderer;
 import com.ashvehicles.client.ghost.GhostRenderContext;
 import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
 import com.ashvehicles.client.model.WeaponModel;
+import com.ashvehicles.client.model.obj.MeshBone;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 
@@ -10,6 +11,7 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
+import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.animatable.GeoAnimatable;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animatable.instance.SingletonAnimatableInstanceCache;
@@ -125,6 +127,15 @@ public final class MountedStore implements GeoAnimatable {
             super.preRender(poseStack, animatable, model, bufferSource, buffer, isReRender, partialTick,
                     packedLight, packedOverlay, colour);
             poseStack.translate(-0.5F, -0.51F, -0.5F);
+        }
+
+        /** OBJ から焼いたボーンは頂点ごとの法線で描く。{@link MeshBone} 参照。 */
+        @Override
+        public void renderCubesOfBone(PoseStack poseStack, GeoBone bone, VertexConsumer buffer, int packedLight,
+                int packedOverlay, int colour) {
+            if (!MeshBone.draw(poseStack, bone, buffer, packedLight, packedOverlay, colour)) {
+                super.renderCubesOfBone(poseStack, bone, buffer, packedLight, packedOverlay, colour);
+            }
         }
 
         /**

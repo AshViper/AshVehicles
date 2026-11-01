@@ -1,0 +1,23 @@
+{
+  "type": "ashvehicles:vehicle_crafting",
+  "group": "ashvehicles_bomb",
+  "tab": "weapon",
+  "materials": [
+    {
+      "item": "ashvehicles:steel_plate",
+      "count": 5
+    },
+    {
+      "item": "ashvehicles:high_explosive",
+      "count": 2
+    },
+    {
+      "item": "ashvehicles:fuze",
+      "count": 1
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:gbu_54"
+  }
+}

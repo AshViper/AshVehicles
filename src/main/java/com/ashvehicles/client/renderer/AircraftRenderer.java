@@ -5,6 +5,7 @@ import java.util.List;
 import com.ashvehicles.data.Definitions;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.vehicle.VehicleChassis;
+import com.ashvehicles.client.CockpitDisplays;
 import com.ashvehicles.client.ghost.GhostRenderContext;
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.client.ghost.geo.GhostGeoRenderer;
@@ -75,6 +76,12 @@ public class AircraftRenderer extends VehicleRenderer<AircraftEntity> {
     private void renderSolid(AircraftEntity aircraft, float yaw, float partialTick, PoseStack poseStack,
             MultiBufferSource bufferSource, int packedLight) {
         super.render(aircraft, yaw, partialTick, poseStack, bufferSource, packedLight);
+        AfterburnerPlume.draw(aircraft, partialTick, poseStack, bufferSource);
+        NavLights.draw(aircraft, partialTick, poseStack, bufferSource);
+
+        if (!this.drawingGhost) {
+            CockpitDisplays.draw(aircraft, partialTick, poseStack, bufferSource);
+        }
 
         List<AircraftDefinition.Hardpoint> hardpoints = aircraft.getStats().hardpoints();
         List<WeaponMounts.Mount> mounts = aircraft.getWeapons().mounts();

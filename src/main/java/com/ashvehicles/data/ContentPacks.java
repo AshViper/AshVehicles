@@ -31,10 +31,10 @@ import net.neoforged.fml.loading.FMLPaths;
  * <pre>
  * ashvehiclespack/
  *   mypack.zip
- *     assets/mypack/geo/entity/foo.geo.json
+ *     assets/mypack/geo/entity/foo.geo.json    （OBJ なら assets/mypack/obj/entity/foo.obj）
  *     assets/mypack/textures/entity/foo.png
  *     assets/mypack/lang/en_us.json
- *     data/mypack/aircraft/foo.json
+ *     data/mypack/ashvehicles/aircraft/foo.json
  * </pre>
  *
  * <p><b>名前空間はフォルダ名がそのまま。</b> 上の例の機体は {@code mypack:foo} になり、エンティティ型も

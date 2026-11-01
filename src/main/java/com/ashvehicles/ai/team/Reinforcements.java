@@ -23,6 +23,11 @@ import com.ashvehicles.ai.decision.ParameterSet;
  * <li><b>拠点</b>——取りに行く拠点は軽装甲を、取られかけている拠点は戦車を呼ぶ
  * <li><b>最近何に倒されたか</b>（{@link #lost}、直近 {@value #MEMORY} tick）——空から倒されていれば防空を呼び、
  *     防空に落とされていれば攻撃機を控える
+ * <li><b>空に敵がいるか</b>（2026-09-17 の指示「敵航空機がいない際に対空を出したら罰にして、その逆はスコアに」）——敵機がいなければ
+ *     防空から {@code spawn.air_idle} を引き、いれば {@code spawn.air_wanted} を足す。引いた点が0を割れば、くじでは選ばれない
+ * <li><b>戦車と歩兵戦闘車の組</b>（同日の指示「戦車とIFVのコンビで加算」）——近く（{@value #PAIR_REACH} ブロック）に相方の
+ *     歩兵戦闘車がいない戦車の数だけ軽装甲を、相方の戦車がいない歩兵戦闘車の数だけ戦車を呼ぶ（{@code spawn.pair}）。軽装甲を
+ *     出すときに相方のいない戦車がいれば、歩兵戦闘車から選ぶ（{@code match/Bots.pick}）
  * <li><b>チケットの余裕</b>（{@link #spare}）——残りが多いうちは航空機（戦闘機と攻撃機）を呼ぶ（2026-09-13 の指示「チケットに
  *     余裕があれば航空機を出す」）。航空機は拠点を取らず、防空に落とされやすく、落ちれば1枚持っていく。余裕のあるうちに空を
  *     使い、減ってきたら拠点を取って守れる地上に戻す。余裕が無くても、敵機や敵の戦車に応じて呼ぶ分はそのまま
@@ -30,8 +35,9 @@ import com.ashvehicles.ai.decision.ParameterSet;
  *
  * <pre>
  * 戦車   = base + armour × 足りない戦車 + hold × 取られかけの拠点 + lost × 戦車に倒された − have × 味方の戦車
- * 軽装甲 = base + capture × 取りたい拠点 + soft × 足りない軽い物 − have × 味方の軽装甲
- * 防空   = airDefence × 防空に当たられていない敵機 + lost × 空から倒された
+ *          + pair × 相方のいない歩兵戦闘車
+ * 軽装甲 = base + capture × 取りたい拠点 + soft × 足りない軽い物 − have × 味方の軽装甲 + pair × 相方のいない戦車
+ * 防空   = airDefence × 防空に当たられていない敵機 + lost × 空から倒された + (敵機がいる ? airWanted : −airIdle)
  * 砲兵   = support − 2 × have × 味方の砲兵
  * 戦闘機 = intercept × 戦闘機に当たられていない敵機 + lost ÷ 2 × 空から倒された − flak × 敵の防空 + spare × 余裕
  * 攻撃機 = strike + spare × 余裕 + armour ÷ 2 × 敵の戦車 − have × 味方の攻撃機 − flak × 敵の防空 − lost × 防空に落とされた
@@ -47,6 +53,9 @@ public final class Reinforcements {
 
     /** 損失を覚えている長さ（tick）。 */
     private static final long MEMORY = 2400L;
+
+    /** 戦車と歩兵戦闘車を組と数える距離（ブロック）。{@code GroundPilot} の「近くの味方」と同じ。 */
+    public static final double PAIR_REACH = 60.0;
 
     /** 陣営ごとに覚えている損失の数の上限。 */
     private static final int MOST_LOSSES = 64;
@@ -98,22 +107,26 @@ public final class Reinforcements {
 
     /** 重み。{@link #of} が版のパラメータ（{@code spawn.*}）から読む。 */
     public record Weights(double base, double armour, double capture, double hold, double soft, double airDefence,
-            double intercept, double flak, double lost, double have, double support, double strike, double spare) {
+            double intercept, double flak, double lost, double have, double support, double strike, double spare,
+            double airIdle, double airWanted, double pair) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("spawn.base", 1.0),
-                    parameters.get("spawn.armour", 0.6),
-                    parameters.get("spawn.capture", 0.8),
-                    parameters.get("spawn.hold", 0.4),
-                    parameters.get("spawn.soft", 0.3),
-                    parameters.get("spawn.air_defence", 0.9),
-                    parameters.get("spawn.intercept", 0.7),
-                    parameters.get("spawn.flak", 0.5),
-                    parameters.get("spawn.lost", 0.5),
-                    parameters.get("spawn.have", 0.25),
-                    parameters.get("spawn.support", 0.4),
-                    parameters.get("spawn.strike", 0.6),
-                    parameters.get("spawn.spare", 1.0));
+                    parameters.get("spawn.base", 0.831487),
+                    parameters.get("spawn.armour", 0.515686),
+                    parameters.get("spawn.capture", 0.606632),
+                    parameters.get("spawn.hold", 0.501213),
+                    parameters.get("spawn.soft", 0.262227),
+                    parameters.get("spawn.air_defence", 0.833823),
+                    parameters.get("spawn.intercept", 0.784359),
+                    parameters.get("spawn.flak", 0.551079),
+                    parameters.get("spawn.lost", 0.641067),
+                    parameters.get("spawn.have", 0.239139),
+                    parameters.get("spawn.support", 0.339817),
+                    parameters.get("spawn.strike", 0.561082),
+                    parameters.get("spawn.spare", 1.004985),
+                    parameters.get("spawn.air_idle", 0.620452),
+                    parameters.get("spawn.air_wanted", 0.474821),
+                    parameters.get("spawn.pair", 0.486792));
         }
     }
 
@@ -124,11 +137,13 @@ public final class Reinforcements {
      * @param capturable 取りに行く拠点（自陣が握っていない物と、奪還が要る物）
      * @param threatened 取られかけている自陣の拠点
      * @param spare      チケットの余裕（{@link #spare}、0〜1）
+     * @param loneTanks  近くに味方の歩兵戦闘車がいない、味方の戦車（役割 {@code TANK}）
+     * @param loneIfvs   近くに味方の戦車がいない、味方の歩兵戦闘車（役割 {@code IFV}）
      */
     public record Situation(double own, double enemyAir, double enemyArmour, double enemyLight,
             double enemyAirDefence, double ownTanks, double ownLight, double ownAirDefence, double ownArtillery,
             double ownFighters, double ownStrikers, double capturable, double threatened, double lostToAir,
-            double lostToArmour, double lostToAirDefence, double spare) {
+            double lostToArmour, double lostToAirDefence, double spare, double loneTanks, double loneIfvs) {
     }
 
     private Reinforcements() {
@@ -140,12 +155,14 @@ public final class Reinforcements {
         Map<Kind, Double> needs = new EnumMap<>(Kind.class);
 
         needs.put(Kind.TANK, w.base() + w.armour() * Math.max(0.0, s.enemyArmour() - s.ownTanks()) * per
-                + w.hold() * s.threatened() + w.lost() * s.lostToArmour() - w.have() * s.ownTanks() * per);
+                + w.hold() * s.threatened() + w.lost() * s.lostToArmour() - w.have() * s.ownTanks() * per
+                + w.pair() * s.loneIfvs() * per);
         needs.put(Kind.LIGHT, w.base() + w.capture() * s.capturable()
-                + w.soft() * Math.max(0.0, s.enemyLight() - s.ownLight()) * per - w.have() * s.ownLight() * per);
+                + w.soft() * Math.max(0.0, s.enemyLight() - s.ownLight()) * per - w.have() * s.ownLight() * per
+                + w.pair() * s.loneTanks() * per);
         needs.put(Kind.AIR_DEFENCE, w.airDefence()
                 * Math.max(0.0, s.enemyAir() - s.ownAirDefence() - 0.5 * s.ownFighters()) * per
-                + w.lost() * s.lostToAir());
+                + w.lost() * s.lostToAir() + (s.enemyAir() > 0.0 ? w.airWanted() : -w.airIdle()));
         needs.put(Kind.ARTILLERY, w.support() - 2.0 * w.have() * s.ownArtillery() * per);
         needs.put(Kind.FIGHTER, w.intercept()
                 * Math.max(0.0, s.enemyAir() - s.ownFighters() - 0.5 * s.ownAirDefence()) * per

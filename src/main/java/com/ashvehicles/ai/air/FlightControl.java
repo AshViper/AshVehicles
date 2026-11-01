@@ -16,7 +16,10 @@ import org.joml.Quaternionf;
  * 分け、左右はバンク角の要求に、上下は昇降舵に、進行中の回転で減衰させる。人の手で試合に耐えてきた式であり、AI の
  * ために別の飛ばし方を作れば、機体の調整のたびに2つの操縦を見直すことになる
  * （[[bots-are-a-pilot-object-on-the-vehicle]]）。あちらはクライアントの物なので、サーバーで回るここへ写してある。
- * 違いは1つ——真後ろの方向を、機首の円錐へ引き戻すと真っ直ぐに化けるので、右へ回り始める向きに直す。
+ * 違いは3つ——真後ろの方向を、機首の円錐へ引き戻すと真っ直ぐに化けるので、右へ回り始める向きに直す。そして固定翼機は、
+ * 円錐の外の向きへは水平に回り（{@link #level}）、引きは飛行経路が求める上りを越えない分だけにする（{@link #holdPath}）
+ * ——人は機首が上がり過ぎるのを見てマウスを戻すが、AI はそのまま縦か斜めのループに入り、爆撃機はその頂で失速する
+ * （2026-09-14）。
  *
  * <p><b>回転の速さは自分で測る。</b> 機体の {@code getPitchDelta} は、tick の頭で前の姿勢が今の姿勢に揃えられた後に
  * 読むと常に0になり、AI が考えるのはまさにその位置だ。だから前の tick に見た姿勢を覚えて差を取る
@@ -61,6 +64,21 @@ public final class FlightControl {
 
     /** これより上へスロットルを押し込まない。押し切り続けるとアフターバーナーのゲートが開く（{@code AircraftEntity.tickAfterburner}）。 */
     private static final float LEVER_TOP = 0.98F;
+
+    /** 機首の円錐の外の向きへ水平に回る間に許す上り下りの角（度、{@link #level}）。 */
+    private static final double TURN_CLIMB = 10.0;
+    private static final double TURN_CLIMB_RADIANS = Math.toRadians(TURN_CLIMB);
+
+    /**
+     * 飛行経路で引きを切る（{@link #holdPath}）: 求めた上り角を越えてよい角（度）、越えた1度あたりに抜く引き、抜いた先で
+     * 押してよい量の上限。
+     */
+    private static final double PATH_SLACK = 3.0;
+    private static final float PATH_GAIN = 0.05F;
+    private static final float PATH_PUSH = 0.3F;
+
+    /** 失速の手前の余裕を越えた速さ（失速速度の倍率）1あたりに許す上りの角（度、{@link #sustainableClimb}）。 */
+    private static final double CLIMB_PER_RESERVE = 30.0;
 
     /** 操縦桿の3軸。各 -1〜1。 */
     public record Stick(float pitch, float roll, float yaw) {
@@ -217,6 +235,91 @@ public final class FlightControl {
         Vec3 side = across.lengthSqr() < 1.0E-8 ? right : across.normalize();
 
         return nose.scale(CONE_COS).add(side.scale(CONE_SIN));
+    }
+
+    /**
+     * 固定翼機: 機首から水平に円錐より外の向きを、<b>水平に回る</b>向きに直す。水平の向きを機首の側から円錐の縁まで
+     * 回し、上り下りは {@value #TURN_CLIMB} 度までに切る。円錐の内なら何もしない。真後ろは {@link #inCone} と同じく
+     * 機体の右へ。
+     *
+     * <p><b>{@link #inCone} は、機首と向けたい方向を含む平面の中で円錐の縁へ引き戻す。</b> 後ろの少し上なら、その平面は
+     * ほぼ縦になる——向けたい方向が真後ろから上へ20度ずれているだけで回る向きは「上」になり、機体はバンクせずに
+     * 引き続けてループに入る（2026-09-14 の指示「爆撃機とかで垂直に旋回しようとする動きがあるので控えたい」）。人は
+     * マウスを横へ振り直すが、AI の向けたい方向は抜けた後の旋回の間ずっと後ろにある。
+     */
+    public static Vec3 level(Quaternionf attitude, Vec3 want) {
+        Vec3 nose = flat(Attitude.nose(attitude));
+        Vec3 bearing = flat(want);
+
+        if (nose == null || bearing == null || nose.dot(bearing) >= CONE_COS) {
+            return want;
+        }
+
+        Vec3 side = new Vec3(-nose.z, 0.0, nose.x);
+        double across = side.dot(bearing);
+
+        if (Math.abs(across) < 1.0E-3 ? side.dot(Attitude.right(attitude)) < 0.0 : across < 0.0) {
+            side = side.scale(-1.0);
+        }
+
+        Vec3 turn = nose.scale(CONE_COS).add(side.scale(CONE_SIN));
+        double rise = Mth.clamp(Math.asin(Mth.clamp(want.y / want.length(), -1.0, 1.0)), -TURN_CLIMB_RADIANS,
+                TURN_CLIMB_RADIANS);
+
+        return new Vec3(turn.x * Math.cos(rise), Math.sin(rise), turn.z * Math.cos(rise));
+    }
+
+    /**
+     * 固定翼機: 引きを、飛行経路の上り角が {@code want} の上り角を {@value #PATH_SLACK} 度より越えない分に切る。
+     * バンクの分の引き（{@link #holdTheTurn}）は残す——水平に回るのに要る引きまでは削らない。押している舵と、背面
+     * （バンク90度以上）には何もしない。
+     *
+     * <p><b>向けたい方向が機首の円錐の外にある間、マウス操縦の式は引きを一杯に張り付ける</b>（円錐の縁は機首から35度で、
+     * 昇降舵は外れ1度に {@value #PITCH_GAIN}）。バンクは「外れの左右 × 3」が付いた角で釣り合い、真横の向きなら60度前後
+     * になる。そこで一杯に引けば翼の荷重の上向きの分が重さを越え、機体は回りながら上っていく——斜めのループだ。ロールの
+     * 遅い機体（B-52 の {@code roll_rate} は戦闘機の5分の1ほど）は、バンクが20度しか付かないうちにほぼ一杯に引いていて、
+     * ほとんど真上へ上がる。上った分だけ速さを失い、頂で失速する。
+     *
+     * @param motion 今の速度（ブロック/tick）
+     * @param want   機首を向けたい方向（{@link #point} へ渡した物）
+     */
+    public static float holdPath(float pitch, Quaternionf attitude, Vec3 motion, Vec3 want) {
+        double speed = motion.length();
+        double length = want.length();
+        float bank = Attitude.bank(attitude);
+
+        if (pitch <= 0.0F || speed < 1.0E-3 || length < 1.0E-8 || Math.abs(bank) >= 90.0F) {
+            return pitch;
+        }
+
+        double path = Math.toDegrees(Math.asin(Mth.clamp(motion.y / speed, -1.0, 1.0)));
+        double wanted = Math.toDegrees(Math.asin(Mth.clamp(want.y / length, -1.0, 1.0)));
+        float allowed = holdTheTurn(bank) + (float) (wanted + PATH_SLACK - path) * PATH_GAIN;
+
+        return Math.min(pitch, Math.max(allowed, -PATH_PUSH));
+    }
+
+    /**
+     * その速さで、失速速度の {@code margin} 倍の余裕を残して水平に回れるバンク（度）。失速速度を1G の失速と見れば、翼が
+     * 出せる荷重倍数は (速さ ÷ 失速速度)²、水平旋回に要るのは 1 ÷ cos(バンク)。余裕の速さ以下なら0。
+     *
+     * <p>巡航（失速の2.8倍）で余裕1.3なら78度で、普段のバンクの上限（75度）は変わらない。上って失速の1.6倍まで落ちれば
+     * 49度——遅い機体ほど深く傾けて回れず、傾けて引けば翼の荷重で速さを失う。
+     */
+    public static float sustainableBank(double speed, double stallSpeed, double margin) {
+        double reserve = speed / Math.max(stallSpeed * margin, 1.0E-6);
+        double load = reserve * reserve;
+
+        return load <= 1.0 ? 0.0F : (float) Math.toDegrees(Math.acos(1.0 / load));
+    }
+
+    /**
+     * その速さで許す上りの角（度）。失速速度の {@code margin} 倍で0、そこから倍率1ごとに {@value #CLIMB_PER_RESERVE} 度。
+     * 余裕1.3なら、巡航（失速の2.8倍）で45度、上って失速の2倍まで落ちれば21度、1.6倍で9度——上るほど速さを失い、上って
+     * よい角が自分で閉じていく。降りる角には使わない。
+     */
+    public static double sustainableClimb(double speed, double stallSpeed, double margin) {
+        return Math.max(0.0, (speed / Math.max(stallSpeed, 1.0E-6) - margin) * CLIMB_PER_RESERVE);
     }
 
     /**

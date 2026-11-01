@@ -38,6 +38,10 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
     private static final float FLAP_TRAVEL = 15.0F;
     private static final float GEAR_RETRACT_TRAVEL = 90.0F;
     private static final float GEAR_DOOR_TRAVEL = 85.0F;
+    // 操縦室の操縦桿とスロットルレバー。操縦桿は舵面と同じ偏向から、レバーはスロットルから振る。
+    private static final float STICK_PITCH_TRAVEL = 15.0F;
+    private static final float STICK_ROLL_TRAVEL = 15.0F;
+    private static final float THROTTLE_TRAVEL = 40.0F;
 
     /**
      * <em>機体</em>座標系での砲座の回転方向。地上車両の砲塔・砲と同じ値であり、理由も同じだ。
@@ -134,10 +138,11 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
      * @param bay 兵装倉の扉の開き量。0が閉、1が全開
      * @param ramp 後部ハッチの開き量。0が閉、1が全開
      * @param sweepGear ここで脚を振るか。アニメーションファイルに脚サイクルを持たない機体用
+     * @param throttle スロットル。0がアイドル、1が全開
      */
     public record Pose(float elevator, float aileron, float rudder, float gear, float flaps, float nozzle,
             float bay, float ramp, float rotor, float tailRotor, float rotorRate, float tailRotorRate,
-            float wingSweep, boolean sweepGear) {
+            float wingSweep, boolean sweepGear, float throttle) {
         /** 機体の舵面が今どうなっているか。 */
         public static Pose of(AircraftEntity aircraft, float partialTick) {
             // 機首を上げると水平尾翼の後縁が下がるので、ピッチ差分を反転している。
@@ -155,7 +160,8 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     aircraft.getRotorAngle(1.0F) - aircraft.getRotorAngle(0.0F),
                     aircraft.getTailRotorAngle(1.0F) - aircraft.getTailRotorAngle(0.0F),
                     aircraft.getWingSweep(partialTick),
-                    !AircraftAnimations.hasGearCycle(aircraft));
+                    !AircraftAnimations.hasGearCycle(aircraft),
+                    aircraft.getThrottle());
         }
 
         /**
@@ -185,7 +191,8 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     now.tailRotor() + now.tailRotorRate() * wind,
                     now.rotorRate(), now.tailRotorRate(),
                     Mth.lerp(partialTick, previous.wingSweep(), now.wingSweep()),
-                    now.sweepGear());
+                    now.sweepGear(),
+                    Mth.lerp(partialTick, previous.throttle(), now.throttle()));
         }
     }
 
@@ -202,6 +209,16 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         rotateY(model, setup, AircraftDefinition.Bone.RUDDER, pose.rudder());
         rotateY(model, setup, AircraftDefinition.Bone.RUDDER_LEFT, pose.rudder());
         rotateY(model, setup, AircraftDefinition.Bone.RUDDER_RIGHT, pose.rudder());
+
+        // 操縦桿は舵面と同じ偏向を読むので、桿と舵面はいつも揃って動く。機首上げで桿は手前へ、
+        // 右ロールで右へ倒れる。スロットルレバーは同期されたスロットルをそのまま前後の角度にする。
+        float pitch = -pose.elevator() / ELEVATOR_TRAVEL;
+        float roll = pose.aileron() / AILERON_TRAVEL;
+
+        rotateX(model, setup, AircraftDefinition.Bone.STICK, pitch * STICK_PITCH_TRAVEL);
+        // 符号はゲーム内で確かめた。軸からの導出では Z を逆に読んでいた。
+        rotateZ(model, setup, AircraftDefinition.Bone.STICK, -roll * STICK_ROLL_TRAVEL);
+        rotateX(model, setup, AircraftDefinition.Bone.THROTTLE, -pose.throttle() * THROTTLE_TRAVEL);
 
         if (pose.sweepGear()) {
             float gear = pose.gear();

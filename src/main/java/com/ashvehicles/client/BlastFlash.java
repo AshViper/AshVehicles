@@ -62,6 +62,30 @@ public final class BlastFlash implements LayeredDraw.Layer {
     private static final float NUCLEAR_HOLDS = 0.22F;
 
     /**
+     * 核の閃光の二つの山（tick）。最初の山が終わる所、谷の底、二つ目の山が上がりきる所と、谷の明るさ。
+     *
+     * <p>核の閃光は一度ではなく二度光る（ダブルフラッシュ）。最初の一瞬の後、衝撃波面が自分の後ろの火球を
+     * 覆い隠して暗くなり、波面が透けると火球がもう一度、今度は長く光る。衛星が核実験を見分けるのに使う
+     * ほど決まった形で、実時間では最初の山はミリ秒だが、それでは見えないので tick に引き伸ばしてある。
+     */
+    private static final float FIRST_PULSE = 2.0F;
+    private static final float DIP_BOTTOM = 4.0F;
+    private static final float SECOND_PULSE = 10.0F;
+    private static final float DIP = 0.30F;
+
+    /**
+     * 焼き付き。閃光を正面から見た者の目に残る、暗い紫の斑点の tick 数と濃さ。
+     *
+     * <p>閃光が引いた後も、見た位置に残る。世界の位置ではなく<b>画面の位置</b>に残すのは、焼けているのが網膜
+     * だからだ——振り向いても斑点は同じ所に付いてくる。濃さは見た閃光の強さに比例し、見ていなければ残らない。
+     */
+    private static final int AFTERIMAGE = 220;
+    private static final float AFTERIMAGE_ALPHA = 0.55F;
+    private static final int AFTERIMAGE_TINT = 0x2A1640;
+    /** 斑点の大きさ。見ていた光の玉に対する割合。滲みではなく芯が焼き付く。 */
+    private static final float AFTERIMAGE_CORE = 0.35F;
+
+    /**
      * 白熱が引いた後、世界がオレンジがかっている tick 数。
      *
      * <p>閃光の続きではなく、別の現象だ。閃光は火球そのものを見ている明るさだが、こちらは<b>火球に照らされた
@@ -235,6 +259,13 @@ public final class BlastFlash implements LayeredDraw.Layer {
 
     private static void draw(GuiGraphics graphics, Minecraft minecraft, Flash flash, Vec3 eye, float focal,
             int light, float partialTick, int centreX, int centreY) {
+        // 閃光が引いた後は、焼き付いた斑点だけが残る。画面に残すので、どこを向いていても描く。
+        if (flash.nuclear && flash.age >= flash.burns) {
+            afterimage(graphics, flash, partialTick);
+
+            return;
+        }
+
         Vec3 line = flash.at.subtract(eye);
         double away = line.length();
 
@@ -273,7 +304,29 @@ public final class BlastFlash implements LayeredDraw.Layer {
             return;
         }
 
-        halo(graphics, on[0], on[1], radius, alpha);
+        halo(graphics, on[0], on[1], radius, alpha, GLOW);
+
+        // 最も強く見た瞬間を目が覚えている。
+        if (flash.nuclear && alpha > flash.seared) {
+            flash.seared = alpha;
+            flash.searedX = on[0];
+            flash.searedY = on[1];
+            flash.searedRadius = radius * AFTERIMAGE_CORE;
+        }
+    }
+
+    /** 焼き付いた斑点。見た位置に、暗い紫で、ゆっくり薄れる。 */
+    private static void afterimage(GuiGraphics graphics, Flash flash, float partialTick) {
+        if (flash.seared <= 0.0F) {
+            return;
+        }
+
+        float since = Mth.clamp((flash.age - flash.burns + partialTick) / AFTERIMAGE, 0.0F, 1.0F);
+        float alpha = flash.seared * AFTERIMAGE_ALPHA * (float) Math.pow(1.0F - since, 1.5F);
+
+        if (alpha > 0.0F) {
+            halo(graphics, flash.searedX, flash.searedY, flash.searedRadius, alpha, AFTERIMAGE_TINT);
+        }
     }
 
     /**
@@ -327,15 +380,15 @@ public final class BlastFlash implements LayeredDraw.Layer {
      * <p>三角扇ではなく四角形なのは {@code RenderType.gui()} が四角形しか受け付けないからで、内側の半径が
      * 0 の帯は自然に扇形になる。
      */
-    private static void halo(GuiGraphics graphics, int x, int y, float radius, float alpha) {
+    private static void halo(GuiGraphics graphics, int x, int y, float radius, float alpha, int colour) {
         VertexConsumer buffer = graphics.bufferSource().getBuffer(RenderType.gui());
         PoseStack.Pose pose = graphics.pose().last();
 
         for (int band = 0; band < BANDS; band++) {
             float inner = radius * band / BANDS;
             float outer = radius * (band + 1) / BANDS;
-            int from = tint(alpha * falloff((float) band / BANDS));
-            int to = tint(alpha * falloff((float) (band + 1) / BANDS));
+            int from = tint(alpha * falloff((float) band / BANDS), colour);
+            int to = tint(alpha * falloff((float) (band + 1) / BANDS), colour);
 
             for (int step = 0; step < SEGMENTS; step++) {
                 double a = step * Mth.TWO_PI / SEGMENTS;
@@ -364,6 +417,21 @@ public final class BlastFlash implements LayeredDraw.Layer {
             return (float) Math.pow(1.0F - lived, FADES);
         }
 
+        // 二度光る。最初の一瞬、波面に覆われた谷、そして長い二つ目の山。
+        float ticks = lived * flash.burns;
+
+        if (ticks < FIRST_PULSE) {
+            return 1.0F;
+        }
+
+        if (ticks < DIP_BOTTOM) {
+            return Mth.lerp((ticks - FIRST_PULSE) / (DIP_BOTTOM - FIRST_PULSE), 1.0F, DIP);
+        }
+
+        if (ticks < SECOND_PULSE) {
+            return Mth.lerp((ticks - DIP_BOTTOM) / (SECOND_PULSE - DIP_BOTTOM), DIP, 1.0F);
+        }
+
         if (lived <= NUCLEAR_HOLDS) {
             return 1.0F;
         }
@@ -374,10 +442,6 @@ public final class BlastFlash implements LayeredDraw.Layer {
     /** 中心からの距離（0〜1）に対する明るさ。 */
     private static float falloff(float out) {
         return (float) Math.pow(1.0F - out, HALO_FALLOFF);
-    }
-
-    private static int tint(float alpha) {
-        return tint(alpha, GLOW);
     }
 
     private static int tint(float alpha, int colour) {
@@ -395,6 +459,11 @@ public final class BlastFlash implements LayeredDraw.Layer {
         /** 白熱している tick 数。 */
         private final int burns;
         private int age;
+        /** 焼き付き。見た中で最も強かった明るさと、その時の画面上の位置と大きさ。核だけ。 */
+        private float seared;
+        private int searedX;
+        private int searedY;
+        private float searedRadius;
 
         private Flash(Vec3 at, float power) {
             this.at = at;

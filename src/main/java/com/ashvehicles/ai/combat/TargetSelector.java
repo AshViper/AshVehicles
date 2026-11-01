@@ -62,21 +62,21 @@ public final class TargetSelector {
             double ineffective, double antiAir, double preferred, double airDuty) {
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("target.threat", 0.5),
-                    parameters.get("target.attacking_me", 1.0),
-                    parameters.get("target.objective", 0.6),
-                    parameters.get("target.ally", 0.45),
-                    parameters.get("target.proximity", 0.3),
-                    parameters.get("target.weak", 0.15),
-                    parameters.get("target.effect", 0.3),
-                    parameters.get("target.in_range", 0.2),
-                    parameters.get("target.sticky", 0.25),
-                    parameters.get("target.focus", 0.1),
-                    parameters.get("target.overkill", 0.1),
-                    parameters.get("target.ineffective", 0.6),
-                    parameters.get("target.anti_air", 0.5),
-                    parameters.get("target.preferred", 0.8),
-                    parameters.get("target.air_duty", 2.0));
+                    parameters.get("target.threat", 0.560165),
+                    parameters.get("target.attacking_me", 1.189897),
+                    parameters.get("target.objective", 0.769514),
+                    parameters.get("target.ally", 0.359811),
+                    parameters.get("target.proximity", 0.355776),
+                    parameters.get("target.weak", 0.15457),
+                    parameters.get("target.effect", 0.183626),
+                    parameters.get("target.in_range", 0.249294),
+                    parameters.get("target.sticky", 0.219692),
+                    parameters.get("target.focus", 0.091221),
+                    parameters.get("target.overkill", 0.104929),
+                    parameters.get("target.ineffective", 0.651088),
+                    parameters.get("target.anti_air", 0.564442),
+                    parameters.get("target.preferred", 0.798543),
+                    parameters.get("target.air_duty", 1.608433));
         }
     }
 

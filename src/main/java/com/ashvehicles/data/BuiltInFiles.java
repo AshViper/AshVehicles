@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import com.ashvehicles.AshVehicles;
@@ -31,6 +33,10 @@ import net.neoforged.neoforgespi.language.IModFileInfo;
  * 増えるということだ。ここに現れなければエンティティ型もアイテムも作られず、後からデータパックとして
  * 中身が届いても置く先が無い。だからパックの中の {@code data/<名前空間>/<ディレクトリ>/} も同じ手順で
  * 歩く。{@link ContentPacks} 参照。
+ *
+ * <p>MOD 本体は {@code data/ashvehicles/ashvehicles/<種類>/} だけを持つ。パックは以前の
+ * {@code data/<名前空間>/<種類>/} も読むが、そこは他の MOD と取り合いになる場所なので警告を出す。
+ * {@link DefinitionRegistry} 参照。
  */
 public final class BuiltInFiles {
     private static final String SUFFIX = ".json";
@@ -43,9 +49,12 @@ public final class BuiltInFiles {
      * はログに残る。名前空間はパックごとに違うのが普通なので、これが起きるのはパックが意図して MOD 本体
      * の物を置き換えに来た場合だけだ。
      *
+     * @param legacy 以前の置き場所。パックの中だけを探す
      * @param what ログ用の語。"aircraft" や "weapons" など
+     * @param legacyNamespaces 以前の置き場所にファイルがあったパックの名前空間を書き足す先
      */
-    public static <T> Map<ResourceLocation, T> read(String directory, Codec<T> codec, String what) {
+    public static <T> Map<ResourceLocation, T> read(String directory, String legacy, Codec<T> codec, String what,
+            Set<String> legacyNamespaces) {
         Map<ResourceLocation, T> found = new LinkedHashMap<>();
         Path path = locate(directory);
 
@@ -55,7 +64,16 @@ public final class BuiltInFiles {
             readFolder(path, AshVehicles.MODID, codec, what, found);
         }
 
-        ContentPacks.forEachRoot(root -> readPack(root, directory, codec, what, found));
+        ContentPacks.forEachRoot(root -> {
+            readPack(root, directory, codec, what, found, namespace -> {
+            });
+            readPack(root, legacy, codec, what, found, namespace -> {
+                AshVehicles.LOGGER.warn("Content pack namespace {} keeps its {} in data/{}/{}/; move them to "
+                        + "data/{}/{}/ (the old folder collides with other mods such as Immersive Aircraft)",
+                        namespace, what, namespace, legacy, namespace, directory);
+                legacyNamespaces.add(namespace);
+            });
+        });
 
         AshVehicles.LOGGER.info("Found {} {}: {}", found.size(), what, found.keySet());
 
@@ -67,11 +85,11 @@ public final class BuiltInFiles {
      * ディレクトリがあれば読む。
      *
      * <p>名前空間を1つに決め打たないのがこの MOD 本体との唯一の違いだ。パックは自分の名前で物を出す
-     * ——{@code data/mypack/aircraft/foo.json} は {@code mypack:foo} になる——ので、2つのパックが同じ
+     * ——{@code data/mypack/ashvehicles/aircraft/foo.json} は {@code mypack:foo} になる——ので、2つのパックが同じ
      * ファイル名を選んでも互いに何も起きない。
      */
     private static <T> void readPack(Path root, String directory, Codec<T> codec, String what,
-            Map<ResourceLocation, T> into) {
+            Map<ResourceLocation, T> into, Consumer<String> seen) {
         Path data = root.resolve("data");
 
         if (!Files.isDirectory(data)) {
@@ -95,6 +113,7 @@ public final class BuiltInFiles {
                             return;
                         }
 
+                        seen.accept(name);
                         readFolder(folder, name, codec, what, into);
                     });
         } catch (Exception exception) {
@@ -122,7 +141,7 @@ public final class BuiltInFiles {
             IModFileInfo mod = ModList.get().getModFileById(AshVehicles.MODID);
 
             if (mod != null) {
-                Path path = mod.getFile().findResource("data", AshVehicles.MODID, directory);
+                Path path = mod.getFile().findResource(("data/" + AshVehicles.MODID + "/" + directory).split("/"));
 
                 if (Files.isDirectory(path)) {
                     return path;

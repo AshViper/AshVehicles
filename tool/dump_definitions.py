@@ -31,9 +31,9 @@ def load(path):
 
 
 def defs(kind):
-    """data/ashvehicles/<kind>/*.json を id 順に返す。"""
+    """data/ashvehicles/ashvehicles/<kind>/*.json を id 順に返す。"""
     out = []
-    for p in sorted(glob.glob(os.path.join(RES, "data", "ashvehicles", kind, "*.json"))):
+    for p in sorted(glob.glob(os.path.join(RES, "data", "ashvehicles", "ashvehicles", kind, "*.json"))):
         out.append((os.path.basename(p)[:-5], load(p)))
     return out
 
@@ -379,7 +379,8 @@ def index_note(out_dir, en, ja):
               (u"weapon", len(defs("weapon"))), (u"ammunition", len(defs("ammunition"))),
               (u"rack", len(defs("rack"))), (u"equipment", len(defs("equipment"))),
               (u"recipe", len(glob.glob(os.path.join(RES, "data", "ashvehicles", "recipe", "*.json"))))]
-    rows = [[u"`data/ashvehicles/%s/`" % k, u"%d" % n] for k, n in counts]
+    rows = [[(u"`data/ashvehicles/%s/`" if k == u"recipe" else u"`data/ashvehicles/ashvehicles/%s/`") % k, u"%d" % n]
+            for k, n in counts]
     body = [
         u"実装済みの定義ファイルを数えたもの。**登録の本体は Java ではなく定義ファイル**なので、"
         u"ここにある数がそのままゲーム内の実装数になる。\n",

@@ -4,9 +4,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.client.model.obj.ObjModels;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.ResourceManager;
 import software.bernie.geckolib.animatable.GeoAnimatable;
 import software.bernie.geckolib.model.GeoModel;
 
@@ -139,9 +141,14 @@ public abstract class WeaponModel<T extends GeoAnimatable> extends GeoModel<T> {
     /**
      * どれかのリソースパックが提供していれば専用ファイル、無ければフォールバック。問い合わせは物1つにつき
      * リソースリロード1回あたり1度。{@link #FILES} 参照。
+     *
+     * <p>geo.json の代わりに OBJ が置かれていても「提供している」。OBJ はその geo.json の名前で GeckoLib の
+     * キャッシュに入るので、答えは同じ名前のまま（{@link ObjModels}）。
      */
     private static ResourceLocation found(ResourceLocation wanted, ResourceLocation fallback) {
-        return Minecraft.getInstance().getResourceManager().getResource(wanted).isPresent()
+        ResourceManager resources = Minecraft.getInstance().getResourceManager();
+
+        return resources.getResource(wanted).isPresent() || ObjModels.standsIn(resources, wanted)
                 ? wanted
                 : fallback;
     }

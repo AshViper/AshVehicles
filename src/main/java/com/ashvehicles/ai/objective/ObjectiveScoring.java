@@ -35,26 +35,26 @@ public final class ObjectiveScoring {
 
         public static Weights of(ParameterSet parameters) {
             return new Weights(
-                    parameters.get("objective.capture.enemy", 1.0),
-                    parameters.get("objective.capture.neutral", 0.85),
-                    parameters.get("objective.capture.contested", 0.95),
-                    parameters.get("objective.capture.friendly", 0.2),
+                    parameters.get("objective.capture.enemy", 0.942723),
+                    parameters.get("objective.capture.neutral", 0.781693),
+                    parameters.get("objective.capture.contested", 1.102076),
+                    parameters.get("objective.capture.friendly", 0.199806),
                     parameters.get("objective.capture.base", 0.6),
-                    parameters.get("objective.strategic", 0.3),
-                    parameters.get("objective.recapture", 1.2),
-                    parameters.get("objective.recapture_recency_ticks", 1200.0),
-                    parameters.get("objective.defend_urgency", 1.0),
-                    parameters.get("objective.ally_support", 0.3),
-                    parameters.get("objective.enemy_threat", 0.5),
-                    parameters.get("objective.distance", 0.6),
-                    parameters.get("objective.route_risk", 0.4),
-                    parameters.get("objective.sticky", 0.25),
-                    parameters.get("objective.role.scout_far", 0.25),
-                    parameters.get("objective.role.artillery", -0.3),
-                    parameters.get("objective.role.anti_air_hold", 0.2),
-                    parameters.get("objective.role.tank_fight", 0.4),
-                    parameters.get("objective.role.light_capture", 0.3),
-                    parameters.get("objective.role.tank_capture", 0.3));
+                    parameters.get("objective.strategic", 0.370948),
+                    parameters.get("objective.recapture", 1.17215),
+                    parameters.get("objective.recapture_recency_ticks", 1467.0),
+                    parameters.get("objective.defend_urgency", 1.319124),
+                    parameters.get("objective.ally_support", 0.239956),
+                    parameters.get("objective.enemy_threat", 0.483471),
+                    parameters.get("objective.distance", 0.542661),
+                    parameters.get("objective.route_risk", 0.328452),
+                    parameters.get("objective.sticky", 0.264947),
+                    parameters.get("objective.role.scout_far", 0.284359),
+                    parameters.get("objective.role.artillery", -0.277486),
+                    parameters.get("objective.role.anti_air_hold", 0.200563),
+                    parameters.get("objective.role.tank_fight", 0.449956),
+                    parameters.get("objective.role.light_capture", 0.300652),
+                    parameters.get("objective.role.tank_capture", 0.311029));
         }
     }
 

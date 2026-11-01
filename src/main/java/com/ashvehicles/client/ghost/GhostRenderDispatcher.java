@@ -297,6 +297,14 @@ public final class GhostRenderDispatcher {
                 continue;
             }
 
+            // 一人称のカメラ自身は描かない。ゲームのループも同じ条件で飛ばしている（LevelRenderer.renderLevel の
+            // entity != camera.getEntity() || camera.isDetached()）。これが無いと、区画が未構築の場所では
+            // ゴーストが自分の体を目の位置へ描いた。
+            if (!camera.isDetached() && ghost.uuid().equals(camera.getEntity().getUUID())) {
+                ghost.record(ghost.lod(), ghost.distanceSq(), GhostVerdict.GAME);
+                continue;
+            }
+
             // 階層はtick位置から決める。ゲームのレンダラーが claims() で測るのもそれだ。描画自体は補間後の位置で行う。
             double distanceSq = ghost.current().position().distanceToSqr(eye);
             GhostLOD lod = GhostLOD.of(distanceSq);
@@ -379,6 +387,9 @@ public final class GhostRenderDispatcher {
             // 霧を動かしたままの状態で行う。さもないと、この時点以降に描かれるバッチ済みジオメトリが「霧から出てきた
             // ジオメトリ」になってしまい、それは誤ったジオメトリだ。
             buffers.endBatch();
+            // 味方の影もここで流す。AFTER_LEVEL ではこの後に行列を戻すので、後の番では別の画面へ落ちる。
+            // 輪郭を引く処理そのものは GhostOutline が後で1回だけ走らせる。
+            GhostOutline.endBatch(minecraft);
         } finally {
             RenderSystem.setShaderFogStart(vanillaFogStart);
             RenderSystem.setShaderFogEnd(vanillaFogEnd);
@@ -444,6 +455,14 @@ public final class GhostRenderDispatcher {
 
         void render(Vec3 eye, float partialTick, PoseStack poseStack, MultiBufferSource buffers,
                 Camera camera, EntityRenderDispatcher dispatcher, double farPlane) {
+            // 光らせる相手ならアウトラインを添えて描く。ゲームのレンダラーが降板した距離でも発光が切れないように。
+            MultiBufferSource outlined = GhostOutline.outlined(Minecraft.getInstance(),
+                    this.entity != null ? this.entity : this.ghost.entity());
+
+            if (outlined != null) {
+                buffers = outlined;
+            }
+
             if (this.entity != null) {
                 drawWithGameRenderer(this.entity, eye, partialTick, poseStack, buffers, dispatcher,
                         farPlane, this.ghostStyle, this.light);
@@ -626,6 +645,10 @@ public final class GhostRenderDispatcher {
      * 飛行中に有効化したユーザーは、さもないと次の再起動まで空っぽの空を飛ぶことになる。問い合わせは boolean への
      * バインド済みメソッドハンドルで、コストは無に等しい。
      */
+    static RenderLevelStageEvent.Stage passStage() {
+        return activeStage();
+    }
+
     private static RenderLevelStageEvent.Stage activeStage() {
         return IrisShaders.inUse()
                 ? RenderLevelStageEvent.Stage.AFTER_LEVEL

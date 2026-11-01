@@ -216,7 +216,7 @@
   }
 
   const MARKED = new Set(["VehicleDestroyed", "WaterEntered", "ObjectiveCaptured", "ObjectiveRecaptured",
-    "UnnecessaryDeath", "WeaponReleased", "EnemyDestroyed"]);
+    "UnnecessaryDeath", "WeaponReleased", "EnemyDestroyed", "Stalled"]);
 
   /** 段階の記録が無い行（describeFlight を足す前の AirPilot）は、行動から段階を推す。移動と離脱は見分けられない。 */
   const PHASE_OF_ACTION = { ATTACK: "RUN", RETREAT: "SPENT", SEARCH_ENEMY: "TRANSIT", ADVANCE: "TRANSIT" };
@@ -435,7 +435,8 @@
       const text = await readText(entry.events);
 
       for (const type of ["WaterEntered", "Underwater", "VehicleDestroyed", "EnemyDestroyed", "ObjectiveCaptured",
-        "ObjectiveRecaptured", "ObjectiveLost", "UnnecessaryDeath", "LongExposure", "RetreatStarted", "WeaponReleased"]) {
+        "ObjectiveRecaptured", "ObjectiveLost", "UnnecessaryDeath", "LongExposure", "RetreatStarted", "WeaponReleased",
+        "Stalled"]) {
         out[type] = count(text, new RegExp('"type":"' + type + '"', "g"));
       }
 

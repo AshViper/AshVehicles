@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AshVehicles AI 学習器</title>
+<link rel="stylesheet" href="trainer.css">
+</head>
+<body>
+<header class="bar">
+  <h1>AshVehicles AI 学習器</h1>
+  <span id="status" class="status idle">停止中</span>
+  <button id="start" class="primary">学習を開始</button>
+  <button id="stop" disabled>停止</button>
+  <span id="throughput" class="muted"></span>
+</header>
+
+<main class="layout">
+  <aside class="column">
+    <section class="card">
+      <h2>基にする版</h2>
+      <p class="muted">既定はコードの値そのまま（<code>rule_v1</code>）。ゲームで <code>/tdm ai versions export &lt;版&gt;</code> を打つと
+        <code>ashvehicles_ai/exports/</code> に全部の値が出るので、それを読めばその版から始める。</p>
+      <div class="row">
+        <label class="file">版の JSON を読む…<input id="baseFile" type="file" accept=".json"></label>
+        <button id="baseDefault">rule_v1 から</button>
+      </div>
+      <p id="baseName" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <h2>会場</h2>
+      <div class="row">
+        <label class="check"><input type="radio" name="mapSource" value="generated">自動生成（種ごとに違う点対称の会場）</label>
+        <label class="check"><input type="radio" name="mapSource" value="world">Minecraft のワールド</label>
+      </div>
+      <p class="muted">ワールドのフォルダ（<code>saves/&lt;ワールド&gt;</code>）を選ぶと、<code>data/ashvehicles_deathmatch.dat</code> の陣地と拠点を囲む範囲の地形を読む。
+        陣地が2つ無ければ下の中心と一辺で読む。</p>
+      <div class="row">
+        <button id="worldOpen">ワールドを開く…</button>
+        <label class="file">フォルダを選ぶ（Firefox など）<input id="worldFiles" type="file" webkitdirectory multiple></label>
+        <button id="worldForget">ワールドを捨てる</button>
+      </div>
+      <div class="row">
+        <input id="worldUrl" type="text" placeholder="/run/saves/world/" style="flex:1 1 160px; min-width:0">
+        <button id="worldFetch">サーバーのパスから読む</button>
+      </div>
+      <div class="grid">
+        <label>陣地が無いときの中心 X<input id="fallbackX" type="number" value="0"></label>
+        <label>中心 Z<input id="fallbackZ" type="number" value="0"></label>
+        <label>一辺<input id="fallbackSide" type="number" value="768" min="256" max="2048" step="64"></label>
+      </div>
+      <div class="progress"><div id="worldFill"></div></div>
+      <p id="worldInfo" class="muted">ワールドは読んでいない</p>
+    </section>
+
+    <section class="card">
+      <h2>並列と試合</h2>
+      <div class="grid">
+        <label>Worker（同時に回す試合）<input id="workers" type="number" min="1" max="64"></label>
+        <label>1陣営の台数<input id="teamSize" type="number" min="2" max="24"></label>
+        <label>制限時間（分）<input id="minutes" type="number" min="2" max="30" step="1"></label>
+        <label>拠点の数<select id="points"><option>1</option><option>3</option><option>5</option></select></label>
+        <label>会場の広さ<select id="mapSize"><option value="512">512</option><option value="768">768</option><option value="1024">1024</option></select></label>
+        <label class="check"><input id="varyTerrain" type="checkbox">地形を毎試合ばらつかせる（自動生成）</label>
+        <label class="check"><input id="air" type="checkbox">航空機を出す（陣営の3割まで）</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>進化戦略</h2>
+      <div class="grid">
+        <label>候補の数 λ<input id="population" type="number" min="2" max="64" step="2"></label>
+        <label>候補ごとの試合<input id="matchesPerCandidate" type="number" min="2" max="32" step="2"></label>
+        <label>揺らす幅 σ<input id="sigma" type="number" min="0.01" max="1" step="0.01"></label>
+        <label>寄せる速さ<input id="learningRate" type="number" min="0.05" max="1" step="0.05"></label>
+        <label>過去の採用版と戦う割合<input id="hallShare" type="number" min="0" max="1" step="0.05"></label>
+        <label>門の試合数<input id="gateMatches" type="number" min="2" max="200" step="2"></label>
+        <label>門の勝率<input id="gateWinRate" type="number" min="0.5" max="0.9" step="0.01"></label>
+        <label>版の名前の頭<input id="prefix" type="text" maxlength="30"></label>
+      </div>
+      <h3>学習するパラメータ</h3>
+      <div id="groups" class="groups"></div>
+      <p id="paramCount" class="muted"></p>
+      <div class="row">
+        <button id="reset" class="danger">最初からやり直す</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>罰と加点</h2>
+      <p class="muted">勝ち点（勝1・分0.5＋チケット差×0.25）に、1試合ごとに足す。ゲームの補充の選び方（<code>spawn.air_idle</code>
+        <code>spawn.air_wanted</code> <code>spawn.pair</code>）とは別に、学習の向きを押す。</p>
+      <div class="grid">
+        <label>敵機がいないときの防空（1両の罰）<input id="shapeAirIdle" type="number" min="0" max="1" step="0.01"></label>
+        <label>敵機がいるときの防空（1両の加点）<input id="shapeAirWanted" type="number" min="0" max="1" step="0.01"></label>
+        <label>戦車と IFV の組（組んでいた割合×）<input id="shapePair" type="number" min="0" max="2" step="0.05"></label>
+        <label>水に入った（1回の罰）<input id="shapeWater" type="number" min="0" max="1" step="0.01"></label>
+        <label>障害物に詰まった（1回の罰）<input id="shapeStall" type="number" min="0" max="1" step="0.001"></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>書き出し</h2>
+      <p class="muted">採用版を <code>versions/&lt;名前&gt;.json</code> の形で出す。ゲームで <code>/tdm ai versions reload</code>、
+        <code>/tdm ai selfplay start 40 &lt;名前&gt; rule_v1</code> で確かめてから <code>promote</code>。</p>
+      <div class="row">
+        <button id="saveFolder">versions フォルダへ書く…</button>
+        <button id="download">JSON を保存</button>
+        <button id="copy">コピー</button>
+      </div>
+      <p id="exportNote" class="muted"></p>
+    </section>
+  </aside>
+
+  <div class="column wide">
+    <section class="card">
+      <div class="split">
+        <h2>進み具合</h2>
+        <span id="phase" class="muted"></span>
+      </div>
+      <div class="progress"><div id="progressFill"></div></div>
+      <div class="stats" id="summary"></div>
+      <canvas id="chart" height="220"></canvas>
+      <div class="legend">
+        <span><i class="swatch gate"></i>門の勝率（平均の版 vs 採用版）</span>
+        <span><i class="swatch best"></i>一番良い候補の勝率</span>
+        <span><i class="swatch mean"></i>候補の平均勝率</span>
+        <span><i class="swatch promo"></i>採用</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="split">
+        <h2>観戦</h2>
+        <div class="row">
+          <select id="spectateWho">
+            <option value="champion-base">採用版 vs 基の版</option>
+            <option value="mean-champion">学習中の平均 vs 採用版</option>
+            <option value="base-base">基の版 同士</option>
+          </select>
+          <select id="spectateSpeed">
+            <option value="1">×1</option><option value="4" selected>×4</option><option value="16">×16</option><option value="64">×64</option>
+          </select>
+          <button id="spectateNew">新しい試合</button>
+          <button id="spectatePause">一時停止</button>
+        </div>
+      </div>
+      <div class="spectate">
+        <canvas id="field" width="720" height="720"></canvas>
+        <div class="side">
+          <div id="scoreboard" class="scoreboard"></div>
+          <div id="unitInfo" class="unitInfo muted">車両をクリックすると判断が見える</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>採用版</h2>
+      <div id="champion"></div>
+      <h3>行動の割合（直近の門、挑戦者 / 採用版）</h3>
+      <div id="actions" class="actions"></div>
+      <h3>基の版から動いたパラメータ</h3>
+      <div class="tableWrap"><table id="params"><thead><tr><th>名前</th><th>基</th><th>採用版</th><th>比</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section class="card">
+      <h2>記録</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+  </div>
+</main>
+
+<script src="data.js"></script>
+<script src="sim/core.js"></script>
+<script src="sim/terrain.js"></script>
+<script src="sim/brain.js"></script>
+<script src="sim/tactics.js"></script>
+<script src="sim/air.js"></script>
+<script src="sim/match.js"></script>
+<script src="sim/worker.js"></script>
+<script src="world.js"></script>
+<script src="trainer.js"></script>
+<script src="spectate.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -440,6 +440,123 @@ public final class Hitboxes {
         return mover.level().noCollision(mover, box.move(stepped)) ? stepped : allowed;
     }
 
+    /**
+     * 地上車両の水平移動のうち、他の機体の箱に止められずに残る分。
+     *
+     * <p>地上車両は {@code Entity.move} を通らない（{@code GroundVehicleEntity.move} が位置を直に書く）ので
+     * {@link #limit} が一度も呼ばれず、他の機体に当たるのは四隅の地面プローブだけだった。プローブの間を
+     * 抜ける物——砲身、細い車両、斜めに来た相手の角——はそのまま車体の中へ入っていた。
+     *
+     * <p>箱を掃引すると甲板やランプへ登れなくなる（[[vehicles-stand-on-vehicles-by-probe]]）。そこで止められた
+     * ときは段差の高さだけ持ち上げた箱でもう一度掃引し、それで通れるなら通す。持ち上げるのは地面プローブ
+     * の仕事で、ここは「登れる高さの物か」だけを答える。
+     *
+     * @param climb 車両が乗り越えられる段差の高さ
+     */
+    public static Vec3 betweenMachines(VehicleEntityBase mover, Vec3 wanted, double climb) {
+        Vec3 across = new Vec3(wanted.x, 0.0, wanted.z);
+
+        if (across.lengthSqr() == 0.0) {
+            return wanted;
+        }
+
+        List<Hitbox> mine = own(mover);
+
+        if (mine.isEmpty()) {
+            return wanted;
+        }
+
+        List<Hitbox> theirs = near(mover, union(mine).expandTowards(across).expandTowards(0.0, climb, 0.0));
+
+        if (theirs.isEmpty()) {
+            return wanted;
+        }
+
+        Vec3 allowed = resolve(theirs, mine, across);
+
+        if (allowed.x == across.x && allowed.z == across.z) {
+            return wanted;
+        }
+
+        if (climb > 0.0) {
+            double lift = along(theirs, mine, climb, 1);
+
+            if (lift > NOTHING) {
+                Vec3 over = resolve(theirs, shifted(mine, new Vec3(0.0, lift, 0.0)), across);
+
+                if (over.horizontalDistanceSqr() > allowed.horizontalDistanceSqr()) {
+                    allowed = over;
+                }
+            }
+        }
+
+        return new Vec3(allowed.x, wanted.y, allowed.z);
+    }
+
+    /**
+     * 機体の箱が、余裕を足した範囲で他の機体の箱に触れているなら、その機体。
+     *
+     * <p>墜落の報告の検算に使う。ブロックしか見ない検算は、空中で他の機体に当たった報告を必ず捨てていた。
+     *
+     * @param margin 各箱をどれだけ膨らませて問うか
+     */
+    public static VehicleEntityBase touchedMachine(VehicleEntityBase mover, double margin) {
+        List<Hitbox> mine = own(mover);
+        Set<VehicleEntityBase> machines = MACHINES.get(mover.level());
+
+        if (mine.isEmpty() || machines == null) {
+            return null;
+        }
+
+        List<Hitbox> grown = new ArrayList<>(mine.size());
+
+        for (Hitbox box : mine) {
+            grown.add(box.grow(margin));
+        }
+
+        AABB area = union(grown);
+        Entity riding = mover.getRootVehicle();
+
+        for (VehicleEntityBase machine : machines) {
+            AABB bounds = machine.placedBounds();
+
+            if (machine == mover || machine == riding || machine.getRootVehicle() == mover
+                    || machine.isRemoved() || bounds == null || !bounds.intersects(area)) {
+                continue;
+            }
+
+            for (VehiclePart part : machine.getParts()) {
+                Hitbox theirs = part.hitbox();
+
+                if (theirs == null || part.isPylon() || !theirs.reach().intersects(area)) {
+                    continue;
+                }
+
+                for (Hitbox ours : grown) {
+                    if (ours.reach().intersects(theirs.reach()) && overlapping(theirs, ours)) {
+                        return machine;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 2つの箱が今重なっているか。動かない掃引は「中にいる」に何も答えないので、相手の中心へ向かう
+     * ごく小さな移動で問う。重なっていれば深く入る向きなので0、離れていればほぼ1が返る。
+     */
+    private static boolean overlapping(Hitbox still, Hitbox moving) {
+        Vec3 inward = still.centre().subtract(moving.centre());
+
+        if (inward.lengthSqr() < NOTHING) {
+            return true;
+        }
+
+        return still.sweep(moving, inward.normalize().scale(1.0E-3)) < 1.0;
+    }
+
     // ------------------------------------------------------------------
     // 動きながら上に立たれる側
     // ------------------------------------------------------------------

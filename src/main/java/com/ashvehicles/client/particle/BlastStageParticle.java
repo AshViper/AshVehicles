@@ -350,6 +350,68 @@ public class BlastStageParticle extends WeaponParticle {
     private static final double SURGE_CREEP = 0.05;
     private static final float SURGE_GRAIN = 0.18F;
 
+    /**
+     * 傘の高さでの風（1tickあたりブロック）。柱の根元では0で、高さに比例して強くなる。
+     *
+     * <p>実物の雲は立ち上がりきった後、上空の風に押されて傾き、崩れながら風下へ流れていく。根元が動かず頭だけが
+     * 流れるので、柱は斜めに曲がる——まっすぐ立ったまま1分残るキノコ雲は絵だ。1.2 m/s 相当と実際より遥かに弱い
+     * のは、雲が残る90秒で傘が100ブロックほど流れれば十分で、それ以上だと戦場から雲が出ていってしまうからだ。
+     * 向きは爆心の座標から決める——全員の画面で同じ向きに流れなければならない。
+     */
+    private static final double WIND = 0.06;
+
+    /**
+     * 傘の渦。最も広い高さに、傘の縁から内へ巻き込む輪（トーラス）を置く。
+     *
+     * <p>傘は平たい円盤ではない。上がりきった熱い気体は縁で外へ出て下へ回り、内側から上がる——渦の輪になって
+     * 転がっている。映像で傘の下側が明るく縁が巻いて見えるのはこれで、層だけでは出ない。輪の中心半径は傘の
+     * 何割か、管の太さも傘の何割か。
+     */
+    private static final double TORUS_AT = 0.68;
+    private static final double TORUS_TUBE = 0.24;
+    private static final int TORUS_PUFFS = 3;
+    /** 渦が転がる速さ。管の上側は外へ、下側は内へ。摩擦で止まるので形を崩さない程度の飾り。 */
+    private static final double TORUS_ROLL = 0.10;
+
+    /**
+     * 頭巾雲（ピレウス）。立ち上がる傘のすぐ上にできる薄く白い帽子。
+     *
+     * <p>押し上げられた湿った空気が冷えて凝結する物で、傘が開き始めた瞬間だけに現れ、傘に呑まれて消える。
+     * 傘の開きのこの範囲で、傘の厚みの何倍上に、傘の半径の何倍の大きさで置く。
+     */
+    private static final float PILEUS_FROM = 0.05F;
+    private static final float PILEUS_TO = 0.35F;
+    private static final double PILEUS_ABOVE = 1.25;
+    private static final double PILEUS_WIDE = 1.15;
+    private static final int PILEUS_PLATES = 3;
+
+    /**
+     * 吸い込み。柱が立つ間、根元へ向かって地面の土埃が吸い寄せられ、柱の足元に台座のような土煙を作る。
+     *
+     * <p>衝撃波が通り過ぎた後には、立ち上がる火球に向かって逆向きの風（戻り風）が吹く。外へ這う
+     * ベースサージと逆向きのこの流れがあるから、柱は地面から生えて見える。
+     */
+    private static final int INFLOW_EVERY = 2;
+    private static final int INFLOW_PUFFS = 2;
+    /** 吸い寄せられ始める距離（傘の半径に対する倍率）と、根元へ向かう速さ、上がる速さ。 */
+    private static final double INFLOW_FROM = 1.6;
+    private static final double INFLOW_PULL = 0.55;
+    private static final double INFLOW_RISE = 0.18;
+    private static final float INFLOW_GRAIN = 0.12F;
+
+    /**
+     * 降下物を落とし続ける tick 数と、その間隔と1回の粒数。
+     *
+     * <p>傘が開ききった頃から降り始める。傘の底から、傘がそこまで流された分だけ風下で。
+     */
+    private static final int FALLOUT_FOR = 1200;
+    private static final int FALLOUT_EVERY = 2;
+    private static final int FALLOUT_PUFFS = 2;
+    /** 降らせる範囲。傘の半径に対する割合。 */
+    private static final double FALLOUT_SPREAD = 0.75;
+    /** 灰の色。煤より明るい灰色——燃えかすではなく、焼けた土と塵だ。 */
+    private static final int ASH = 0x4A4744;
+
     private final int colour;
     private final float power;
     /** 粒1つの大きさの基準。{@link #grain} 参照。 */
@@ -379,6 +441,11 @@ public class BlastStageParticle extends WeaponParticle {
     private final TintedParticleType layerOf;
     /** 既に置いた凝結の棚の段数。 */
     private int shelvesLaid;
+    /** 頭巾雲を置いたか。 */
+    private boolean pileusLaid;
+    /** 傘の高さでの風（1tickあたりブロック）。核だけ。{@link #WIND} 参照。 */
+    private final double windX;
+    private final double windZ;
 
     private BlastStageParticle(ClientLevel level, double x, double y, double z,
             TintedParticleOption options, SpriteSet sprites) {
@@ -404,6 +471,17 @@ public class BlastStageParticle extends WeaponParticle {
         this.lifetime = this.mushrooms
                 ? MUSHROOM_FROM + this.climbs + this.caps + (int) (LINGERS * slower)
                 : SHOW;
+
+        if (this.nuclear) {
+            this.lifetime = Math.max(this.lifetime, this.falloutFrom() + FALLOUT_FOR);
+        }
+
+        // 座標から決める。乱数にすると見ている者ごとに雲が別の向きへ流れる。
+        double blowing = Mth.frac(Math.sin(Math.floor(x) * 12.9898 + Math.floor(z) * 78.233) * 43758.5453)
+                * Mth.TWO_PI;
+
+        this.windX = this.nuclear ? Math.cos(blowing) * WIND : 0.0;
+        this.windZ = this.nuclear ? Math.sin(blowing) * WIND : 0.0;
 
         // 進行役自体は動かないし落ちない。爆心はそこに開いた穴であって、飛んでいく物ではない。
         this.hasPhysics = false;
@@ -626,8 +704,10 @@ public class BlastStageParticle extends WeaponParticle {
         double top = this.capAt * eased(climbed);
         double wide = this.capWide * STEM_SLIM * (1.0 + climbed * STEM_FLARES);
 
+        double aloft = top / this.capAt;
+
         this.level.addParticle(this.layerOf.of(Effects.SOOT, (float) wide),
-                this.x, this.y + top, this.z, 0.0, STEM_RISE, 0.0);
+                this.x, this.y + top, this.z, this.windX * aloft, STEM_RISE, this.windZ * aloft);
 
         if (this.nuclear) {
             this.shelves(top);
@@ -684,7 +764,7 @@ public class BlastStageParticle extends WeaponParticle {
         double lift = this.capAt + high * this.capWide * CAP_SQUASH;
 
         this.level.addParticle(this.layerOf.of(Effects.SOOT, (float) (spread * profile)),
-                this.x, this.y + lift, this.z, 0.0, CAP_LIFT, 0.0);
+                this.x, this.y + lift, this.z, this.windX, CAP_LIFT, this.windZ);
 
         if (!this.nuclear) {
             return;
@@ -696,7 +776,56 @@ public class BlastStageParticle extends WeaponParticle {
                 this.x + this.random.nextGaussian() * spread * profile * 0.3,
                 this.y + lift,
                 this.z + this.random.nextGaussian() * spread * profile * 0.3,
-                0.0, CAP_LIFT, 0.0);
+                this.windX, CAP_LIFT, this.windZ);
+
+        this.torus(spread);
+
+        if (!this.pileusLaid && opened >= PILEUS_FROM && opened <= PILEUS_TO) {
+            this.pileus(spread);
+        }
+    }
+
+    /**
+     * 傘の渦の輪のこの分。傘の最も広い高さを中心に、輪の管の断面上へ煙を置く。
+     *
+     * <p>管の断面の角で、上側の粒は外へ、下側の粒は内へ転がす。灼熱する煙を使うので、巻き込まれた輪の内側が
+     * 傘より長く赤い。
+     */
+    private void torus(double spread) {
+        double ring = spread * TORUS_AT;
+        double tube = this.capWide * TORUS_TUBE;
+
+        for (int i = 0; i < TORUS_PUFFS; i++) {
+            double turn = this.random.nextDouble() * Mth.TWO_PI;
+            double around = this.random.nextDouble() * Mth.TWO_PI;
+            double out = ring + Math.cos(around) * tube;
+            double up = Math.sin(around) * tube * CAP_SQUASH;
+            double cos = Math.cos(turn);
+            double sin = Math.sin(turn);
+            // 管の断面の接線。上側（sin > 0）では外へ、外側（cos > 0）では下へ回る。
+            double rollOut = Math.sin(around) * TORUS_ROLL;
+            double rollUp = -Math.cos(around) * TORUS_ROLL;
+
+            this.level.addParticle(
+                    ModParticles.NUCLEAR_CLOUD.get().of(Effects.SOOT, (float) (tube * 0.9)),
+                    this.x + cos * out, this.y + this.capAt + up, this.z + sin * out,
+                    cos * rollOut + this.windX, rollUp + CAP_LIFT, sin * rollOut + this.windZ);
+        }
+    }
+
+    /** 頭巾雲。傘の頭のすぐ上に、白く薄い皿を数枚。凝結した水なので光らない。 */
+    private void pileus(double spread) {
+        double over = this.capAt + this.capWide * CAP_SQUASH * PILEUS_ABOVE;
+
+        for (int plate = 0; plate < PILEUS_PLATES; plate++) {
+            this.level.addParticle(
+                    ModParticles.CLOUD_LAYER.get().of(Effects.DUST,
+                            (float) (spread * PILEUS_WIDE * (1.0 - plate * 0.12))),
+                    this.x, this.y + over + plate * SHELF_THICK * this.capWide, this.z,
+                    0.0, CAP_LIFT, 0.0);
+        }
+
+        this.pileusLaid = true;
     }
 
     /**
@@ -719,6 +848,65 @@ public class BlastStageParticle extends WeaponParticle {
         if (this.age >= SURGE_FROM && this.age <= MUSHROOM_FROM + this.climbs
                 && this.age % SURGE_EVERY == 0) {
             this.surge();
+        }
+
+        // 吸い込みは外へ這う雲より少し遅れ、傘が半分開くまで続く。戻り風は衝撃波が通り過ぎた後に吹く。
+        if (this.ground != AIRBURST && this.age >= SURGE_FROM + SURGE_EVERY
+                && this.age <= MUSHROOM_FROM + this.climbs + this.caps / 2
+                && this.age % INFLOW_EVERY == 0) {
+            this.inflow();
+        }
+
+        int falling = this.age - this.falloutFrom();
+
+        if (falling >= 0 && falling < FALLOUT_FOR && this.age % FALLOUT_EVERY == 0) {
+            this.fallout(1.0F - (float) falling / FALLOUT_FOR);
+        }
+    }
+
+    /** 降下物が降り始める tick。傘が開ききった時。 */
+    private int falloutFrom() {
+        return MUSHROOM_FROM + this.climbs + this.caps;
+    }
+
+    /** 根元へ吸い寄せられる土埃。地面の色で、内へ、そして上へ。 */
+    private void inflow() {
+        for (int i = 0; i < INFLOW_PUFFS; i++) {
+            double turn = this.random.nextDouble() * Mth.TWO_PI;
+            double reach = this.capWide * INFLOW_FROM * (0.35 + this.random.nextDouble() * 0.65);
+            double cos = Math.cos(turn);
+            double sin = Math.sin(turn);
+
+            this.level.addParticle(
+                    ModParticles.CLOUD.get().of(this.ground, (float) (this.capWide * INFLOW_GRAIN)),
+                    this.x + cos * reach,
+                    this.y + this.random.nextDouble() * this.capWide * SURGE_LOW * 0.5,
+                    this.z + sin * reach,
+                    -cos * INFLOW_PULL, INFLOW_RISE, -sin * INFLOW_PULL);
+        }
+    }
+
+    /**
+     * 降下物のこの分。傘の底から、傘が流された分だけ風下で灰を落とす。
+     *
+     * @param left 降り終わりまでの残り。0〜1。降り始めが最も濃く、細っていく
+     */
+    private void fallout(float left) {
+        int puffs = Math.max(Math.round(FALLOUT_PUFFS * left * 1.5F), 1);
+        int drifted = this.age - MUSHROOM_FROM - this.climbs;
+        double base = this.capAt - this.capWide * CAP_SQUASH * CAP_UNDER * 0.5;
+        double spread = this.capWide * FALLOUT_SPREAD;
+
+        for (int i = 0; i < puffs; i++) {
+            double turn = this.random.nextDouble() * Mth.TWO_PI;
+            double reach = spread * Math.sqrt(this.random.nextDouble());
+
+            // 灰自身も風に乗る。下るにつれて風は弱まるので、傘より少し遅く。
+            this.level.addParticle(ModParticles.FALLOUT.get().of(ASH, this.oversize),
+                    this.x + this.windX * drifted + Math.cos(turn) * reach,
+                    this.y + base,
+                    this.z + this.windZ * drifted + Math.sin(turn) * reach,
+                    this.windX * 0.6, 0.0, this.windZ * 0.6);
         }
     }
 

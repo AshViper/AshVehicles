@@ -2,8 +2,11 @@ package com.ashvehicles.client.renderer;
 
 import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.client.model.WeaponModel;
+import com.ashvehicles.client.model.obj.MeshBone;
 import com.ashvehicles.entity.RocketEntity;
+import com.ashvehicles.weapon.WeaponDefinition;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 
 import net.minecraft.client.renderer.LightTexture;
@@ -12,6 +15,7 @@ import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
+import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 
 /**
@@ -64,6 +68,19 @@ public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
     public void render(RocketEntity rocket, float entityYaw, float partialTick, PoseStack poseStack,
             MultiBufferSource bufferSource, int packedLight) {
         super.render(rocket, entityYaw, partialTick, poseStack, bufferSource, lit(rocket, packedLight));
+
+        WeaponDefinition.Flame flame = rocket.plume();
+
+        if (flame != null) {
+            poseStack.pushPose();
+            this.applyRotations(rocket, poseStack, 0.0F, entityYaw, partialTick, 1.0F);
+            // applyRotations はモデルのために最後に半回転するので、ここで +Z を進行方向へ戻す
+            poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
+            float time = (rocket.level().getGameTime() % 100000L) + partialTick;
+            AfterburnerPlume.motor(flame.colour(), flame.size(), flame.length(), rocket.ignitionFlare(partialTick),
+                    time, rocket.getId(), poseStack, bufferSource);
+            poseStack.popPose();
+        }
     }
 
     /** モーターが燃えている間の明るさ。燃えていなければ世界が答えた通り。 */
@@ -95,6 +112,15 @@ public class RocketRenderer extends GeoEntityRenderer<RocketEntity> {
         }
 
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
+    }
+
+    /** OBJ から焼いたボーンは頂点ごとの法線で描く。{@link MeshBone} 参照。 */
+    @Override
+    public void renderCubesOfBone(PoseStack poseStack, GeoBone bone, VertexConsumer buffer, int packedLight,
+            int packedOverlay, int colour) {
+        if (!MeshBone.draw(poseStack, bone, buffer, packedLight, packedOverlay, colour)) {
+            super.renderCubesOfBone(poseStack, bone, buffer, packedLight, packedOverlay, colour);
+        }
     }
 
     /** ミサイルの上に浮かぶ名前タグを描くのは妙な話だ。 */
