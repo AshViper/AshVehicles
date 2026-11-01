@@ -4,7 +4,7 @@
   "ammo": 940,
   "gun_class": "machine_gun",
   "firing": {
-    "rounds_per_second": 40.0,
+    "rounds_per_second": 9.17,
     "spread": 0.55
   },
   "projectile": {

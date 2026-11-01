@@ -4,7 +4,7 @@
   "ammo": 60,
   "gun_class": "tank_gun",
   "firing": {
-    "rounds_per_second": 0.17,
+    "rounds_per_second": 0.05,
     "automatic": false,
     "spread": 0.16
   },
