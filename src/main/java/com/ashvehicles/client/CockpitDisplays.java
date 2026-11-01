@@ -55,7 +55,7 @@ public final class CockpitDisplays {
     private static final int GROUND = 0xFF6B4423;
 
     /** 計器盤の面から目の側へ浮かせる距離（ブロック）。模型の画面と深度で争わないため。 */
-    private static final float LIFT = 0.012F;
+    private static final float LIFT = 0.02F;
 
     private static final int LIGHT = LightTexture.FULL_BRIGHT;
 
@@ -477,7 +477,9 @@ public final class CockpitDisplays {
 
     /** 以後に描く物を目の側へ一段寄せる。 */
     private static void layer() {
-        layer -= 0.05F;
+        // 1 画素は 0.126 ブロック幅の画面で約 0.001 ブロック。これより薄く重ねると深度の精度が足りず、
+        // 背景と線と文字が奪い合って点滅する。
+        layer -= 1.5F;
     }
 
     private static void fill(float left, float top, float right, float bottom, int colour) {
@@ -519,7 +521,7 @@ public final class CockpitDisplays {
         vertex(x2, y2, colour);
         vertex(x1, y1, colour);
         vertex(x0, y0, colour);
-        layer -= 0.0005F;
+        layer -= 0.02F;
     }
 
     private static void vertex(float x, float y, int colour) {
