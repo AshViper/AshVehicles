@@ -26,6 +26,7 @@ import com.ashvehicles.client.model.WeaponModel;
 import com.ashvehicles.client.renderer.AircraftRenderer;
 import com.ashvehicles.client.renderer.BulletRenderer;
 import com.ashvehicles.client.renderer.CountermeasureRenderer;
+import com.ashvehicles.client.renderer.EjectedSeatRenderer;
 import com.ashvehicles.client.renderer.DesignationRenderer;
 import com.ashvehicles.client.renderer.GroundVehicleRenderer;
 import com.ashvehicles.client.renderer.RocketRenderer;
@@ -128,6 +129,7 @@ public class AshVehiclesClient {
         event.registerEntityRenderer(ModEntities.ROCKET.get(), RocketRenderer::new);
         event.registerEntityRenderer(ModEntities.TARGET_DRONE.get(), TargetDroneRenderer::new);
         event.registerEntityRenderer(ModEntities.COUNTERMEASURE.get(), CountermeasureRenderer::new);
+        event.registerEntityRenderer(ModEntities.EJECTED_SEAT.get(), EjectedSeatRenderer::new);
         // 指示点は計器が地表に重ねて描くもので、そこに立つ物体として描くものではない。
         // レンダラーがあるのは、エンティティ型には必ず要るから。
         event.registerEntityRenderer(ModEntities.DESIGNATION.get(), DesignationRenderer::new);

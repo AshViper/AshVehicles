@@ -16,7 +16,7 @@ public final class ModNetwork {
      * NeoForge 自身のペイロードに乗るが、サーバーが書いた形式と違う形式でクライアントが読めば、結果は
      * 同じ「接続が壊れる」。{@link com.ashvehicles.entity.VehicleProjectile#writeSpawnData} 参照。
      */
-    private static final String PROTOCOL_VERSION = "21";
+    private static final String PROTOCOL_VERSION = "22";
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
@@ -34,6 +34,8 @@ public final class ModNetwork {
         registrar.playToServer(GunCrewPayload.TYPE, GunCrewPayload.STREAM_CODEC,
                 GunCrewPayload::handle);
         registrar.playToServer(EjectPayload.TYPE, EjectPayload.STREAM_CODEC, EjectPayload::handle);
+        registrar.playToClient(EjectLaunchPayload.TYPE, EjectLaunchPayload.STREAM_CODEC,
+                EjectLaunchPayload::handle);
         // 無人機。繋ぐ・切る と、繋いでいる間の操縦桿。
         registrar.playToServer(DroneLinkPayload.TYPE, DroneLinkPayload.STREAM_CODEC,
                 DroneLinkPayload::handle);
