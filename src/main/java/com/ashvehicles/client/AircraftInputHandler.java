@@ -68,6 +68,10 @@ public final class AircraftInputHandler {
                             : "message.ashvehicles.mouse_aim_off"), true);
         }
 
+        while (ModKeyMappings.COUNTERMEASURE_MODE.consumeClick()) {
+            CountermeasureMode.cycle(player);
+        }
+
         AircraftEntity aircraft = pilotedAircraft(player);
         // 遠隔操作中の無人機。操縦席に座っている訳ではないが、操縦桿を握っているのはこのプレイヤーだ。
         // 以下は最後の1行——どのパケットで送るか——を除いて、有人機と完全に同じ経路を通る。同じキーで
@@ -143,8 +147,8 @@ public final class AircraftInputHandler {
                 trigger,
                 // クリックではなく押し続け。ディスペンサーはハンドルを引いている間1発ずつ放出し、その速さは自身
                 // の間隔が決める。
-                ModKeyMappings.RELEASE_FLARE.isDown(),
-                ModKeyMappings.RELEASE_CHAFF.isDown(),
+                CountermeasureMode.flare(ModKeyMappings.RELEASE_COUNTERMEASURE.isDown()),
+                CountermeasureMode.chaff(ModKeyMappings.RELEASE_COUNTERMEASURE.isDown()),
                 // 押下状態をそのまま送る。1押しの切り出し（掴む・手放す）はサーバーのシーカーが行う。
                 // TargetLock.tick 参照。
                 ModKeyMappings.RADAR_LOCK.isDown(),

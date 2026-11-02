@@ -3,7 +3,7 @@
   "nation": "us",
   "item": true,
   "ammo": 1,
-  "mass": 1100,
+  "mass": 1021,
   "firing": {
     "rounds_per_second": 0.5,
     "spread": 0.0,

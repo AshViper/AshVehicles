@@ -102,11 +102,12 @@ public final class ModKeyMappings {
      */
     public static final KeyMapping JETTISON = create("jettison", GLFW.GLFW_KEY_J);
     /**
-     * 2つの対抗手段のハンドル。1つではなく別々のキーにしてある。どちらが正解かは警戒受信機が今答えた問いだからだ。
-     * 赤外線誘導にはフレア、レーダー反射誘導にはチャフ。押し続ければ放出し続ける。
+     * 対抗手段の放出は1キー。何を出すか（フレアのみ・チャフのみ・両方）は {@link #COUNTERMEASURE_MODE} で選んでおく。
+     * 赤外線誘導にはフレア、レーダー反射誘導にはチャフ。押し続ければ放出し続ける。{@link CountermeasureMode} 参照。
      */
-    public static final KeyMapping RELEASE_FLARE = create("release_flare", GLFW.GLFW_KEY_C);
-    public static final KeyMapping RELEASE_CHAFF = create("release_chaff", GLFW.GLFW_KEY_V);
+    public static final KeyMapping RELEASE_COUNTERMEASURE = create("release_countermeasure", GLFW.GLFW_KEY_C);
+    /** 放出する対抗手段を フレア → チャフ → 両方 の順に切り替える。 */
+    public static final KeyMapping COUNTERMEASURE_MODE = create("countermeasure_mode", GLFW.GLFW_KEY_V);
 
     /**
      * 押している間、シーカーに目標を捕捉させる。既に捉えている物を保持するだけではない。
@@ -225,7 +226,7 @@ public final class ModKeyMappings {
     public static final KeyMapping[] ALL = {PITCH_UP, PITCH_DOWN, ROLL_LEFT, ROLL_RIGHT,
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
             AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_BAY, TOGGLE_RAMP, TOGGLE_VTOL, FLIGHT_LIMIT, JETTISON,
-            RELEASE_FLARE, RELEASE_CHAFF,
+            RELEASE_COUNTERMEASURE, COUNTERMEASURE_MODE,
             RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE, HOVER,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,
             DISMOUNT, SWITCH_SEAT, SENSOR_POLARITY};

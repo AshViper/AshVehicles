@@ -19,11 +19,13 @@
     "trail": false
   },
   "cluster": {
-    "submunition": "ashvehicles:bomblet",
+    "submunition": "ashvehicles:blu97",
     "count": 28,
-    "spread": 0.22,
+    "spread": 0.75,
     "inherit": 0.15,
-    "open": 34.0
+    "open": 60.0,
+    "pattern": "ring",
+    "stretch": 1.6
   },
   "sound": {
     "volume": 1.0,

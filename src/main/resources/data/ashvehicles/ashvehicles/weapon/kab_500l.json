@@ -3,7 +3,7 @@
   "nation": "ru",
   "item": true,
   "ammo": 1,
-  "mass": 525,
+  "mass": 534,
   "requires": "targeting_pod",
   "firing": {
     "rounds_per_second": 2.0,

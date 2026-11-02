@@ -9,6 +9,7 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.RandomSource;
 import net.minecraft.util.StringRepresentable;
 import net.minecraft.world.phys.Vec3;
 
@@ -34,12 +35,14 @@ import net.minecraft.world.phys.Vec3;
  * @param nation この兵装の国籍。機体の {@code airframe.nation} と同じ書き方。書かなければ国籍を持たない
  *               汎用品で、どの機体も自分の物として扱う（増槽がそう）
  * @param nuclear 核弾頭。書いた兵装だけが着弾点で核として炸裂する。{@link Nuclear} 参照
+ * @param bomblet 子弾として撒かれた時の焼夷と不発。{@link Bomblet} 参照
  */
 public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoKind> ammoItem,
         Optional<GunClass> gunClass,
         Firing firing, Projectile projectile, Optional<Guidance> guidance,
         Optional<EquipmentDefinition.Kind> requires, SoundSetup sound, float drag, float mass,
-        Optional<Cluster> cluster, Optional<String> nation, Optional<Nuclear> nuclear) {
+        Optional<Cluster> cluster, Optional<String> nation, Optional<Nuclear> nuclear,
+        Optional<Bomblet> bomblet) {
 
     /** {@code RRGGBB}。先頭の # は有っても無くてもよい。この種のファイルでの色表記はすべてこれ。 */
     static final Codec<Integer> COLOUR = Codec.STRING.comapFlatMap(
@@ -92,8 +95,10 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
             // 国籍。吊れるかどうかは決めず、出撃盤のプリセットが自国の物を先に選ぶのに使うだけ。
             // {@code AircraftDefinition.Airframe#uses} 参照。
             Codec.STRING.optionalFieldOf("nation").forGetter(WeaponDefinition::nation),
-            // 核弾頭。この1行でグループは15項目——DFU の上限まであと1つ。次に足す物は入れ子に（[[fuel-system-shape]]）。
-            Nuclear.CODEC.optionalFieldOf("nuclear").forGetter(WeaponDefinition::nuclear)
+            Nuclear.CODEC.optionalFieldOf("nuclear").forGetter(WeaponDefinition::nuclear),
+            // 子弾としての振る舞い（焼夷・不発）。この1行でグループは16項目——DFU の上限そのもの。次に足す物は
+            // 必ず既存のブロックの中か、新しい入れ子に（[[fuel-system-shape]]）。
+            Bomblet.CODEC.optionalFieldOf("bomblet").forGetter(WeaponDefinition::bomblet)
     ).apply(instance, WeaponDefinition::new));
 
     /**
@@ -121,15 +126,106 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
      * @param spread 1発ごとに横へ与える速度（1tickあたりブロック）。落下時間と掛かって撒布界の広さになる
      * @param inherit 親の速度をどれだけ引き継ぐか。0なら真下に落ち、1なら親と同じ勢いで前へ飛ぶ
      * @param open 真下の地面までがこの高さ（ブロック）を切ったら開く。0 なら着弾まで開かない
+     * @param pattern 撒き方。{@link Pattern} 参照
+     * @param stretch 進行方向への撒きを横の何倍にするか。1 なら円、2 なら前後に倍の楕円
      */
-    public record Cluster(ResourceLocation submunition, int count, float spread, float inherit, float open) {
+    public record Cluster(ResourceLocation submunition, int count, float spread, float inherit, float open,
+            Pattern pattern, float stretch) {
         public static final Codec<Cluster> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 ResourceLocation.CODEC.fieldOf("submunition").forGetter(Cluster::submunition),
                 Codec.INT.optionalFieldOf("count", 12).forGetter(Cluster::count),
                 Codec.FLOAT.optionalFieldOf("spread", 0.3F).forGetter(Cluster::spread),
                 Codec.FLOAT.optionalFieldOf("inherit", 0.25F).forGetter(Cluster::inherit),
-                Codec.FLOAT.optionalFieldOf("open", 0.0F).forGetter(Cluster::open)
+                Codec.FLOAT.optionalFieldOf("open", 0.0F).forGetter(Cluster::open),
+                Pattern.CODEC.optionalFieldOf("pattern", Pattern.GAUSSIAN).forGetter(Cluster::pattern),
+                Codec.FLOAT.optionalFieldOf("stretch", 1.0F).forGetter(Cluster::stretch)
         ).apply(instance, Cluster::new));
+
+        /**
+         * 子弾1発に与える横向きの速度。{@code along} は親の水平の進行方向（単位ベクトル、無ければ零）。
+         *
+         * <p>{@code stretch} はその方向へだけ掛かる。実物の撒布界が進行方向に長い楕円なのは、子弾が前後には
+         * 親の勢いのばらつきも受けるからで、横への撒きと同じ1つの数では作れない。
+         */
+        public Vec3 scatter(RandomSource random, Vec3 along) {
+            double side;
+            double ahead;
+
+            if (this.pattern == Pattern.GAUSSIAN) {
+                side = random.nextGaussian() * this.spread;
+                ahead = random.nextGaussian() * this.spread;
+            } else {
+                // 面積で一様に。半径を一様に引くと中心に寄る。
+                double inner = this.pattern == Pattern.RING ? RING_INNER : 0.0;
+                double radius = this.spread * Math.sqrt(inner * inner + (1.0 - inner * inner) * random.nextDouble());
+                double angle = random.nextDouble() * Math.PI * 2.0;
+
+                side = Math.cos(angle) * radius;
+                ahead = Math.sin(angle) * radius;
+            }
+
+            if (along.lengthSqr() < 1.0E-8) {
+                return new Vec3(side, 0.0, ahead * this.stretch);
+            }
+
+            Vec3 across = new Vec3(-along.z, 0.0, along.x);
+
+            return across.scale(side).add(along.scale(ahead * this.stretch));
+        }
+
+        /** 輪の内径（外径に対する比）。回転で撒く散弾筒は中心が薄い。 */
+        private static final double RING_INNER = 0.55;
+    }
+
+    /**
+     * 子弾の撒き方。
+     *
+     * <ul>
+     *   <li>{@code gaussian} — 正規分布。中心が濃く、縁は薄れて消える。書かなければこれ</li>
+     *   <li>{@code disc} — 円の中に一様。縁まで同じ濃さで、外にははみ出さない</li>
+     *   <li>{@code ring} — 輪。回転して開く散弾筒（SUU-65 の CBU-87）は遠心力で子弾を外へ投げるので、
+     *       足跡は中心の抜けたドーナツになる</li>
+     * </ul>
+     */
+    public enum Pattern implements StringRepresentable {
+        GAUSSIAN("gaussian"),
+        DISC("disc"),
+        RING("ring");
+
+        public static final Codec<Pattern> CODEC = StringRepresentable.fromEnum(Pattern::values);
+
+        private final String name;
+
+        Pattern(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String getSerializedName() {
+            return this.name;
+        }
+    }
+
+    /**
+     * 子弾として撒かれた時の、着いてからの振る舞い。複合効果子弾（BLU-97 のような、成形炸薬・破片・焼夷を
+     * 1発に持つ物）のためのもので、親ではなく子弾自身のファイルに書く。
+     *
+     * <p>成形炸薬と破片はここには無い。前者は {@code projectile.damage} と {@code penetration}（上から落ちる
+     * 子弾は箱の上面の {@code plate} と比べられる——上面装甲が薄いことがそのまま効く）、後者は
+     * {@code explosion} と {@code blast} で、どちらも他の弾と同じ書き方で既に書ける。足りなかったのが残りの2つ。
+     *
+     * @param incendiary 炸裂点からこの半径（ブロック）の生き物に火を付け、燃える足場に火を置く。0 なら焼夷を持たない
+     * @param burn 付ける火の長さ（秒）
+     * @param dud 着いても炸裂しない確率。不発の子弾はその場に残り、触れられるか撃たれるまで待つ
+     * @param linger 不発の子弾が残っている長さ（tick）。弾の寿命の上限と同じく、永久には残さない
+     */
+    public record Bomblet(float incendiary, float burn, float dud, int linger) {
+        public static final Codec<Bomblet> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+                Codec.FLOAT.optionalFieldOf("incendiary", 0.0F).forGetter(Bomblet::incendiary),
+                Codec.FLOAT.optionalFieldOf("burn", 5.0F).forGetter(Bomblet::burn),
+                Codec.FLOAT.optionalFieldOf("dud", 0.0F).forGetter(Bomblet::dud),
+                Codec.INT.optionalFieldOf("linger", Projectile.UNBOUNDED_LIFETIME).forGetter(Bomblet::linger)
+        ).apply(instance, Bomblet::new));
     }
 
     /**
@@ -213,7 +309,8 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     public static final WeaponDefinition FALLBACK = new WeaponDefinition(Type.GUN, true, 100, Optional.empty(),
             Optional.empty(),
             new Firing(5.0F, 1.0F, 1, 0.0F, Optional.empty()), Projectile.DEFAULT, Optional.empty(),
-            Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty(), Optional.empty(), Optional.empty());
+            Optional.empty(), SoundSetup.DEFAULT, 0.0F, 0.0F, Optional.empty(), Optional.empty(), Optional.empty(),
+            Optional.empty());
 
     /**
      * 引き金を押し続けている間撃ち続けるか、それとも1押し1発か。
