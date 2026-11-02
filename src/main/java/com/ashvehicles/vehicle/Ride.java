@@ -142,6 +142,11 @@ public record Ride(float heave, float pitch, float lean) {
 
         /** 1tick分の落下として数えてよい上限。テレポートが打ち上げにならないように。 */
         private static final float MAX_JOLT = 1.5F;
+        /** 駆動系と旋回が押さえる位置を均す割合（1 tick あたり）。 */
+        private static final float TARGET_SMOOTHING = 0.2F;
+
+        private float nodTarget;
+        private float heelTarget;
 
         private final Axis heave = new Axis();
         private final Axis pitch = new Axis();
@@ -212,9 +217,14 @@ public record Ride(float heave, float pitch, float lean) {
 
             // 上下動の静止線は水平で、引かれる先も水平だけ。そこから外すのは上の衝撃。他の2つは駆動系
             // と旋回が押さえている位置に保たれ、それらが止まった瞬間に解放される。
+            // 駆動系と旋回の目標は数 tick で均す。速度は段や壁に当たるたびにその tick に進めた分まで切り詰め
+            // られるので、1 tick の差をそのまま読むと目標が毎 tick 跳ね、dive と lean の大きい装輪車両ほど
+            // 車体がぼよんぼよんと揺れ続けた。
+            this.nodTarget += (this.nod(definition, along) - this.nodTarget) * TARGET_SMOOTHING;
+            this.heelTarget += (this.heel(definition, speed, turn) - this.heelTarget) * TARGET_SMOOTHING;
             this.heave.tick(0.0F, setup, travel);
-            this.pitch.tick(this.nod(definition, along), setup, nodLimit);
-            this.lean.tick(this.heel(definition, speed, turn), setup, heelLimit);
+            this.pitch.tick(this.nodTarget, setup, nodLimit);
+            this.lean.tick(this.heelTarget, setup, heelLimit);
         }
 
         /** 2つの tick の間の任意の瞬間の車体。描画側が欲しいのはこれ。 */
@@ -266,6 +276,8 @@ public record Ride(float heave, float pitch, float lean) {
             private float value;
             private float previous;
             private float rate;
+            /** 減衰比の下限。1 未満なので揺り返しは小さく1回だけ残る。 */
+            private static final float MIN_DAMPING_RATIO = 0.75F;
 
             /**
              * @param target 車両に働く力が車体を押さえている位置。駆動系や旋回が引っ張っていなければ
@@ -274,8 +286,12 @@ public record Ride(float heave, float pitch, float lean) {
              */
             void tick(float target, GroundVehicleDefinition.Suspension setup, float limit) {
                 this.previous = this.value;
-                this.rate += (target - this.value) * Mth.clamp(setup.stiffness(), 0.0F, 1.0F);
-                this.rate -= this.rate * Mth.clamp(setup.damping(), 0.0F, 1.0F);
+                float stiffness = Mth.clamp(setup.stiffness(), 0.0F, 1.0F);
+                this.rate += (target - this.value) * stiffness;
+                // 減衰はファイルの値と、ばねの硬さから決まる下限（減衰比 MIN_DAMPING_RATIO）の大きい方。ファイルの
+                // 値だけでは多くの車両が減衰不足で、段差のたびに車体がぼよんぼよんと何度も揺り返した。
+                float damping = Math.max(setup.damping(), 2.0F * Mth.sqrt(stiffness) * MIN_DAMPING_RATIO);
+                this.rate -= this.rate * Mth.clamp(damping, 0.0F, 1.0F);
 
                 float moved = this.value + this.rate;
 
