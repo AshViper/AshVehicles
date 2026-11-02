@@ -91,6 +91,8 @@ public final class ModKeyMappings {
      */
     public static final KeyMapping TOGGLE_RAMP = create("toggle_ramp", GLFW.GLFW_KEY_H);
     public static final KeyMapping TOGGLE_VTOL = create("toggle_vtol", GLFW.GLFW_KEY_R);
+    /** フライトリミット。MFD の ENG 頁の LMT と同じ切り替え。{@code Y} は他の機体キーと衝突しない。 */
+    public static final KeyMapping FLIGHT_LIMIT = create("flight_limit", GLFW.GLFW_KEY_Y);
     /** パイロン上の物を順送りする。トリガー自体はバニラの攻撃ボタン。 */
     /**
      * 吊っている増槽を全部切り離す。飛行中でも構わないし、むしろそのためにある。
@@ -222,7 +224,7 @@ public final class ModKeyMappings {
 
     public static final KeyMapping[] ALL = {PITCH_UP, PITCH_DOWN, ROLL_LEFT, ROLL_RIGHT,
             THROTTLE_UP, THROTTLE_DOWN, YAW_LEFT, YAW_RIGHT,
-            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_BAY, TOGGLE_RAMP, TOGGLE_VTOL, JETTISON,
+            AIR_BRAKE, TOGGLE_GEAR, TOGGLE_FLAPS, TOGGLE_BAY, TOGGLE_RAMP, TOGGLE_VTOL, FLIGHT_LIMIT, JETTISON,
             RELEASE_FLARE, RELEASE_CHAFF,
             RADAR_LOCK, FREE_LOOK, TOGGLE_MOUSE_AIM, AIM, DESIGNATE, HOVER,
             DRIVE_FORWARD, DRIVE_BACK, STEER_LEFT, STEER_RIGHT, VEHICLE_BRAKE, FIRE_COAXIAL,

@@ -37,6 +37,33 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
         Effects effects, Countermeasures countermeasures, VehicleType type, Optional<Vtol> vtol,
         Optional<Rotor> rotor, List<Hardpoint> hardpoints, List<Station> stations, Sync sync) {
 
+    /**
+     * フライトリミットを入れた機体の性能。推力（アフターバーナー・VTOL・ローターの揚力を含む）、最高速度、
+     * 3軸の角速度だけを {@code factor} 倍にした写し。失速・抗力・重さは元のままなので、速く回るぶん失速も
+     * 早く来る。飛行モデルにだけ渡し、HUD や AI が読む値は元のファイルのまま。
+     */
+    public AircraftDefinition boosted(float factor) {
+        Engine e = this.engine;
+        Engine engine = new Engine(e.maxThrust() * factor, e.throttleRate(), e.spoolRate(), e.seaLevelDensity(),
+                e.afterburner().map(a -> new Afterburner(a.thrust() * factor, a.lightRate(), a.heat(), a.nozzles())),
+                e.fuel(), e.propellerRpm());
+        Wing w = this.wing;
+        Wing wing = new Wing(w.maxSpeed() * factor, w.stallSpeed(), w.lift(), w.liftSlope(), w.stallAngle(),
+                w.drag(), w.airBrakeDrag(), w.inducedDrag(), w.lateralDrag(), w.groundEffect(), w.span(),
+                w.rotateSpeed(), w.sweep());
+        Handling h = this.handling;
+        Handling handling = new Handling(h.pitchRate() * factor, h.rollRate() * factor, h.yawRate() * factor,
+                h.controlLag(), h.weathervane(), h.alphaLimit(), h.aeroDamping(), h.thrustVectoring());
+        Optional<Vtol> vtol = this.vtol.map(v -> new Vtol(v.maxAngle(), v.rate(), v.liftThrust() * factor,
+                v.authority(), v.hoverDrag(), v.conversionSpeed()));
+        Optional<Rotor> rotor = this.rotor.map(r -> new Rotor(r.lift() * factor, r.spoolTicks(),
+                r.translationalLift(), r.translationalSpeed(), r.authority() * factor, r.maxTilt(), r.trim(),
+                r.stability(), r.hoverDrag(), r.discDrag(), r.bluffDrag(), r.torque(), r.rpm(), r.tailRpm()));
+
+        return new AircraftDefinition(this.hitbox, this.model, engine, wing, handling, this.airframe,
+                this.landingGear, this.flaps, this.camera, this.sound, this.radar, this.signature, this.effects,
+                this.countermeasures, this.type, vtol, rotor, this.hardpoints, this.stations, this.sync);
+    }
 
     /**
      * 翼以外で機体を支える2つの方式を、1つのフィールドとして読む。

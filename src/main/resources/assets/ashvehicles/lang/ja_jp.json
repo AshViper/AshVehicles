@@ -172,6 +172,7 @@
   "key.ashvehicles.toggle_bay": "兵装倉の開閉",
   "key.ashvehicles.toggle_ramp": "後部ハッチの開閉",
   "key.ashvehicles.toggle_vtol": "VTOL ノズル",
+  "key.ashvehicles.flight_limit": "フライトリミット",
   "key.ashvehicles.throttle_up": "スロットル上げ",
   "key.ashvehicles.throttle_down": "スロットル下げ",
   "key.ashvehicles.yaw_left": "左ヨー",

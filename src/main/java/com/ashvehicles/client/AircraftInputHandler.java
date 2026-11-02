@@ -51,6 +51,7 @@ public final class AircraftInputHandler {
         boolean toggleBay = ModKeyMappings.TOGGLE_BAY.consumeClick();
         boolean toggleRamp = ModKeyMappings.TOGGLE_RAMP.consumeClick();
         boolean jettison = ModKeyMappings.JETTISON.consumeClick();
+        boolean toggleLimit = ModKeyMappings.FLIGHT_LIMIT.consumeClick();
         // センサー映像の極性。砲座の映像を見ている間しか目に見える効果は無いが、他の切り替えと同じく座席の
         // 内外を問わず毎tick吸い出す。地上での押下がキューに残り、砲座に着いた瞬間に発火するのを防ぐためだ。
         // ThermalView 参照。
@@ -165,6 +166,10 @@ public final class AircraftInputHandler {
         toggleFlaps |= CockpitControls.takeFlaps();
         toggleBay |= CockpitControls.takeBay();
         cycleWeapon += CockpitControls.takeWeaponSteps();
+
+        if (toggleLimit) {
+            CockpitControls.toggleFlightLimit();
+        }
 
         aircraft.setInput(input);
         // 速度も同送する。サーバーには見えないからだ。ここから操縦される機体はサーバー上でtickの合間に届く

@@ -172,6 +172,7 @@
   "key.ashvehicles.toggle_bay": "Open / Close Weapon Bay",
   "key.ashvehicles.toggle_ramp": "Open / Close Rear Ramp",
   "key.ashvehicles.toggle_vtol": "VTOL Nozzle",
+  "key.ashvehicles.flight_limit": "Flight Limit",
   "key.ashvehicles.throttle_up": "Throttle Up",
   "key.ashvehicles.throttle_down": "Throttle Down",
   "key.ashvehicles.yaw_left": "Yaw Left",
