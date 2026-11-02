@@ -187,7 +187,7 @@ public final class Sensors {
             // 1つだけだ。
             if (other instanceof RocketEntity missile && missile.getTarget() == this.vehicle
                     && distance <= radar.warningRange()) {
-                warnings.add(new Threat(bearing, Threat.Kind.MISSILE, "M"));
+                warnings.add(new Threat(bearing, Threat.Kind.MISSILE, missileSymbolOf(missile)));
             }
 
             Iff identity = Iff.between(this.vehicle, other);
@@ -306,6 +306,22 @@ public final class Sensors {
         }
 
         return "U";
+    }
+
+    /**
+     * 向かってくる誘導弾の記号。シーカーの種類で分ける——避け方（フレアかチャフか、照射元を叩くか）が
+     * それで決まるので、パイロットが知りたいのは型番よりこちら。
+     */
+    private static String missileSymbolOf(RocketEntity missile) {
+        return missile.getWeapon().guidance()
+                .map(guidance -> switch (guidance.seeker()) {
+                    case HEAT -> "IR";
+                    case RADAR -> "RF";
+                    case LASER -> "LZ";
+                    case BEAM -> "WG";
+                    case POINT -> "BM";
+                })
+                .orElse("M");
     }
 
     /**

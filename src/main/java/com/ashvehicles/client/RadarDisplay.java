@@ -204,6 +204,11 @@ public final class RadarDisplay {
                 graphics.fill(x - 1, y - 1, x + 2, y + 2, AircraftHud.DIM);
             } else if (lit) {
                 graphics.fill(x - 2, y - 2, x + 3, y + 3, AircraftHud.WARNING);
+
+                // ミサイルにはシーカーの種類を添える。フレアかチャフかはこれで決まる。
+                if (threat.kind() == Threat.Kind.MISSILE) {
+                    graphics.drawString(font, threat.symbol(), x + 4, y - 4, AircraftHud.WARNING, true);
+                }
             }
         }
 
@@ -213,7 +218,7 @@ public final class RadarDisplay {
             return;
         }
 
-        String warning = worst == Threat.Kind.MISSILE ? "MISSILE" : "LOCKED";
+        String warning = worst == Threat.Kind.MISSILE ? "MISSILE " + threats.get(0).symbol() : "LOCKED";
         graphics.drawString(font, warning, centreX - font.width(warning) / 2, centreY + RWR_RADIUS + 4,
                 AircraftHud.WARNING, true);
     }
