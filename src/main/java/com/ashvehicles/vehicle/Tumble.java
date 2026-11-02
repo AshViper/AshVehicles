@@ -62,6 +62,11 @@ public final class Tumble {
         this.rate += rate;
     }
 
+    /** 角速度を割合で削る。車体が履帯ではなく側面や屋根で地面を擦っているとき。 */
+    public void damp(double keep) {
+        this.rate *= keep;
+    }
+
     /** 辺で地面に着いて止まっているか（向きは問わない。横倒しでも屋根でも）。 */
     public boolean atRest() {
         return this.rate == 0.0 && this.resting;

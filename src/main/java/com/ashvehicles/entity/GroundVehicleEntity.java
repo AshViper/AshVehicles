@@ -300,6 +300,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     /** 縁の下の地面へ姿勢を渡す転がりの角度の範囲（ラジアン）。上は横倒し・逆さまの手前で、そこから先は転がりの物。 */
     private static final double HAND_OVER_MIN = Math.toRadians(4.0);
     private static final double HAND_OVER_MAX = Math.toRadians(80.0);
+    /** 横の転がりがこれを超えたら履帯は地面に着いていない（ラジアン）。履帯の下の支えを転がりへ渡さない。 */
+    private static final double SIDE_DOWN = Math.toRadians(45.0);
+    /** 横倒し・逆さまの車体の転がりに1tickごとに残す角速度の割合。 */
+    private static final double SIDE_DOWN_SCRUB = 0.85;
+    /** 横倒し・逆さまの車体が1tickに押し上げられる高さの上限（ブロック）。 */
+    private static final double SIDE_DOWN_RISE = 0.05;
+    /** 地面の読み値の途切れを直前の値で埋める tick 数。 */
+    private static final int SUPPORT_MISS_GRACE = 2;
+    /** これだけ接地していた車体の飛び出しだけが、回転を転がりへ渡す（tick）。 */
+    private static final int SPIN_HAND_GROUNDED = 10;
     /** 端がこの距離まで地面に寄ったら着いたと見なす（ブロック）。 */
     private static final double HAND_OVER_REACH = 0.15;
     /** これより遅いとき、姿勢を箱の下の凸包に乗せる（ブロック/tick）。速いほど平面へ戻す。 */
@@ -458,6 +468,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private double groundClimb;
     /** 着地してから段差の蹴り上げ（STEP_KICK）を止めておく残り tick。 */
     private int kickCooldown;
+    /** 最後に読めた支えの高さと、そこから読み値が途切れ続けている tick。 */
+    private double lastSupport = Double.NaN;
+    private int supportMisses;
+    /** 接地してからの tick。飛び出しの回転を転がりへ渡すのは、しばらく地面にいた車体だけ。 */
+    private int groundedTicks;
 
     /**
      * 船が今水に浮いているか。{@link #settleOnWater} が最後に判定した値。
@@ -2172,6 +2187,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private void driveTick() {
         GroundVehicleDefinition definition = this.getStats();
         this.airTicks = this.launched && !this.onGround() ? this.airTicks + 1 : 0;
+        this.groundedTicks = this.onGround() ? this.groundedTicks + 1 : 0;
         this.kickCooldown = Math.max(this.kickCooldown - 1, 0);
         this.steer(definition.powertrain());
         this.accelerate(definition.powertrain(), definition.suspension());
@@ -3325,6 +3341,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     private void rest(double support, GroundVehicleDefinition.Suspension suspension) {
         double climb = suspension.climbHeight();
+
+        // 読み値が1〜2tick途切れても直前の地面を使う。急な川岸を登る車体では地面のプローブが tick おきに外れ、
+        // そのたびに飛び出しと読んで転がりへ回転を渡し直し、積もった回転で車体が縦に回った。
+        if (Double.isNaN(support) && this.supportMisses < SUPPORT_MISS_GRACE && !Double.isNaN(this.lastSupport)) {
+            this.supportMisses++;
+            support = this.lastSupport;
+        } else if (!Double.isNaN(support)) {
+            this.supportMisses = 0;
+        }
+
+        this.lastSupport = support;
         double rise = support - this.getY();
 
         if (Double.isNaN(support)) {
@@ -3376,7 +3403,10 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         // 段差へ乗り上げるか、坂を下る。登坂能力を超える高さは、ここへ来る前に水平方向で止められている。
         // 上限は、読み違えが車両を崖に沿って打ち上げるのを防ぐためのもの——本来は崖で止まるべきなのだ。
-        double up = Math.min(rise, climb);
+        // 横倒し・逆さまの車体は段を登らない。地面の読み値は立っているときの転輪の位置で取るので、寝た車体の
+        // 隣の1段を拾って車体ごと登坂の高さまで持ち上げ、次の tick にそこから落ちて、止まったまま浮き沈みした。
+        // 地面へ埋まらない分だけゆっくり押し上げる。
+        double up = Math.min(rise, Math.abs(this.tipRoll.angle()) > SIDE_DOWN ? SIDE_DOWN_RISE : climb);
         this.setPos(this.getX(), this.getY() + up, this.getZ());
         this.groundClimb += (up - this.groundClimb) * CLIMB_SMOOTHING;
 
@@ -3406,12 +3436,18 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 宙での回転は転がりが持つ。ばねの姿勢は ±60 度で頭打ちになるので、そちらに回転を残すと宙返りしかけた
         // 車体が途中で見えない壁に当たったように止まった。転がりには角度の上限が無い。ただし小さい段では渡さない。
         // 転がりは前の縁を支点に回るので、1〜2ブロック降りるだけの車体が後ろを掬い上げられた。
-        if (drop > SPIN_HAND_DROP) {
+        // 着いたばかりの車体が跳ねて離れるたびに渡すと、回転が積もって縦に回る。
+        if (drop > SPIN_HAND_DROP && this.groundedTicks >= SPIN_HAND_GROUNDED) {
             double cap = Math.toRadians(LAND_SPIN_CAP);
             this.tipPitch.kick(Mth.clamp(Math.toRadians(this.hullPitchRate), -cap, cap));
             this.tipRoll.kick(Mth.clamp(-Math.toRadians(this.hullBankRate), -cap, cap));
             this.hullPitchRate = 0.0F;
             this.hullBankRate = 0.0F;
+        } else {
+            // 渡さない回転もばねに満額は残さない。宙ではばねが効かないので、段を越えた瞬間のばねの速さ（10 度/tick
+            // を超える）がそのまま続き、川岸から落ちた車体が -60 度から +60 度まで振れた。
+            this.hullPitchRate = Mth.clamp(this.hullPitchRate, -LAND_SPIN_CAP, LAND_SPIN_CAP);
+            this.hullBankRate = Mth.clamp(this.hullBankRate, -LAND_SPIN_CAP, LAND_SPIN_CAP);
         }
         // 車体の傾きはばねで揺れ、段差の上では一瞬 40 度にもなる。それをそのまま初速にすると、階段状の斜面の
         // 縁ごとに車体が打ち上げられた。実際に上下していた速さ（groundClimb）と同じ向きのときだけ、小さい方を採る。
@@ -3944,6 +3980,18 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                     - this.edgeAlong) * EDGE_SMOOTHING;
             this.edgeAcross += (((halfWidth - this.supportRight) - (halfWidth + this.supportLeft))
                     - this.edgeAcross) * EDGE_SMOOTHING;
+            // 横倒し・逆さまの車体を支えているのは履帯ではなく側面や屋根で、履帯の下で読んだ支えの広がりは意味を
+            // 持たない。それを前後へ渡すと、地面の読み値の揺れだけで寝ている車体が前後に ±45 度揺れ続け、持ち上げ
+            // （tipLift）が上下して車体ごと宙に浮いて見えた。
+            if (Math.abs(this.tipRoll.angle()) > SIDE_DOWN) {
+                this.edgeAlong = 0.0;
+                this.edgeAcross = 0.0;
+                // 側面や屋根は履帯より強く地面を擦る。SCRUB だけでは横倒しの車体が側面と屋根の間を数秒揺れ続け、
+                // そのたびに持ち上げが上下して浮いて見えた。
+                this.tipRoll.damp(SIDE_DOWN_SCRUB);
+                this.tipPitch.damp(SIDE_DOWN_SCRUB);
+            }
+
             forward += normal * this.edgeAlong / b;
             lateral += normal * this.edgeAcross / b;
 
