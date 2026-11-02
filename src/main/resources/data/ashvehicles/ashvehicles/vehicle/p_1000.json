@@ -4203,7 +4203,7 @@
   },
   "suspension": {
     "climb_height": 2.5,
-    "slope_limit": 32,
+    "slope_limit": 25,
     "settle_rate": 0.2,
     "grip": 0.95,
     "wheel_radius": 0.525,
