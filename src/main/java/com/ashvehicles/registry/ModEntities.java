@@ -12,6 +12,7 @@ import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.BulletEntity;
 import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.entity.DesignationEntity;
+import com.ashvehicles.entity.EjectedSeatEntity;
 import com.ashvehicles.entity.GroundVehicleEntity;
 import com.ashvehicles.entity.RocketEntity;
 import com.ashvehicles.entity.TargetDroneEntity;
@@ -144,6 +145,20 @@ public final class ModEntities {
                             .updateInterval(5)
                             .setShouldReceiveVelocityUpdates(false)
                             .build("target_drone"));
+
+    /**
+     * 乗員を押し出し終えた射出座席。燃え尽きて落ちていく数秒だけの物で、保存しない。
+     *
+     * <p>出だしは機体の速度を持っているので速度パケットを載せ、位置も2tickごとに送る。
+     */
+    public static final DeferredHolder<EntityType<?>, EntityType<EjectedSeatEntity>> EJECTED_SEAT =
+            ENTITY_TYPES.register("ejected_seat",
+                    () -> EntityType.Builder.<EjectedSeatEntity>of(EjectedSeatEntity::new, MobCategory.MISC)
+                            .sized(0.8F, 1.2F)
+                            .clientTrackingRange(32)
+                            .updateInterval(2)
+                            .setShouldReceiveVelocityUpdates(true)
+                            .build("ejected_seat"));
 
     private static Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> registerAll() {
         Map<ResourceLocation, DeferredHolder<EntityType<?>, EntityType<AircraftEntity>>> types = new LinkedHashMap<>();

@@ -1,10 +1,14 @@
 package com.ashvehicles.item;
 
+import java.util.List;
 import java.util.function.Supplier;
 
 import com.ashvehicles.entity.VehicleEntityBase;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.component.CustomData;
@@ -78,6 +82,22 @@ public abstract class VehicleItem<T extends VehicleEntityBase> extends Item {
      */
     protected boolean floatsOnWater() {
         return false;
+    }
+
+    /** 1 block/tick を km/h へ。定義ファイルの速度は全部 block/tick。 */
+    protected static final float BLOCKS_PER_TICK_TO_KMH = 72.0F;
+
+    /** アイテムのまま見せる諸元の行。定義ファイルから読むだけで、機体を作らない。 */
+    protected abstract void specs(List<Component> lines);
+
+    @Override
+    public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> lines, TooltipFlag flag) {
+        this.specs(lines);
+    }
+
+    /** 諸元の1行。キーは tooltip.ashvehicles.spec.<name>。 */
+    protected static void spec(List<Component> lines, String name, Object... args) {
+        lines.add(Component.translatable("tooltip.ashvehicles.spec." + name, args).withStyle(ChatFormatting.GRAY));
     }
 
     @Override

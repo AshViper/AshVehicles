@@ -987,6 +987,7 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      *
      * <p>撒く速度は3つの合成だ。親の速度の一部（{@code inherit}）で前方向の勢いを残し、横向きのばらつき
      * （{@code spread}）で撒布界を作り、鉛直成分は与えない——落下は重力の仕事であって、撒く側の仕事ではない。
+     * 横のばらつきの形（正規分布・円・輪）と前後への伸び（{@code stretch}）は {@link WeaponDefinition.Cluster#scatter}。
      */
     private void scatter(Vec3 where) {
         WeaponDefinition.Cluster cluster = this.getWeapon().cluster().orElse(null);
@@ -997,15 +998,15 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
 
         Entity vehicle = this.firedFrom();
         Vec3 inherited = this.getDeltaMovement().scale(cluster.inherit());
+        Vec3 flat = new Vec3(this.getDeltaMovement().x, 0.0, this.getDeltaMovement().z);
+        Vec3 along = flat.lengthSqr() < 1.0E-8 ? Vec3.ZERO : flat.normalize();
 
         for (int i = 0; i < cluster.count(); i++) {
             RocketEntity bomblet = new RocketEntity(ModEntities.ROCKET.get(), level);
 
             bomblet.setup(cluster.submunition(), vehicle == null ? this : vehicle, this.getOwner());
             bomblet.setPos(where);
-            bomblet.launch(inherited.add(
-                    this.random.nextGaussian() * cluster.spread(), 0.0,
-                    this.random.nextGaussian() * cluster.spread()));
+            bomblet.launch(inherited.add(cluster.scatter(this.random, along)));
 
             level.addFreshEntity(bomblet);
         }
@@ -1385,6 +1386,12 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
      */
     @Override
     public boolean hurt(DamageSource source, float amount) {
+        Boolean dud = this.hurtWhileDud(amount);
+
+        if (dud != null) {
+            return dud;
+        }
+
         if (this.level().isClientSide || this.isRemoved()) {
             return true;
         }

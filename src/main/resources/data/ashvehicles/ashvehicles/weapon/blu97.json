@@ -1,0 +1,32 @@
+{
+  "type": "bomb",
+  "item": false,
+  "ammo": 1,
+  "mass": 1.54,
+  "firing": {
+    "rounds_per_second": 1,
+    "spread": 0
+  },
+  "projectile": {
+    "damage": 180,
+    "speed": 0.1,
+    "gravity": 0.03,
+    "range": 4000,
+    "explosion": 1.2,
+    "blast": 40,
+    "penetration": 175,
+    "drag": 0.02,
+    "tracer": "D8C23A",
+    "trail": false
+  },
+  "bomblet": {
+    "incendiary": 2.5,
+    "burn": 6,
+    "dud": 0.05,
+    "linger": 6000
+  },
+  "sound": {
+    "volume": 0.8,
+    "pitch": 1.5
+  }
+}

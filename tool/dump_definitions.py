@@ -296,6 +296,7 @@ def cluster_section():
             u"%d" % cl.get("count", 12),
             num(cl.get("spread", 0.3), 2),
             num(cl.get("inherit", 0.25), 2),
+            u"%s ×%s" % (cl.get("pattern", "gaussian"), num(cl.get("stretch", 1.0), 1)),
             (u"%s（`open`）" % num(open_at, 1)) if open_at else
             ((u"%s（`proximity`）" % num(prox, 1)) if prox else u"着弾"),
         ])
@@ -306,7 +307,7 @@ def cluster_section():
         u"子弾を撒く兵装。**撒布界の広さは `spread` と落下時間の積**なので、開く高さが無ければ何発撒いても"
         u"1点に落ちる。開く高さの出どころは2つあり、目標を持つ弾は `guidance.proximity`、投下されるだけの"
         u"爆弾は `cluster.open`（[[cluster-bomb-opens-by-height]]）。\n",
-        table([u"id", u"子弾", u"数", u"横速度", u"引き継ぎ", u"開く高さ"], rows),
+        table([u"id", u"子弾", u"数", u"横速度", u"引き継ぎ", u"撒き方", u"開く高さ"], rows),
         u"",
     ]
 

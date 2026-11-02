@@ -230,21 +230,23 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final double GRAVITY = 0.08;
     /** この角度（ラジアン、約29度）を超えて転がった車体は、履帯で走れも曲がれもしない。 */
     private static final double OVERTURNED = 0.5;
-    /** 物理を引き継いだとき、これ（度）を超える傾きは地面ではなく転倒と読む。 */
+    /**
+     * 物理を引き継いだとき、これ（度）を超える傾きは転倒の疑いがある。疑いだけで、履帯の両端がその傾きで地面に
+     * 着いていれば斜面の姿勢（{@link #restsOnTracks}）。角度だけで決めると 45 度の階段で降りた車体が浮いた。
+     */
     private static final float TIP_EVIDENT = 45.0F;
     /** 質量が書かれていない車両の見積もり（kg / 接地面積×車高）。 */
     private static final double ESTIMATED_DENSITY = 850.0;
     /**
-     * 支えの面から「乗り越えられる段差＋これ」だけ下までの読み値は、まだ車体を支えていると数える（ブロック）。
-     * この世界の坂は階段なので、段の下の読み値を「支えなし」と数えると、坂を走るだけで支えの広さが毎 tick
-     * 跳ね、車体が勝手にのめったり傾いたりした。
+     * 崖の縁の向こうに地面が無いとき、接地のばねが車体をその側へ倒し込む目標の角度（度）。{@link #TIP_EVIDENT}
+     * より小さくなければならない。倒し込んだ車体の片端は宙にあるので、超えると運転手の乗り降りで物理を引き継いだ側
+     * （{@link #takeTip}）がこの傾きを転倒と読み、Tumble の持ち上げで車体を宙に浮かせる。
      */
-    private static final double SUPPORT_DEPTH = 0.25;
+    private static final float CLIFF_LEAN = 40.0F;
     /** 転輪の可動域の下限（ブロック）。車両の suspension.travel が小さすぎるか 0 のときの下限。 */
     private static final float MIN_WHEEL_REACH = 0.3F;
     /** 当たり判定の箱のうち、最も低い底からこの高さ（ブロック）以内に底を持つ物を接地面と読む。 */
     private static final double BASE_BAND = 0.5;
-    private static final double EDGE_SMOOTHING = 0.25;
     /** 押しが車体の向きを変える割合。残りは履帯が地面に食い込んで受け止める。 */
     private static final float YAW_GIVE = 0.5F;
     /** 終端速度。崖から落ちた車両が世界を突き抜けないように。 */
@@ -261,14 +263,28 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      *
      * <p>頭打ちは安全側に外れる。これで抑えられた読み値は登りを実際より小さく見せるので、何も無い所で止まるより
      * 車両を通す方に転ぶ。
+     *
+     * <p>ただし登坂能力（climb_height）より低い上限は安全側ではない。壁はどれだけ高くても上限の高さの段と
+     * 読まれるので、上限が登坂能力以下だとあらゆる壁が「登れる段」になる。P.1000（2.5）はそれで崖にも山にも
+     * 入っていった。実際の上限は {@link #probeAbove}。
      */
     private static final double PROBE_ABOVE = 2.0;
-    private static final double PROBE_BELOW = 3.0;
+    /** 登坂能力の大きい車両で、プローブの上限を登坂能力からこれだけ上に置く（ブロック）。 */
+    private static final double PROBE_ABOVE_CLIMB_MARGIN = 0.5;
+    /**
+     * 窓の下側（ブロック）。接地のばねが崖の縁へ倒し込んだ車体は、この深さまでに下の地面が見つからなければ
+     * 倒れ込んだ角度で宙に止まる。3 では、縁から 2〜3 ブロック下に階段状の坂があるだけで後ろが宙に浮いたままに
+     * なった。
+     */
+    private static final double PROBE_BELOW = 6.0;
 
-    /** 姿勢のばねの減衰比。1 未満なので段差の後に1〜2回揺り返す。 */
-    private static final float SUSPENSION_DAMPING_RATIO = 0.35F;
+    /**
+     * 姿勢のばねの減衰比。1 未満なので段差の後に小さく1回揺り返す。0.35 では2〜3回揺れ、凸凹を渡る車体が
+     * ぼよんぼよんと波打って見えた。
+     */
+    private static final float SUSPENSION_DAMPING_RATIO = 0.75F;
     /** 段差に乗り上げた高さのうち、上向きの速度として車体に残る割合（全速のとき）。 */
-    private static final double STEP_KICK = 0.35;
+    private static final double STEP_KICK = 0.15;
     /** この速さ（ブロック/tick）で段差の跳ね上げが満額になる。 */
     private static final double KICK_FULL_SPEED = 0.5;
     /** 着地の速度のうち跳ね返る割合。 */
@@ -279,10 +295,43 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private static final float LANDING_NOD = 12.0F;
     /** 宙にある車体の回転が1tickで空気に削られる割合。 */
     private static final float AIR_SPIN_DRAG = 0.02F;
+    /** 飛び出してから駆動系を切るまでの tick。段差の連続で接地と空中が交互に来ても揺れないように。 */
+    private static final int AIR_GRACE = 2;
+    /**
+     * 飛び出しで転がりへ渡す回転の上限（度/tick）。宙の回転は減らないので、4 では数ブロックの落下の間に機首が
+     * 60 度を越え、着地で姿勢を渡せずに車体が機首で立った。
+     */
+    private static final float LAND_SPIN_CAP = 1.5F;
+    /** 飛び出しの回転を転がりへ渡す落差の下限（ブロック）。これより浅い段では回転はばねに残す。 */
+    private static final double SPIN_HAND_DROP = 2.5;
+    private static final double CLIMB_SMOOTHING = 0.25;
+    /** 着地の跳ね返りの上限（ブロック/tick）。 */
+    private static final double MAX_BOUNCE = 0.12;
+    /** 着地で機首を揺する回転の上限（度/tick）。 */
+    private static final float MAX_LANDING_NOD = 3.0F;
+    private static final int KICK_COOLDOWN = 10;
+    /** 車体がこれ（度）より傾いていれば、段差は坂の一部なので跳ねない。 */
+    private static final float KICK_MAX_PITCH = 12.0F;
+    /** 縁の下の地面へ姿勢を渡す転がりの角度の範囲（ラジアン）。上は横倒し・逆さまの手前で、そこから先は転がりの物。 */
+    private static final double HAND_OVER_MIN = Math.toRadians(4.0);
+    private static final double HAND_OVER_MAX = Math.toRadians(80.0);
+    /** 横の転がりがこれを超えたら履帯は地面に着いていない（ラジアン）。履帯の下の支えを転がりへ渡さない。 */
+    private static final double SIDE_DOWN = Math.toRadians(45.0);
+    /** 横倒し・逆さまの車体の転がりに1tickごとに残す角速度の割合。 */
+    private static final double SIDE_DOWN_SCRUB = 0.85;
+    /** 横倒し・逆さまの車体が1tickに押し上げられる高さの上限（ブロック）。 */
+    private static final double SIDE_DOWN_RISE = 0.05;
+    /** 地面の読み値の途切れを直前の値で埋める tick 数。 */
+    private static final int SUPPORT_MISS_GRACE = 2;
+    /** これだけ接地していた車体の飛び出しだけが、回転を転がりへ渡す（tick）。 */
+    private static final int SPIN_HAND_GROUNDED = 10;
+    /** 端がこの距離まで地面に寄ったら着いたと見なす（ブロック）。 */
+    private static final double HAND_OVER_REACH = 0.15;
+    /** これより遅いとき、姿勢を箱の下の凸包に乗せる（ブロック/tick）。速いほど平面へ戻す。 */
+    private static final double SETTLE_BLEND_SPEED = 0.15;
 
     /** 履帯に沿って地面を読む間隔の上限（ブロック）。ブロック1つの起伏を取りこぼさない細かさ。 */
     private static final double TRACK_SAMPLE_SPACING = 0.9;
-
     /**
      * 読み値を「地表」ではなく「プローブ自身の上限」と見なすための、上端からの許容幅（ブロック）。
      *
@@ -340,6 +389,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     /** 降車者を車両からどれだけ離して降ろすか（ブロック）。 */
     private static final double DISMOUNT_MARGIN = 0.2;
+    /** 降車位置として許す、車体の原点からの落差（ブロック）。 */
+    private static final double DISMOUNT_DROP = 3.0;
 
     /**
      * 地面が船の喫水線よりどれだけせり上がったら「船を止める岸」と見なすか（ブロック）。これ未満なら深い水の
@@ -399,17 +450,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     private double tipLift;
     /** この側が物理を回し始めたか。回し始めた最初の tick に、届いていた姿勢から転がりを拾い直す。 */
     private boolean drivenHere;
-    /**
-     * 地面が実際に車体を支えている範囲（車体中心から、前・後・右・左へのブロック）。全面で支えられていれば
-     * 接地面の端そのもの。{@link #settleOnGround} が測り、{@link #tip} が支点として読む。
-     */
-    private double supportAhead;
-    private double supportBehind;
-    private double supportRight;
-    private double supportLeft;
-    /** 支えの縁の偏りを数 tick で均した物。読み値は1ブロック単位で跳ぶので、そのまま使うと車体が震える。 */
-    private double edgeAlong;
-    private double edgeAcross;
+    /** 前後（左右）の一方にしか地面が無く、接地のばねが車体を崖の縁へ倒し込んでいる。{@link #tip} は斜面と読まない。 */
+    private boolean cliffPitch;
+    private boolean cliffBank;
     /** サーバーが前の tick に見た車首方向の速度。衝突を「急に止まった」ことから読む（{@link VehicleCollisions}）。 */
     private float speedLastTick;
 
@@ -421,6 +464,23 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * かのどちらかで、高さは衝突ではなく {@link #rest} が決める。
      */
     private double fallSpeed;
+
+    /**
+     * 地面を離れて飛んでいるか。地面が届く範囲より下へ落ちた（崖・丘の頂点から飛び出した）瞬間に立ち、着地で
+     * 倒れる。段差の跳ね上がり（STEP_KICK）では立たない。立っている間、駆動系も操舵も車体を動かさない。
+     */
+    private boolean launched;
+    /** {@link #launched} が立ってからの tick。切り替えの揺れを殺すため、数 tick 続いてから空中と見なす。 */
+    private int airTicks;
+    /** 接地中に1tickで上下した高さを均した物。飛び出しの鉛直の初速の上限（{@link #launch}）。 */
+    private double groundClimb;
+    /** 着地してから段差の蹴り上げ（STEP_KICK）を止めておく残り tick。 */
+    private int kickCooldown;
+    /** 最後に読めた支えの高さと、そこから読み値が途切れ続けている tick。 */
+    private double lastSupport = Double.NaN;
+    private int supportMisses;
+    /** 接地してからの tick。飛び出しの回転を転がりへ渡すのは、しばらく地面にいた車体だけ。 */
+    private int groundedTicks;
 
     /**
      * 船が今水に浮いているか。{@link #settleOnWater} が最後に判定した値。
@@ -2101,6 +2161,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.input = GroundVehicleInput.PARKED;
         this.speed = 0.0F;
         this.fallSpeed = 0.0;
+        this.launched = false;
         this.setOnGround(true);
         this.setDeltaMovement(Vec3.ZERO);
         this.resetFallDistance();
@@ -2133,6 +2194,9 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     private void driveTick() {
         GroundVehicleDefinition definition = this.getStats();
+        this.airTicks = this.launched && !this.onGround() ? this.airTicks + 1 : 0;
+        this.groundedTicks = this.onGround() ? this.groundedTicks + 1 : 0;
+        this.kickCooldown = Math.max(this.kickCooldown - 1, 0);
         this.steer(definition.powertrain());
         this.accelerate(definition.powertrain(), definition.suspension());
         this.travel();
@@ -2182,7 +2246,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         }
 
         // 履帯が地面を離れた車体も同じ。
-        if (this.overturned()) {
+        if (this.overturned() || this.flying()) {
             return;
         }
 
@@ -2249,6 +2313,12 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             return;
         }
 
+        // 飛んでいる車体の履帯は何も掴まない。前進の速度は飛び出した瞬間のまま保つ——ここで駆動系に決め
+        // 直させると、丘から飛び出した戦車が宙で失速して真下へ落ちた。
+        if (this.flying()) {
+            return;
+        }
+
         // 倒れた車体の履帯は空を掻く。残った惰性は車体が地面を擦って失う。
         if (this.overturned()) {
             this.speed = approach(this.speed, 0.0F, powertrain.braking() * 2.0F);
@@ -2284,13 +2354,14 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         // 登坂限界超え。駆動系に坂へ回す余力が無いので牽引をやめ、下の重力処理が次を決める——この傾斜なら
         // ずり落ちる。
+        // 崖の縁へ倒れ込んでいる傾きは登る坂ではない。数えると、車首を縁から出した車体が後進で戻れなかった。
         float limit = holdableSlope(suspension);
 
-        if (target > 0.0F && this.hullPitch > limit) {
+        if (!this.cliffPitch && target > 0.0F && this.hullPitch > limit) {
             target = 0.0F;
         }
 
-        if (target < 0.0F && this.hullPitch < -limit) {
+        if (!this.cliffPitch && target < 0.0F && this.hullPitch < -limit) {
             target = 0.0F;
         }
 
@@ -2334,15 +2405,19 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 地面のどこにいるかを決め、あちらが高さと角度を決める。ここでは素の直方体を一切参照しないし、その必要も
      * ない。
      *
-     * <p>tick をまたぐ運動量は横方向成分だけ。車首方向は全て駆動系の管轄で毎回決め直すが、旋回したばかりの
-     * 車体はまだ少し前の方向へ進んでおり、それがどれだけ速く消えるかが「履帯が地面を噛む」ということだ。
+     * <p>接地している間、tick をまたぐ運動量は横方向成分だけ。車首方向は全て駆動系の管轄で毎回決め直すが、
+     * 旋回したばかりの車体はまだ少し前の方向へ進んでおり、それがどれだけ速く消えるかが「履帯が地面を噛む」
+     * ということだ。
+     *
+     * <p>飛んでいる間（{@link #flying}）は全部を持ち越す。駆動系は速度を触らず、横滑りも履帯が噛まないので
+     * 減らない。丘や崖から飛び出した車体は、離れた瞬間の速度のまま放物線を描く（鉛直は {@link #rest}）。
      */
     private void travel() {
         Vec3 forward = this.headingVector();
         Vec3 sideways = new Vec3(-forward.z, 0.0, forward.x);
         Vec3 was = this.getDeltaMovement();
         double drift = new Vec3(was.x, 0.0, was.z).dot(sideways)
-                * (1.0 - Mth.clamp(this.getStats().suspension().grip(), 0.0F, 1.0F));
+                * (this.flying() ? 1.0 : 1.0 - Mth.clamp(this.getStats().suspension().grip(), 0.0F, 1.0F));
 
         Vec3 asked = forward.scale(this.speed).add(sideways.scale(drift));
         Vec3 allowed = this.getStats().isShip() ? this.limitAfloat(asked) : this.limitToShape(asked);
@@ -2394,35 +2469,62 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 段を車首の下で「登る段」と数え、手前で止まったり宙で持ち上がったりした。張り出しの四隅は、その下の
         // 隙間（底の高さ）ぶん高い段まで素通りさせる。
         GroundVehicleDefinition.Suspension suspension = this.getStats().suspension();
-        Vec3[] baseCorners = footprint.baseCorners(this.position(), this.headingVector(), suspension);
-        Vec3[] hullCorners = footprint.corners(this.position(), this.headingVector());
-        Vec3[] corners = new Vec3[baseCorners.length + hullCorners.length];
-        double[] allowance = new double[corners.length];
         double climbHeight = suspension.climbHeight();
+        // 隅は車体座標 {前へ s, 右へ t} で持ち、ワールドの位置と高さは今の車体の傾きから出す（{@link #onHull}）。
+        // 以前は隅を原点の高さで読んでいたので、坂の途中では登り側の隅がプローブの上限で頭打ちになり（上限
+        // 同士の差は 0 なので、どんな壁へも通した）、下り側の隅は窓の下へ地面を見失った。
+        double[][] body = {
+                {footprint.baseFront(suspension), -footprint.baseHalfWidth(suspension)},
+                {footprint.baseFront(suspension), footprint.baseHalfWidth(suspension)},
+                {footprint.baseBack(suspension), -footprint.baseHalfWidth(suspension)},
+                {footprint.baseBack(suspension), footprint.baseHalfWidth(suspension)},
+                {footprint.front(), -footprint.halfWidth()},
+                {footprint.front(), footprint.halfWidth()},
+                {footprint.back(), -footprint.halfWidth()},
+                {footprint.back(), footprint.halfWidth()}};
+        Vec3[] corners = new Vec3[body.length];
+        double[] levels = new double[body.length];
+        double[] allowance = new double[body.length];
 
-        for (int i = 0; i < baseCorners.length; i++) {
-            corners[i] = baseCorners[i];
-            allowance[i] = climbHeight;
-        }
-
-        for (int i = 0; i < hullCorners.length; i++) {
-            corners[baseCorners.length + i] = hullCorners[i];
-            allowance[baseCorners.length + i] = Math.max(climbHeight,
-                    footprint.clearance(i < 2) - footprint.bottom());
+        for (int i = 0; i < body.length; i++) {
+            corners[i] = this.onHull(body[i][0], body[i][1]);
+            levels[i] = this.hullLevel(body[i][0], body[i][1]);
+            allowance[i] = i < 4 ? climbHeight
+                    : Math.max(climbHeight, footprint.clearance(i < 6) - footprint.bottom());
         }
 
         double[] before = new double[corners.length];
 
         for (int i = 0; i < corners.length; i++) {
-            before[i] = this.groundUnder(corners[i]);
+            before[i] = this.groundUnder(corners[i], levels[i]);
         }
 
-        double x = this.canStep(new Vec3(movement.x, 0.0, 0.0), corners, before, footprint, allowance)
+        double x = this.canStep(new Vec3(movement.x, 0.0, 0.0), corners, levels, before, footprint, allowance)
                 ? movement.x : 0.0;
-        double z = this.canStep(new Vec3(0.0, 0.0, movement.z), corners, before, footprint, allowance)
+        double z = this.canStep(new Vec3(0.0, 0.0, movement.z), corners, levels, before, footprint, allowance)
                 ? movement.z : 0.0;
 
         return new Vec3(x, movement.y, z);
+    }
+
+    /**
+     * 車体の点 {前へ s, 右へ t}（接地面の高さ）が今あるワールドの水平位置。車体は傾いているので、前後の
+     * 距離は cos だけ縮む。縮めずに読むと、40 度で立った車体の先端の読み値は履帯の端より 1 ブロック近く先の
+     * 地面で、まだ触れていない段に車体が持ち上がって後ろが浮いた。
+     */
+    private Vec3 onHull(double s, double t) {
+        Vec3 forward = this.headingVector();
+        Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
+        double ahead = s * Math.cos(Math.toRadians(this.hullPitch));
+        double across = t * Math.cos(Math.toRadians(this.hullBank));
+
+        return this.position().add(forward.scale(ahead)).add(right.scale(across));
+    }
+
+    /** 車体の点 {前へ s, 右へ t} の、今の傾きでの高さ（{@link #onHull} の位置に立てた窓の中心）。 */
+    private double hullLevel(double s, double t) {
+        return this.getY() + s * Math.sin(Math.toRadians(this.hullPitch))
+                - t * Math.sin(Math.toRadians(this.hullBank));
     }
 
     /**
@@ -2434,28 +2536,43 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * だからだ。よって頭上空間は別途、局所地面の段差1つ上から車両上端までを見て、その隙間にある物は車体が
      * ぶつかる物として扱う。
      */
-    private boolean canStep(Vec3 step, Vec3[] corners, double[] before, Footprint footprint, double[] allowance) {
+    private boolean canStep(Vec3 step, Vec3[] corners, double[] levels, double[] before, Footprint footprint,
+            double[] allowance) {
         if (step.lengthSqr() == 0.0) {
             return true;
         }
 
         for (int i = 0; i < corners.length; i++) {
             double climb = allowance[i];
+            double level = levels[i];
             Vec3 to = corners[i].add(step);
-            double ground = this.groundUnder(to);
+            double ground = this.groundUnder(to, level);
 
             if (Double.isNaN(ground)) {
                 // その隅の下に何も無い。溝か崖の縁で、車両は自由に乗り出せるし、踏み切れば落ちる。
                 continue;
             }
 
-            if (!Double.isNaN(before[i]) && ground - before[i] > climb + CLIMB_SLACK) {
+            // 段は 2 つの物差しで測り、両方が「登れない」と言ったときだけ止める。
+            // 隅が今ある高さから: 崖から乗り出した隅（読み値は何ブロックも下）を縁へ戻す 1 歩は、前の読み値から
+            // 測ると「登れない段」になって後進で戻れなかった。
+            // 前の読み値から: 坂を登る車体の傾きは数 tick 遅れるので、隅の高さだけで測ると階段状の坂の 1 段ごとに
+            // 止まって動きにくかった。1 段ずつ上がる地面は、隅がまだ低くても登れる。
+            // ただし窓の上限で頭打ちした読み値は壁で、前の読み値も頭打ちなら差が 0 になるので、前の読み値の
+            // 物差しには掛けない（以前はそれでどんな壁の中へも進めた）。既に壁の中に居る隅（押し込まれた、傾きの
+            // 読み違え）は、深くならない歩みだけ許して抜け出させる。
+            boolean overLevel = ground - level > climb + CLIMB_SLACK;
+            boolean overBefore = this.isProbeCeiling(ground, level)
+                    || Double.isNaN(before[i]) || ground - before[i] > climb + CLIMB_SLACK;
+            boolean inside = before[i] - level > climb + CLIMB_SLACK && ground <= before[i] + CLIMB_SLACK;
+
+            if (overLevel && overBefore && !inside) {
                 // 立ちはだかっているのが機体なら、そこで終わり。押し通れるかを問うのは
                 // {@link BlockCrusher} でありブロックの話なので、船体の前で問えば「その空間に硬い
                 // ブロックは無い」——空気は柔らかい——と答えて、戦車を輸送機の胴体へ通してしまう。
-                double deck = this.deckUnder(to);
+                double deck = Hitboxes.deckUnder(this, this.probeFrom(to, level), this.probeTo(to, level));
 
-                if (!Double.isNaN(deck) && deck - before[i] > climb + CLIMB_SLACK) {
+                if (!Double.isNaN(deck) && deck - level > climb + CLIMB_SLACK) {
                     return false;
                 }
 
@@ -2468,7 +2585,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             // してしまう。1ブロック段差の連なりの前で戦車が急停止していたのはこれが原因だ——しかも平地で、
             // 最初の段差の数ブロック手前で止まる。坂を読むのは車首側に張り出した隅だからだ。除外しても失う物は
             // 無い。その高さの地面は、隅が最初に触れたtickで上の登坂判定が既に拒否している。
-            if (!this.isProbeCeiling(ground) && !this.hasHeadroom(to, ground, footprint.top(), climb)) {
+            if (!this.isProbeCeiling(ground, level) && !this.hasHeadroom(to, ground, footprint.top(), climb)) {
                 return this.crushesThrough(step);
             }
         }
@@ -2553,7 +2670,17 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 読まれる。登坂判定にとっては安全側だが、地表の位置を知りたい用途にはまったく無価値だ。
      */
     private boolean isProbeCeiling(double ground) {
-        return ground >= this.getY() + PROBE_ABOVE - PROBE_CEILING_SLACK;
+        return this.isProbeCeiling(ground, this.getY());
+    }
+
+    /** 窓を {@code level} に置いたプローブの読み値が、その上限かどうか。 */
+    private boolean isProbeCeiling(double ground, double level) {
+        return ground >= level + this.probeAbove() - PROBE_CEILING_SLACK;
+    }
+
+    /** 地面のプローブを窓の高さからどこまで上で始めるか。登坂能力より必ず上（{@link #PROBE_ABOVE}）。 */
+    private double probeAbove() {
+        return Math.max(PROBE_ABOVE, this.getStats().suspension().climbHeight() + PROBE_ABOVE_CLIMB_MARGIN);
     }
 
     /** ある地点の地面上の隙間が、車両が通れる高さあるか。 */
@@ -2585,13 +2712,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * @param back 同じく後方への張り出し。負値
      */
     private record Footprint(double halfWidth, double front, double back, double top, List<double[]> undersides,
-            double baseHalfWidthOrZero, double baseFrontOrZero, double baseBackOrZero, double bottom) {
+            double baseHalfWidthOrZero, double baseFrontOrZero, double baseBackOrZero, double bottom,
+            @Nullable Tumble.Section roll, @Nullable Tumble.Section pitch) {
         static Footprint of(VehicleShape shape) {
             double halfWidth = 0.0;
             double front = 0.0;
             double back = 0.0;
             double top = 0.0;
             List<double[]> undersides = new ArrayList<>();
+            // 箱ごとの {前, 後, 半幅, 底}。接地面は読む点（内側へ寄せてある）ではなく箱の縁から取る。
+            List<double[]> extents = new ArrayList<>();
 
             for (VehicleShape.Box box : shape.boxes()) {
                 Vec3 half = box.size().scale(0.5);
@@ -2610,6 +2740,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 // 埋まった。履帯と同じ細かさで底の縁を読む（内側だけに当たる柱は稀で、毎tick読む数が箱の面積で
                 // 増えるのは割に合わない）。四隅は必ず含む。
                 double bottom = box.offset().y - half.y;
+                extents.add(new double[] {box.offset().z + half.z, box.offset().z - half.z,
+                        Math.abs(box.offset().x) + half.x, bottom});
                 int alongCount = Math.max(2, Mth.ceil(box.size().z / TRACK_SAMPLE_SPACING) + 1);
                 int acrossCount = Math.max(2, Mth.ceil(box.size().x / TRACK_SAMPLE_SPACING) + 1);
 
@@ -2631,26 +2763,86 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             // 箱がこれに当たる。
             double floor = Double.MAX_VALUE;
 
-            for (double[] corner : undersides) {
-                floor = Math.min(floor, corner[2]);
+            for (double[] extent : extents) {
+                floor = Math.min(floor, extent[3]);
             }
 
             double baseHalfWidth = 0.0;
             double baseFront = 0.0;
             double baseBack = 0.0;
 
-            for (double[] corner : undersides) {
-                if (corner[2] > floor + BASE_BAND) {
+            for (double[] extent : extents) {
+                if (extent[3] > floor + BASE_BAND) {
                     continue;
                 }
 
-                baseHalfWidth = Math.max(baseHalfWidth, Math.abs(corner[1]));
-                baseFront = Math.max(baseFront, corner[0]);
-                baseBack = Math.min(baseBack, corner[0]);
+                baseHalfWidth = Math.max(baseHalfWidth, extent[2]);
+                baseFront = Math.max(baseFront, extent[0]);
+                baseBack = Math.min(baseBack, extent[1]);
             }
 
             return new Footprint(halfWidth, front, back, top, List.copyOf(undersides), baseHalfWidth, baseFront,
-                    baseBack, undersides.isEmpty() ? 0.0 : floor);
+                    baseBack, undersides.isEmpty() ? 0.0 : floor, section(shape, true), section(shape, false));
+        }
+
+        /**
+         * 転がりの断面（{@link Tumble.Section}）。砲身（GUN）以外の全部の箱を、横転なら左右と上下の面へ、前転なら
+         * 前後と上下の面へ投影し、凸包を取る。砲塔の箱は入る——逆さまの戦車を支えるのはそれだ。砲身は入れない。
+         * 地形に引っかけない約束（壁際での旋回が詰む）を転がりでも守る。
+         *
+         * <p>重心は箱の体積で重み付けた中心。質量の配分は定義ファイルに無いので一様な密度と見なす。車体の箱が
+         * 大きいので、砲塔の重さぶん実車より少し低めに出る。箱の回転は読まない（{@link #of} の接地面と同じ）。
+         *
+         * @param across 横転（右が +x）なら真、前転（前が +x）なら偽
+         */
+        @Nullable
+        private static Tumble.Section section(VehicleShape shape, boolean across) {
+            List<double[]> points = new ArrayList<>();
+            // 接地面の帯（BASE_BAND）に底を持つ箱は、底を一番低い底に揃える。接地の処理はそれらを1枚の面として
+            // 地面に置いているので、ここで数 cm の差を残すと、平地に立った車両が止まったまま少し傾き直した。
+            double floor = Double.MAX_VALUE;
+
+            for (VehicleShape.Box box : shape.boxes()) {
+                if (box.mount() != VehicleShape.Mount.GUN) {
+                    floor = Math.min(floor, box.offset().y - box.size().y * 0.5);
+                }
+            }
+
+            double mass = 0.0;
+            double cx = 0.0;
+            double cy = 0.0;
+
+            for (VehicleShape.Box box : shape.boxes()) {
+                if (box.mount() == VehicleShape.Mount.GUN) {
+                    continue;
+                }
+
+                Vec3 half = box.size().scale(0.5);
+                // 箱の +x は左。断面の +x は右なので反転する。
+                double x = across ? -box.offset().x : box.offset().z;
+                double w = across ? half.x : half.z;
+                double volume = box.size().x * box.size().y * box.size().z;
+                mass += volume;
+                cx += x * volume;
+                cy += box.offset().y * volume;
+
+                double low = box.offset().y - half.y;
+
+                if (low <= floor + BASE_BAND) {
+                    low = floor;
+                }
+
+                for (int i = 0; i < 4; i++) {
+                    points.add(new double[] {x + ((i & 1) == 0 ? -w : w),
+                            (i & 2) == 0 ? low : box.offset().y + half.y});
+                }
+            }
+
+            if (points.size() < 4 || mass <= 0.0) {
+                return null;
+            }
+
+            return Tumble.Section.of(points, new double[] {cx / mass, cy / mass});
         }
 
         private boolean hasBase() {
@@ -2693,18 +2885,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             }
 
             return lowest == Double.MAX_VALUE ? this.bottom : lowest;
-        }
-
-        /** 接地面（履帯・車輪の箱）の四隅（ワールド座標）。順は {@link #corners} と同じ。 */
-        Vec3[] baseCorners(Vec3 at, Vec3 forward, GroundVehicleDefinition.Suspension suspension) {
-            Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
-            Vec3 nose = forward.scale(this.baseFront(suspension));
-            Vec3 tail = forward.scale(this.baseBack(suspension));
-            Vec3 side = right.scale(this.baseHalfWidth(suspension));
-
-            return new Vec3[] {
-                    at.add(nose).subtract(side), at.add(nose).add(side),
-                    at.add(tail).subtract(side), at.add(tail).add(side)};
         }
 
         /** ある位置・方位における設置面積の四隅（ワールド座標）。 */
@@ -2792,8 +2972,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 毎回の読み値をそのまま採る車体は耕地を渡るだけでバラバラに揺れる。
      */
     private void settleOnGround(GroundVehicleDefinition.Suspension suspension) {
-        Vec3 forward = this.headingVector();
-        Vec3 right = new Vec3(-forward.z, 0.0, forward.x);
         // 接地面は定義ファイルの数字ではなく当たり判定の箱から取る（{@link Footprint#base}）。
         Footprint base = this.footprint();
         double baseFront = base.baseFront(suspension);
@@ -2808,33 +2986,41 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         double[] s = new double[count];
         double[] t = new double[count];
         double[] h = new double[count];
-        Vec3 centre = this.position();
+        // 読み値が壁（プローブの開始点がブロックの中）だった点。高さには使わないが、崖の縁でもない。
+        boolean[] wall = new boolean[count];
+        // プローブの窓は原点の高さではなく、今の車体の平面がその点を通る高さに置く（{@link #hullLevel}）。原点の
+        // 高さに置くと、急な坂では登り側の端の窓が地面の中から始まり（壁と読まれ）、下り側の端の窓は地面に
+        // 届かず（崖と読まれ）、坂の途中の車体が崖の縁に乗り出したと読まれていた。
+        // 読む位置も傾きで縮める（{@link #onHull}）。s と t は以後、履帯に沿った車体座標ではなく、その点の原点
+        // からの水平距離。平面の傾きも凸包も「水平距離あたりの高さ」でなければ、45 度の坂で角度が 10 度近く
+        // 甘く出る。
+        double alongScale = Math.cos(Math.toRadians(this.hullPitch));
+        double acrossScale = Math.cos(Math.toRadians(this.hullBank));
 
         for (int side = 0; side < 2; side++) {
             double across = side == 0 ? -halfWidth : halfWidth;
 
             for (int i = 0; i < along; i++) {
                 int k = side * along + i;
-                s[k] = baseBack + halfLength * 2.0 * i / (along - 1);
-                t[k] = across;
-                h[k] = this.groundUnder(centre.add(forward.scale(s[k])).add(right.scale(across)));
+                double along0 = baseBack + halfLength * 2.0 * i / (along - 1);
+                Vec3 at = this.onHull(along0, across);
+                double level = this.hullLevel(along0, across);
+                s[k] = along0 * alongScale;
+                t[k] = across * acrossScale;
+                double raw = this.groundUnder(at, level);
+                h[k] = this.supportUnder(at, level, suspension.climbHeight(), raw);
+                wall[k] = Double.isNaN(h[k]) && this.isProbeCeiling(raw, level);
             }
         }
 
-        // 姿勢は読み値に最小二乗で当てた平面から取る。下に何も無ければ水平と読む。空中の車両が向かうべき
-        // 姿勢はそれだ。今離れた斜面の角度を保つ理由は無い。
+        // 姿勢は読み値に最小二乗で当てた平面から取る。下に何も無ければ水平と読むが、宙にある車体はこの目標へ
+        // 寄せない（下のばねが止まる）。飛び出した車体は離れたときの姿勢と回転を保ったまま飛ぶ。
         double[] plane = fitPlane(s, t, h);
 
-        // 車体の箱の底の四隅の下の地面。箱の底が地面に乗るなら、そこも車体を支える点になる。持ち上げるだけ
-        // では1つの角が段に掛かっただけで車体ごと宙へ浮いたので、傾き（restingSlope）と高さの両方に入れる。
-        List<double[]> undersides = this.footprint().undersides();
-        double[][] under = new double[undersides.size()][];
-
-        for (int k = 0; k < under.length; k++) {
-            double[] corner = undersides.get(k);
-            double ground = this.groundUnder(centre.add(forward.scale(corner[0])).add(right.scale(corner[1])));
-            under[k] = new double[] {corner[0], ground - corner[2], corner[1], ground};
-        }
+        // 車体を支えるのは転輪（履帯）の下の地面だけ。以前は箱の底の縁の下も支えに数えていたが、箱は見た目の
+        // 車体より大きいので、段の角をかすめただけで車体の後ろが宙へ持ち上がった。箱の底は姿勢にも高さにも
+        // 入れない（下の under を読む処理は空の配列で素通りする）。
+        double[][] under = new double[0][];
         // ハーフブロックのような小さな段は転輪が縮んで呑む（描画は client/model/WheelGround）。平面からの
         // はみ出しが転輪の可動域に収まる間は、車体は均した平面のまま動かさない。収まらない段だけが、凸包で
         // 車体を傾け持ち上げる。
@@ -2843,14 +3029,61 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         float targetPitch = (float) Math.toDegrees(Math.atan(absorbed ? plane[0]
                 : restingSlope(s, h, along, under, Math.tan(Math.toRadians(this.hullPitch)), plane[0])));
         // ロールは左が高いときを正とし、t は右向き。
-        float targetBank = (float) Math.toDegrees(Math.atan(-plane[1]));
+        // 止まっているか遅いときは、横も箱の下の凸包に乗せる（片側の履帯の下の岩、張り出しの下の段）。速いと
+        // 1ブロック単位の読み値で凸包の辺が tick ごとに入れ替わり車体が震えるので、平面へ速度で混ぜ戻す。
+        double across = plane[1];
+
+        if (!absorbed) {
+            double slow = 1.0 - Mth.clamp(Math.abs(this.speed) / SETTLE_BLEND_SPEED, 0.0, 1.0);
+
+            if (slow > 0.0) {
+                double resting = restingSlopeAcross(t, h, under, -Math.tan(Math.toRadians(this.hullBank)), plane[1]);
+                across = Mth.lerp(slow, plane[1], resting);
+            }
+        }
+
+        float targetBank = (float) Math.toDegrees(Math.atan(-across));
+
+        // 崖の縁。原点のどちらか一方に地面が1点も無い（窓の下まで何も無い）なら、その側へ倒れ込む。ばねが回し、
+        // 高さは残った読み値のいちばん高い点から取るので、車体は最後に地面のある点を支点に下がる。以前は転がり
+        // （Tumble）に縁の偏りを力として渡していたが、Tumble は箱の角の下に平らな地面があると見なして回すので、
+        // 角の下が空でも車体ごと持ち上げて宙に浮かせた。壁の点は地面がある側に数える。
+        boolean ahead = false;
+        boolean behind = false;
+        boolean onRight = false;
+        boolean onLeft = false;
+
+        for (int k = 0; k < count; k++) {
+            if (Double.isNaN(h[k]) && !wall[k]) {
+                continue;
+            }
+
+            ahead |= s[k] >= 0.0;
+            behind |= s[k] <= 0.0;
+            onRight |= t[k] >= 0.0;
+            onLeft |= t[k] <= 0.0;
+        }
+
+        this.cliffPitch = ahead != behind;
+        this.cliffBank = onRight != onLeft;
+
+        if (this.cliffPitch) {
+            targetPitch = ahead ? CLIFF_LEAN : -CLIFF_LEAN;
+        }
+
+        // ロールは左が高いときを正とする。右に地面が無ければ右が下がる。
+        if (this.cliffBank) {
+            targetBank = onLeft ? CLIFF_LEAN : -CLIFF_LEAN;
+        }
 
         // 姿勢は追従ではなくばね。settle_rate をばね定数に読み、減衰を臨界より弱くすると、段差を越えた車体は
         // 目標の角度を少し行き過ぎて揺り返す。
         // 宙にある車体を地面へ向けて回す力は無い。ばねは転輪が地面を押しているときだけ働き、宙では離れた
         // ときの回転がそのまま続く（空気が僅かに削るだけ）。宙でも掛けると、飛んだ車体が見えない手で水平に
         // 保たれていた。
-        if (!this.onGround() || this.fallSpeed > 0.0) {
+        // ただし止めるのは本当に飛んだ車体（launched）だけ。段差の跳ね（STEP_KICK）や着地の跳ね返りでも止めると、
+        // 1 ブロックの段に乗っただけで宙の数 tick の間に車首の回転が積もり、8 輪装甲車が 30 度で前輪を浮かせた。
+        if (this.launched) {
             this.hullPitchRate *= 1.0F - AIR_SPIN_DRAG;
             this.hullBankRate *= 1.0F - AIR_SPIN_DRAG;
         } else {
@@ -2892,56 +3125,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             }
 
             support = Math.max(support - reach, lowest);
-        }
-
-        // 履帯の下だけを読むと、履帯より前後へ張り出した車体の箱が、傾いたときに斜面や段へ埋まった。箱の底の
-        // 四隅の下も読み、その底が地面に潜らない高さまで持ち上げる。登坂能力を超える持ち上げは壁なので採らない
-        // （そこへは limitToShape が入らせない）。
-        if (!Double.isNaN(support)) {
-            double hullSupport = support;
-
-            for (double[] corner : under) {
-                if (Double.isNaN(corner[3])) {
-                    continue;
-                }
-
-                double origin = corner[1] - corner[0] * tanPitch + corner[2] * tanBank;
-
-                if (origin > hullSupport && origin - support <= suspension.climbHeight() + CLIMB_SLACK) {
-                    hullSupport = origin;
-                }
-            }
-
-            support = hullSupport;
-        }
-
-        // 実際に車体を支えている読み値の広がり。崖の縁に乗り出した車体は後ろ半分でしか支えられておらず、
-        // 重心がその外へ出れば縁を支点に倒れる（{@link #tip}）。支えの面から少し下までを「支えている」と読む。
-        this.supportAhead = baseBack;
-        this.supportBehind = baseFront;
-        this.supportRight = -halfWidth;
-        this.supportLeft = halfWidth;
-        boolean any = false;
-
-        for (int k = 0; k < count; k++) {
-            if (Double.isNaN(h[k]) || Double.isNaN(support)
-                    || h[k] - s[k] * tanPitch + t[k] * tanBank
-                            < support - suspension.climbHeight() - SUPPORT_DEPTH) {
-                continue;
-            }
-
-            any = true;
-            this.supportAhead = Math.max(this.supportAhead, s[k]);
-            this.supportBehind = Math.min(this.supportBehind, s[k]);
-            this.supportRight = Math.max(this.supportRight, t[k]);
-            this.supportLeft = Math.min(this.supportLeft, t[k]);
-        }
-
-        if (!any) {
-            this.supportAhead = baseFront;
-            this.supportBehind = baseBack;
-            this.supportRight = halfWidth;
-            this.supportLeft = -halfWidth;
         }
 
         this.rest(support, suspension);
@@ -3015,7 +3198,46 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             n++;
         }
 
-        // s の昇順に並べる。
+        return upperHullSlope(xs, ys, n, current, fallback);
+    }
+
+    /**
+     * 車体が左右方向に乗る傾き（右へ1ブロックあたりの上がり）。{@link #restingSlope} の横版で、左右の履帯の
+     * 読み値と、全部の箱の底の下の地面から、上側の凸包を取る。片側の履帯の下にだけ岩があれば、車体はその岩と
+     * 反対側の履帯を結ぶ線に乗る（最小二乗の平面は岩を均して半分しか傾けない）。張り出した箱の底が段に乗れば
+     * それも支えになる。
+     */
+    private static double restingSlopeAcross(double[] t, double[] h, double[][] under, double current,
+            double fallback) {
+        double[] xs = new double[h.length + under.length];
+        double[] ys = new double[h.length + under.length];
+        int n = 0;
+
+        for (double[] corner : under) {
+            if (!Double.isNaN(corner[1])) {
+                xs[n] = corner[2];
+                ys[n] = corner[1];
+                n++;
+            }
+        }
+
+        for (int k = 0; k < h.length; k++) {
+            if (!Double.isNaN(h[k])) {
+                xs[n] = t[k];
+                ys[n] = h[k];
+                n++;
+            }
+        }
+
+        return upperHullSlope(xs, ys, n, current, fallback);
+    }
+
+    /**
+     * 点 (x, y) の上側の凸包のうち、x = 0（重心）の真下の辺の傾き。重心が頂点の真上なら両側の辺の傾きの間で
+     * 今の傾きを保つ。重心の片側に点が無ければ {@code fallback}。
+     */
+    private static double upperHullSlope(double[] xs, double[] ys, int n, double current, double fallback) {
+        // x の昇順に並べる。
         Integer[] order = new Integer[n];
 
         for (int i = 0; i < n; i++) {
@@ -3148,9 +3370,21 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      */
     private void rest(double support, GroundVehicleDefinition.Suspension suspension) {
         double climb = suspension.climbHeight();
+
+        // 読み値が1〜2tick途切れても直前の地面を使う。急な川岸を登る車体では地面のプローブが tick おきに外れ、
+        // そのたびに飛び出しと読んで転がりへ回転を渡し直し、積もった回転で車体が縦に回った。
+        if (Double.isNaN(support) && this.supportMisses < SUPPORT_MISS_GRACE && !Double.isNaN(this.lastSupport)) {
+            this.supportMisses++;
+            support = this.lastSupport;
+        } else if (!Double.isNaN(support)) {
+            this.supportMisses = 0;
+        }
+
+        this.lastSupport = support;
         double rise = support - this.getY();
 
         if (Double.isNaN(support)) {
+            this.launch(Double.POSITIVE_INFINITY);
             this.fall();
 
             return;
@@ -3165,9 +3399,20 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
                 double impact = -this.fallSpeed;
                 this.setPos(this.getX(), Math.min(support, this.getY() + climb), this.getZ());
 
+                if (this.launched) {
+                    this.land(impact);
+                }
+
                 if (impact > LANDING_SETTLE) {
-                    this.fallSpeed = impact * LANDING_RESTITUTION;
-                    this.hullPitchRate -= (float) impact * LANDING_NOD;
+                    // 跳ね返りと揺れには上限を置く。丘から慣性のまま飛ぶようになって着地が強くなり、衝撃に比例
+                    // させたままでは着地のたびに車体が跳ね直し、機首が何十度も振れた。
+                    this.fallSpeed = Math.min(impact * LANDING_RESTITUTION, MAX_BOUNCE);
+                    // 車首を揺するのは本当に飛んだ着地だけ。段差の跳ね（STEP_KICK）の着地でも揺すると、階段状の
+                    // 坂では跳ねるたびに車首が下へ押され、登っている間ずっと前へ倒される力に見えた。
+                    if (this.launched) {
+                        this.hullPitchRate -= (float) Math.min(impact * LANDING_NOD, MAX_LANDING_NOD);
+                    }
+                    this.kickCooldown = KICK_COOLDOWN;
                 } else {
                     this.fallSpeed = 0.0;
                     this.setOnGround(true);
@@ -3178,21 +3423,98 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         }
 
         if (rise < -climb) {
+            this.launch(-rise);
             this.fall();
 
             return;
         }
 
+        // 飛んできて斜面へ横から着いた（地面が足元より上）。
+        if (this.launched) {
+            this.land(-this.fallSpeed);
+        }
+
         // 段差へ乗り上げるか、坂を下る。登坂能力を超える高さは、ここへ来る前に水平方向で止められている。
         // 上限は、読み違えが車両を崖に沿って打ち上げるのを防ぐためのもの——本来は崖で止まるべきなのだ。
-        double up = Math.min(rise, climb);
+        // 横倒し・逆さまの車体は段を登らない。地面の読み値は立っているときの転輪の位置で取るので、寝た車体の
+        // 隣の1段を拾って車体ごと登坂の高さまで持ち上げ、次の tick にそこから落ちて、止まったまま浮き沈みした。
+        // 地面へ埋まらない分だけゆっくり押し上げる。
+        double up = Math.min(rise, Math.abs(this.tipRoll.angle()) > SIDE_DOWN ? SIDE_DOWN_RISE : climb);
         this.setPos(this.getX(), this.getY() + up, this.getZ());
+        this.groundClimb += (up - this.groundClimb) * CLIMB_SMOOTHING;
 
         // 速く段差へ乗り上げた車体は、持ち上げられた勢いのまま少し宙へ出る。坂の連続した持ち上げで跳ねない
         // よう、1tick で目に見えるほど持ち上がったときだけ。
         double pace = Mth.clamp(Math.abs(this.speed) / KICK_FULL_SPEED, 0.0, 1.0);
-        this.fallSpeed = up > 0.2 ? up * STEP_KICK * pace : 0.0;
+        // 跳ねるのは平地の縁石。坂の途中の段は坂の一部なので跳ねない——跳ねると階段状の坂で 10 tick ごとに
+        // 宙に出て、ばねが止まり、着地のたびに揺れた。
+        if (Math.abs(this.hullPitch) > KICK_MAX_PITCH || Math.abs(this.hullBank) > KICK_MAX_PITCH) {
+            pace = 0.0;
+        }
+        // 着地の直後は蹴らない。着いた先が登り坂だと、段ごとに蹴られて跳ね続けた。
+        this.fallSpeed = up > 0.2 && this.kickCooldown == 0 ? up * STEP_KICK * pace : 0.0;
+
+        // 跳ねている間はばねが止まるので、段を越えた瞬間のばねの速さ（数度/tick）がそのまま続き、着地まで
+        // に車首が何十度も振れてから揺り戻した。飛び出し（{@link #launch}）と同じ上限に抑える。
+        if (this.fallSpeed > 0.0) {
+            this.hullPitchRate = Mth.clamp(this.hullPitchRate, -LAND_SPIN_CAP, LAND_SPIN_CAP);
+            this.hullBankRate = Mth.clamp(this.hullBankRate, -LAND_SPIN_CAP, LAND_SPIN_CAP);
+        }
+
         this.setOnGround(true);
+    }
+
+    /**
+     * 地面を離れた瞬間。接地していた車体だけが飛び出す（既に宙にあれば何もしない）。
+     *
+     * <p>鉛直の速度は、車首方向の速度を今の車体の傾きで立ち上げた物。坂を登り切って丘の頂点を越えた戦車は
+     * 上向きの勢いのまま飛び、下り坂の途中で地面が切れた戦車は下向きの勢いのまま落ちる。0 から落とし始めると
+     * どちらも頂点で一度止まって見えた。
+     */
+    private void launch(double drop) {
+        if (!this.onGround() || this.launched) {
+            return;
+        }
+
+        this.launched = true;
+        this.airTicks = 0;
+
+        // 宙での回転は転がりが持つ。ばねの姿勢は ±60 度で頭打ちになるので、そちらに回転を残すと宙返りしかけた
+        // 車体が途中で見えない壁に当たったように止まった。転がりには角度の上限が無い。ただし小さい段では渡さない。
+        // 転がりは前の縁を支点に回るので、1〜2ブロック降りるだけの車体が後ろを掬い上げられた。
+        // 着いたばかりの車体が跳ねて離れるたびに渡すと、回転が積もって縦に回る。
+        if (drop > SPIN_HAND_DROP && this.groundedTicks >= SPIN_HAND_GROUNDED) {
+            double cap = Math.toRadians(LAND_SPIN_CAP);
+            this.tipPitch.kick(Mth.clamp(Math.toRadians(this.hullPitchRate), -cap, cap));
+            this.tipRoll.kick(Mth.clamp(-Math.toRadians(this.hullBankRate), -cap, cap));
+            this.hullPitchRate = 0.0F;
+            this.hullBankRate = 0.0F;
+        } else {
+            // 渡さない回転もばねに満額は残さない。宙ではばねが効かないので、段を越えた瞬間のばねの速さ（10 度/tick
+            // を超える）がそのまま続き、川岸から落ちた車体が -60 度から +60 度まで振れた。
+            this.hullPitchRate = Mth.clamp(this.hullPitchRate, -LAND_SPIN_CAP, LAND_SPIN_CAP);
+            this.hullBankRate = Mth.clamp(this.hullBankRate, -LAND_SPIN_CAP, LAND_SPIN_CAP);
+        }
+        // 車体の傾きはばねで揺れ、段差の上では一瞬 40 度にもなる。それをそのまま初速にすると、階段状の斜面の
+        // 縁ごとに車体が打ち上げられた。実際に上下していた速さ（groundClimb）と同じ向きのときだけ、小さい方を採る。
+        double climbing = Attitude.nose(this.attitude).y * this.speed;
+        double vertical = Math.signum(climbing) == Math.signum(this.groundClimb)
+                ? Math.signum(climbing) * Math.min(Math.abs(climbing), Math.abs(this.groundClimb)) : 0.0;
+        this.fallSpeed = Mth.clamp(vertical, -MAX_FALL, MAX_FALL);
+    }
+
+    /**
+     * 飛んでいた車体の着地。宙の回転は飛び出したときから転がり（{@link Tumble}）が持っているので、ここでは飛行の
+     * 印を下ろすだけ。転がるかどうかは着いた先で支点と重心が決める。
+     */
+    private void land(double impact) {
+        this.launched = false;
+        this.airTicks = 0;
+    }
+
+    /** 飛び出してから切り替えの猶予を過ぎたか。駆動系と操舵はこの間、車体を動かさない。 */
+    private boolean flying() {
+        return this.launched && this.airTicks >= AIR_GRACE;
     }
 
     /** 落下1tick分。終端速度で頭打ちにし、崖から落ちた車両が何も追い越さないようにする。 */
@@ -3213,8 +3535,20 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * 長く進み、着地するはずだった床をプローブが一度も触れないまま突き抜ける。
      */
     private double groundUnder(Vec3 where) {
-        double blocks = this.blocksUnder(where);
-        double deck = this.deckUnder(where);
+        return this.groundUnder(where, this.getY());
+    }
+
+    /**
+     * {@link #groundUnder(Vec3)} の窓を {@code level} の上下に置いた物。傾いた車体の端は原点と同じ高さには無い
+     * ので、端の下を読むときはその端が今ある高さを渡す。
+     */
+    private double groundUnder(Vec3 where, double level) {
+        Vec3 from = this.probeFrom(where, level);
+        Vec3 to = this.probeTo(where, level);
+        BlockHitResult hit = this.level().clip(new ClipContext(from, to,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
+        double blocks = hit.getType() == HitResult.Type.MISS ? Double.NaN : hit.getLocation().y;
+        double deck = Hitboxes.deckUnder(this, from, to);
 
         if (Double.isNaN(deck)) {
             return blocks;
@@ -3223,32 +3557,36 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         return Double.isNaN(blocks) ? deck : Math.max(blocks, deck);
     }
 
-    /** 同じプローブをブロックにだけ投げた物。 */
-    private double blocksUnder(Vec3 where) {
-        BlockHitResult hit = this.level().clip(new ClipContext(this.probeFrom(where), this.probeTo(where),
-                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
-
-        return hit.getType() == HitResult.Type.MISS ? Double.NaN : hit.getLocation().y;
-    }
-
     /**
-     * 同じプローブを、この MOD の他の機体の箱にだけ投げた物。
-     *
-     * <p>これが車両を甲板の上に立たせている全部だ。高さは下から読むので、答えられる物が増えれば立てる場所が
-     * 増える——輸送機のランプ、船の甲板、他の戦車の車体。ブロックの読みと同じ線分を同じ向きに投げるので、
-     * 段差・坂・壁の区別（{@link #rest} と {@link #canStep}）はそのまま効く。ランプは坂として登り、船体は
-     * 登坂能力を超える段差として車両を止める。
+     * 車体を支える読み値としての地面。{@code raw} は同じ点を {@link #groundUnder(Vec3, double)} で読んだ物。
+     * プローブの上限で頭打ちした読み値は地表ではなく「開始点がブロックの中だった」という意味しか無い（頭上の
+     * 葉や天井、履帯の脇の壁）。それをそのまま支えに数えると、何も無い所に地面があると読んで車体が急に浮き
+     * 上がった。登坂能力の高さから読み直し、そこもブロックの中なら支えは無い（その高さの壁へは limitToShape が
+     * 入らせない）。
      */
-    private double deckUnder(Vec3 where) {
-        return Hitboxes.deckUnder(this, this.probeFrom(where), this.probeTo(where));
+    private double supportUnder(Vec3 where, double level, double climb, double raw) {
+        if (Double.isNaN(raw) || !this.isProbeCeiling(raw, level)) {
+            return raw;
+        }
+
+        Vec3 from = new Vec3(where.x, level + climb + CLIMB_SLACK, where.z);
+        Vec3 to = this.probeTo(where, level);
+        BlockHitResult hit = this.level().clip(new ClipContext(from, to,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
+        double blocks = hit.getType() == HitResult.Type.MISS ? Double.NaN : hit.getLocation().y;
+        double deck = Hitboxes.deckUnder(this, from, to);
+        double lowered = Double.isNaN(deck) ? blocks : Double.isNaN(blocks) ? deck : Math.max(blocks, deck);
+
+        // 下げた開始点もブロックの中なら、そこは床ではなく壁。
+        return !Double.isNaN(lowered) && lowered >= from.y - PROBE_CEILING_SLACK ? Double.NaN : lowered;
     }
 
-    private Vec3 probeFrom(Vec3 where) {
-        return new Vec3(where.x, this.getY() + PROBE_ABOVE, where.z);
+    private Vec3 probeFrom(Vec3 where, double level) {
+        return new Vec3(where.x, level + this.probeAbove(), where.z);
     }
 
-    private Vec3 probeTo(Vec3 where) {
-        return new Vec3(where.x, this.getY() - (PROBE_BELOW + Math.abs(this.fallSpeed)), where.z);
+    private Vec3 probeTo(Vec3 where, double level) {
+        return new Vec3(where.x, level - (PROBE_BELOW + Math.abs(this.fallSpeed)), where.z);
     }
 
     // ------------------------------------------------------------------
@@ -3680,7 +4018,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         double g = GRAVITY;
         double bank = Math.toRadians(this.hullBank);
         double pitch = Math.toRadians(this.hullPitch);
-        double b = this.tipHeight();
+        Tumble.Section rollShape = this.rollSection();
+        Tumble.Section pitchShape = this.pitchSection();
         double halfWidth = this.tipHalfWidth();
         double halfLength = this.tipHalfLength();
         double rollBefore = this.tipRoll.angle();
@@ -3690,51 +4029,128 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         if (this.onGround()) {
             double normal = g * Math.cos(bank) * Math.cos(pitch);
-            // 左が高い斜面は車体を右（+x）へ引く。右へ曲がる車体の遠心力は左へ。
-            double lateral = g * Math.sin(bank) * Math.cos(pitch) - this.speed * Math.toRadians(this.turned);
+            // 左が高い斜面は車体を右（+x）へ引く。右へ曲がる車体の遠心力は左へ。崖の縁へ倒れ込んでいる傾きは
+            // 斜面ではないので重力の分を渡さない（渡すと箱の角を支点に回して車体を持ち上げる）。
+            double lateral = (this.cliffBank ? 0.0 : g * Math.sin(bank) * Math.cos(pitch))
+                    - this.speed * Math.toRadians(this.turned);
             // 機首上げの坂は車体を後ろへ引く。
-            double forward = -g * Math.sin(pitch);
+            double forward = this.cliffPitch ? 0.0 : -g * Math.sin(pitch);
 
-            // 支えが接地面の端まで届いていなければ、支点はもっと内側にある。Tumble は支点を箱の角に置くので、
-            // 内側の支点が作るのと同じモーメントになるよう、重力の分を横向きの力に足して渡す。崖から車首を
-            // 突き出した車体では前の支えが重心より後ろへ下がり、重力だけで車首から落ちる。
-            this.edgeAlong += (((halfLength - this.supportAhead) - (halfLength + this.supportBehind))
-                    - this.edgeAlong) * EDGE_SMOOTHING;
-            this.edgeAcross += (((halfWidth - this.supportRight) - (halfWidth + this.supportLeft))
-                    - this.edgeAcross) * EDGE_SMOOTHING;
-            forward += normal * this.edgeAlong / b;
-            lateral += normal * this.edgeAcross / b;
+            // 崖の縁から乗り出した車体は転がりではなく接地のばねが倒す（{@link #settleOnGround} の CLIFF_LEAN）。
+            // Tumble は箱の角の下に平らな地面があると見なして回すので、縁の偏りをここへ渡すと、角の下が空でも
+            // 車体ごと持ち上げて宙に浮かせた。
+            if (Math.abs(this.tipRoll.angle()) > SIDE_DOWN) {
+                // 側面や屋根は履帯より強く地面を擦る。SCRUB だけでは横倒しの車体が側面と屋根の間を数秒揺れ続け、
+                // そのたびに持ち上げが上下して浮いて見えた。
+                this.tipRoll.damp(SIDE_DOWN_SCRUB);
+                this.tipPitch.damp(SIDE_DOWN_SCRUB);
+            }
 
-            across = this.tipRoll.step(halfWidth, b, lateral, normal);
-            along = this.tipPitch.step(halfLength, b, forward, normal);
+            across = this.tipRoll.step(rollShape, lateral, normal);
+            along = this.tipPitch.step(pitchShape, forward, normal);
         } else {
             this.tipRoll.drift();
             this.tipPitch.drift();
         }
 
-        // 支点が地面に留まるよう車体ごと横へずらす。原点（底面の中央）は重心から b だけ下にあり、傾けば横へ出る。
-        double right = across + b * (Math.sin(this.tipRoll.angle()) - Math.sin(rollBefore));
-        double ahead = along + b * (Math.sin(this.tipPitch.angle()) - Math.sin(pitchBefore));
+        // 支点が地面に留まるよう車体ごと横へずらす。原点（底面の基準点）は重心の下にあり、傾けば横へ出る。
+        double right = across + Tumble.rotatedX(rollShape.origin(), this.tipRoll.angle())
+                - Tumble.rotatedX(rollShape.origin(), rollBefore);
+        double ahead = along + Tumble.rotatedX(pitchShape.origin(), this.tipPitch.angle())
+                - Tumble.rotatedX(pitchShape.origin(), pitchBefore);
         Vec3 forward = this.headingVector();
         Vec3 side = new Vec3(-forward.z, 0.0, forward.x);
         Vec3 shift = side.scale(right).add(forward.scale(ahead));
 
-        this.tipLift = this.tipLiftFor(halfWidth, halfLength, b);
+        this.tipLift = this.tipLiftFor();
         this.setPos(this.getX() + shift.x, this.getY() + this.tipLift, this.getZ() + shift.z);
+
+        if (this.onGround()) {
+            this.handOverAtDrop(halfWidth, halfLength);
+        }
     }
 
-    /** 転がりが原点を持ち上げる高さ。立っていれば0、横倒しで半幅、屋根で車高。 */
-    private double tipLiftFor(double halfWidth, double halfLength, double b) {
-        return this.tipRoll.lift(halfWidth, b) - b + this.tipPitch.lift(halfLength, b) - b
-                + b - b * Math.cos(this.tipRoll.angle()) * Math.cos(this.tipPitch.angle());
+    /**
+     * 段や崖の縁を越えて倒れていく車体が、下の本物の地面に着いたら、その傾きを地面に沿う姿勢（ばね）へ渡して
+     * 転がりをやめる。
+     *
+     * <p>{@link Tumble} は支点と同じ高さに平らな地面が続いていると見なして解く。縁の向こうの地面がもっと低くても
+     * 前面が仮想の床に着く 90 度まで回り、車首を下にして穴の中に立ったまま止まった。倒れていく側の端の真下を
+     * 読み、その端が地面に届いた時点の角度を {@code hullPitch} / {@code hullBank} へ移す。ばねはその後、縁から下の
+     * 地面へ掛けての傾きに車体を寝かせる。平らな地面では端が届くのは角度 0 なので何もしない。
+     */
+    private void handOverAtDrop(double halfWidth, double halfLength) {
+        double pitch = this.tipPitch.angle();
+        double roll = this.tipRoll.angle();
+        boolean pitchOver = Math.abs(pitch) > HAND_OVER_MIN && Math.abs(pitch) < HAND_OVER_MAX;
+        boolean rollOver = Math.abs(roll) > HAND_OVER_MIN && Math.abs(roll) < HAND_OVER_MAX;
+
+        if (!pitchOver && !rollOver) {
+            return;
+        }
+
+        Quaternionf now = this.buildAttitude();
+        // 角度が負なら前（右）が下がっている。
+        boolean pitchTouches = pitchOver && this.touchesBelow(now,
+                new Vec3(0.0, 0.0, pitch < 0.0 ? halfLength : -halfLength));
+        boolean rollTouches = rollOver && this.touchesBelow(now,
+                new Vec3(roll < 0.0 ? halfWidth : -halfWidth, 0.0, 0.0));
+
+        if (!pitchTouches && !rollTouches) {
+            return;
+        }
+
+        double before = this.tipLift;
+
+        // 回る勢いも一緒に渡す。角度だけ渡すと、倒れていく車体が縁の下に着いた瞬間にぴたりと止まった。
+        if (pitchTouches) {
+            this.hullPitch = Mth.clamp(this.hullPitch + (float) Math.toDegrees(pitch), -60.0F, 60.0F);
+            this.hullPitchRate = (float) Math.toDegrees(this.tipPitch.rate());
+            this.tipPitch.set(0.0, 0.0);
+        }
+
+        if (rollTouches) {
+            this.hullBank = Mth.clamp(this.hullBank - (float) Math.toDegrees(roll), -60.0F, 60.0F);
+            this.hullBankRate = (float) -Math.toDegrees(this.tipRoll.rate());
+            this.tipRoll.set(0.0, 0.0);
+        }
+
+        this.setXRot(-this.hullPitch);
+        this.tipLift = this.tipLiftFor();
+        this.setPos(this.getX(), this.getY() - before + this.tipLift, this.getZ());
     }
 
-    /** 重心から車体の底面まで。車高の半分。 */
+    /** 車体の点（右・上・前）が、その真下の地面に届いているか。 */
+    private boolean touchesBelow(Quaternionf attitude, Vec3 body) {
+        Vec3 at = this.position().add(Attitude.toWorld(attitude, body));
+        double ground = this.groundUnder(at, at.y);
+
+        return !Double.isNaN(ground) && at.y <= ground + HAND_OVER_REACH;
+    }
+
+    /**
+     * 転がりが原点を持ち上げる高さ。立っていれば0。
+     *
+     * <p>重心の高さ（一番低い頂点から）の立っているときからの増分に、原点の重心に対する高さの変化を足す。
+     * 2軸は別々に解いているので、原点はロールで回してからピッチで回す。
+     */
+    private double tipLiftFor() {
+        Tumble.Section roll = this.rollSection();
+        Tumble.Section pitch = this.pitchSection();
+        double rollAngle = this.tipRoll.angle();
+        double pitchAngle = this.tipPitch.angle();
+        double[] o = roll.origin();
+        double oy = o[1];
+        double rolledY = Tumble.rotatedY(o, rollAngle);
+        double ahead = pitch.origin()[0];
+        double originY = ahead * Math.sin(pitchAngle) + rolledY * Math.cos(pitchAngle);
+
+        return roll.lift(rollAngle) - roll.height() + pitch.lift(pitchAngle) - pitch.height() + originY - oy;
+    }
+
+    /** 重心から車体の底面まで。 */
     private double tipHeight() {
-        Footprint shape = this.footprint();
-        double height = shape.isEmpty() ? this.hitbox().height() : shape.top() - shape.bottom();
-
-        return Math.max(height, 0.5) * 0.5;
+        return Math.max(this.rollSection().height(), 0.25);
     }
 
     private double tipHalfWidth() {
@@ -3743,6 +4159,28 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     private double tipHalfLength() {
         return Math.max(this.footprint().baseLength(this.getStats().suspension()), 0.5) * 0.5;
+    }
+
+    /** 横転の断面。箱が無ければ接地面の幅と車高の長方形。 */
+    private Tumble.Section rollSection() {
+        Tumble.Section section = this.footprint().roll();
+
+        return section != null ? section : Tumble.Section.rectangle(this.tipHalfWidth(), this.boxHeight());
+    }
+
+    /** 前転の断面。 */
+    private Tumble.Section pitchSection() {
+        Tumble.Section section = this.footprint().pitch();
+
+        return section != null ? section : Tumble.Section.rectangle(this.tipHalfLength(), this.boxHeight());
+    }
+
+    /** 車高の半分。箱が無い車両の代役の断面に。 */
+    private double boxHeight() {
+        Footprint shape = this.footprint();
+        double height = shape.isEmpty() ? this.hitbox().height() : shape.top() - shape.bottom();
+
+        return Math.max(height, 0.5) * 0.5;
     }
 
     /**
@@ -3762,8 +4200,6 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         this.tipRoll.set(0.0, 0.0);
         this.tipPitch.set(0.0, 0.0);
         this.tipLift = 0.0;
-        this.edgeAlong = 0.0;
-        this.edgeAcross = 0.0;
         this.hullBank = 0.0F;
         this.hullBankRate = 0.0F;
         this.hullPitch = 0.0F;
@@ -3786,6 +4222,25 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     }
 
     /**
+     * 届いている姿勢が、地面の傾きでは説明できない転倒か。{@link #takeTip} と同じ判定で、斜面に乗っている
+     * 45 度超は転倒ではない。レンチで起こすか畳むかの分かれ目。
+     */
+    private boolean looksTipped() {
+        float bank = Attitude.bank(this.attitude);
+        float pitch = -Attitude.elevation(this.attitude);
+        float keptBank = this.hullBank;
+        float keptPitch = this.hullPitch;
+        this.hullBank = bank;
+        this.hullPitch = pitch;
+        boolean tipped = Math.abs(bank) > TIP_EVIDENT && !this.restsOnTracks(true)
+                || Math.abs(pitch) > TIP_EVIDENT && !this.restsOnTracks(false);
+        this.hullBank = keptBank;
+        this.hullPitch = keptPitch;
+
+        return tipped;
+    }
+
+    /**
      * 物理を回し始めた側が、届いていた姿勢から転がりを拾い直す。地面の傾きでは説明できない角度——45度を
      * 超える傾き——だけを転がりと読む。それ以下はばねの姿勢がすぐ地面へ寄せ直す。
      */
@@ -3796,20 +4251,63 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         float bank = Attitude.bank(this.attitude);
         float pitch = -Attitude.elevation(this.attitude);
+        // 角度だけでは斜面と転倒を分けられない。45 度の階段では車体の傾きが 39〜50 度を振れるので、降りた
+        // 瞬間に 48 度の車体を転倒と読み、Tumble の持ち上げで車体ごと宙に浮かせてから後ろへ倒していた。
+        // 履帯の両端がその傾きで地面に着いていれば、それは斜面の姿勢であってばねの物。
+        this.hullBank = bank;
+        this.hullPitch = pitch;
 
-        if (Math.abs(bank) > TIP_EVIDENT) {
+        if (Math.abs(bank) > TIP_EVIDENT && !this.restsOnTracks(true)) {
             this.tipRoll.set(-Math.toRadians(bank), 0.0);
             this.hullBank = 0.0F;
             this.hullBankRate = 0.0F;
         }
 
-        if (Math.abs(pitch) > TIP_EVIDENT) {
+        if (Math.abs(pitch) > TIP_EVIDENT && !this.restsOnTracks(false)) {
             this.tipPitch.set(Math.toRadians(pitch), 0.0);
             this.hullPitch = 0.0F;
             this.hullPitchRate = 0.0F;
         }
 
-        this.tipLift = this.tipLiftFor(this.tipHalfWidth(), this.tipHalfLength(), this.tipHeight());
+        this.hullPitch = Mth.clamp(this.hullPitch, -60.0F, 60.0F);
+        this.hullBank = Mth.clamp(this.hullBank, -60.0F, 60.0F);
+        this.tipLift = this.tipLiftFor();
+    }
+
+    /**
+     * 今の {@code hullPitch} / {@code hullBank} で、接地面の両端（{@code across} なら左右、でなければ前後）の
+     * 下に、その端の高さから登坂能力の範囲に地面があるか。あれば車体はその傾きの地面に乗っている。
+     */
+    private boolean restsOnTracks(boolean across) {
+        Footprint footprint = this.footprint();
+        GroundVehicleDefinition.Suspension suspension = this.getStats().suspension();
+        double climb = Math.max(suspension.climbHeight(), 1.0);
+        double front = footprint.baseFront(suspension);
+        double back = footprint.baseBack(suspension);
+        double halfWidth = footprint.baseHalfWidth(suspension);
+
+        if (front - back <= 0.0 || halfWidth <= 0.0) {
+            return false;
+        }
+
+        for (int end = 0; end < 2; end++) {
+            boolean touched = false;
+
+            for (int i = 0; i < 2 && !touched; i++) {
+                double s = across ? (i == 0 ? front : back) : (end == 0 ? front : back);
+                double t = across ? (end == 0 ? -halfWidth : halfWidth) : (i == 0 ? -halfWidth : halfWidth);
+                double level = this.hullLevel(s, t);
+                double raw = this.groundUnder(this.onHull(s, t), level);
+                double ground = this.supportUnder(this.onHull(s, t), level, suspension.climbHeight(), raw);
+                touched = !Double.isNaN(ground) && Math.abs(ground - level) <= climb;
+            }
+
+            if (!touched) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     @Override
@@ -3855,8 +4353,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         Vec3 torque = at.subtract(centre).cross(impulse);
         // 断面の反時計回りは、ロールでは車首の逆まわり、ピッチでは右まわり。
         if (tilts) {
-            this.tipRoll.kick(-torque.dot(forward) / (4.0 / 3.0 * (halfWidth * halfWidth + b * b)));
-            this.tipPitch.kick(torque.dot(side) / (4.0 / 3.0 * (halfLength * halfLength + b * b)));
+            // 慣性は支点（一番遠い角）まわり。箱の凸包から。
+            Tumble.Section roll = this.rollSection();
+            Tumble.Section pitch = this.pitchSection();
+            this.tipRoll.kick(-torque.dot(forward) / (roll.gyration() + roll.reach() * roll.reach()));
+            this.tipPitch.kick(torque.dot(side) / (pitch.gyration() + pitch.reach() * pitch.reach()));
         }
 
         // 鉛直まわりの分は向きを変える。鎖で横から引かれた車体は鎖の方へ首を振る。ヨーの正は右回り（上から見て
@@ -4044,7 +4545,8 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             Vec3 spot = this.position().add(offset);
             double ground = this.groundUnder(spot);
 
-            if (Double.isNaN(ground)) {
+            // 窓は崖の下まで届くが、乗員をそこへ降ろしはしない。
+            if (Double.isNaN(ground) || ground < this.getY() - DISMOUNT_DROP) {
                 continue;
             }
 
@@ -4111,8 +4613,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
             // 倒れた車両にレンチを当てれば、畳むのではなく起こす。畳みたければ起こしてからもう一度。
             // 転がりを持っているのは物理を回している側なので、運転席のクライアントが回していればサーバーの
             // 転がりは0。届いている姿勢からも読む。
-            if (this.overturned() || Math.abs(Attitude.bank(this.attitude)) > TIP_EVIDENT
-                    || Math.abs(Attitude.elevation(this.attitude)) > TIP_EVIDENT) {
+            if (this.overturned() || this.looksTipped()) {
                 return this.right(player);
             }
 

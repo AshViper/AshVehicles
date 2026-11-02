@@ -51,6 +51,7 @@ public final class AircraftInputHandler {
         boolean toggleBay = ModKeyMappings.TOGGLE_BAY.consumeClick();
         boolean toggleRamp = ModKeyMappings.TOGGLE_RAMP.consumeClick();
         boolean jettison = ModKeyMappings.JETTISON.consumeClick();
+        boolean toggleLimit = ModKeyMappings.FLIGHT_LIMIT.consumeClick();
         // センサー映像の極性。砲座の映像を見ている間しか目に見える効果は無いが、他の切り替えと同じく座席の
         // 内外を問わず毎tick吸い出す。地上での押下がキューに残り、砲座に着いた瞬間に発火するのを防ぐためだ。
         // ThermalView 参照。
@@ -65,6 +66,10 @@ public final class AircraftInputHandler {
             player.displayClientMessage(Component.translatable(
                     MouseAim.isEnabled() ? "message.ashvehicles.mouse_aim_on"
                             : "message.ashvehicles.mouse_aim_off"), true);
+        }
+
+        while (ModKeyMappings.COUNTERMEASURE_MODE.consumeClick()) {
+            CountermeasureMode.cycle(player);
         }
 
         AircraftEntity aircraft = pilotedAircraft(player);
@@ -142,8 +147,8 @@ public final class AircraftInputHandler {
                 trigger,
                 // クリックではなく押し続け。ディスペンサーはハンドルを引いている間1発ずつ放出し、その速さは自身
                 // の間隔が決める。
-                ModKeyMappings.RELEASE_FLARE.isDown(),
-                ModKeyMappings.RELEASE_CHAFF.isDown(),
+                CountermeasureMode.flare(ModKeyMappings.RELEASE_COUNTERMEASURE.isDown()),
+                CountermeasureMode.chaff(ModKeyMappings.RELEASE_COUNTERMEASURE.isDown()),
                 // 押下状態をそのまま送る。1押しの切り出し（掴む・手放す）はサーバーのシーカーが行う。
                 // TargetLock.tick 参照。
                 ModKeyMappings.RADAR_LOCK.isDown(),
@@ -165,6 +170,10 @@ public final class AircraftInputHandler {
         toggleFlaps |= CockpitControls.takeFlaps();
         toggleBay |= CockpitControls.takeBay();
         cycleWeapon += CockpitControls.takeWeaponSteps();
+
+        if (toggleLimit) {
+            CockpitControls.toggleFlightLimit();
+        }
 
         aircraft.setInput(input);
         // 速度も同送する。サーバーには見えないからだ。ここから操縦される機体はサーバー上でtickの合間に届く

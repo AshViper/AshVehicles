@@ -22,6 +22,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ContainerScreenEvent;
+import net.neoforged.neoforge.client.event.RenderTooltipEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 
 /**
@@ -127,6 +128,14 @@ public final class CreativeTabHeadings {
         }
 
         if (grabs) {
+            event.setCanceled(true);
+        }
+    }
+
+    /** 仕切りにカーソルを乗せてもツールチップを出さない。題は帯が既に見せている。 */
+    @SubscribeEvent
+    public static void onTooltip(RenderTooltipEvent.Pre event) {
+        if (event.getItemStack().is(ModItems.TAB_DIVIDER.get())) {
             event.setCanceled(true);
         }
     }

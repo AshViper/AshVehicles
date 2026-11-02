@@ -40,10 +40,12 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -104,6 +106,28 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      */
     private static final EntityDataAccessor<Vector3f> DATA_LAUNCH =
             SynchedEntityData.defineId(VehicleProjectile.class, EntityDataSerializers.VECTOR3);
+
+    /**
+     * 不発で地面に残った子弾の居場所。飛んでいる間は {@link #FLYING}（全成分 NaN）。
+     *
+     * <p>位置ごと送るのは、クライアントが弾を自分で飛ばしているから。止まったことだけを伝えれば、
+     * クライアントの複製は自分が地面に着いたと思った所——往復ぶん先の、地面の中——で止まる。
+     * {@code Bomblet.dud} 参照。
+     */
+    private static final EntityDataAccessor<Vector3f> DATA_DUD =
+            SynchedEntityData.defineId(VehicleProjectile.class, EntityDataSerializers.VECTOR3);
+    private static final Vector3f FLYING = new Vector3f(Float.NaN, Float.NaN, Float.NaN);
+
+    /** 不発弾が転がってから、隣の炸裂で起こされない間（tick）。同じ撒布の残りが降り終わるまで。 */
+    private static final int DUD_SETTLE_TICKS = 60;
+    /** 不発弾が触れた物を探す間隔（tick）と、触れたと見なす距離（ブロック）。 */
+    private static final int DUD_CHECK_TICKS = 4;
+    private static final double DUD_TOUCH = 0.9;
+    /** 焼夷の半径の中で火が置かれる升の割合。全部を埋めると子弾1発が草原を丸ごと焼く。 */
+    private static final float INCENDIARY_COVER = 0.3F;
+
+    /** 不発で地面に残ってからの tick 数。飛んでいる間は -1。サーバーだけが数える。 */
+    private int dudFor = -1;
 
     /**
      * サーバーとクライアントの「弾の位置」の食い違いが、クライアントを動かすまでに許される量（ブロック）。
@@ -472,6 +496,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         builder.define(DATA_WEAPON, "");
         builder.define(DATA_AMMUNITION, "");
         builder.define(DATA_LAUNCH, new Vector3f());
+        builder.define(DATA_DUD, FLYING);
+    }
+
+    /** 不発のまま地面に残っているか。 */
+    public boolean isDud() {
+        return !Float.isNaN(this.entityData.get(DATA_DUD).x());
     }
 
     /**
@@ -501,6 +531,14 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     @Override
     public void onSyncedDataUpdated(EntityDataAccessor<?> key) {
         super.onSyncedDataUpdated(key);
+
+        if (DATA_DUD.equals(key) && this.level().isClientSide && this.isDud()) {
+            Vector3f rest = this.entityData.get(DATA_DUD);
+
+            this.setPos(rest.x(), rest.y(), rest.z());
+            this.setOldPosAndRot();
+            this.setDeltaMovement(Vec3.ZERO);
+        }
 
         if (DATA_LAUNCH.equals(key) && this.level().isClientSide) {
             Vector3f launch = this.entityData.get(DATA_LAUNCH);
@@ -783,6 +821,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
      */
     @Override
     public void tick() {
+        if (this.isDud()) {
+            this.lieInWait();
+
+            return;
+        }
+
         long started = WeaponProfile.open(this);
 
         try {
@@ -1303,6 +1347,11 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     public Vec3 travel(float partialTick) {
         Vec3 next = this.getDeltaMovement();
 
+        // 不発弾は止まっているので速度から向きが出ない。最後に落ちてきた向きのまま横たわる。
+        if (this.isDud()) {
+            return this.lastTravel.lengthSqr() < 1.0E-8 ? new Vec3(0.0, -1.0, 0.0) : this.lastTravel;
+        }
+
         if (this.lastTravel.lengthSqr() < 1.0E-8) {
             return next;
         }
@@ -1667,8 +1716,144 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
     @Override
     protected void onHitBlock(BlockHitResult hit) {
+        if (this.failsToFire()) {
+            this.becomeDud(hit);
+
+            return;
+        }
+
         super.onHitBlock(hit);
         this.burst(hit.getLocation(), this.level().getBlockState(hit.getBlockPos()));
+    }
+
+    /**
+     * 地面に着いたこの子弾が不発か。{@code bomblet.dud} の確率で。
+     *
+     * <p>引くのは地面に着いた時だけ。車両の上に落ちた子弾は炸裂する——実物の不発の大半は、柔らかい地面や
+     * 水に落ちて信管が十分な衝撃を受けないことから来るので、装甲板に着いた物まで不発にする理由は無い。
+     */
+    private boolean failsToFire() {
+        WeaponDefinition.Bomblet bomblet = this.getWeapon().bomblet().orElse(null);
+
+        return bomblet != null && bomblet.dud() > 0.0F && !this.level().isClientSide
+                && this.random.nextFloat() < bomblet.dud();
+    }
+
+    /**
+     * 不発のまま、着いた所に横たわる。以後は飛ばない（{@link #lieInWait}）。
+     *
+     * <p>当たった面の外へ少し浮かせて置く。当たった点そのままでは箱の半分が地面の中になる。
+     */
+    private void becomeDud(BlockHitResult hit) {
+        Vec3 rest = hit.getLocation().add(Vec3.atLowerCornerOf(hit.getDirection().getNormal()).scale(0.05));
+
+        this.setPos(rest);
+        this.setDeltaMovement(Vec3.ZERO);
+        this.dudFor = 0;
+        this.entityData.set(DATA_DUD, rest.toVector3f());
+    }
+
+    /**
+     * 不発弾の1 tick。何も飛ばさず、触れた物があれば炸裂し、{@code linger} が尽きれば静かに消える。
+     *
+     * <p>触れたと見なすのは生き物と機体だけ。弾やフレアや残骸が転がってきても起きない——同じ撒布の子弾が
+     * 隣に降るたびに起きていたら、不発弾は1発も残らない。同じ理由で、残ってから {@link #DUD_SETTLE_TICKS}
+     * の間は爆風でも起きない（{@link #hurt}）。
+     *
+     * <p>不発弾は地面の上にしかいない。地面はロード済みなので、ここで周りを訊いても chunk は開かない。そして
+     * 保存されない（{@link #shouldBeSaved}）ので、その chunk がアンロードされれば一緒に消える。
+     */
+    private void lieInWait() {
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+
+        WeaponDefinition.Bomblet bomblet = this.getWeapon().bomblet().orElse(null);
+
+        if (bomblet == null || ++this.dudFor > bomblet.linger()) {
+            this.discard();
+
+            return;
+        }
+
+        if (this.dudFor % DUD_CHECK_TICKS != 0) {
+            return;
+        }
+
+        for (Entity entity : level.getEntities(this, this.getBoundingBox().inflate(DUD_TOUCH))) {
+            if (entity instanceof LivingEntity living && !living.isSpectator() || isMachine(entity)) {
+                this.burst(this.position(), null);
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * 不発弾は撃たれれば、あるいは近くの爆風を受ければ炸裂する。ただし転がってすぐは起きない。
+     * {@link #lieInWait} 参照。飛んでいる弾は今まで通り（{@code RocketEntity.hurt}）。
+     *
+     * @return 不発弾でなければ null——呼び手が自分の答えを出す
+     */
+    @Nullable
+    protected Boolean hurtWhileDud(float amount) {
+        if (!this.isDud() || this.level().isClientSide || this.isRemoved()) {
+            return null;
+        }
+
+        if (this.dudFor < DUD_SETTLE_TICKS || amount <= 0.0F) {
+            return false;
+        }
+
+        this.burst(this.position(), null);
+
+        return true;
+    }
+
+    /**
+     * 焼夷。炸裂点の周りの生き物に火を付け、燃える足場に火を置く。{@code bomblet.incendiary} を持つ弾だけ。
+     *
+     * <p>火を置くのはその chunk が既にある時だけ。炸裂点は地面か機体の上でロード済みの世界の中にあるが、
+     * 半径の縁が chunk の境を越えることはある（{@link #groundUnder} と同じ規律）。
+     *
+     * <p>機体には火を付けない。燃えるのは人とモブで、機体への打撃は成形炸薬と破片が既に渡している。
+     */
+    private void ignite(ServerLevel level, Vec3 where, WeaponDefinition.Bomblet bomblet) {
+        double radius = bomblet.incendiary();
+
+        for (Entity entity : level.getEntities(this, new AABB(where, where).inflate(radius))) {
+            if (entity instanceof LivingEntity living
+                    && living.position().distanceTo(where) <= radius + living.getBbWidth() * 0.5) {
+                living.igniteForSeconds(bomblet.burn());
+            }
+        }
+
+        BlockPos centre = BlockPos.containing(where);
+        int span = Mth.ceil(radius);
+
+        for (int dx = -span; dx <= span; dx++) {
+            for (int dz = -span; dz <= span; dz++) {
+                if (dx * dx + dz * dz > radius * radius || this.random.nextFloat() > INCENDIARY_COVER) {
+                    continue;
+                }
+
+                if (level.getChunkSource().getChunkNow(SectionPos.blockToSectionCoord(centre.getX() + dx),
+                        SectionPos.blockToSectionCoord(centre.getZ() + dz)) == null) {
+                    continue;
+                }
+
+                // 着いた高さの前後1段から、火を置ける空気の升を上から探す。
+                for (int dy = 1; dy >= -1; dy--) {
+                    BlockPos at = centre.offset(dx, dy, dz);
+
+                    if (level.getBlockState(at).isAir() && BaseFireBlock.canBePlacedAt(level, at, Direction.UP)) {
+                        level.setBlockAndUpdate(at, BaseFireBlock.getState(level, at));
+
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     /** 既に炸裂の処理へ入っているか。連鎖爆発が同じ弾へ戻ってこないための印。{@link #burst} 参照。 */
@@ -1750,6 +1935,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
 
                 if (round.blast() > 0.0F) {
                     this.blastMachines(level, where, round);
+                }
+
+                WeaponDefinition.Bomblet bomblet = this.getWeapon().bomblet().orElse(null);
+
+                if (bomblet != null && bomblet.incendiary() > 0.0F) {
+                    this.ignite(level, where, bomblet);
                 }
             }
         }

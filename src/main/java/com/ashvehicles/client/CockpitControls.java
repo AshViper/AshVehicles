@@ -51,7 +51,7 @@ public final class CockpitControls {
 
     enum Edge { TOP, LEFT, RIGHT, BOTTOM }
 
-    enum Action { NONE, PAGE, RANGE_OUT, RANGE_IN, PREV, NEXT, GEAR, FLAP, BAY, NAV, BEACON, STROBE, INTERROGATE,
+    enum Action { NONE, PAGE, RANGE_OUT, RANGE_IN, PREV, NEXT, GEAR, FLAP, BAY, NAV, BEACON, STROBE, FLIGHT_LIMIT, COUNTERMEASURE, INTERROGATE,
         FILTER, BINGO_UP, BINGO_DOWN, SEARCH_SHOWN, POD_VIEW, MARK_TARGET, WP_NEXT, WP_PREV, WP_MARK, WP_DELETE,
         WP_NORTH, WP_SOUTH, WP_EAST, WP_WEST }
 
@@ -264,10 +264,15 @@ public final class CockpitControls {
                 verbs.add(verb("NAV", Action.NAV, aircraft.isLightOn(AircraftEntity.LIGHT_NAV)));
                 verbs.add(verb("BCN", Action.BEACON, aircraft.isLightOn(AircraftEntity.LIGHT_BEACON)));
                 verbs.add(verb("STRB", Action.STROBE, aircraft.isLightOn(AircraftEntity.LIGHT_STROBE)));
+                verbs.add(verb("LMT", Action.FLIGHT_LIMIT, !aircraft.isLightOn(AircraftEntity.SWITCH_LIMIT_RELEASED)));
                 verbs.add(verb("BNG+", Action.BINGO_UP, false));
                 verbs.add(verb("BNG-", Action.BINGO_DOWN, false));
             }
-            case "rwr" -> verbs.add(verb("SRCH", Action.SEARCH_SHOWN, searchShown));
+            case "rwr" -> {
+                verbs.add(verb("SRCH", Action.SEARCH_SHOWN, searchShown));
+                // 何を出すかは警戒受信機を見て決めるので、ここに置く。札が今の選択を示す。
+                verbs.add(verb(CountermeasureMode.current().label(), Action.COUNTERMEASURE, true));
+            }
             case "tpod" -> {
                 verbs.add(verb("VIEW", Action.POD_VIEW, PodCamera.isActive()));
                 verbs.add(verb("WPT", Action.MARK_TARGET, false));
@@ -447,6 +452,8 @@ public final class CockpitControls {
             case NAV -> lights ^= AircraftEntity.LIGHT_NAV;
             case BEACON -> lights ^= AircraftEntity.LIGHT_BEACON;
             case STROBE -> lights ^= AircraftEntity.LIGHT_STROBE;
+            case FLIGHT_LIMIT -> toggleFlightLimit();
+            case COUNTERMEASURE -> CountermeasureMode.cycle(net.minecraft.client.Minecraft.getInstance().player);
             case INTERROGATE -> interrogating = !interrogating;
             case FILTER -> filter = (filter + 1) % FILTERS.length;
             case BINGO_UP -> FuelWatch.adjustBingo(1);
@@ -503,6 +510,11 @@ public final class CockpitControls {
         bay = false;
 
         return taken;
+    }
+
+    /** フライトリミットを切り替える。MFD の LMT とキーが同じ1ビットに乗る。 */
+    static void toggleFlightLimit() {
+        lights ^= AircraftEntity.SWITCH_LIMIT_RELEASED;
     }
 
     /** 切り替える灯火のビット。同じボタンを2度押せば打ち消し合う。 */

@@ -163,6 +163,16 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     public static final int LIGHT_BEACON = 2;
     /** ストロボ。翼端と尾部で白く閃く。 */
     public static final int LIGHT_STROBE = 4;
+    /**
+     * フライトリミット。灯火ではないが、同じくサーバーの持つ1ビットを乗員が MFD かキーで切り替える物なので
+     * 同じバイトと同じパケットに相乗りする。リミットが入っている（既定）のが元の性能で、ビットが立つのは
+     * 解除したとき。解除すると推力・最高速度・角速度が {@link #FLIGHT_LIMIT_FACTOR} 倍。ビットを「解除」の
+     * 向きにしたのは、このビットを知らない既存の保存データと既定値がそのまま「リミット入り」になるからだ。
+     */
+    public static final int SWITCH_LIMIT_RELEASED = 8;
+    public static final float FLIGHT_LIMIT_FACTOR = 1.5F;
+    private AircraftDefinition boosted;
+    private AircraftDefinition boostedFrom;
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /**
@@ -924,6 +934,22 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         return current;
+    }
+
+    /** 飛行モデルが使う性能。フライトリミットを解除していれば {@link #FLIGHT_LIMIT_FACTOR} 倍の写し。 */
+    private AircraftDefinition flightStats() {
+        AircraftDefinition base = this.getStats();
+
+        if (!this.isLightOn(SWITCH_LIMIT_RELEASED)) {
+            return base;
+        }
+
+        if (this.boostedFrom != base) {
+            this.boosted = base.boosted(FLIGHT_LIMIT_FACTOR);
+            this.boostedFrom = base;
+        }
+
+        return this.boosted;
     }
 
     /** スロットル全開時の機首方向加速度（ブロック/tick^2）。 */
@@ -3116,7 +3142,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * {@code rotor} ブロックがあればヘリ、それ以外に判定材料は無い。
      */
     private void flightTick() {
-        AircraftDefinition definition = this.getStats();
+        AircraftDefinition definition = this.flightStats();
         AircraftDefinition.Rotor rotor = definition.rotor().orElse(null);
 
         if (rotor == null) {
@@ -3272,20 +3298,30 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
             commandedRoll *= wheels;
         }
 
-        // ハイG旋回の補助。エアブレーキを握ったまま操縦桿を引き切ると、昇降舵の効きが上がり、尾翼もトリム迎角へ
-        // 戻そうとしなくなる。機首を決め打ちで回すのではなく効きを足すだけなので、迎角リミッターは残り、
-        // 引けるGは機体と速度が決める。減速はブレーキの抗力がそのまま担う。
+        float commandedYaw = this.input.yaw() * handling.yawRate() * (control + vectored * NOZZLE_YAW_SHARE);
+
+        // 機動の補助。エアブレーキを握ったまま舵を切り切ると（ピッチ・ロール・ヨーのどれも、どちら向きでも）、
+        // その軸の効きが上がり、尾翼も機首を戻そうとしなくなる。機首を決め打ちで回すのではなく効きを足すだけ
+        // なので、迎角リミッターは残り、引けるGは機体と速度が決める。減速はブレーキの抗力がそのまま担う。
         // AI は速すぎるとブレーキを握ったまま引くので外す。
         this.holdAttitude = !rolling && !this.isBotDriven() && this.input.brake();
-        this.highG = this.holdAttitude && this.input.pitch() >= HIGH_G_TRIGGER;
+        this.highG = this.holdAttitude && Math.abs(this.input.pitch()) >= HIGH_G_TRIGGER;
 
         if (this.highG) {
             commandedPitch *= HIGH_G_BOOST;
         }
 
+        if (this.holdAttitude && Math.abs(this.input.roll()) >= HIGH_G_TRIGGER) {
+            commandedRoll *= HIGH_G_BOOST;
+        }
+
+        if (this.holdAttitude && Math.abs(this.input.yaw()) >= HIGH_G_TRIGGER) {
+            commandedYaw *= HIGH_G_BOOST;
+        }
+
         this.pitchVelocity += (commandedPitch - this.pitchVelocity) * lag;
         this.rollVelocity += (commandedRoll - this.rollVelocity) * lag;
-        this.yawVelocity += (this.input.yaw() * handling.yawRate() * (control + vectored * NOZZLE_YAW_SHARE) - this.yawVelocity) * lag;
+        this.yawVelocity += (commandedYaw - this.yawVelocity) * lag;
 
         // 前輪操舵。これはまったく別物で、機体が駐機場から自走で向きを変えられる理由だ。地上の車輪は垂直尾翼を
         // 流れる空気の速さを気にしないので、気流が与える操舵権限を迂回し、操縦ラグを通さず即座に応える。方向舵が
@@ -3464,6 +3500,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // エアブレーキを握っている間は尾翼が機首を戻さない。引き切りを離しても据えた姿勢がそのまま残る。
         if (this.holdAttitude) {
             weathervanePitch = 0.0F;
+            weathervaneYaw = 0.0F;
         }
 
         // 車輪に載った機体は転がった分しか向きを変えられない。方向舵の効きの下限と風見がそのままだと、止まった

@@ -2149,7 +2149,7 @@
     "nation": "us",
     "cost": 350,
     "mass": 152600,
-    "payload": 18000,
+    "payload": 27200,
     "health": 700,
     "crash_speed": 2.2,
     "explosion_power": 7,
