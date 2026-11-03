@@ -2255,12 +2255,12 @@
     },
     {
       "name": "pylon3_left",
-      "pos": [4.55, 1.6, -1.4],
+      "pos": [4.55, 1.3, -1.4],
       "kind": "weapon"
     },
     {
       "name": "pylon3_right",
-      "pos": [-4.5, 1.6, -1.4],
+      "pos": [-4.5, 1.3, -1.4],
       "kind": "weapon"
     },
     {

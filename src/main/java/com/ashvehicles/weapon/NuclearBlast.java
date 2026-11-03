@@ -111,6 +111,9 @@ public final class NuclearBlast {
     private static final double SCORCHED_WITHIN = 0.5;
 
     private static final List<NuclearBlast> LIVE = new ArrayList<>();
+    /** 放されてまだ落ちている核。落ちている間に届く範囲をロードさせる（{@link BombChunkLoader}）。 */
+    private static final List<VehicleProjectile> FALLING = new ArrayList<>();
+    private static int clock;
 
     private final ServerLevel level;
     private final Vec3 at;
@@ -129,6 +132,8 @@ public final class NuclearBlast {
     private final int searedSide;
     /** 熱線の抜き取りの、済んだ数。 */
     private int kindled;
+    /** 波が出てからの tick。チケットの置き直しの拍。 */
+    private int age;
 
     private record Caught(Entity entity, double distance) {
     }
@@ -165,6 +170,11 @@ public final class NuclearBlast {
         }
 
         Deathmatch.armNuclear(aircraft, bomb);
+
+        if (bomb.getWeapon().nuclear().isPresent()) {
+            BombChunkLoader.hold(level, bomb.position(), bomb.getWeapon().nuclear().get().reach());
+            FALLING.add(bomb);
+        }
     }
 
     /**
@@ -238,6 +248,23 @@ public final class NuclearBlast {
 
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
+        if (!FALLING.isEmpty()) {
+            boolean refresh = ++clock % BombChunkLoader.EVERY == 0;
+            Iterator<VehicleProjectile> bombs = FALLING.iterator();
+
+            while (bombs.hasNext()) {
+                VehicleProjectile bomb = bombs.next();
+
+                if (bomb.isRemoved() || !(bomb.level() instanceof ServerLevel level)
+                        || level.getServer() != event.getServer()) {
+                    bombs.remove();
+                } else if (refresh) {
+                    bomb.getWeapon().nuclear().ifPresent(
+                            nuke -> BombChunkLoader.hold(level, bomb.position(), nuke.reach()));
+                }
+            }
+        }
+
         if (LIVE.isEmpty()) {
             return;
         }
@@ -261,6 +288,11 @@ public final class NuclearBlast {
         // ワールドを閉じた後の、前のサーバーの波。
         if (this.level.getServer() != server) {
             return true;
+        }
+
+        // 波が通り終わるまで、届く範囲をロードしたままにする。終われば置き直さないので数秒で外れる。
+        if (this.age++ % BombChunkLoader.EVERY == 0) {
+            BombChunkLoader.hold(this.level, this.at, this.nuke.reach());
         }
 
         this.front += WeaponDefinition.Nuclear.WAVE_SPEED;

@@ -3466,7 +3466,7 @@
     "nation": "ru",
     "cost": 250,
     "mass": 39000,
-    "payload": 12000,
+    "payload": 8000,
     "health": 380,
     "crash_speed": 2.6,
     "explosion_power": 3.5,

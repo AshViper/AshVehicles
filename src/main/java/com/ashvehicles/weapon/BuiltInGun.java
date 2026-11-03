@@ -266,15 +266,6 @@ public final class BuiltInGun {
         }
     }
 
-    /**
-     * 自動火器で発射炎を出す間隔（何発ごとか）。
-     *
-     * <p>発射炎1回はパーティクルの4連射で、それぞれが車両を見られる全員へのパケットになる。毎秒20発で
-     * 1発1回なら毎秒80パケット、引き金を引いている限り数百個のパーティクル。3発に1回でも連続射撃に見える
-     * ——1回の発光は間隔より長く続く——うえコストは1/3になる。単発の砲は1発ごとに光る。
-     */
-    private static final int FLASH_EVERY = 3;
-
     private final GroundVehicleEntity vehicle;
     private final Mount mount;
     /** 前 tick に引き金が引かれていたか。押しっぱなしで弾倉を空にしないため。 */
@@ -286,8 +277,6 @@ public final class BuiltInGun {
      * 気付かれない。
      */
     private int barrel;
-    /** 次の発射炎までの残り発数。{@link #FLASH_EVERY} 参照。 */
-    private int untilFlash;
     /** 連射を録った発砲音を、録音の長さに1回へ間引く。{@link FireSoundPacing} 参照。 */
     private final FireSoundPacing soundPacing = new FireSoundPacing();
 
@@ -331,6 +320,12 @@ public final class BuiltInGun {
         boolean pressed = trigger && (weapon.isAutomatic() || !wasDown);
 
         if (!pressed || reload > 0 || this.mount.rounds(this.vehicle) <= 0) {
+            return;
+        }
+
+        // 射線の先に味方がいれば撃たない。HoldFire 参照。
+        if (HoldFire.refuses(this.vehicle, this.mount.muzzle(this.vehicle, 0), this.mount.bore(this.vehicle),
+                this.mount.crew(this.vehicle))) {
             return;
         }
 
@@ -486,7 +481,6 @@ public final class BuiltInGun {
         // 前者は同じ瞬間に散らばって出る弾、後者は順に出る弾。
         int salvo = Math.max(1, weapon.firing().salvo());
 
-        // 発射炎と音はこのtickの1発目の砲口から。5発ぶんの炎を重ねても明るくなるだけで、5つには見えない。
         Vec3 muzzle = this.mount.muzzle(this.vehicle, this.barrel % barrels);
         Vec3 bore = this.mount.bore(this.vehicle);
         Vec3 right = across(bore);
@@ -510,10 +504,7 @@ public final class BuiltInGun {
             }
         }
 
-        if (--this.untilFlash <= 0) {
-            WeaponEffects.muzzleBlast(level, muzzle, bore, blastPower(round), round.tracer());
-            this.untilFlash = weapon.isAutomatic() ? FLASH_EVERY : 1;
-        }
+        // 発射炎と硝煙はクライアントが描かれた砲口に撒く（client.GunSmoke）。ここから送ると古い位置に立つ。
 
         this.playFireSound(weapon, weaponId);
 
@@ -574,11 +565,6 @@ public final class BuiltInGun {
         Vec3 right = bore.cross(new Vec3(0.0, 1.0, 0.0));
 
         return right.lengthSqr() < 1.0E-8 ? new Vec3(1.0, 0.0, 0.0) : right.normalize();
-    }
-
-    /** 発射炎の大きさ。弾が持つ炸薬から決める。0にはならない。どの砲にも砲口はある。 */
-    private static float blastPower(WeaponDefinition.Projectile round) {
-        return Mth.clamp(round.explosion(), 1.5F, 6.0F);
     }
 
     /**

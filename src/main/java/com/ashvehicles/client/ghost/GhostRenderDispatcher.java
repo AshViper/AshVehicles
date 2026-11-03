@@ -24,7 +24,6 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
@@ -127,9 +126,8 @@ public final class GhostRenderDispatcher {
     /** 最も遠くなりうるゴーストを、それに対する割合でさらにどれだけ先へ置くか。順序を保つための値。 */
     private static final double PULL_SPREAD = 0.15;
 
-    /** 近い順。毎フレーム必要で内容も変わらないので、都度作らず保持する。 */
-    private static final Comparator<EntityGhost> NEAREST_FIRST =
-            Comparator.comparingDouble(EntityGhost::distanceSq);
+    /** プレイヤーのチャンクの物が先、残りは近い順。EntityGhostManager と同じ順序。 */
+    private static final Comparator<EntityGhost> NEAREST_FIRST = EntityGhostManager.NEAREST_FIRST;
 
     /**
      * 2つの作業リスト。毎回作らずフレーム間で保持する。
@@ -309,6 +307,9 @@ public final class GhostRenderDispatcher {
             double distanceSq = ghost.current().position().distanceToSqr(eye);
             GhostLOD lod = GhostLOD.of(distanceSq);
             Vec3 position = ghost.position(partialTick);
+            // プレイヤーのチャンクの物は遮蔽の答えも視錐台も信じない。乗っている機体の中から撃ったレイは機体の
+            // すぐ外の地形に当たりうるし、カメラを包む大きな機体の箱は視錐台の判定と相性が悪い。
+            boolean near = EntityGhostManager.nearPlayer(ghost);
             GhostVerdict verdict;
 
             if (lod == GhostLOD.FULL) {
@@ -318,7 +319,7 @@ public final class GhostRenderDispatcher {
 
                 if (entity == null || gameDraws(entity, minecraft, eye, farPlane)) {
                     verdict = GhostVerdict.GAME;
-                } else if (ghost.isOccluded()) {
+                } else if (ghost.isOccluded() && !near) {
                     verdict = GhostVerdict.OCCLUDED;
                 } else {
                     draws.add(Draw.ofEntity(entity, minecraft, distanceSq, ghostBeyond, partialTick, dispatcher));
@@ -343,9 +344,9 @@ public final class GhostRenderDispatcher {
                     // 霧に沈み切った。DH の地形であれゲーム自身の天候・描画距離の霧であれ、地形がそこで見えなく
                     // なるのと同じ場所で、ゴーストも見えなくなる。
                     verdict = GhostVerdict.HIDDEN;
-                } else if (ghost.isOccluded() && !isBuilt(BlockPos.containing(position))) {
+                } else if (ghost.isOccluded() && !near && !isBuilt(BlockPos.containing(position))) {
                     verdict = GhostVerdict.OCCLUDED;
-                } else if (!inView(frustum, snapshot, position, eye, pull)) {
+                } else if (!near && !inView(frustum, snapshot, position, eye, pull)) {
                     culled++;
                     verdict = GhostVerdict.CULLED;
                 } else {
@@ -432,7 +433,7 @@ public final class GhostRenderDispatcher {
             int light = inWorld
                     ? LevelRenderer.getLightColor(minecraft.level, BlockPos.containing(ghost.current()
                             .centre().subtract(ghost.current().position()).add(position)))
-                    : LightTexture.FULL_BRIGHT;
+                    : GhostRenderContext.OPEN_SKY;
 
             ghost.recordLight(light, inWorld);
 
@@ -446,7 +447,7 @@ public final class GhostRenderDispatcher {
             // レンダラー自身の答え。ゲームのループが使ったであろう値だ。
             int light = inWorld
                     ? dispatcher.getPackedLightCoords(entity, partialTick)
-                    : LightTexture.FULL_BRIGHT;
+                    : GhostRenderContext.OPEN_SKY;
 
             // FULL 階層は128ブロック以内で、DH の霧がそこまで届く設定は現実には無い。0で正しい。
             return new Draw(null, entity, GhostLOD.FULL, null, distanceSq, 0.0, light,
@@ -517,9 +518,9 @@ public final class GhostRenderDispatcher {
         GhostRenderContext.enter(ghostStyle, 0.0F);
 
         try {
-            // ゴーストとして描く間は光を引かない。理由と経緯は GhostRenderContext.packedLight 参照。
+            // 光は読み込み内と同じ値。理由と経緯は GhostRenderContext.OPEN_SKY 参照。
             dispatcher.render(entity, to.x, to.y, to.z, yaw, partialTick, poseStack, buffers,
-                    ghostStyle ? LightTexture.FULL_BRIGHT : light);
+                    light);
         } finally {
             GhostRenderContext.exit();
             poseStack.popPose();
@@ -645,8 +646,13 @@ public final class GhostRenderDispatcher {
      * 飛行中に有効化したユーザーは、さもないと次の再起動まで空っぽの空を飛ぶことになる。問い合わせは boolean への
      * バインド済みメソッドハンドルで、コストは無に等しい。
      */
-    static RenderLevelStageEvent.Stage passStage() {
+    public static RenderLevelStageEvent.Stage passStage() {
         return activeStage();
+    }
+
+    /** Iris シェーダーパックがフレームを持っているか。コクピットの画面も同じ理由で描く段を移す。 */
+    public static boolean shadersInUse() {
+        return IrisShaders.inUse();
     }
 
     private static RenderLevelStageEvent.Stage activeStage() {

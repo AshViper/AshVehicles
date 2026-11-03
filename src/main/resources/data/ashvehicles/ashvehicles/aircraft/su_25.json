@@ -2299,17 +2299,17 @@
   "hardpoints": [
     {
       "name": "pylon1",
-      "pos": [-1.85, 1.85, -0.35],
+      "pos": [-1.85, 1.585, -0.35],
       "kind": "weapon"
     },
     {
       "name": "pylon1_copy",
-      "pos": [-2.85, 1.8, -0.7],
+      "pos": [-2.85, 1.585, -0.7],
       "kind": "weapon"
     },
     {
       "name": "pylon1_copy_copy",
-      "pos": [-3.85, 1.7, -1.1],
+      "pos": [-3.85, 1.585, -1.1],
       "kind": "weapon"
     },
     {
@@ -2319,17 +2319,17 @@
     },
     {
       "name": "pylon1_copy",
-      "pos": [1.9, 1.85, -0.4],
+      "pos": [1.9, 1.585, -0.4],
       "kind": "weapon"
     },
     {
       "name": "pylon1_copy_copy",
-      "pos": [2.95, 1.8, -0.8],
+      "pos": [2.95, 1.585, -0.8],
       "kind": "weapon"
     },
     {
       "name": "pylon1_copy_copy_copy",
-      "pos": [3.95, 1.7, -1.25],
+      "pos": [3.95, 1.585, -1.25],
       "kind": "weapon"
     },
     {

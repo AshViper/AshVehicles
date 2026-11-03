@@ -1,5 +1,6 @@
 package com.ashvehicles.client.renderer;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -22,8 +23,8 @@ import org.joml.Vector3f;
 /**
  * 外部灯火。左翼端の赤・右翼端の緑・尾部の白の航法灯と、胴体上下の赤い衝突防止灯、翼端と尾部の白いストロボ。
  *
- * <p><b>位置は箱から読む。</b>定義ファイルに灯火の欄は無い。翼端は機体の箱の角のうち一番左右へ出ている所、
- * 尾部は一番後ろ、衝突防止灯は一番上と一番下の所。箱を持たない機体は翼の {@code span} と素の当たり判定の
+ * <p><b>位置は箱から読む。</b>定義ファイルに灯火の欄は無い。翼端の面の中、中心線の一番後ろ、主翼の付け根での
+ * 胴体の背と腹（{@link #locate}）。箱を持たない機体は翼の {@code span} と素の当たり判定の
  * 高さに戻る。だから新しい機体を足しても灯火のために何かを書く必要は無い。
  *
  * <p><b>光は描くだけ。</b>アフターバーナーと同じ加算合成の板で、地形を照らさない
@@ -42,7 +43,14 @@ public final class NavLights {
     /** ストロボの周期（tick）。 */
     private static final int STROBE_PERIOD = 24;
 
-    private static final float[] RED = {1.0F, 0.12F, 0.08F};
+    /** 翼端の面とみなす、一番外の角からの幅（ブロック）。 */
+    private static final float TIP_BAND = 0.2F;
+    /** 中心線を跨ぐとみなす半幅（ブロック）。 */
+    private static final float SPINE = 0.25F;
+    /** 灯を外板から浮かせる量。面の上にちょうど置くと半分が機体に埋まる。 */
+    private static final float LIFT = 0.05F;
+
+    private static final float[] RED ={1.0F, 0.12F, 0.08F};
     private static final float[] GREEN = {0.15F, 1.0F, 0.3F};
     private static final float[] WHITE = {1.0F, 0.97F, 0.9F};
 
@@ -58,17 +66,34 @@ public final class NavLights {
     /** 機体の原点に置かれた {@code poseStack} へ、点いている灯火を描く。 */
     public static void draw(AircraftEntity aircraft, float partialTick, PoseStack poseStack,
             MultiBufferSource buffers) {
-        boolean nav = aircraft.isLightOn(AircraftEntity.LIGHT_NAV);
-        boolean beacon = aircraft.isLightOn(AircraftEntity.LIGHT_BEACON);
-        boolean strobe = aircraft.isLightOn(AircraftEntity.LIGHT_STROBE);
-
-        if (!(nav || beacon || strobe) || aircraft.isWrecked()) {
+        if (aircraft.isWrecked()) {
             return;
         }
 
-        Spots spots = SPOTS.computeIfAbsent(aircraft.getStats(), NavLights::locate);
-        float time = (aircraft.level().getGameTime() % 100000L) + partialTick + (aircraft.getId() & 15);
-        Quaternionf attitude = aircraft.getAttitude(partialTick);
+        int lights = (aircraft.isLightOn(AircraftEntity.LIGHT_NAV) ? AircraftEntity.LIGHT_NAV : 0)
+                | (aircraft.isLightOn(AircraftEntity.LIGHT_BEACON) ? AircraftEntity.LIGHT_BEACON : 0)
+                | (aircraft.isLightOn(AircraftEntity.LIGHT_STROBE) ? AircraftEntity.LIGHT_STROBE : 0);
+
+        draw(aircraft.getStats(), lights, aircraft.getId(), (aircraft.level().getGameTime() % 100000L) + partialTick,
+                aircraft.getAttitude(partialTick), poseStack, buffers);
+    }
+
+    /**
+     * 実体を介さずに描く。ゴーストが撮影した値で呼ぶ。{@code lights} は {@code AircraftEntity.LIGHT_*} の組、
+     * {@code time} は明滅の位相を決めるゲームtick（部分tick込み）。
+     */
+    public static void draw(AircraftDefinition stats, int lights, int id, float time, Quaternionf attitude,
+            PoseStack poseStack, MultiBufferSource buffers) {
+        boolean nav = (lights & AircraftEntity.LIGHT_NAV) != 0;
+        boolean beacon = (lights & AircraftEntity.LIGHT_BEACON) != 0;
+        boolean strobe = (lights & AircraftEntity.LIGHT_STROBE) != 0;
+
+        if (!(nav || beacon || strobe)) {
+            return;
+        }
+
+        Spots spots = SPOTS.computeIfAbsent(stats, NavLights::locate);
+        time += id & 15;
 
         poseStack.pushPose();
         // ここでの poseStack はカメラに対する機体の原点で、まだ回っていない。距離はその並進から測る。
@@ -163,15 +188,23 @@ public final class NavLights {
         vc.addVertex(m, p.x, p.y, p.z).setColor(c[0], c[1], c[2], Math.min(1.0F, alpha));
     }
 
-    /** 箱の角から灯火の位置を決める。 */
+    /**
+     * 箱から灯火の位置を決める。実機の付け方に合わせる:
+     *
+     * <ul>
+     * <li>航法灯は翼端の<b>面の中</b>。一番外の角1つではなく、一番外から少しの所にある角を全部均す。後退翼の
+     * 後縁の角や、翼の上面・下面の縁に乗らないように。左右は鏡に写す——片側だけ箱がずれていても揃う。</li>
+     * <li>尾灯は中心線の一番後ろ（テールコーンか垂直尾翼の後縁）。水平尾翼の先端を拾って中心へ寄せると、
+     * 何も無い空中に浮いていた。</li>
+     * <li>衝突防止灯は胴体の背と腹、主翼の付け根の辺り。一番高い所を取ると垂直尾翼の先へ上がっていた。
+     * 翼端が機体の後ろ半分にある（ヘリの水平安定板）なら、胴体の真ん中に置く。</li>
+     * </ul>
+     */
     private static Spots locate(AircraftDefinition stats) {
         List<VehicleShape.Box> boxes = stats.hitbox().shape().boxes();
-
-        Vector3f left = new Vector3f(Float.MAX_VALUE, 0.0F, 0.0F);
-        Vector3f right = new Vector3f(-Float.MAX_VALUE, 0.0F, 0.0F);
-        Vector3f tail = new Vector3f(0.0F, 0.0F, Float.MAX_VALUE);
-        Vector3f top = new Vector3f(0.0F, -Float.MAX_VALUE, 0.0F);
-        Vector3f bottom = new Vector3f(0.0F, Float.MAX_VALUE, 0.0F);
+        List<Vector3f> corners = new ArrayList<>();
+        // 箱ごとの、角を囲む軸平行の範囲。min x, y, z, max x, y, z。
+        List<float[]> extents = new ArrayList<>();
 
         for (VehicleShape.Box box : boxes) {
             // 可動部（ランプ・扉・ノズル）の箱は外れる。灯火は動かない所に付いている。
@@ -182,53 +215,93 @@ public final class NavLights {
             Quaternionf orientation = box.orientation();
             Vector3f half = new Vector3f((float) box.size().x, (float) box.size().y, (float) box.size().z).mul(0.5F);
             Vector3f centre = new Vector3f((float) box.offset().x, (float) box.offset().y, (float) box.offset().z);
+            float[] e = {Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE,
+                -Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
 
             for (int corner = 0; corner < 8; corner++) {
                 Vector3f p = orientation.transform(new Vector3f(
                         (corner & 1) == 0 ? -half.x : half.x,
                         (corner & 2) == 0 ? -half.y : half.y,
                         (corner & 4) == 0 ? -half.z : half.z)).add(centre);
+                corners.add(p);
 
-                if (p.x < left.x) {
-                    left.set(p);
+                for (int i = 0; i < 3; i++) {
+                    e[i] = Math.min(e[i], p.get(i));
+                    e[i + 3] = Math.max(e[i + 3], p.get(i));
                 }
+            }
 
-                if (p.x > right.x) {
-                    right.set(p);
-                }
+            extents.add(e);
+        }
 
-                if (p.z < tail.z) {
-                    tail.set(p);
-                }
+        if (corners.isEmpty()) {
+            return fallback(stats);
+        }
 
-                // 上下の灯は胴体の中心線の近くに付く。翼端や尾翼の先を拾わないよう、中心から離れた角は見ない。
-                if (Math.abs(p.x) < 1.0F) {
-                    if (p.y > top.y) {
-                        top.set(p);
-                    }
+        float reach = 0.0F;
+        float front = -Float.MAX_VALUE;
+        float back = Float.MAX_VALUE;
 
-                    if (p.y < bottom.y) {
-                        bottom.set(p);
-                    }
+        for (Vector3f p : corners) {
+            reach = Math.max(reach, Math.abs(p.x));
+            front = Math.max(front, p.z);
+            back = Math.min(back, p.z);
+        }
+
+        float tipY = 0.0F;
+        float tipZ = 0.0F;
+        int tips = 0;
+
+        for (Vector3f p : corners) {
+            if (Math.abs(p.x) >= reach - TIP_BAND) {
+                tipY += p.y;
+                tipZ += p.z;
+                tips++;
+            }
+        }
+
+        tipY /= tips;
+        tipZ /= tips;
+
+        // 中心線を跨ぐ箱。胴体と垂直尾翼。
+        List<float[]> spine = new ArrayList<>();
+
+        for (float[] e : extents) {
+            if (e[0] <= SPINE && e[3] >= -SPINE) {
+                spine.add(e);
+            }
+        }
+
+        if (spine.isEmpty()) {
+            spine = extents;
+        }
+
+        float[] last = spine.get(0);
+
+        for (float[] e : spine) {
+            if (e[2] < last[2]) {
+                last = e;
+            }
+        }
+
+        Vector3f tail = new Vector3f(0.0F, (last[1] + last[4]) * 0.5F, last[2] - LIFT);
+
+        float beaconZ = tipZ < back + (front - back) * 0.4F ? (front + back) * 0.5F : tipZ;
+        float top = -Float.MAX_VALUE;
+        float bottom = Float.MAX_VALUE;
+
+        // その位置で胴体を切る箱が無ければ（翼と胴体の間の隙間など）、前後へ範囲を広げて探す。
+        for (float reachZ = 0.5F; top == -Float.MAX_VALUE; reachZ *= 2.0F) {
+            for (float[] e : spine) {
+                if (e[2] - reachZ <= beaconZ && beaconZ <= e[5] + reachZ) {
+                    top = Math.max(top, e[4]);
+                    bottom = Math.min(bottom, e[1]);
                 }
             }
         }
 
-        if (left.x == Float.MAX_VALUE) {
-            return fallback(stats);
-        }
-
-        // 中心線の近くに角が無かった（胴体が細い箱で書かれていない）なら、全体の上下に置く。
-        if (top.y == -Float.MAX_VALUE) {
-            top.set(0.0F, stats.hitbox().height(), 0.0F);
-            bottom.set(0.0F, 0.0F, 0.0F);
-        }
-
-        top.x = 0.0F;
-        bottom.x = 0.0F;
-        tail.x = 0.0F;
-
-        return new Spots(left, right, tail, top, bottom);
+        return new Spots(new Vector3f(-reach - LIFT, tipY, tipZ), new Vector3f(reach + LIFT, tipY, tipZ), tail,
+                new Vector3f(0.0F, top + LIFT, beaconZ), new Vector3f(0.0F, bottom - LIFT, beaconZ));
     }
 
     /** 箱を持たない機体。翼幅と素の当たり判定から置く。 */

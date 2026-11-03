@@ -718,6 +718,11 @@ public class RocketEntity extends VehicleProjectile implements GeoEntity {
     private boolean couldReacquire(Entity candidate) {
         Entity vehicle = this.firedFrom();
 
+        // 撃った機体の味方は拾い直さない。シーカーが発射前に味方を掴まないのと同じ線（TargetLock）。
+        if (vehicle != null && com.ashvehicles.sensor.Iff.friendly(vehicle, candidate)) {
+            return false;
+        }
+
         // 他人のミサイルは有効目標。自分と同じレールから出た物は違う——並走する僚弾を「再取得」した
         // 迎撃弾は、撃たれた理由だった相手を見捨てて味方を食う。
         if (candidate instanceof RocketEntity missile) {

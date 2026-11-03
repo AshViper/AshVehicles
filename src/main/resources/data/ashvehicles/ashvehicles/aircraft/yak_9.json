@@ -757,6 +757,7 @@
     "lift_bonus": 0.45
   },
   "camera": {
+    "generic_cockpit": false,
     "pos": [0.0, 2.5, -8.5],
     "cockpit": [0.0, 2.1, 0.75]
   },
@@ -785,19 +786,21 @@
   "hardpoints": [
     {
       "name": "pylon_left",
-      "pos": [-1.5, 0.95, 1.5],
+      "pos": [-1.5, 0.54, 1.5],
       "kind": "weapon"
     },
     {
       "name": "pylon_right",
-      "pos": [1.5, 0.95, 1.5],
+      "pos": [1.5, 0.54, 1.5],
       "kind": "weapon"
     },
     {
       "name": "motor_cannon",
       "pos": [0.0, 1.66, 3.9],
       "fixed": "ashvehicles:shvak",
-      "ammunition": ["ashvehicles:autocannon_apfsds", "ashvehicles:autocannon_he", "ashvehicles:autocannon_heat"]
+      "ammunition": [
+        "ashvehicles:autocannon_apfsds", "ashvehicles:autocannon_he", "ashvehicles:autocannon_heat"
+      ]
     },
     {
       "name": "gun_left",

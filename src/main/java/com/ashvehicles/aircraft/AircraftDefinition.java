@@ -765,7 +765,10 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * 外側の箱の縁。だから既存のファイルは1行も足さずに今までどおり飛ぶ。
      *
      * @param cone ベイパーコーンの中心。機体座標系（x 右、y 上、z 機首）。空なら原点の上 1.5・前 2.0
-     * @param coneRadius コーンの半径（ブロック）。粒はこの 0.7〜1.0 倍の円周上に置かれる
+     * @param coneRadius コーンの平均半径（ブロック）。殻の形は書いても書かなくても当たり判定の箱を正面へ
+     *                   投影した輪郭（胴体と主翼の付け根を包む横に潰れた殻）で、この値はその縮尺だけを
+     *                   決める。0 なら箱の輪郭のまま（全機の既定。2026-11-03 から。形の作り方は
+     *                   {@code entity.VapourShape}）
      * @param coneSpeed コーンが出始める速度。その機体の最大速度に対する割合。実機の遷音速に相当するので、
      *                  1 に近づけるほど「最高速度でだけ出る」になる
      * @param vortex 右翼端の渦の出る位置。機体座標系。左翼端は x を反転した鏡像で、翼が対称だから2点を
@@ -775,7 +778,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
     public record Effects(Optional<Vec3> cone, float coneRadius, float coneSpeed,
             Optional<Vec3> vortex, float vortexLoad) {
         public static final Effects DEFAULT =
-                new Effects(Optional.empty(), 3.0F, 0.88F, Optional.empty(), 2.5F);
+                new Effects(Optional.empty(), 0.0F, 0.88F, Optional.empty(), 2.5F);
 
         public static final Codec<Effects> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Vec3.CODEC.optionalFieldOf("cone").forGetter(Effects::cone),

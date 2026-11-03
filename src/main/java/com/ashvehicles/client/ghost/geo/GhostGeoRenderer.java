@@ -103,7 +103,7 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
     private static final float FOGGED = 0.01F;
 
     /**
-     * 背後に何も無いゴーストは半透明で、しかも自ら光って描く。自ら光るのは、あの距離に照らす光が無いから。
+     * 背後に何も無いゴーストは半透明で描く。
      * 半透明なのは、近くの物ではなく「接触点」として読ませるためだ。描画済み地形の上では実体として描く。
      *
      * <p><b>半透明の側が裏返って見えていた。</b>使っていた {@code entityTranslucentEmissive} は面の裏表を
@@ -114,8 +114,7 @@ public final class GhostGeoRenderer extends GeoObjectRenderer<GhostAnimatable> {
      *
      * <p>{@code entityTranslucentCull} は同じ半透明合成のまま裏面を捨て、深度も書く。向こう側の外板は
      * カメラに背を向けているので落ち、手前の面が深度を書くので残りの重なりも決着する。自ら光る性質は
-     * {@link GhostRenderContext#packedLight} が最大輝度を渡すことで保たれる——ライトマップを最大で引く
-     * ことは、光を無視することと同じだ。
+     * 光は {@link GhostRenderContext#OPEN_SKY}（空の光だけ）で引くので、読み込み内と同じ明るさになる。
      */
     public static RenderType renderType(ResourceLocation texture, boolean ghostStyle) {
         return ghostStyle

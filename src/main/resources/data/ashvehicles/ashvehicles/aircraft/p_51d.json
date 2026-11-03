@@ -279,6 +279,7 @@
     "lift_bonus": 0.45
   },
   "camera": {
+    "generic_cockpit": false,
     "pos": [0.0, 2.6, -11.1],
     "cockpit": [0.0, 2.569, -1.439]
   },

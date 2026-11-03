@@ -284,6 +284,13 @@ public final class TurretLauncher {
             return;
         }
 
+        // 射線の先に味方がいれば撃たない。据える弾は筒を空へ向けて撃つので射線が無い。HoldFire 参照。
+        if (!this.vehicle.laysPoint() && HoldFire.refuses(this.vehicle,
+                this.vehicle.turretToWorld(this.vehicle.getStats().launcher().rail(), 1.0F),
+                this.vehicle.getAimDirection(1.0F), this.vehicle.getControllingPassenger())) {
+            return;
+        }
+
         if (this.vehicle.level() instanceof ServerLevel level) {
             this.fire(level, missileId, missile);
         }

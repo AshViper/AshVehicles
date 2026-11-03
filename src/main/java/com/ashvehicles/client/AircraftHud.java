@@ -1427,9 +1427,7 @@ public final class AircraftHud implements LayeredDraw.Layer {
      * （{@link CockpitDisplays#drawHud}）が同じ1件を出すように、選ぶのはここ1か所。
      */
     static String caution(AircraftEntity aircraft, Quaternionf attitude, Vec3 velocity, double speed) {
-        float stallAngle = aircraft.getStats().wing().stallAngle();
-        boolean stalled = speed > 0.05 && !aircraft.onGround() && !aircraft.isHovering()
-                && Math.abs(angleOfAttack(attitude, velocity, speed)) > stallAngle;
+        boolean stalled = stalled(aircraft, attitude, velocity, speed);
         Threat.Kind threat = RadarReadout.worst();
 
         // 深刻な順に1つだけ選ぶ。2件同時に起きていても灯は1つで、上の1件を消してからでないと下の1件は
@@ -1442,6 +1440,10 @@ public final class AircraftHud implements LayeredDraw.Layer {
             text = "STALL";
         } else if (aircraft.isOutOfFuel()) {
             text = "FUEL OUT";
+        } else if (aircraft.isEngineDead()) {
+            text = "ENGINE OUT";
+        } else if (aircraft.getEngineHealth() < AircraftEntity.ENGINE_BURNING) {
+            text = "ENGINE FIRE";
         } else if (threat == Threat.Kind.LOCK) {
             text = "LOCKED";
         } else if (threat == Threat.Kind.SEARCH) {
@@ -1459,6 +1461,12 @@ public final class AircraftHud implements LayeredDraw.Layer {
         }
 
         return text;
+    }
+
+    /** 翼が失速角を超えているか。警告灯と音声警報（{@link VoiceWarnings}）が同じ判定を読む。 */
+    static boolean stalled(AircraftEntity aircraft, Quaternionf attitude, Vec3 velocity, double speed) {
+        return speed > 0.05 && !aircraft.onGround() && !aircraft.isHovering()
+                && Math.abs(angleOfAttack(attitude, velocity, speed)) > aircraft.getStats().wing().stallAngle();
     }
 
     /** 三角の中に感嘆符。字ではなく形で描くのは、この計器のフォントに在るとは限らないからだ。 */

@@ -22,7 +22,9 @@ import com.ashvehicles.client.item.VehicleIcons;
 import com.ashvehicles.client.model.AircraftAnimations;
 import com.ashvehicles.client.model.AircraftModel;
 import com.ashvehicles.client.model.WeaponModel;
+import com.ashvehicles.client.renderer.AfterburnerPlume;
 import com.ashvehicles.client.renderer.MountedStore;
+import com.ashvehicles.client.renderer.NavLights;
 import com.ashvehicles.client.renderer.VehicleRenderer;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.weapon.WeaponMounts;
@@ -32,6 +34,7 @@ import com.mojang.math.Axis;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -88,7 +91,9 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         // 変わらない。
         AABB bounds = aircraft.getBoundingBoxForCulling().move(position.reverse());
         Payload payload = new Payload(id, setup, AircraftModel.Pose.of(aircraft, 1.0F), stores(aircraft, stats),
-                aircraft.isGearDown(), aircraft.getGearCycleTicks());
+                aircraft.isGearDown(), aircraft.getGearCycleTicks(), stats, lights(aircraft),
+                aircraft.isWrecked() ? 0.0F : aircraft.getAfterburner(), aircraft.getAfterburnerNozzles(),
+                aircraft.isWrecked());
 
         return new GhostSnapshot(
                 aircraft.getUUID(),
@@ -110,6 +115,20 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
                 true,
                 gameTime,
                 payload);
+    }
+
+    /** 点いている灯火。{@code AircraftEntity.LIGHT_*} の組。 */
+    private static int lights(AircraftEntity aircraft) {
+        int lights = 0;
+
+        for (int light : new int[] {AircraftEntity.LIGHT_NAV, AircraftEntity.LIGHT_BEACON,
+                AircraftEntity.LIGHT_STROBE}) {
+            if (aircraft.isLightOn(light)) {
+                lights |= light;
+            }
+        }
+
+        return lights;
     }
 
     /**
@@ -196,9 +215,11 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         }
 
         PoseStack poseStack = context.poseStack();
+        Quaternionf attitude = attitude(ghost, context.partialTick());
+        drawLights(ghost, attitude, context);
         poseStack.pushPose();
         // 機体座標系へ入る。半回転はモデル由来だ。ジオメトリは北を向き、機体は機首を +Z 方向として記述される。
-        poseStack.mulPose(attitude(ghost, context.partialTick()));
+        poseStack.mulPose(attitude);
         poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
 
         EntityGhostRenderer.drawModel(ghost, snapshot, context, GhostConfig.animation() ? POSER : null);
@@ -220,6 +241,30 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
         }
 
         return new Quaternionf(then).slerp(now, partialTick).normalize();
+    }
+
+    /**
+     * 灯火とバーナーの炎。機体のレンダラーと同じ描画を、撮影した値で呼ぶ。どちらも自分で姿勢を掛けるので、
+     * 呼ぶのは機体座標系へ入る前。バーナーの出力は2スナップショットの間で補間し、明滅の時計はスナップショットの
+     * tick から進める——実体を失ったゴーストにはレベルの時計しか無く、それは機体の物ではない。
+     */
+    private static void drawLights(EntityGhost ghost, Quaternionf attitude, GhostRenderContext context) {
+        GhostSnapshot snapshot = ghost.current();
+        Payload now = payload(snapshot);
+
+        if (now == null || now.wrecked()) {
+            return;
+        }
+
+        Payload then = payload(ghost.previous());
+        float partialTick = context.partialTick();
+        double ab = then == null ? now.afterburner() : Mth.lerp(partialTick, then.afterburner(), now.afterburner());
+        float time = (snapshot.gameTime() % 100000L) + partialTick;
+
+        NavLights.draw(now.stats(), now.lights(), snapshot.entityId(), time, attitude, context.poseStack(),
+                context.buffers());
+        AfterburnerPlume.draw(ghost, snapshot.entityId(), now.nozzles(), ab, time, attitude, context.poseStack(),
+                context.buffers());
     }
 
     /** 撮影時に主翼の下に吊られていた物。 */
@@ -344,8 +389,12 @@ public final class AircraftGhostAdapter implements GhostAdapter<AircraftEntity> 
      *
      * @param gearDown パイロットが要求している降着装置の状態。ゴーストが再生するサイクルの半分を決める
      * @param gearCycleTicks この機体が脚を上げ下げするのに要する時間
+     * @param lights 点いている灯火。{@code AircraftEntity.LIGHT_*} の組
+     * @param afterburner バーナーの出力（0〜1）
+     * @param nozzles バーナーのノズル。機体座標系
      */
     record Payload(ResourceLocation aircraftId, VehicleChassis.Model setup, AircraftModel.Pose pose,
-            List<Store> stores, boolean gearDown, int gearCycleTicks) {
+            List<Store> stores, boolean gearDown, int gearCycleTicks, AircraftDefinition stats, int lights,
+            float afterburner, List<Vec3> nozzles, boolean wrecked) {
     }
 }

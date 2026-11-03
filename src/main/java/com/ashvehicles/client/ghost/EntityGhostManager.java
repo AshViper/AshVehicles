@@ -17,7 +17,9 @@ import com.ashvehicles.client.ghost.dh.DHIntegration;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -49,9 +51,13 @@ public final class EntityGhostManager {
     private static final Collection<EntityGhost> VIEW = Collections.unmodifiableCollection(GHOSTS.values());
     /** このtickの作業リスト。毎回作らずtickをまたいで保持する。ゲームスレッド限定。 */
     private static final List<EntityGhost> ORDERED = new ArrayList<>();
-    /** 近い順。描画予算も Distant Horizons の予算も近い物を優先する。 */
-    private static final Comparator<EntityGhost> NEAREST_FIRST =
-            Comparator.comparingDouble(EntityGhost::distanceSq);
+    /**
+     * プレイヤーと同じチャンクにいる物（乗っている機体を含む）を先に、残りは近い順。描画予算も遮蔽レイの予算も
+     * Distant Horizons の予算もこの順で配る。
+     */
+    public static final Comparator<EntityGhost> NEAREST_FIRST =
+            Comparator.comparing((EntityGhost ghost) -> !nearPlayer(ghost))
+                    .thenComparingDouble(EntityGhost::distanceSq);
 
     @Nullable
     private static ClientLevel level;
@@ -285,6 +291,28 @@ public final class EntityGhostManager {
 
         // tickをまたいで何も保持しない。ここに残したゴーストは自身の削除より長生きしてしまう。
         ordered.clear();
+    }
+
+    /**
+     * プレイヤーと同じチャンクにいるか、プレイヤーが乗っている物か。こうしたゴーストは予算の先頭に来て、
+     * 遮蔽と視錐台で落とされない——自分が乗っている機体が消えるのは、遠くの1機が欠けるのとは訳が違う。
+     */
+    public static boolean nearPlayer(EntityGhost ghost) {
+        Player player = Minecraft.getInstance().player;
+
+        if (player == null) {
+            return false;
+        }
+
+        Entity entity = ghost.entity();
+
+        if (entity != null && (entity == player.getRootVehicle() || player.isPassengerOfSameVehicle(entity))) {
+            return true;
+        }
+
+        Vec3 position = ghost.current().position();
+        return SectionPos.blockToSectionCoord(position.x) == player.chunkPosition().x
+                && SectionPos.blockToSectionCoord(position.z) == player.chunkPosition().z;
     }
 
     @SuppressWarnings("unchecked")

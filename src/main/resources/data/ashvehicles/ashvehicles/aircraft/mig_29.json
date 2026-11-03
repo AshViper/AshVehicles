@@ -3106,37 +3106,37 @@
   "hardpoints": [
     {
       "name": "pylon1_left",
-      "pos": [-2.1, 1.6, -1.6],
+      "pos": [-2.1, 1.346, -1.6],
       "kind": "weapon"
     },
     {
       "name": "pylon1_right",
-      "pos": [2.1, 1.6, -1.6],
+      "pos": [2.1, 1.346, -1.6],
       "kind": "weapon"
     },
     {
       "name": "pylon2_left",
-      "pos": [-3.2, 1.6, -2.3],
+      "pos": [-3.2, 1.346, -2.3],
       "kind": "weapon"
     },
     {
       "name": "pylon2_right",
-      "pos": [3.2, 1.6, -2.3],
+      "pos": [3.2, 1.346, -2.3],
       "kind": "weapon"
     },
     {
       "name": "pylon3_left",
-      "pos": [-4.3, 1.6, -3.0],
+      "pos": [-4.3, 1.346, -3.0],
       "kind": "weapon"
     },
     {
       "name": "pylon3_right",
-      "pos": [4.3, 1.6, -3.0],
+      "pos": [4.3, 1.346, -3.0],
       "kind": "weapon"
     },
     {
       "name": "centreline",
-      "pos": [0.0, 1.5, -1.5],
+      "pos": [0.0, 1.26, -1.5],
       "kind": "weapon"
     },
     {

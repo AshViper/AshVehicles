@@ -4971,6 +4971,7 @@
     "lift_bonus": 0.5
   },
   "camera": {
+    "generic_cockpit": false,
     "pos": [0.0, 9.898, -31.066],
     "cockpit": [0.4, 5.4, 15.337]
   },
@@ -5040,12 +5041,12 @@
     },
     {
       "name": "pylon_left",
-      "pos": [1.47, 2.695, 9.408],
+      "pos": [1.47, 2.469, 9.408],
       "kind": "weapon"
     },
     {
       "name": "pylon_right",
-      "pos": [-1.47, 2.695, 9.408],
+      "pos": [-1.47, 2.469, 9.408],
       "kind": "weapon"
     },
     {

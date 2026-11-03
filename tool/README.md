@@ -71,7 +71,8 @@ file is still in the history if you want it: `git show cf0ee44:tool/hitbox-edito
 ### Using it
 
 1. **Drop the folder in.** The two files a machine is made of live nowhere near each other — the
-   model in `src/main/resources/assets/ashvehicles/geo/entity/`, and the machine's own file, the
+   model in `src/main/resources/assets/ashvehicles/bbmodel/entity/` (a `.bbmodel`, which carries
+   its own texture; a `.geo.json` with a `.png` beside it is read too), and the machine's own file, the
    boxes included in its `hitbox` block, in `data/ashvehicles/ashvehicles/vehicle/` or
    `data/ashvehicles/ashvehicles/aircraft/` — so hand the editor `src/main/resources` whole, by dropping it on
    the page or through **A folder…**. It is walked once, the pairs are matched up by name, and
@@ -80,7 +81,7 @@ file is still in the history if you want it: `git show cf0ee44:tool/hitbox-edito
    a read. Which folder is up to you — the repository root works too, and `.git`, `build` and the
    rest are walked past.
 
-   Individual files still work exactly as they did: drop a `.geo.json` and a machine's file
+   Individual files still work exactly as they did: drop a `.bbmodel` (or a `.geo.json`) and a machine's file
    together, anywhere on the page, or use **Files…**. Either way the geometry is read first,
    because the scale in the machine's file decides how big the model is built and the bones it
    names decide which of its cubes come round with the turret.
@@ -293,8 +294,7 @@ and fly is five things, and three of them live nowhere near the definition:
 | | where | who writes it |
 | --- | --- | --- |
 | the definition | `data/<ns>/aircraft/foo.json` | this tool |
-| the model | `assets/<ns>/geo/entity/foo.geo.json` | Blockbench |
-| the skin | `assets/<ns>/textures/entity/foo.png` | you |
+| the model and the skin | `assets/<ns>/bbmodel/entity/foo.bbmodel` (or `geo/entity/foo.geo.json` + `textures/entity/foo.png`) | Blockbench |
 | the name people read | `assets/<ns>/lang/en_us.json` | this tool |
 | the recipe at the workbench | `data/<ns>/recipe/foo.json` | this tool |
 

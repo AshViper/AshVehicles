@@ -15,6 +15,7 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 
 /**
  * アフターバーナーのプルーム。パーティクルではなく発光する形状で描く（AshCC のジェットエンジンの写し）。
@@ -43,7 +44,7 @@ public final class AfterburnerPlume {
     private static final float FLASH_TICKS = 6.0F;
 
     /** 機体ごとの点火の検出。[前フレームの出力, 点火した時刻]。 */
-    private static final Map<AircraftEntity, float[]> LIGHT = new WeakHashMap<>();
+    private static final Map<Object, float[]> LIGHT = new WeakHashMap<>();
 
     private static final Vec3 D = new Vec3(0, 0, -1);
     private static final Vec3 A = new Vec3(1, 0, 0);
@@ -61,22 +62,33 @@ public final class AfterburnerPlume {
 
     /** 機体の原点に置かれた {@code poseStack} へ、全ノズルのプルームを描く。 */
     public static void draw(AircraftEntity aircraft, float partialTick, PoseStack poseStack, MultiBufferSource buffers) {
-        List<Vec3> nozzles = aircraft.getAfterburnerNozzles();
-
-        if (nozzles.isEmpty() || aircraft.isWrecked()) {
+        if (aircraft.isWrecked()) {
             return;
         }
 
-        double ab = aircraft.getAfterburner();
-        float time = (aircraft.level().getGameTime() % 100000L) + partialTick;
-        double flash = flash(aircraft, (float) ab, time);
+        draw(aircraft, aircraft.getId(), aircraft.getAfterburnerNozzles(), aircraft.getAfterburner(),
+                (aircraft.level().getGameTime() % 100000L) + partialTick, aircraft.getAttitude(partialTick),
+                poseStack, buffers);
+    }
+
+    /**
+     * 実体を介さずに描く。ゴーストが撮影した値で呼ぶ。{@code key} は点火の火の玉を覚えておく相手で、描く物ごとに
+     * 同じ物を渡し続けること。
+     */
+    public static void draw(Object key, int id, List<Vec3> nozzles, double ab, float time, Quaternionf attitude,
+            PoseStack poseStack, MultiBufferSource buffers) {
+        if (nozzles.isEmpty()) {
+            return;
+        }
+
+        double flash = flash(key, (float) ab, time);
 
         if (ab <= LIT && flash <= 0.02) {
             return;
         }
 
         poseStack.pushPose();
-        poseStack.mulPose(aircraft.getAttitude(partialTick));
+        poseStack.mulPose(attitude);
         Matrix4f m = poseStack.last().pose();
         VertexConsumer vc = buffers.getBuffer(PlumeRenderType.PLUME);
         // 可変ノズルはバーナーで開く
@@ -85,7 +97,7 @@ public final class AfterburnerPlume {
         for (int n = 0; n < nozzles.size(); n++) {
             Vec3 nozzle = nozzles.get(n);
             Vec3 exit = new Vec3(-nozzle.x, nozzle.y, nozzle.z);
-            long seed = aircraft.getId() * 31L + n;
+            long seed = id * 31L + n;
 
             // ノズルの奥のタービン面。排気の黒体色
             float[] c = blackBody(1000 + 500 * ab);
@@ -164,8 +176,8 @@ public final class AfterburnerPlume {
     }
 
     /** 点火の火の玉の強さ（1→0）。同期された出力が LIT を越えた瞬間をフレームで拾う。 */
-    private static double flash(AircraftEntity aircraft, float ab, float time) {
-        float[] state = LIGHT.computeIfAbsent(aircraft, k -> new float[] {ab, -1000F});
+    private static double flash(Object key, float ab, float time) {
+        float[] state = LIGHT.computeIfAbsent(key, k -> new float[] {ab, -1000F});
 
         if (state[0] <= LIT && ab > LIT) {
             state[1] = time;

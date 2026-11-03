@@ -3041,32 +3041,32 @@
   "hardpoints": [
     {
       "name": "fuselage1_left",
-      "pos": [-0.85, 1.2, 1.2],
+      "pos": [-0.85, 0.936, 1.2],
       "kind": "weapon"
     },
     {
       "name": "fuselage1_right",
-      "pos": [0.85, 1.2, 1.2],
+      "pos": [0.85, 0.936, 1.2],
       "kind": "weapon"
     },
     {
       "name": "fuselage2_left",
-      "pos": [-0.85, 1.05, -0.6],
+      "pos": [-0.85, 0.936, -0.6],
       "kind": "weapon"
     },
     {
       "name": "fuselage2_right",
-      "pos": [0.85, 1.1, -0.6],
+      "pos": [0.85, 0.936, -0.6],
       "kind": "weapon"
     },
     {
       "name": "pylon1_left",
-      "pos": [-3.35, 2.25, -3.1],
+      "pos": [-3.35, 1.842, -3.1],
       "kind": "weapon"
     },
     {
       "name": "pylon1_right",
-      "pos": [3.35, 2.25, -3.1],
+      "pos": [3.35, 1.842, -3.1],
       "kind": "weapon"
     },
     {

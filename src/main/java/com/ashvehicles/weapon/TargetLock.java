@@ -11,6 +11,7 @@ import com.ashvehicles.entity.VehicleEntityBase;
 import com.ashvehicles.entity.VehicleProjectile;
 import com.ashvehicles.entity.CountermeasureEntity;
 import com.ashvehicles.sensor.Contact;
+import com.ashvehicles.sensor.Iff;
 import com.ashvehicles.vehicle.VehicleChassis;
 
 import net.minecraft.nbt.CompoundTag;
@@ -547,6 +548,12 @@ public final class TargetLock {
      */
     private boolean couldTarget(Entity candidate) {
         if (candidate == this.vehicle || WeaponMounts.isPartOf(this.vehicle, candidate)) {
+            return false;
+        }
+
+        // 味方はシーカーに載らない。機体も乗員も、味方が撃ったミサイルも。チームの無いワールドでは誰も
+        // 味方にならないので、ここは何も落とさない（Iff 参照）。
+        if (Iff.friendly(this.vehicle, candidate)) {
             return false;
         }
 

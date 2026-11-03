@@ -30,6 +30,13 @@ import net.minecraft.sounds.SoundEvent;
 public final class EngineSounds {
     /** 音が鳴っていない機体を再確認する間隔。 */
     private static final int RETRY_TICKS = 10;
+    /** 操縦席で聞く録音のイベント名に足す接尾辞。 */
+    public static final String COCKPIT_SUFFIX = ".cockpit";
+    /**
+     * 操縦席の一人称でエンジンとバーナーに掛ける音量。外で聞くより絞り、音声警報や RWR を
+     * エンジンの下に埋もれさせない。
+     */
+    public static final float COCKPIT_GAIN = 0.6F;
 
     /** このクライアントから見える全機体と、それぞれのエンジン音。 */
     public static final LiveSounds<VehicleEntityBase> SOUNDS =
@@ -46,7 +53,26 @@ public final class EngineSounds {
             return null;
         }
 
-        return new EngineSoundInstance(vehicle, engineSound(Minecraft.getInstance().getSoundManager(), vehicle));
+        SoundManager sounds = Minecraft.getInstance().getSoundManager();
+        boolean cockpit = EngineSoundInstance.inCockpit(vehicle);
+        SoundEvent outside = engineSound(sounds, vehicle);
+
+        return new EngineSoundInstance(vehicle, cockpit ? cockpitSound(sounds, outside) : outside, cockpit);
+    }
+
+    /**
+     * 操縦席の一人称で聞く録音。外の録音のイベント名に {@code .cockpit} を足した物
+     * （{@code engine.jet.cockpit} など）で、無ければ外と同じ録音を鳴らす。
+     */
+    public static SoundEvent cockpitSound(SoundManager sounds, SoundEvent outside) {
+        return SoundEvent.createVariableRangeEvent(cockpitSound(sounds, outside.getLocation()));
+    }
+
+    /** 同じ物をイベント名で。 */
+    public static ResourceLocation cockpitSound(SoundManager sounds, ResourceLocation outside) {
+        ResourceLocation inside = outside.withSuffix(COCKPIT_SUFFIX);
+
+        return ModSounds.exists(sounds, inside) ? inside : outside;
     }
 
     /**

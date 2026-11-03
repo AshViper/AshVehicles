@@ -1406,6 +1406,18 @@ public final class WeaponMounts {
                     continue;
                 }
 
+                // 射線の先に味方がいれば撃たない。落とす物と増槽には射線が無い。HoldFire 参照。
+                if (pull && weapon.type() != WeaponDefinition.Type.BOMB
+                        && weapon.type() != WeaponDefinition.Type.TANK
+                        && HoldFire.refuses(this.aircraft,
+                                laid ? stations.muzzle(station, 1.0F) : this.aircraft.getBoundingBox().getCenter(),
+                                laid ? laidAim : this.aircraft.getAimDirection(1.0F),
+                                laid ? stations.operatorOf(station) : this.aircraft.getAviator())) {
+                    load.cooldown = Math.max(0.0F, load.cooldown - 1.0F);
+
+                    continue;
+                }
+
                 if (!pull) {
                     load.cooldown = Math.max(0.0F, load.cooldown - 1.0F);
 

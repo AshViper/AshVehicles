@@ -30,7 +30,9 @@ final class ContentPackTemplate {
                   data/mypack/ashvehicles/ammunition/he.json   <- other rounds for a gun
                   data/mypack/ashvehicles/rack/rail.json       <- pylons and ejector racks
                   data/mypack/ashvehicles/equipment/pod.json   <- pods
-                  assets/mypack/geo/entity/foo.geo.json  <- the model
+                  assets/mypack/bbmodel/entity/foo.bbmodel <- the Blockbench project: model, skin
+                                                            and animations in one file
+                  assets/mypack/geo/entity/foo.geo.json  <- ...or the model exported on its own
                   assets/mypack/obj/entity/foo.obj       <- ...or the model as a Wavefront OBJ
                   assets/mypack/textures/entity/foo.png  <- its skin
                   assets/mypack/animations/entity/foo.animation.json
@@ -51,6 +53,11 @@ final class ContentPackTemplate {
             data/mypack/ashvehicles/aircraft/foo.json is the aeroplane "mypack:foo". Its entity and its item are
             registered under that name, its model is looked for at assets/mypack/geo/entity/foo.geo.json,
             and its skin at assets/mypack/textures/entity/foo.png -- the same word in both places.
+
+            A Blockbench project needs no exporting at all: save it as
+            assets/mypack/bbmodel/entity/foo.bbmodel and it is the model, the skin (the texture saved
+            inside the project) and the animations, all three. Group names are the bone names. Only one
+            texture is drawn, so paint every face from the same one.
 
             An OBJ model stands in for the .geo.json of the same name, so nothing else changes. Export
             it the way Blockbench shows the model: y up, nose towards -Z, one unit is one block, and

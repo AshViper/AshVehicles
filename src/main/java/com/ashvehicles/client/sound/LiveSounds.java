@@ -82,7 +82,9 @@ public final class LiveSounds<T extends Entity> {
                 continue;
             }
 
-            if (entity.tickCount % this.retryTicks != 0) {
+            // 鳴っていた音が終わった直後は待たずに鳴らし直す。視点の切り替えで録音を替えるとき、
+            // 間隔のぶん無音が挟まらないように。
+            if ((sound == null || !sound.isStopped()) && entity.tickCount % this.retryTicks != 0) {
                 continue;
             }
 

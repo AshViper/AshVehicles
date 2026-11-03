@@ -71,6 +71,39 @@ public final class Effects {
      */
     public static final int FURNACE = 0xFF7A30;
 
+    /** 水面で巻き上がる飛沫の色。 */
+    public static final int SPRAY = 0xE8EEF2;
+    /** 地面の色を砂埃に寄せる基準の色。乾いた土の灰色がかった砂色。 */
+    private static final int DUSTY = 0xB8AE9C;
+    /** 地面の色をこの割合だけ {@link #DUSTY} に混ぜる。草や雪の原色をそのまま撒かないため。 */
+    private static final float DUSTY_MIX = 0.45F;
+    /** 1 tick に下の色へ寄せる割合。ブロックの境目で色が跳ねず、地面が変わればおよそ1秒で追い付く。 */
+    private static final float SETTLE = 0.12F;
+
+    /**
+     * 巻き上げる砂埃の色を1 tick 分寄せる。
+     *
+     * <p>真下のブロックの色をそのまま使うと、草・土・砂の境目を越えるたびに粒の色が1つずつ跳ねる。現実の
+     * 砂埃は辺り一帯の土が混ざった物なので、色は持ち主が覚えておいて少しずつ下の地面へ寄せる。
+     *
+     * @param current 今の色。-1 ならまだ無いので、下の色から始める
+     * @param ground  真下のブロックの色
+     */
+    public static int settle(int current, int ground) {
+        // 水の飛沫は土ではないので白のまま。
+        int target = ground == SPRAY ? SPRAY : mix(ground, DUSTY, DUSTY_MIX);
+
+        return current < 0 ? target : mix(current, target, SETTLE);
+    }
+
+    private static int mix(int from, int to, float t) {
+        int r = Math.round(((from >> 16) & 0xFF) + (((to >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * t);
+        int g = Math.round(((from >> 8) & 0xFF) + (((to >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * t);
+        int b = Math.round((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * t);
+
+        return (r << 16) | (g << 8) | b;
+    }
+
     /**
      * 実用上いちばん大きな弾頭の規模。
      *
@@ -199,10 +232,19 @@ public final class Effects {
      * これにあたる。
      */
     public static void fireball(ServerLevel level, Vec3 at, float power, int colour) {
+        fireball(level, at, power, colour, 1.0F);
+    }
+
+    /**
+     * 同じものを、煙だけ縮めて。
+     *
+     * @param smoke 煙の大きさと数に掛ける倍率。炎と火花はそのまま
+     */
+    public static void fireball(ServerLevel level, Vec3 at, float power, int colour, float smoke) {
         send(level, at, ModParticles.BLAST.get().of(colour, power * 0.34F),
                 4 + (int) (power * 1.6F), power * 0.16, power * 0.035);
-        send(level, at, ModParticles.BLAST_SMOKE.get().of(SOOT, power * 0.42F),
-                8 + (int) (power * 3.0F), power * 0.28, power * 0.022);
+        send(level, at, ModParticles.BLAST_SMOKE.get().of(SOOT, power * 0.42F * smoke),
+                Math.max(2, (int) ((8 + power * 3.0F) * smoke)), power * 0.28 * smoke, power * 0.022);
         sparks(level, at, EMBER, power);
     }
 

@@ -1396,10 +1396,10 @@
     "explosion_power": 3,
     "max_g": 3.5,
     "seats": [
-      [0.0, 1.155, 3.202],
+      [0.0, 1.65, 3.2],
       {
-        "pos": [0.0, 0.84, 4.567],
-        "eye": [0.0, 2.572, 4.567]
+        "pos": [0.0, 1.4, 4.5],
+        "eye": [0.0, 2.6, 4.45]
       }
     ]
   },
@@ -1437,7 +1437,7 @@
   },
   "camera": {
     "pos": [0.0, 2.625, -12.6],
-    "cockpit": [0.0, 2.835, 3.202]
+    "cockpit": [0.0, 2.85, 3.15]
   },
   "sound": {
     "volume": 1,
@@ -1461,7 +1461,7 @@
     "chaff": 120,
     "interval_ticks": 8,
     "reload_ticks": 300,
-    "speed": 0.35,
+    "speed": 0.35,
     "salvo": 6,
     "spread": 140
   },
@@ -1473,7 +1473,7 @@
     },
     {
       "name": "outer_right",
-      "pos": [2.835, 1.522, 1.365],
+      "pos": [2.835, 1.061, 1.365],
       "kind": "weapon"
     },
     {
@@ -1493,7 +1493,7 @@
     },
     {
       "name": "outer_left",
-      "pos": [-2.835, 1.522, 1.312],
+      "pos": [-2.835, 1.061, 1.312],
       "kind": "weapon"
     },
     {
@@ -1511,9 +1511,7 @@
       "pos": [0.0, 0.735, 4.2],
       "fixed": "ashvehicles:m230",
       "ammunition": [
-        "ashvehicles:autocannon_apfsds",
-        "ashvehicles:autocannon_he",
-        "ashvehicles:autocannon_heat"
+        "ashvehicles:autocannon_apfsds", "ashvehicles:autocannon_he", "ashvehicles:autocannon_heat"
       ]
     }
   ],

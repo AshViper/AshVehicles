@@ -5756,6 +5756,7 @@
     "lift_bonus": 0.5
   },
   "camera": {
+    "generic_cockpit": false,
     "pos": [0.0, 11.711, -34.3],
     "cockpit": [-0.588, 4.753, 19.502]
   },
@@ -5782,7 +5783,8 @@
     "chaff": 120,
     "interval_ticks": 8,
     "reload_ticks": 400,
-    "speed": 0.35,
+    "speed": 0.35
+,
     "salvo": 4,
     "spread": 120
   },

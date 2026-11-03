@@ -68,7 +68,7 @@ public final class ModParticles {
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> NUCLEAR_WAVE = register("nuclear_wave");
     /**
      * 燃え続ける炎。今爆発した物ではなく燃えている物のためのもので、墜落地点で燃える機体の残骸など。
-     * 火球と同じテクスチャだが別物。{@link com.ashvehicles.client.particle.FlameParticle} 参照。
+     * 火球と同じテクスチャだが別物。{@link com.ashvehicles.client.renderer.SmokeCloud} 参照。
      */
     public static final DeferredHolder<ParticleType<?>, TintedParticleType> FIRE = register("fire");
     /** 被弾で飛び散る破片。何を背景にしても見えるだけの明るさを持つ。 */

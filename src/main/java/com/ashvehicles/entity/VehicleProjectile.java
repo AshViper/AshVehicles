@@ -303,6 +303,8 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
     @Nullable
     private Entity firedFrom;
     private int firedFromId = -1;
+    @Nullable
+    private Vec3 leftMuzzleAt;
     /**
      * これを撃った機体が、撃った瞬間に立っていた位置。
      *
@@ -583,6 +585,16 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         // クライアント側で、エンティティが既にワールドにありサーバーの置いた場所に立っている状態で読む。
         // これができる唯一の瞬間がそこ。
         this.anchorToMuzzle();
+        this.leftMuzzleAt = this.position();
+    }
+
+    /**
+     * クライアントで、この弾が描かれている砲口を離れた位置。生成データを読んだ瞬間にしか分からず、次の
+     * tick には弾はもう数十ブロック先にいる。硝煙（{@code client.GunSmoke}）がそこへ置く。サーバーでは null。
+     */
+    @Nullable
+    public Vec3 leftMuzzleAt() {
+        return this.leftMuzzleAt;
     }
 
     /**
@@ -927,6 +939,12 @@ public abstract class VehicleProjectile extends Projectile implements IEntityWit
         // エンティティループではなくそちらになる。WeaponTicker 参照。
         if (!this.level().isClientSide) {
             WeaponTicker.flying(this);
+
+            // 爆弾だけは落ちる先の地面をロードさせる。兵装がチャンクをロードしない方針の例外（BombChunkLoader）。
+            if (this.getWeapon().isDropped() && this.getWeapon().nuclear().isEmpty()
+                    && this.age % com.ashvehicles.weapon.BombChunkLoader.EVERY == 0) {
+                com.ashvehicles.weapon.BombChunkLoader.ahead(this);
+            }
         }
 
         WeaponProfile.lap(WeaponProfile.MOVE);

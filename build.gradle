@@ -22,7 +22,7 @@ sourceSets.main.resources {
     srcDir('src/generated/resources')
 
     // Exclude common development only resources from finalized outputs
-    exclude("**/*.bbmodel") // BlockBench project files
+    // .bbmodel is not excluded: the models are read from assets/<ns>/bbmodel/ (BbModels)
     exclude("src/generated/**/.cache") // datagen cache files
 }
 

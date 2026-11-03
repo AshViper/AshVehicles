@@ -28,7 +28,13 @@ import com.ashvehicles.item.WrenchItem;
 import com.ashvehicles.weapon.AmmoKind;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.item.ArmorItem;
+import net.minecraft.world.item.ArmorMaterial;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
@@ -73,6 +79,17 @@ public final class ModItems {
      * ヘルメット装着型表示器。頭に被ると、機体の中央の計器と B スコープ・警戒受信機が画面に出る
      * （{@link HmdItem} 参照）。
      */
+    public static final DeferredRegister<ArmorMaterial> ARMOR_MATERIALS =
+            DeferredRegister.create(Registries.ARMOR_MATERIAL, AshVehicles.MODID);
+
+    /** HMD の素材。防御は0で、レイヤーは名目だけ（描くのは GeckoLib の模型）。 */
+    public static final DeferredHolder<ArmorMaterial, ArmorMaterial> HMD_MATERIAL =
+            ARMOR_MATERIALS.register("hmd", () -> new ArmorMaterial(
+                    new EnumMap<>(Map.of(ArmorItem.Type.HELMET, 0)), 0,
+                    SoundEvents.ARMOR_EQUIP_IRON, () -> Ingredient.EMPTY,
+                    List.of(new ArmorMaterial.Layer(ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "hmd"))),
+                    0f, 0f));
+
     public static final DeferredItem<HmdItem> HMD =
             ITEMS.registerItem("hmd", HmdItem::new, new Item.Properties().stacksTo(1));
 
