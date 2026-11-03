@@ -83,6 +83,10 @@ public abstract class WeaponParticle extends TextureSheetParticle {
 
     /** 灼熱しない粒の {@code hot}。ほとんどの粒はこれで、生まれた時点で既に自分の色をしている。 */
     protected static final int NEVER_GLOWS = 0;
+
+    /** 描画スレッドだけが使う作業用。{@link #render} と {@link #corner} 参照。 */
+    private static final Quaternionf FACING = new Quaternionf();
+    private static final Vector3f CORNER = new Vector3f();
     /**
      * ブロック光の最大値。
      *
@@ -220,7 +224,9 @@ public abstract class WeaponParticle extends TextureSheetParticle {
      */
     @Override
     public void render(VertexConsumer buffer, Camera camera, float partialTick) {
-        Quaternionf quaternion = new Quaternionf();
+        // 向きは setRotation が毎回丸ごと置き直すので、描画スレッドの作業用を使い回す。粒は数千あり、毎フレーム
+        // 5個ずつ作っていた。
+        Quaternionf quaternion = FACING;
 
         this.getFacingCameraMode().setRotation(quaternion, camera, partialTick);
 
@@ -271,7 +277,7 @@ public abstract class WeaponParticle extends TextureSheetParticle {
     /** 板の四隅のうち1つ。バニラの {@code renderVertex} と同じ順序・同じ回転。 */
     private void corner(VertexConsumer buffer, Quaternionf quaternion, float x, float y, float z,
             float xOffset, float yOffset, float size, float u, float v, int light, float alpha) {
-        Vector3f at = new Vector3f(xOffset, yOffset, 0.0F).rotate(quaternion).mul(size).add(x, y, z);
+        Vector3f at = CORNER.set(xOffset, yOffset, 0.0F).rotate(quaternion).mul(size).add(x, y, z);
 
         buffer.addVertex(at.x(), at.y(), at.z())
                 .setUv(u, v)
