@@ -21,6 +21,8 @@ final class FuelWatch {
     private static final int BANNER = 100;
     /** 消費率を均す重み。1 tick あたり。約 2 秒で追い付く。 */
     private static final float SMOOTH = 0.025F;
+    /** 残量がこれだけ変わらなければ、消費が止まったと読む（tick）。刻みの間隔はアイドルでも数秒。 */
+    private static final long STILL = 400L;
 
     private static float bingo = 0.25F;
     private static int aircraftId = -1;
@@ -61,6 +63,14 @@ final class FuelWatch {
         }
 
         long ticks = now - lastTick;
+
+        // 残量は刻みでしか届かない（VehicleEntityBase.getFuel）。届いていない tick を「減っていない」と
+        // 読むと、消費率は刻みの間に0へ落ちて次の刻みで跳ね、航続時間が脈打つ。変わるまで待ち、変わった
+        // 時にその間の tick 数で割れば刻みごとの平均になる。長く変わらなければエンジンが止まっている。
+        if (fuel == lastFuel && ticks < STILL) {
+            return;
+        }
+
         float used = (lastFuel - fuel) / ticks;
 
         // 給油で増えた分は消費として均さない。
@@ -75,7 +85,9 @@ final class FuelWatch {
 
         if (nowBelow && !below) {
             crossedAt = now;
-            minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.NOTE_BLOCK_BELL.value(), 0.7F, 1.0F));
+            if (!VoiceWarnings.say(VoiceWarnings.Callout.BINGO)) {
+                minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.NOTE_BLOCK_BELL.value(), 0.7F, 1.0F));
+            }
         }
 
         below = nowBelow;

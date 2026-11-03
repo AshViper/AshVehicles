@@ -328,11 +328,15 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             current = Definitions.shape(this.getVehicleId());
             this.shape = current;
             this.shapeVersion = Definitions.version();
+            this.shapeReach = -1.0;
             this.onShapeChanged();
         }
 
         return current;
     }
+
+    /** {@link #shapeReach()} の写し。形が入れ替わるまで有効。負なら未計算。 */
+    private double shapeReach = -1.0;
 
     /** リロードで機体に別の箱一式が渡された時に呼ばれる。 */
     protected void onShapeChanged() {
@@ -430,7 +434,8 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
             this.ejectPassengers();
         }
 
-        WreckEffects.burn(level, this.position(), this.getAttitude(), this.wreckAge, velocity, reach);
+        WreckEffects.burn(level, this.position(), this.getAttitude(), this.wreckAge, velocity, reach,
+                this.getShape().boxes());
     }
 
     /**
@@ -495,17 +500,40 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      */
     public abstract VehicleChassis.Fuel fuelSetup();
 
-    /** タンクに残っている量。両側で同じ値を返す。 */
+    /**
+     * タンクに残っている量。サーバーは燃やしている本当の値、クライアントは最後に届いた写しを返す。
+     *
+     * <p>写しは {@link #FUEL_SYNC_STEP} 刻みでしか届かない。燃焼は毎tick微量ずつ進むので、値そのものを
+     * 同期させると走っている機械1台ごとに毎tick同期パケットが1つ出ていた。計器が読むのは割合の整数
+     * パーセントで、刻みはその5分の1。空と満タンは刻みを待たずに届ける——「まだある」と「もう無い」の
+     * 判断は両側で同じ tick に一致していなければならない。
+     */
     public float getFuel() {
-        return this.entityData.get(DATA_FUEL);
+        return this.level().isClientSide ? this.entityData.get(DATA_FUEL) : this.fuelHeld;
     }
 
     /** 0を下回らず、タンクの容量を超えない。サーバーのみ。 */
     public void setFuel(float left) {
-        if (!this.level().isClientSide) {
-            this.entityData.set(DATA_FUEL, Mth.clamp(left, 0.0F, this.fuelSetup().capacity()));
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        float capacity = this.fuelSetup().capacity();
+        float held = Mth.clamp(left, 0.0F, capacity);
+        this.fuelHeld = held;
+
+        float published = this.entityData.get(DATA_FUEL);
+
+        if (held == 0.0F || held == capacity || Math.abs(held - published) >= capacity * FUEL_SYNC_STEP) {
+            this.entityData.set(DATA_FUEL, held);
         }
     }
+
+    /** 写しを送り直すまでに動いてよい量。容量に対する割合。{@link #getFuel} 参照。 */
+    private static final float FUEL_SYNC_STEP = 0.002F;
+
+    /** サーバーが持つ本当の残量。クライアントでは使わない。 */
+    private float fuelHeld;
 
     /**
      * タンクへ入れて、実際に入った量を返す。溢れる分は受け取らない——燃料アイテムは満タンの機械に対して
@@ -2041,16 +2069,13 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         // 轢く方は上限に掛けない。CARRY_LIMIT は「運ぶ」ための物で、1tickにそれ以上進んだ機体は
         // テレポートしたと見なして誰も連れて行かない。だが轢くのは速い機体こそが轢くのであって、
         // 速すぎるから無害になる道理は無い。
-        if (!this.level().isClientSide) {
-            Hitboxes.runOver(this, shift);
-        }
+        boolean runOver = !this.level().isClientSide;
+        boolean carry = shift.lengthSqr() <= CARRY_LIMIT * CARRY_LIMIT
+                && (shift.lengthSqr() > 1.0E-12 || Math.abs(turn) > 1.0E-4F);
 
-        if (shift.lengthSqr() > CARRY_LIMIT * CARRY_LIMIT) {
-            return;
-        }
-
-        if (shift.lengthSqr() > 1.0E-12 || Math.abs(turn) > 1.0E-4F) {
-            Hitboxes.carry(this, before, shift, turn);
+        // 2つの判定は別物だが、周りの物を探す検索は1回で済む。Hitboxes.carryAndRunOver 参照。
+        if (runOver || carry) {
+            Hitboxes.carryAndRunOver(this, before, shift, turn, runOver, carry);
         }
     }
 
@@ -2118,11 +2143,27 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
      * @param underside これ以下のブロックを床と見なす高さ。全部を数えるなら
      *                  {@link Hitboxes#UNDERSIDE_NONE}
      */
+    /** 軸ごとの差し渡し（{@link #shapeReach}）から箱の対角まで伸ばす係数。√3。 */
+    private static final double ROOM_SPHERE = 1.7320508075688772;
+
+    /** 砲塔に載って振れる箱・開いたハッチ・脚の沈み込みが差し渡しの外へ出る分の余裕（ブロック）。 */
+    private static final double ROOM_SLACK = 4.0;
+
     public boolean hasRoomHere(double margin, double underside) {
         List<VehicleShape.Box> shape = this.getShape().boxes();
 
         if (shape.isEmpty()) {
             return this.level().noCollision(this, this.getBoundingBox().deflate(margin));
+        }
+
+        // 飛んでいる機体はこれを毎tick問う（AircraftEntity.insideTerrain）。周りのチャンク区画が全部
+        // 空気なら、どの箱も何にも入っていない——箱を組み直さずそこで終える。問う範囲は形が届きうる
+        // 球で、砲塔や可動部が軸ごとの差し渡しの外へ振れる分と機体の沈み込みを余裕に足す。空気でない
+        // 区画が1つでもあれば従来どおり箱ごとに判定するので、答えが変わることはない。
+        double radius = this.shapeReach() * ROOM_SPHERE + ROOM_SLACK + Math.max(-margin, 0.0);
+
+        if (Hitboxes.onlyAirAround(this.level(), this.position(), radius)) {
+            return true;
         }
 
         for (VehicleShape.Box box : shape) {
@@ -2168,14 +2209,24 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
 
     /** 当たり判定の箱だけから求めた同じ値。箱を持たない機体では0。 */
     private double shapeReach() {
-        double reach = 0.0;
+        List<VehicleShape.Box> boxes = this.getShape().boxes();
+        double reach = this.shapeReach;
 
-        for (VehicleShape.Box box : this.getShape().boxes()) {
+        // getShape が形を入れ替えた時に捨てる。描画のカリングが毎フレーム問うので、箱を毎回歩かない。
+        if (reach >= 0.0) {
+            return reach;
+        }
+
+        reach = 0.0;
+
+        for (VehicleShape.Box box : boxes) {
             for (int axis = 0; axis < 3; axis++) {
                 double corner = Math.abs(component(box.offset(), axis)) + component(box.size(), axis) / 2.0;
                 reach = Math.max(reach, corner);
             }
         }
+
+        this.shapeReach = reach;
 
         return reach;
     }
