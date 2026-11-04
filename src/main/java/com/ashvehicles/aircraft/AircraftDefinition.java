@@ -245,6 +245,13 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
         public static final String NOZZLE_LEFT = "nozzle_left";
         public static final String NOZZLE_RIGHT = "nozzle_right";
         /**
+         * 片側に2つ目のノズルを持つ機体のための同じ物。ハリアーは胴体の両脇に前後2つずつ、計4つのノズルを
+         * 持ち、それぞれが自分の軸で回る——1つのボーンにまとめると前後の2つが1点を中心に公転してしまう。
+         * 番号の付け方は兵装倉の扉（{@code bay_left_2}）と同じで、振れる角度も他のノズルと共通。
+         */
+        public static final String NOZZLE_LEFT_2 = "nozzle_left_2";
+        public static final String NOZZLE_RIGHT_2 = "nozzle_right_2";
+        /**
          * ヘリコプターのメインローター。自分のマスト回り——つまり機体が何をしていようとモデルの垂直軸回り
          * ——に回る。アニメーションではなくここで名指しするのは、これが一連の動きではなく1つの角度だから。
          * 回転速度は機体が既に知っており、アニメーションファイルではそれが変わるたびにタイミングを取り直す
