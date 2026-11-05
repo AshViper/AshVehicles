@@ -2,9 +2,9 @@
 
     python tool/make_weapon_icon.py r77 r37m lmur
 
-`assets/ashvehicles/geo/weapon/<id>.geo.json` の全キューブを側面（Z 軸が長さ、Y 軸が上）へ投影し、
+`assets/ashvehicles/bbmodel/weapon/<id>.bbmodel` の全キューブを側面（Z 軸が長さ、Y 軸が上）へ投影し、
 既存アイコンと同じ右上がりの対角に置いて 16x16 へ落とす。色は同じ兵装の
-`textures/weapon/<id>.png` の中央値から 4 階調を作るので、インベントリの絵と 3D の機体色が揃う。
+その bbmodel に埋め込まれたテクスチャの中央値から 4 階調を作るので、インベントリの絵と 3D の機体色が揃う。
 
 **これは手描きの代わりではなく、手描きの下地である。** アイコンが無い兵装はインベントリで
 マゼンタの市松模様になる（記憶ノート what-a-new-weapon-needs）ので、まずこれで形の正しい 1 枚を
@@ -20,12 +20,15 @@ import math
 import os
 import sys
 
+import io
+
 from PIL import Image, ImageDraw
+
+from geo_to_bbmodel import geometry, sheet
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS = os.path.join(ROOT, "src", "main", "resources", "assets", "ashvehicles")
-GEO = os.path.join(ASSETS, "geo", "weapon")
-SKIN = os.path.join(ASSETS, "textures", "weapon")
+MODELS = os.path.join(ASSETS, "bbmodel", "weapon")
 ICON = os.path.join(ASSETS, "textures", "item")
 
 SIZE = 16
@@ -53,10 +56,15 @@ def rotate(point, pivot, degrees):
     return (x + pivot[0], y + pivot[1], z + pivot[2])
 
 
+def project(weapon):
+    """兵装の Blockbench プロジェクト。模型とテクスチャはどちらもここから。"""
+    with open(os.path.join(MODELS, weapon + ".bbmodel"), encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def side_view(weapon):
     """全キューブの 8 隅を側面へ投影した点群。1 キューブ 1 リスト。"""
-    with open(os.path.join(GEO, weapon + ".geo.json"), encoding="utf-8") as handle:
-        model = json.load(handle)
+    model = geometry(project(weapon))
 
     shapes = []
 
@@ -105,7 +113,7 @@ def hull(points):
 
 def body_colour(weapon):
     """その兵装のテクスチャの中央値。不透明な画素だけを明度で並べて真ん中を採る。"""
-    skin = Image.open(os.path.join(SKIN, weapon + ".png")).convert("RGBA")
+    skin = Image.open(io.BytesIO(sheet(project(weapon)))).convert("RGBA")
     opaque = [p[:3] for p in skin.getdata() if p[3] > 200]
 
     if not opaque:

@@ -52,7 +52,8 @@ public final class CockpitControls {
     enum Edge { TOP, LEFT, RIGHT, BOTTOM }
 
     enum Action { NONE, PAGE, RANGE_OUT, RANGE_IN, PREV, NEXT, GEAR, FLAP, BAY, NAV, BEACON, STROBE, FLIGHT_LIMIT, COUNTERMEASURE, INTERROGATE,
-        FILTER, BINGO_UP, BINGO_DOWN, SEARCH_SHOWN, POD_VIEW, MARK_TARGET, WP_NEXT, WP_PREV, WP_MARK, WP_DELETE,
+        FILTER, BINGO_UP, BINGO_DOWN, SEARCH_SHOWN, POD_VIEW, POD_DESIGNATE, POD_FIELD, POD_MODE, POD_BORESIGHT,
+        MARK_TARGET, WP_NEXT, WP_PREV, WP_MARK, WP_DELETE,
         WP_NORTH, WP_SOUTH, WP_EAST, WP_WEST }
 
     /**
@@ -274,6 +275,11 @@ public final class CockpitControls {
                 verbs.add(verb(CountermeasureMode.current().label(), Action.COUNTERMEASURE, true));
             }
             case "tpod" -> {
+                // 映像の上を見て押せば、その点へポッドが振れる（CockpitDisplays.slewTo）。札は振る以外の全部。
+                verbs.add(verb("DSG", Action.POD_DESIGNATE, aircraft.getDesignated() != null));
+                verbs.add(verb(PodFeed.fieldName(), Action.POD_FIELD, false));
+                verbs.add(verb(PodFeed.modeName(), Action.POD_MODE, false));
+                verbs.add(verb("BST", Action.POD_BORESIGHT, false));
                 verbs.add(verb("VIEW", Action.POD_VIEW, PodCamera.isActive()));
                 verbs.add(verb("WPT", Action.MARK_TARGET, false));
             }
@@ -419,11 +425,20 @@ public final class CockpitControls {
 
     /** 攻撃ボタンが1回押された。見ているボタンがあれば押す。 */
     static void press(AircraftEntity aircraft) {
-        if (!pointing(aircraft) || hoverButton < 0) {
+        if (!pointing(aircraft)) {
             return;
         }
 
-        List<VehicleChassis.Display> displays = aircraft.getStats().camera().displays().orElse(List.of());
+        if (hoverButton < 0) {
+            // ボタンの間ではなく TGP 頁の映像の上なら、そこへポッドを振る。
+            if (CockpitDisplays.slewTo(hoverDisplay, hoverX, hoverY)) {
+                click(-1);
+            }
+
+            return;
+        }
+
+        List<VehicleChassis.Display> displays = GenericCockpit.displays(aircraft);
 
         if (hoverDisplay >= displays.size()) {
             return;
@@ -460,6 +475,10 @@ public final class CockpitControls {
             case BINGO_DOWN -> FuelWatch.adjustBingo(-1);
             case SEARCH_SHOWN -> searchShown = !searchShown;
             case POD_VIEW -> PodCamera.toggle();
+            case POD_DESIGNATE -> PodCamera.designate();
+            case POD_FIELD -> PodFeed.cycleField();
+            case POD_MODE -> PodFeed.cycleMode();
+            case POD_BORESIGHT -> PodCamera.boresight();
             case MARK_TARGET -> {
                 Vec3 point = aircraft.getDesignatedPoint();
 
@@ -482,9 +501,14 @@ public final class CockpitControls {
             }
         }
 
+        click(hoverButton);
+    }
+
+    /** 押した印。ボタンを光らせ、音を鳴らす。 */
+    private static void click(int button) {
         Minecraft minecraft = Minecraft.getInstance();
         pressedDisplay = hoverDisplay;
-        pressedButton = hoverButton;
+        pressedButton = button;
         pressedAt = minecraft.level == null ? 0L : minecraft.level.getGameTime();
         minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK.value(), 1.8F, 0.2F));
     }

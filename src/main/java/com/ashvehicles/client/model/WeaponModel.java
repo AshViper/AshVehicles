@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.ashvehicles.AshVehicles;
+import com.ashvehicles.client.model.bbmodel.BbModels;
 import com.ashvehicles.client.model.obj.ObjModels;
 
 import net.minecraft.client.Minecraft;
@@ -143,12 +144,14 @@ public abstract class WeaponModel<T extends GeoAnimatable> extends GeoModel<T> {
      * リソースリロード1回あたり1度。{@link #FILES} 参照。
      *
      * <p>geo.json の代わりに OBJ が置かれていても「提供している」。OBJ はその geo.json の名前で GeckoLib の
-     * キャッシュに入るので、答えは同じ名前のまま（{@link ObjModels}）。
+     * キャッシュに入るので、答えは同じ名前のまま（{@link ObjModels}）。bbmodel も geo.json と png の両方の名前で
+     * 入る（{@link BbModels}）。
      */
     private static ResourceLocation found(ResourceLocation wanted, ResourceLocation fallback) {
         ResourceManager resources = Minecraft.getInstance().getResourceManager();
 
         return resources.getResource(wanted).isPresent() || ObjModels.standsIn(resources, wanted)
+                || BbModels.standsIn(resources, wanted)
                 ? wanted
                 : fallback;
     }

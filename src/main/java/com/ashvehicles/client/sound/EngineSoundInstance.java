@@ -3,6 +3,7 @@ package com.ashvehicles.client.sound;
 import com.ashvehicles.vehicle.VehicleChassis;
 import com.ashvehicles.entity.VehicleEntityBase;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
@@ -41,8 +42,12 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
     private float gain;
     private float currentPitch;
 
-    public EngineSoundInstance(VehicleEntityBase vehicle, SoundEvent sound) {
+    /** 操縦席の一人称で鳴らし始めたか。視点が変われば止まり、{@link EngineSounds} が別の録音で鳴らし直す。 */
+    private final boolean cockpit;
+
+    public EngineSoundInstance(VehicleEntityBase vehicle, SoundEvent sound, boolean cockpit) {
         super(vehicle, sound, SoundSource.NEUTRAL, SILENT_TICKS_BEFORE_STOP);
+        this.cockpit = cockpit;
         // 正しい音から始める。全開状態で可聴範囲に入ってきた機体が、まずアイドルから上がっていくのはおかしい。
         this.currentPitch = targetPitch(vehicle, vehicle.soundSetup());
         this.note = this.currentPitch;
@@ -65,6 +70,14 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
                 && (vehicle.getEngineNote() > 0.001F || vehicle.getVelocity().lengthSqr() > 0.01);
     }
 
+    /** このクライアントのプレイヤーがこの機体に乗り、一人称で見ているか。 */
+    public static boolean inCockpit(VehicleEntityBase vehicle) {
+        Minecraft minecraft = Minecraft.getInstance();
+
+        return minecraft.player != null && minecraft.player.getRootVehicle() == vehicle
+                && minecraft.options.getCameraType().isFirstPerson();
+    }
+
     /** この距離で全音量のうちどれだけ残るか。車両ファイルが指定する到達距離を基準にする。 */
     public static float falloff(VehicleEntityBase vehicle, VehicleChassis.Sound setup) {
         return falloff(vehicle, setup.range());
@@ -78,6 +91,12 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
     @Override
     protected void update() {
         VehicleEntityBase vehicle = this.entity();
+
+        if (inCockpit(vehicle) != this.cockpit) {
+            this.stop();
+
+            return;
+        }
         VehicleChassis.Sound setup = vehicle.soundSetup();
 
         boolean running = isEngineRunning(vehicle);
@@ -95,7 +114,7 @@ public class EngineSoundInstance extends EntitySoundInstance<VehicleEntityBase> 
         // 食い違う——音は後ろに残っているのに、大きさだけが機体に追従してしまう。follow が既に
         // 音の位置をそこへ置いているので、それに対して測る。
         float falloff = this.carried(setup.range());
-        this.volume = setup.volume() * this.gain * falloff;
+        this.volume = setup.volume() * this.gain * falloff * (this.cockpit ? EngineSounds.COCKPIT_GAIN : 1.0F);
         // ドップラーと空気の吸収は基底が掛ける。ここが述べるのはエンジンが出している音程だけだ。
         this.note = this.currentPitch;
 

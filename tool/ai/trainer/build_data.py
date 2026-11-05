@@ -235,6 +235,11 @@ def aircraft():
         rotor = bool(raw.get("rotor"))
         pylons = [h for h in hardpoints if h.get("kind") == "weapon" and not h.get("wingtip")]
         tips = [h for h in hardpoints if h.get("kind") == "weapon" and h.get("wingtip")]
+        # 倉が先（AirLoadout.hidesStores）。断面積が1未満で倉を持つ機体は倉の中だけに吊り、外は使わない
+        # （倉が1発も取れない分類の時だけ外へ、という逃げ道は写さない）。
+        bays = [h for h in pylons if h.get("internal")]
+        if bays and float(raw.get("signature", {}).get("radar", 1.0)) < 1.0:
+            pylons, tips = bays, []
         if not guns and (rotor or not pylons):
             continue
         nations = {airframe.get("nation")} | set(airframe.get("stores_from") or [])

@@ -1,5 +1,7 @@
 package com.ashvehicles.vehicle;
 
+import java.util.List;
+
 import com.ashvehicles.particle.Effects;
 import com.ashvehicles.registry.ModParticles;
 
@@ -34,8 +36,17 @@ import org.joml.Quaternionf;
  * 出せる限界の512ブロックを運ぶ。空から見えない火事に意味は無い。
  */
 public final class WreckEffects {
-    /** 炎そのもの。爆発が撒く残り火より熱く、よりオレンジ寄り。 */
-    private static final int FLAME = 0xFF8A2A;
+    /**
+     * 炎そのもの。燃料と機体が燃える火で、爆発の火球より暗く赤い。
+     *
+     * <p>炎は加算で描かれるので、重なった所は足し算で白へ飛ぶ。明るいオレンジを大きな玉で何枚も重ねると、
+     * 残骸の上に白く光る球が並び、燃えている機体ではなく発光体に見えた。暗めの色を小さな舌で多く出す。
+     */
+    private static final int FLAME = 0xC24A14;
+    /** 燃料火災の煙。爆発の煤より黒い。航空燃料とゴムと塗料が燃える煙は灰色ではない。 */
+    private static final int OILY_SMOKE = 0x161412;
+    /** 炎1つの大きさの上限。これより大きな炎の玉は火ではなく光る球に見える。 */
+    private static final float FLAME_CAP = 1.1F;
     /** ちぎれた機体構造。今バラバラになった機体から飛び出す物。 */
     private static final int SCRAP = 0x7A736B;
 
@@ -87,6 +98,9 @@ public final class WreckEffects {
     // 被弾
     // ------------------------------------------------------------------
 
+    /** 撃破の瞬間、機首と尾部の火の玉が出す煙の倍率。炎はそのまま。 */
+    private static final float DESTROYED_SMOKE = 0.5F;
+
     /**
      * 機体が機体でなくなる瞬間。全長から出る炎、衝撃波、飛散物、そして遠くまで届く爆発音。
      *
@@ -102,14 +116,17 @@ public final class WreckEffects {
         // 意図的に、開ける穴より大きく描く。機体ファイルの爆発値は「地面に何をするか」の値で、撃墜され
         // た機体が村を平らにする道理は無いので控えめな数字にしてある。一方 *見た目* は機体の大きさで
         // あるべきなので、描画には機体寸法も渡し、クレーターの方は触らない。
-        float sized = Mth.clamp(power + (float) reach * 0.4F, 1.0F, Effects.BIGGEST);
+        // 機体の大きさが足す分は reach の 0.2 倍（2026-11-03 に 0.4 から下げた）。戦車の撃破で煙が車体より
+        // はるかに大きく広がっていた。
+        float sized = Mth.clamp(power + (float) reach * 0.2F, 1.0F, Effects.BIGGEST);
         Vec3 along = Attitude.toWorld(attitude, new Vec3(0.0, 0.0, 1.0));
 
         // 機体に沿って並べる。機首・中央・尾部の3つ。炎が機体の形を持つには十分で、3回の爆発に見えない
         // 程度に少ない。
         Effects.detonate(level, at, sized, Effects.EMBER);
-        Effects.fireball(level, at.add(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER);
-        Effects.fireball(level, at.subtract(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER);
+        Effects.fireball(level, at.add(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER, DESTROYED_SMOKE);
+        Effects.fireball(level, at.subtract(along.scale(reach * 0.55)), sized * 0.6F, Effects.EMBER,
+                DESTROYED_SMOKE);
         wreckage(level, at, sized, reach);
     }
 
@@ -121,8 +138,8 @@ public final class WreckEffects {
                 pieces, reach * 0.3, 0.25 + power * 0.05);
         Effects.send(level, at, ModParticles.SPARK.get().of(Effects.EMBER, 1.2F),
                 pieces, reach * 0.25, 0.3 + power * 0.06);
-        Effects.send(level, at, ModParticles.FIRE.get().of(FLAME, 1.6F),
-                6 + (int) reach, reach * 0.35, 0.08);
+        Effects.send(level, at, ModParticles.FIRE.get().of(FLAME, FLAME_CAP),
+                8 + (int) reach, reach * 0.35, 0.08);
     }
 
     // ------------------------------------------------------------------
@@ -137,6 +154,20 @@ public final class WreckEffects {
      */
     public static void burn(ServerLevel level, Vec3 at, Quaternionf attitude, int age, Vec3 velocity,
             double reach) {
+        burn(level, at, attitude, age, velocity, reach, List.of());
+    }
+
+    /**
+     * 箱を知っている残骸。着地した後の炎と煙を、機体の中心の1点ではなく箱の上面から立てる。
+     *
+     * <p>燃えている車両は「中心から火の玉が出ている」のではなく、車体の上面全体を炎が舐め、その上に煙柱が
+     * 立つ。燃えているのは中の燃料と弾と内装で、それが開口部と上面から噴き出すからだ。だから炎は上面の
+     * 面積に比例した確率でその上に置き、煙も同じ点から昇らせる。
+     *
+     * @param boxes 当たり判定の箱（機体座標系）。空なら中心の1点から
+     */
+    public static void burn(ServerLevel level, Vec3 at, Quaternionf attitude, int age, Vec3 velocity,
+            double reach, List<VehicleShape.Box> boxes) {
         if (age > BURN_OUT_TICKS) {
             return;
         }
@@ -150,7 +181,95 @@ public final class WreckEffects {
             return;
         }
 
-        smoulder(level, middle, age, heat, reach);
+        if (boxes.isEmpty()) {
+            smoulder(level, middle, age, heat, reach);
+        } else {
+            blaze(level, at, attitude, boxes, age, heat, reach);
+        }
+    }
+
+    /**
+     * 燃える残骸の煙1粒の大きさ。機体の広がり（reach）に対する割合で、火の盛りにはこれの 1.6 倍。
+     *
+     * <p>以前は 0.22 に火の盛りで 2 倍だった。煙の玉は寿命の間に 3 倍へ膨らむので、9 ブロックの戦車で
+     * 1粒が半径 4 ブロック近くになり、煙柱が車体の倍以上の太さになった（2026-11-03 に下げた）。今は
+     * 煙柱がおおよそ車体の幅になる。
+     */
+    private static final double WRECK_SMOKE = 0.15;
+
+    /** 上面から燃える残骸の炎1つあたりの大きさの上限。中心の1点から出すときより大きくてよい。 */
+    private static final float HULL_FLAME_CAP = 1.8F;
+
+    /**
+     * 箱の上面から燃える残骸。{@link #smoulder} と同じ熱の曲線で、置き場所だけが違う。
+     *
+     * <p>炎は上面に沿って多く、小さめで上向きに。煙は炎の上から強い上向きの初速で出し、昇りながら膨らんで
+     * 1本の太い柱になる。火の盛りは黒い油煙、火が細ると灰の煤。
+     */
+    private static void blaze(ServerLevel level, Vec3 at, Quaternionf attitude, List<VehicleShape.Box> boxes,
+            int age, float heat, double reach) {
+        RandomSource random = level.getRandom();
+        float size = (float) Mth.clamp(reach * 0.12, 0.6, HULL_FLAME_CAP);
+
+        if (heat > 0.1F) {
+            int flames = 2 + (int) (heat * 6.0F);
+
+            for (int i = 0; i < flames; i++) {
+                Vec3 top = topOf(boxes, attitude, at, random);
+                Effects.aimed(level, top, ModParticles.FIRE.get().of(FLAME, size * (0.6F + heat * 0.6F)),
+                        new Vec3(random.nextGaussian() * 0.02, 0.05 + heat * 0.06, random.nextGaussian() * 0.02));
+            }
+        }
+
+        int every = Math.round(Mth.lerp(heat, SLOW_PUFF, FAST_PUFF));
+
+        if (age % Math.max(every, 1) == 0) {
+            int smoke = heat > 0.3F ? OILY_SMOKE : Effects.SOOT;
+            float puff = (float) Math.max(reach * WRECK_SMOKE, 0.5) * (1.0F + heat * 0.6F);
+
+            for (int i = 0; i < 1 + (int) (heat * 2.0F); i++) {
+                Vec3 top = topOf(boxes, attitude, at, random).add(0.0, size * 0.5, 0.0);
+                Effects.aimed(level, top, ModParticles.BLAST_SMOKE.get().of(smoke, puff),
+                        new Vec3(random.nextGaussian() * 0.01, 0.10 + heat * 0.12, random.nextGaussian() * 0.01));
+            }
+        }
+
+        if (heat > 0.35F) {
+            Effects.sparks(level, topOf(boxes, attitude, at, random), Effects.EMBER, heat * 0.5F);
+        }
+
+        if (heat > 0.2F && age % CRACKLE_TICKS == 0) {
+            level.playSound(null, at.x, at.y, at.z, SoundEvents.FIRE_AMBIENT, SoundSource.BLOCKS,
+                    FIRE_VOLUME * heat, 0.6F + random.nextFloat() * 0.3F);
+        }
+    }
+
+    /** 上面の面積に比例して選んだ箱の、上面の上の1点（ワールド座標）。箱自身の回転は無視する。 */
+    private static Vec3 topOf(List<VehicleShape.Box> boxes, Quaternionf attitude, Vec3 at, RandomSource random) {
+        double total = 0.0;
+
+        for (VehicleShape.Box box : boxes) {
+            total += box.size().x * box.size().z;
+        }
+
+        double pick = random.nextDouble() * total;
+        VehicleShape.Box chosen = boxes.get(boxes.size() - 1);
+
+        for (VehicleShape.Box box : boxes) {
+            pick -= box.size().x * box.size().z;
+
+            if (pick <= 0.0) {
+                chosen = box;
+                break;
+            }
+        }
+
+        Vec3 o = chosen.offset();
+        Vec3 d = chosen.size();
+        Vec3 local = new Vec3(o.x + (random.nextDouble() - 0.5) * d.x, o.y + d.y * 0.5,
+                o.z + (random.nextDouble() - 0.5) * d.z);
+
+        return at.add(Attitude.toWorld(attitude, local));
     }
 
     /**
@@ -179,13 +298,13 @@ public final class WreckEffects {
     private static void trail(ServerLevel level, Vec3 at, Vec3 velocity, float heat, double reach) {
         float size = (float) Math.max(reach * 0.25, 1.0);
 
-        Effects.send(level, at, ModParticles.FIRE.get().of(FLAME, size * (0.6F + heat)),
-                1 + (int) (heat * 3.0F), reach * 0.2, 0.04);
-        Effects.send(level, at, ModParticles.MOTOR_SMOKE.get().of(Effects.SOOT, size * 1.1F),
-                2 + (int) (heat * 2.0F), reach * 0.15, 0.03);
+        Effects.send(level, at, ModParticles.FIRE.get().of(FLAME, Math.min(size * (0.4F + heat * 0.6F), FLAME_CAP)),
+                2 + (int) (heat * 3.0F), reach * 0.2, 0.04);
+        Effects.send(level, at, ModParticles.MOTOR_SMOKE.get().of(OILY_SMOKE, size * 1.3F),
+                3 + (int) (heat * 3.0F), reach * 0.15, 0.03);
         // 後方へ、機体自身の速度を持たせて。描いているのは残骸が既に通り過ぎた空気で、そこにはまだ機体
         // から出た物が満ちている。
-        Effects.aimed(level, at.subtract(velocity), ModParticles.CONTRAIL.get().of(Effects.SOOT, size * 1.4F),
+        Effects.aimed(level, at.subtract(velocity), ModParticles.CONTRAIL.get().of(OILY_SMOKE, size * 1.4F),
                 velocity.scale(0.25));
 
         if (heat > 0.5F) {
@@ -209,16 +328,21 @@ public final class WreckEffects {
         float size = (float) Math.max(reach * 0.22, 0.8);
         Vec3 spread = new Vec3(reach * SPREAD, reach * SPREAD * FLATNESS, reach * SPREAD);
 
+        // 炎は機体の上に散らばる小さな舌。大きな玉を数個ではなく、小さい物を多く。加算で重なって白く飛ばず、
+        // 機体のあちこちが燃えている形になる。
         if (heat > 0.1F) {
-            Effects.send(level, at, ModParticles.FIRE.get().of(FLAME, size * (0.5F + heat)),
-                    1 + (int) (heat * 2.0F), spread, 0.02);
+            Effects.send(level, at, ModParticles.FIRE.get().of(FLAME, Math.min(size * (0.3F + heat * 0.5F), FLAME_CAP)),
+                    2 + (int) (heat * 4.0F), spread, 0.02);
         }
 
         // 煙柱。漂わせるのではなく上向きの初速を与え、残骸の上に居座らず立ち上がるようにする。1km 先の
         // 誰かに「あそこに残骸がある」と告げるのは木立から立つ煙で、広がるだけの煙はそこまで届かない。
-        Effects.send(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, size * (0.9F + heat * 0.8F)),
-                1 + (int) (heat * 2.0F), spread, 0.02);
-        Effects.aimed(level, at, ModParticles.BLAST_SMOKE.get().of(Effects.SOOT, size * 1.3F),
+        // 燃えている間は黒く、火が細るにつれて爆発の煤の灰へ戻る。
+        int smoke = heat > 0.3F ? OILY_SMOKE : Effects.SOOT;
+        float column = (float) Math.max(reach * WRECK_SMOKE, 0.5);
+        Effects.send(level, at, ModParticles.BLAST_SMOKE.get().of(smoke, column * (1.0F + heat * 0.6F)),
+                2 + (int) (heat * 2.0F), spread, 0.02);
+        Effects.aimed(level, at, ModParticles.BLAST_SMOKE.get().of(smoke, column * (1.2F + heat * 0.4F)),
                 new Vec3(0.0, 0.06 + heat * 0.10, 0.0));
 
         if (heat > 0.35F) {

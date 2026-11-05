@@ -5732,7 +5732,7 @@
     "crash_speed": 2.2,
     "explosion_power": 8,
     "seats": [
-      [-0.588, 3.185, 19.257]
+      [-0.588, 3.521, 19.441]
     ],
     "max_g": 2.5,
     "ejection": {
@@ -5756,8 +5756,9 @@
     "lift_bonus": 0.5
   },
   "camera": {
+    "generic_cockpit": false,
     "pos": [0.0, 11.711, -34.3],
-    "cockpit": [-0.588, 4.753, 19.502]
+    "cockpit": [-0.588, 4.842, 19.541]
   },
   "sound": {
     "volume": 1.3,
@@ -5782,7 +5783,8 @@
     "chaff": 120,
     "interval_ticks": 8,
     "reload_ticks": 400,
-    "speed": 0.35,
+    "speed": 0.35
+,
     "salvo": 4,
     "spread": 120
   },
@@ -5825,22 +5827,22 @@
     },
     {
       "name": "pylon_left",
-      "pos": [-6.762, 2.94, 4.9],
+      "pos": [-6.76, 3.502, 5.048],
       "kind": "weapon"
     },
     {
       "name": "pylon_right",
-      "pos": [6.762, 2.94, 4.9],
+      "pos": [6.76, 3.502, 5.048],
       "kind": "weapon"
     },
     {
       "name": "sensor_left",
-      "pos": [-1.078, 1.274, 17.15],
+      "pos": [-1.08, 1.012, 17.15],
       "kind": "special"
     },
     {
       "name": "sensor_right",
-      "pos": [1.078, 1.274, 17.15],
+      "pos": [1.08, 1.012, 17.15],
       "kind": "special"
     }
   ]

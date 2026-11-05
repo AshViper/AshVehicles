@@ -23,8 +23,8 @@
     "penetration": 400.0,
     "tracer": "FFD0A0",
     "trail": {
-      "colour": "D0CCC2",
-      "exhaust": "6B655A",
+      "colour": "FFFFFF",
+      "exhaust": "FFFFFF",
       "density": 0.8,
       "size": 0.8
     }

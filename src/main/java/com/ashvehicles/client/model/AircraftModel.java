@@ -166,7 +166,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     aircraft.getThrottle(),
                     // 尾輪式の操向輪は後ろにあるので、旋回の外へ前を向ける。
                     aircraft.getWheelSteer(partialTick)
-                            * (aircraft.getStats().landingGear().groundStance() > 0.0F ? -1.0F : 1.0F),
+                            * (aircraft.getStats().landingGear().steersFromBehind() ? -1.0F : 1.0F),
                     aircraft.getWheelSpin(partialTick));
         }
 
@@ -299,6 +299,8 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
         rotateX(model, setup, AircraftDefinition.Bone.NOZZLE, nozzle);
         rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_LEFT, nozzle);
         rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_RIGHT, nozzle);
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_LEFT_2, nozzle);
+        rotateX(model, setup, AircraftDefinition.Bone.NOZZLE_RIGHT_2, nozzle);
 
         // ローター。同じ考え方を1回転まで押し進めた物だ。ここでポーズを付ける理由はノズルと同じで、加えてもう
         // 1つある。ローターの回転速度は機体ファイルの数値であり、その数値が動くたびアニメーションファイルを手作業

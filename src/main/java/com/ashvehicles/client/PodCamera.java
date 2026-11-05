@@ -677,4 +677,17 @@ public final class PodCamera {
         return isActive() || progress > 0.0F;
     }
 
+    /** ジンバルを機首の下の休止位置へ戻す。MFD の BST。マークを保持していれば何もしない。 */
+    static void boresight() {
+        if (designated() == null) {
+            rest();
+        }
+    }
+
+    /** このクライアントが操縦している、ポッドの角度を持っている機体。操縦していなければ null。 */
+    @Nullable
+    static AircraftEntity carrier() {
+        return aircraft;
+    }
+
 }

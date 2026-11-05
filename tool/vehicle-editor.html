@@ -58,7 +58,7 @@
     --c-x: #e06060; --c-y: #9ede1a; --c-z: #6090e0;
 
     /* -- measurements -- */
-    --side-w: 384px;
+    --side-w: 384px; --insp-w: 350px;
   }
 
   /** The same two colours with the black taken all the way down and the green brought up. */
@@ -108,7 +108,7 @@
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    background: var(--bg); color: var(--ink); display: flex; overflow: hidden;
+    background: var(--bg); color: var(--ink); display: flex; flex-direction: column; overflow: hidden;
     /* The Japanese faces are named after the monospaced ones and not before them: everything on
        screen is figures and axis letters, which want the monospace, and the kana only borrow a face
        because none of those have any. */
@@ -127,9 +127,51 @@
 
   /* ---- sidebar ---- */
   #top {
-    display: flex; align-items: center; gap: 6px; padding: 9px 12px; background: var(--head);
-    border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 4;
+    display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: var(--head);
+    border-bottom: 1px solid var(--line); flex: none; z-index: 4; min-height: 46px;
   }
+  #top .group { display: flex; gap: 5px; align-items: flex-end; }
+  #top .group.fields label { margin-bottom: 1px; font-size: 11px; }
+  #top .group.fields input, #top .group.fields select { padding: 3px 6px; }
+  #top #machinerow { gap: 5px; }
+  #top #machinerow > .grow { width: 150px; flex: none; }
+  #top .grow { flex: 1; }
+  #top button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+  #main { flex: 1; min-height: 0; display: flex; }
+  /* ---- the rail and the panels ---- */
+  #rail {
+    flex: none; width: 92px; background: var(--head); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow-y: auto; padding: 6px 0;
+  }
+  #rail button {
+    background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 0;
+    color: var(--ink-mid); font-size: 11px; letter-spacing: .04em; padding: 9px 4px 9px 7px;
+    text-align: left; white-space: normal; line-height: 1.3;
+  }
+  #rail button:hover { background: var(--btn); color: var(--ink); }
+  #rail button.on { color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+  #rail button kbd { display: block; font-size: 10px; margin-top: 2px; color: var(--dim); background: transparent; border: 0; padding: 0; }
+  #panels { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; }
+  #panels > details { display: none; }
+  #panels > details.show { display: block; }
+  #panels > details > summary { pointer-events: none; }
+  /* ---- the inspector ---- */
+  #inspector {
+    width: var(--insp-w); flex: none; background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
+  }
+  #inspector h2 {
+    margin: 0; padding: 9px 12px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-mid); background: var(--head); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 2;
+  }
+  #inspector section { border-bottom: 1px solid var(--line); }
+  #inspector #selbox { flex: 1; }
+  #facts { padding: 8px 10px; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; }
+  #facts .k { color: var(--dim); white-space: nowrap; }
+  #facts .v { font-variant-numeric: tabular-nums; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #facts .v:hover { color: var(--accent); }
+  body.wide #inspector { display: none; }
   #top .name {
     flex: 1; color: var(--ink); letter-spacing: .14em; text-transform: uppercase;
     font-size: 12px; font-weight: 700;
@@ -141,7 +183,7 @@
   #top button { padding: 4px 9px; font-size: 12px; }
   #side {
     width: var(--side-w); flex: none; background: var(--panel); border-right: 1px solid var(--line);
-    display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
+    display: flex; flex-direction: row; min-height: 0;
   }
   body.wide #side, body.wide #grip { display: none; }
 
@@ -154,7 +196,7 @@
   #grip:hover, #grip.on { background: var(--accent); border-right-color: var(--accent); }
   body.dragging { cursor: col-resize; user-select: none; }
 
-  details { border-bottom: 1px solid var(--line); }
+  details { border-bottom: 0; }
   summary {
     padding: 11px 12px 11px 26px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
     color: var(--ink-mid); background: var(--head); cursor: pointer; user-select: none;
@@ -273,6 +315,17 @@
 
   /* The six square-on viewpoints and the corner one, along the top of the pane. Every one of them
      is a key as well, but a key you have to be told about is a key nobody presses. */
+  #povbar {
+    position: absolute; right: 8px; bottom: 30px; display: flex; gap: 3px; z-index: 3;
+    background: var(--c-plate); padding: 3px; border-radius: 6px;
+  }
+  #povbar button { padding: 3px 9px; font-size: 12px; border-radius: 4px; }
+  #povbar button.on { outline: 1px solid var(--sel); }
+  #pov {
+    position: absolute; right: 8px; bottom: 66px; width: min(46%, 520px); aspect-ratio: 16 / 9; z-index: 3;
+    border: 1px solid var(--c-axis); border-radius: 6px; overflow: hidden; background: var(--c-ground);
+  }
+  #cPov { width: 100%; height: 100%; display: block; cursor: grab; }
   #viewbar {
     position: absolute; right: 8px; top: 7px; display: flex; gap: 3px; z-index: 3;
     background: var(--c-plate); padding: 3px; border-radius: 6px;
@@ -321,19 +374,47 @@
 </head>
 <body>
 
-<div id="side">
-
-  <div id="top">
-    <span class="name">AshVehicles</span>
-    <button id="theme" title="the tool's colours &mdash; T">Theme</button>
-    <button id="lang" title="switch the tool's language">日本語</button>
+<header id="top">
+  <span class="name">AshVehicles</span>
+  <div class="group">
+    <button data-fwd="b-files" data-t>Files&hellip;</button>
+    <button data-fwd="b-folder" data-t>A folder&hellip;</button>
+    <button data-fwd="b-reread" title="R &mdash; read the folder again, and whatever is open out of it" data-t>Re-read</button>
   </div>
+  <div class="group fields">
+      <div class="row" id="machinerow">
+        <div class="grow"><label data-t>id</label><input id="f-id" type="text" value="leopard_2a4"></div>
+        <div class="grow"><label data-t>kind</label>
+          <select id="f-kind">
+            <option value="ground" data-t>ground vehicle</option>
+            <option value="aircraft" data-t>aircraft</option>
+          </select>
+        </div>
+        <div style="width:86px"><label data-t>model scale</label><input id="f-scale" type="number" step="0.01" value="1"></div>
+      </div>
+  </div>
+  <div class="group" id="topwrite">
+    <button id="t-write" class="primary" title="Ctrl+S &mdash; write the file and put it back into the folder" data-t>Write back</button>
+    <button id="t-export" title="the file, into the Export box" data-t>Write the file</button>
+    <button id="t-save" data-t>Save&hellip;</button>
+  </div>
+  <span class="grow"></span>
+  <button id="t-help" title="? &mdash; every key and what it does" data-t>Help</button>
+  <button id="theme" title="the tool's colours &mdash; T">Theme</button>
+  <button id="lang" title="switch the tool's language">日本語</button>
+</header>
 
-  <details open>
+<div id="main">
+<div id="side">
+  <nav id="rail"></nav>
+  <div id="panels">
+
+
+  <details open id="machinebox">
     <summary data-t>Machine</summary>
     <div class="pad">
       <div id="drop" class="drop" data-t>Drop a <b>.geo.json</b> here, or a whole folder<br><span class="muted">a folder is read through &mdash; every machine in it comes up as a list</span></div>
-      <input id="file" type="file" accept=".json,.png,image/png" multiple hidden>
+      <input id="file" type="file" accept=".json,.png,.bbmodel,image/png" multiple hidden>
       <input id="dir" type="file" webkitdirectory hidden>
       <div class="sp"></div>
       <div class="row">
@@ -355,16 +436,6 @@
       </div>
 
       <div class="sp"></div>
-      <div class="row">
-        <div class="grow"><label data-t>id</label><input id="f-id" type="text" value="leopard_2a4"></div>
-        <div class="grow"><label data-t>kind</label>
-          <select id="f-kind">
-            <option value="ground" data-t>ground vehicle</option>
-            <option value="aircraft" data-t>aircraft</option>
-          </select>
-        </div>
-        <div style="width:86px"><label data-t>model scale</label><input id="f-scale" type="number" step="0.01" value="1"></div>
-      </div>
       <div class="sp"></div>
       <div class="row">
         <div class="grow"><label data-t>what the file calls it</label>
@@ -410,32 +481,9 @@
     </div>
   </details>
 
-  <details open>
-    <summary data-t>Parts</summary>
-    <div class="pad">
-      <div class="tabs" id="tabs"></div>
-      <div class="row" style="margin-bottom:7px; flex-wrap:wrap">
-        <button id="b-add" title="N" data-t>Add</button>
-        <button id="b-dup" title="Shift+D" data-t>Copy</button>
-        <button id="b-del" title="Delete" data-t>Delete</button>
-        <button id="b-fit" title="F &mdash; shrink onto the geometry already inside" data-t>Fit</button>
-        <button id="b-mirror" title="Shift+M &mdash; a mirrored twin across the centreline" data-t>Mirror</button>
-        <button id="b-sym" title="Y &mdash; keep mirrored twins in step" data-t>Sym</button>
-        <button id="b-stores" class="on" title="W &mdash; draw the racks and the stores hung on the stations" data-t>Stores</button>
-        <button id="b-boxes" class="on" title="X &mdash; the collision boxes, drawn or not. Nothing is forgotten either way" data-t="Boxes|drawn or not">Boxes</button>
-        <button id="b-marks" class="on" title="Shift+X &mdash; the crosses: the stations, the seats and the points" data-t>Marks</button>
-        <button id="b-names" title="L &mdash; the name written beside every box, seat, station and point" data-t>Names</button>
-      </div>
-      <div class="list" id="list"></div>
-    </div>
-  </details>
 
-  <details open>
-    <summary data-t>Selected</summary>
-    <div class="pad" id="editor"><div class="muted" data-t>Nothing selected.</div></div>
-  </details>
 
-  <details>
+  <details id="bonesbox">
     <summary data-t>Bones</summary>
     <div class="pad">
       <input id="bonefind" placeholder="filter…">
@@ -490,12 +538,12 @@
     </div>
   </details>
 
-  <details>
+  <details id="chassisbox">
     <summary data-t>Chassis</summary>
     <div class="pad" id="chassis"></div>
   </details>
 
-  <details>
+  <details id="specbox">
     <summary data-t>Performance</summary>
     <div class="pad">
       <div class="muted" style="margin-bottom:8px" data-t>Everything in the file that is a figure rather than a place. It starts at what the mod itself would assume, so a machine built here from nothing comes out complete and loadable.</div>
@@ -546,7 +594,7 @@
   </details>
 
   <details id="gunsbox">
-    <summary>Crew guns</summary>
+    <summary data-t>Crew guns</summary>
     <div class="pad" id="guns"></div>
   </details>
 
@@ -563,7 +611,7 @@
     </div>
   </details>
 
-  <details>
+  <details id="exportbox">
     <summary data-t>Export</summary>
     <div class="pad">
       <div class="row" style="margin-bottom:7px; flex-wrap:wrap">
@@ -583,10 +631,11 @@
     </div>
   </details>
 
-  <details>
+  <details id="legendbox">
     <summary data-t>Legend</summary>
     <div class="pad" id="legend"></div>
   </details>
+  </div>
 </div>
 
 <div id="grip" title="drag to set how wide the panels are &mdash; double-click puts it back"></div>
@@ -595,7 +644,40 @@
   <div class="view"><canvas id="cView"></canvas>
     <div id="viewbar"></div>
     <div class="tag"></div><div class="read"></div>
-    <div class="hint" data-t>drag to orbit &mdash; right-drag to pan &mdash; wheel to zoom</div></div>
+    <div class="hint" data-t>drag to orbit &mdash; right-drag to pan &mdash; wheel to zoom</div>
+    <div id="povbar"><button data-pov="first" data-t>1st person</button><button data-pov="third" data-t>3rd person</button><button data-pov="off" data-t>Close view</button></div>
+    <div id="pov" style="display:none"><canvas id="cPov"></canvas></div></div>
+</div>
+
+<aside id="inspector">
+  <section id="factsbox">
+    <h2 data-t>Key figures</h2>
+    <div class="pad" id="facts"></div>
+  </section>
+  <section id="partsbox">
+    <h2 data-t>Parts</h2>
+    <div class="pad">
+      <div class="tabs" id="tabs"></div>
+      <div class="row" style="margin-bottom:7px; flex-wrap:wrap">
+        <button id="b-add" title="N" data-t>Add</button>
+        <button id="b-dup" title="Shift+D" data-t>Copy</button>
+        <button id="b-del" title="Delete" data-t>Delete</button>
+        <button id="b-fit" title="F &mdash; shrink onto the geometry already inside" data-t>Fit</button>
+        <button id="b-mirror" title="Shift+M &mdash; a mirrored twin across the centreline" data-t>Mirror</button>
+        <button id="b-sym" title="Y &mdash; keep mirrored twins in step" data-t>Sym</button>
+        <button id="b-stores" class="on" title="W &mdash; draw the racks and the stores hung on the stations" data-t>Stores</button>
+        <button id="b-boxes" class="on" title="X &mdash; the collision boxes, drawn or not. Nothing is forgotten either way" data-t="Boxes|drawn or not">Boxes</button>
+        <button id="b-marks" class="on" title="Shift+X &mdash; the crosses: the stations, the seats and the points" data-t>Marks</button>
+        <button id="b-names" title="L &mdash; the name written beside every box, seat, station and point" data-t>Names</button>
+      </div>
+      <div class="list" id="list"></div>
+    </div>
+  </section>
+  <section id="selbox">
+    <h2 data-t>Selected</h2>
+    <div class="pad" id="editor"><div class="muted" data-t>Nothing selected.</div></div>
+  </section>
+</aside>
 </div>
 
 <div id="help"></div>
@@ -1179,6 +1261,39 @@ const JA = {
   "turret ring": "砲塔リング",
   "trunnion": "砲耳",
   "cockpit eye": "一人称視点",
+  "Key figures": "主要な設定",
+  "Write back": "書き戻す",
+  "Help": "ヘルプ",
+  "plain hitbox": "素の当たり判定",
+  "boxes": "箱",
+  "seats": "座席",
+  "stations": "ステーション",
+  "fixed": "固定",
+  "%s, %s with an eye": "%s 席、うち目つき %s",
+  "none — the common cockpit": "無し — 共通の操縦席",
+  "the file, into the Export box": "ファイルを書き出し欄へ",
+  "Ctrl+S &mdash; write the file and put it back into the folder": "Ctrl+S — ファイルを書いてフォルダへ戻す",
+  "? &mdash; every key and what it does": "? — すべてのキーとその働き",
+  "MFD": "MFD",
+  "pos &mdash; the middle of the screen": "位置 &mdash; 画面の中心",
+  "tilt &mdash; top away from the pilot": "傾き &mdash; 上端が奥へ",
+  "yaw &mdash; right": "振り角 &mdash; 右が正",
+  "page shown at start": "起動時の頁",
+  "seat that reads it": "見る座席",
+  "any seat within reach": "手の届く席すべて",
+  "%s buttons round the edge": "縁のボタン %s 個",
+  "Find buttons in the model": "模型からボタンを拾う",
+  "Lay 6 a side": "左右に6個ずつ",
+  "Clear buttons": "ボタンを消す",
+  "Find screens in the model": "模型から画面を検出",
+  "Standard three": "標準の3枚",
+  "Eye and chase camera": "目と追従カメラを自動",
+  "Do it all": "全部自動",
+  "%s screens, %s buttons": "画面 %s 枚、ボタン %s 個",
+  "No screens found in front of the eye — try Standard three": "目の前に画面が見つからない——「標準の3枚」を試す",
+  "Eye on the pilot, chase camera %s blocks back": "目を操縦席へ、追従カメラは %s ブロック後ろ",
+  "1st person": "一人称", "3rd person": "三人称", "Close view": "閉じる",
+  "first person": "一人称", "third person": "三人称", "fov %s°": "視野 %s°",
   "chase camera": "追従カメラ",
 
   /* ---- the selected thing ---- */
@@ -1758,7 +1873,7 @@ function setLang(code) {
   LANG = code;
   try { localStorage.setItem("ashvehicles.lang", code); } catch (err) { /* nothing to be done */ }
 
-  paint();
+  paint(); renderRail();
   renderHelp(); renderLegend(); renderViewbar(); renderChassis(); renderBones(); renderSpec();
   renderArms(); renderPack(); renderLibrary(); modelInfo(); autoReport();
   setPose(state.pose.turret, state.pose.gun);
@@ -1902,7 +2017,7 @@ const ROLES = {
   aircraft: ["elevator_left", "elevator_right", "aileron_left", "aileron_right", "flap_left",
     "flap_right", "rudder", "rudder_left", "rudder_right", "nose_gear", "left_gear", "right_gear",
     "nose_gear_door", "left_gear_door", "right_gear_door", "nozzle", "nozzle_left",
-    "nozzle_right", "rotor", "tail_rotor"],
+    "nozzle_right", "nozzle_left_2", "nozzle_right_2", "rotor", "tail_rotor"],
 };
 
 /* ================================================================== *
@@ -2220,8 +2335,11 @@ function buildGeo(doc, k, roles) {
     let count = 0;
 
     for (const cube of bone.cubes || []) {
-      const o = cube.origin, s = cube.size;
+      let o = cube.origin, s = cube.size;
       if (!o || !s) continue;
+      // Grown by the inflate, every face out by that much, which is how GeckoLib bakes one.
+      const grow = typeof cube.inflate === "number" ? cube.inflate : 0;
+      if (grow) { o = o.map(v => v - grow); s = s.map(v => v + grow * 2); }
       const pivot = cube.pivot || [o[0] + s[0]/2, o[1] + s[1]/2, o[2] + s[2]/2];
       const cm = cube.rotation ? bbRot(cube.rotation) : null;
       const corners = [];
@@ -2271,6 +2389,109 @@ function loadGeo(text) {
   modelInfo();
   renderClip();
   autoButtons();
+}
+
+/**
+ * A Blockbench project (.bbmodel), turned into the .geo.json the game turns it into
+ * (client/model/bbmodel/BbModelFile; the two have to stay the same). Only the x of anything is
+ * turned round, as Blockbench's own Bedrock export does: pivots [-x, y, z], rotations [-rx, -ry, rz],
+ * a cube's origin [-to.x, from.y, from.z], and the up and down faces' UVs written end to start.
+ * Meshes are not read: the game draws them, but they have no cube for a box to be made from.
+ *
+ * <p>Answers {@code {geo, tex}}: the geometry as text, and the embedded sheet as a data URL or "".
+ */
+function bbmodelToGeo(doc) {
+  const round = v => Math.round(v * 1e6) / 1e6;
+  const three = (v, d = 0) => [0, 1, 2].map(i => (v && v[i] !== undefined ? +v[i] : d));
+  const elements = new Map((doc.elements || []).map(e => [e.uuid, e]));
+  const listed = new Map((doc.groups || []).map(g => [g.uuid, g]));
+  const textures = doc.textures || [];
+  const use = new Map();
+  for (const e of doc.elements || []) for (const f of Object.values(e.faces || {})) {
+    if (f && f.texture !== null && f.texture !== undefined && f.texture !== false) {
+      use.set(String(f.texture), (use.get(String(f.texture)) || 0) + 1);
+    }
+  }
+  let best = null;
+  for (const [k, n] of use) if (best === null || n > use.get(best)) best = k;
+  const sheet = textures.find((t, i) => best === String(i) || best === t.uuid) || textures[0] || null;
+  const res = doc.resolution || {};
+  const uvW = sheet && sheet.uv_width ? sheet.uv_width : res.width || 16;
+  const uvH = sheet && sheet.uv_height ? sheet.uv_height : res.height || 16;
+  const boxUv = !!(doc.meta && doc.meta.box_uv);
+
+  const bones = new Map();
+  const taken = new Set();
+  const cube = e => {
+    const from = three(e.from), to = three(e.to), rot = three(e.rotation);
+    const c = { origin: [-to[0], from[1], from[2]].map(round), size: [0, 1, 2].map(i => round(to[i] - from[i])) };
+    if (e.inflate) c.inflate = e.inflate;
+    if (rot.some(v => v)) {
+      const o = three(e.origin);
+      c.pivot = [-o[0], o[1], o[2]].map(round);
+      c.rotation = [-rot[0], -rot[1], rot[2]];
+    }
+    if (e.box_uv !== undefined ? e.box_uv : boxUv) {
+      c.uv = three(e.uv_offset).slice(0, 2);
+      if (e.mirror_uv) c.mirror = true;
+      return c;
+    }
+    c.uv = {};
+    for (const [face, f] of Object.entries(e.faces || {})) {
+      if (!f || f.texture === null || f.texture === false) continue;
+      const u = [0, 1, 2, 3].map(i => (f.uv && f.uv[i] !== undefined ? +f.uv[i] : 0));
+      const flip = face === "up" || face === "down";
+      c.uv[face] = flip ? { uv: [u[2], u[3]], uv_size: [u[0] - u[2], u[1] - u[3]] }
+        : { uv: [u[0], u[1]], uv_size: [u[2] - u[0], u[3] - u[1]] };
+      if (f.rotation) c.uv[face].uv_rotation = f.rotation;
+    }
+    return c;
+  };
+  const loose = () => {
+    if (!bones.has("bb_main")) { bones.set("bb_main", { name: "bb_main", pivot: [0, 0, 0], cubes: [] }); taken.add("bb_main"); }
+    return "bb_main";
+  };
+  const walk = (node, parent) => {
+    if (typeof node === "string") {
+      const e = elements.get(node);
+      if (e && e.export !== false && (e.type || "cube") === "cube") bones.get(parent || loose()).cubes.push(cube(e));
+      return;
+    }
+    const g = Object.assign({}, listed.get(node.uuid) || {}, node);
+    if (g.export === false) return;
+    const name0 = g.name || "bone";
+    let name = name0;
+    for (let n = 2; taken.has(name); n++) name = name0 + "_" + n;
+    taken.add(name);
+    const o = three(g.origin), r = three(g.rotation);
+    const bone = { name, pivot: [-o[0], o[1], o[2]], cubes: [] };
+    if (parent) bone.parent = parent;
+    if (r.some(v => v)) bone.rotation = [-r[0], -r[1], r[2]];
+    bones.set(name, bone);
+    for (const child of g.children || []) walk(child, name);
+  };
+  for (const node of doc.outliner || []) walk(node, null);
+
+  const geo = { format_version: "1.12.0", "minecraft:geometry": [{
+    description: { identifier: "geometry." + (doc.model_identifier || doc.name || "model"),
+      texture_width: uvW, texture_height: uvH },
+    bones: [...bones.values()] }] };
+  const src = sheet && typeof sheet.source === "string" && sheet.source.startsWith("data:") ? sheet.source : "";
+  return { geo: JSON.stringify(geo), tex: src };
+}
+
+/** The sheet out of a .bbmodel, put on the machine the way a dropped png is. */
+function takeSheet(dataUrl, name) {
+  const img = new Image();
+  img.onload = () => {
+    state.texture = img;
+    state.mips = buildMips(img);
+    state.texName = name;
+    $("m-texture").disabled = false;
+    if (state.model === "solid" || state.model === "ghost") setModel("texture"); else draw();
+    modelInfo();
+  };
+  img.src = dataUrl;
 }
 
 const boneNamed = name => state.bones.find(b => b.name === name) || null;
@@ -2344,6 +2565,8 @@ const STORE_KINDS = ["weapon", "rack", "equipment"];
 /** Where a store's model and its sheet lie. The folder is the kind, as it is for the data files. */
 const STORE_GEO = /\/geo\/(weapon|rack|equipment)\/([^/]+)\.geo\.json$/i;
 const STORE_TEX = /\/textures\/(weapon|rack|equipment)\/([^/]+)\.png$/i;
+/** A Blockbench project, which is the model and the sheet both. */
+const STORE_BB = /\/bbmodel\/(weapon|rack|equipment)\/([^/]+)\.bbmodel$/i;
 
 /** Each thing's model, read the once and then kept. Emptied when the folder is read again. */
 const storeModels = new Map();
@@ -2381,6 +2604,12 @@ function scanStores(records) {
   };
 
   for (const r of records) {
+    const bb = ("/" + r.path).match(STORE_BB);
+    if (bb) {
+      const e = at(bb[1].toLowerCase(), bb[2]);
+      e.geo = r; e.tex = r;
+      continue;
+    }
     const geo = ("/" + r.path).match(STORE_GEO);
     if (geo) {
       const e = at(geo[1].toLowerCase(), geo[2]);
@@ -2443,7 +2672,13 @@ function storeModel(kind, id) {
 /** One store's model and sheet, read out of the folder and put where the next draw will find them. */
 async function readStoreModel(model, geo, tex) {
   try {
-    const built = buildGeo(JSON.parse(await (await grab(geo)).text()), 1 / 16, null);
+    let doc = JSON.parse(await (await grab(geo)).text());
+    if (/\.bbmodel$/i.test(geo.path)) {
+      const bb = bbmodelToGeo(doc);
+      doc = JSON.parse(bb.geo);
+      if (tex === geo) tex = bb.tex ? { file: await (await fetch(bb.tex)).blob() } : null;
+    }
+    const built = buildGeo(doc, 1 / 16, null);
     model.cubes = built.cubes;
     model.bounds = built.bounds;
     model.texSize = built.texSize;
@@ -2663,7 +2898,7 @@ const POD_LENS = [0, -0.2, 0.95];
 
 /** The colours of the things being placed, filled in from the stylesheet by {@link readTheme}. */
 const COLOURS = {
-  hull: "#3be86a", turret: "#2fc6ff", pylon: "#ff5252", seat: "#c07dff",
+  hull: "#3be86a", turret: "#2fc6ff", pylon: "#ff5252", seat: "#c07dff", display: "#5ce1e6",
   // A station that takes a pod rather than armament. Told apart on screen because the two are told
   // apart by the game: a missile will not hang on one and a pod will not hang on the other.
   special: "#ffa03b", pod: "#4de0c0",
@@ -2906,7 +3141,7 @@ const point = key => state.items.find(i => i.kind === "point" && i.key === key);
 
 /** Whether an item means anything for the sort of machine this is. */
 function relevant(it) {
-  if (it.kind === "pylon") return state.kind === "aircraft";
+  if (it.kind === "pylon" || it.kind === "display") return state.kind === "aircraft";
   if (it.kind === "point" && (it.key === "ring" || it.key === "trunnion")) return state.kind === "ground";
   // The coaxial's muzzle is a place on a machine that has a coaxial. Switch the block off under
   // Performance and the point goes with it, exactly as the block does.
@@ -3658,9 +3893,11 @@ function drawScene(cubes) {
   drawModel(g, cubes, P, depthOf);
   if (state.shown.boxes) plainHitbox(g, P);
   drawItems(g, P);
+  drawDisplays(g, P);
   if (state.shown.boxes) handles(g, P);
   scaleBar(g, w, h);
   gizmo(g, w, h);
+  drawPov();
 }
 
 /**
@@ -3986,7 +4223,13 @@ const CREW_HANG = 1.501;
  * ever turned about Y and {@code (0, 0.6, 0)} does not care. On a machine standing level — which is
  * the only way this pane draws one — the two are the same thing.
  */
-const CREW_DROP = 0.6;
+const CREW_DROP_VANILLA = 0.6;
+
+/** {@code AircraftEntity.PLAYER_RIDER_LIFT}: aircraft put a player back up this much along their own up. */
+const CREW_LIFT_AIRCRAFT = 0.2;
+
+/** The drop that applies to the machine being edited. Ground vehicles keep vanilla's whole 0.6. */
+const crewDrop = () => CREW_DROP_VANILLA - (state.kind === "aircraft" ? CREW_LIFT_AIRCRAFT : 0);
 
 /** A radian angle as the degrees {@link Rx} and its two friends want. */
 const rad = r => r * 180 / Math.PI;
@@ -4001,13 +4244,13 @@ const rad = r => r * 180 / Math.PI;
  * forward. The right arm at model x −5 comes out on the right, and the face at −z comes out forward,
  * which is the check that it is the right way round.
  *
- * <p>And the feet are {@link CREW_DROP} below the seat, which is the whole of why this figure used
+ * <p>And the feet are {@link crewDrop} below the seat, which is the whole of why this figure used
  * to sit too high.
  */
 function crewPoint(m, yaw, seat) {
   const r = -m[0] / 16, u = CREW_HANG - m[1] / 16, f = -m[2] / 16;
   const t = apply(Ry(yaw), [r, 0, f]);
-  return [seat[0] + t[0], seat[1] + u - CREW_DROP, seat[2] + t[2]];
+  return [seat[0] + t[0], seat[1] + u - crewDrop(), seat[2] + t[2]];
 }
 
 /**
@@ -4071,7 +4314,7 @@ function crew(g, P, it, col, on) {
   // that. It looks out of the seat's own eye if it has one and the machine's `camera.cockpit` if it
   // has not, both of which are their own points under Points.
   const dir = apply(Ry(yaw), [0, 0, 1]);
-  const eye = [p[0], p[1] + 1.62 - CREW_DROP, p[2]];
+  const eye = [p[0], p[1] + 1.62 - crewDrop(), p[2]];
   const a = P(eye), b = P([eye[0] + dir[0] * 0.9, eye[1], eye[2] + dir[2] * 0.9]);
   g.beginPath(); g.arc(a[0], a[1], 3, 0, Math.PI * 2); g.stroke();
   g.globalAlpha = 0.6;
@@ -4324,7 +4567,7 @@ function pick(sx, sy, w, h) {
   // Nothing that is not on the screen is under the cursor. Taking hold of a box that has been
   // switched off would be dragging something invisible, which is worse than not being able to.
   // Points and seats first: they are small and always want to win against a box drawn over them.
-  for (const kind of state.shown.marks ? ["point", "eye", "pylon", "seat"] : []) {
+  for (const kind of state.shown.marks ? ["point", "eye", "pylon", "seat", "display"] : []) {
     const list = ofKind(kind);
     for (let i = list.length - 1; i >= 0; i--) {
       const s = toScreen(pointAt(list[i]), w, h);
@@ -4608,6 +4851,7 @@ function mirrorOf(it) {
   const p = copy.kind === "box" ? copy.offset : copy.pos;
   p[0] = -p[0];
   if (copy.kind === "box") { copy.rotation[1] = -copy.rotation[1]; copy.rotation[2] = -copy.rotation[2]; }
+  if (copy.kind === "display") { copy.yaw = -copy.yaw; copy.buttons = copy.buttons.map(b => [-b[0], b[1], b[2]]); }
   // The armour comes across with its sides changed over, as mirrorTwin keeps it afterwards.
   if (copy.kind === "box" && copy.plate) [copy.plate[2], copy.plate[3]] = [copy.plate[3], copy.plate[2]];
   return copy;
@@ -4630,6 +4874,10 @@ function mirrorTwin(it) {
   // The crew member on the other side is facing the other way. A gunner leaning out of the right
   // door and their twin leaning out of the left are the same pose mirrored, not the same angle.
   if (it.kind === "seat") twin.yaw = -(it.yaw || 0);
+  if (it.kind === "display") {
+    Object.assign(twin, { width: it.width, height: it.height, tilt: it.tilt, yaw: -it.yaw, page: twin.page });
+    twin.buttons = it.buttons.map(b => [-b[0], b[1], b[2]]);
+  }
 }
 
 /* ================================================================== *
@@ -4681,9 +4929,551 @@ const TABS = [
   { key: "pylon", name: "Pylons", hot: "P" },
   { key: "seat", name: "Seats", hot: "S" },
   { key: "point", name: "Points", hot: "C" },
+  { key: "display", name: "MFD", hot: "M" },
 ];
 
-function refresh() { renderTabs(); renderList(); renderEditor(); draw(); }
+/* ================================================================== *
+ * Cockpit displays (camera.displays)
+ * ================================================================== */
+
+/**
+ * One MFD of {@code camera.displays}. The buttons are kept relative to the screen's middle so that
+ * dragging the screen takes its buttons with it; they are written out in the machine's axes, which
+ * is what VehicleChassis.Display reads.
+ */
+const newDisplay = (pos, o) => Object.assign({ id: uid(), kind: "display", name: "mfd", pos,
+  width: 0.22, height: 0.22, tilt: 20, yaw: 0, page: "pfd", seat: null, buttons: [], twin: 0,
+  // The figures a read file spelled out even at the codec's default, so writing it back keeps them.
+  said: ["width", "height", "tilt", "page"] }, o || {});
+
+/** The pages CockpitDisplays knows, in the order CockpitControls cycles them. */
+const MFD_PAGES = ["pfd", "nav", "radar", "sms", "eng", "plan", "iff", "rwr", "tpod", "map"];
+
+/** CockpitDisplays.LIFT and the HUD glass of drawHud, so the editor puts things where the game does. */
+const MFD_LIFT = 0.02;
+const HUD_GLASS = { width: 0.24, height: 0.2, ahead: 0.55, drop: 0.05 };
+
+/**
+ * A point of a screen's own face — u across to the right, v up, n out towards the pilot — in the
+ * machine's axes. The same chain as CockpitDisplays.frame: translate(x, y, −z), rotateY(−yaw),
+ * rotateX(−tilt), in the render frame whose z is the file's z turned round.
+ */
+function displayPoint(d, u, v, n) {
+  const t = deg(-d.tilt), b = deg(-d.yaw);
+  const y1 = v * Math.cos(t) - n * Math.sin(t), z1 = v * Math.sin(t) + n * Math.cos(t);
+  const x2 = u * Math.cos(b) + z1 * Math.sin(b), z2 = -u * Math.sin(b) + z1 * Math.cos(b);
+  return [d.pos[0] + x2, d.pos[1] + y1, d.pos[2] - z2];
+}
+
+/** The other way: a point of the machine as (u, v, n) on the screen's face. */
+function displayLocal(d, p) {
+  const t = deg(-d.tilt), b = deg(-d.yaw);
+  const x2 = p[0] - d.pos[0], y1 = p[1] - d.pos[1], z2 = -(p[2] - d.pos[2]);
+  const u = x2 * Math.cos(b) - z2 * Math.sin(b), z1 = x2 * Math.sin(b) + z2 * Math.cos(b);
+  return [u, y1 * Math.cos(t) + z1 * Math.sin(t), -y1 * Math.sin(t) + z1 * Math.cos(t)];
+}
+
+const displayCorners = d => [[-1, -1], [1, -1], [1, 1], [-1, 1]]
+  .map(([a, b]) => displayPoint(d, a * d.width / 2, b * d.height / 2, MFD_LIFT));
+
+/** Where a screen's buttons are, in the machine's axes. */
+const displayButtons = d => d.buttons.map(b => add(d.pos, b));
+
+/** The eye a screen is read from: its own seat's eye, else the pilot's, else camera.cockpit. */
+function displayEye(d) {
+  const seats = ofKind("seat");
+  const seat = seats[d && d.seat != null ? d.seat : 0];
+  const eye = seat ? eyeOf(seat) : null;
+  return eye ? eye.pos : point("cockpit").pos;
+}
+
+function drawDisplays(g, P) {
+  if (!state.shown.marks) return;
+  for (const d of ofKind("display")) {
+    const on = d.id === state.sel, over = d.id === state.hover;
+    const col = on ? TH.sel : over ? TH.hover : COLOURS.display;
+    const c = displayCorners(d).map(P);
+    g.globalAlpha = 0.35; g.fillStyle = col;
+    g.beginPath(); c.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.fill();
+    g.globalAlpha = 1; g.strokeStyle = col; g.lineWidth = on ? 2 : 1.2; g.stroke();
+    for (const b of displayButtons(d)) { const s = P(b); g.fillStyle = col; g.fillRect(s[0] - 1.5, s[1] - 1.5, 3, 3); }
+    marker(g, P(d.pos), col, on, "cross");
+    if (state.labels) label(g, P(d.pos), d.page.toUpperCase(), col);
+  }
+}
+
+/* ---- finding the screens in the model ---- */
+
+/** A cube's middle and its three edges, out of the eight corners boxCorners also uses. */
+function cubeFrame(c) {
+  const p = c.pts, o = p[0];
+  const e = [sub(p[1], o), sub(p[2], o), sub(p[4], o)];
+  const len = e.map(v => Math.hypot(...v));
+  const mid = p.reduce((s, q) => add(s, q), [0, 0, 0]).map(n => n / 8);
+  return { mid, e, len };
+}
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const unit = v => { const l = Math.hypot(...v) || 1; return v.map(n => n / l); };
+
+/** Bones whose name says they are a screen. Looked for before anything is guessed from shape. */
+const SCREEN_BONE = /mfd|mfcd|screen|display|lcd|monitor|crt|ddi/i;
+
+/**
+ * The screens of the cockpit in front of an eye: flat cubes within reach of it, facing it, of a
+ * size a screen comes in. A bone named like a screen wins outright; without one the shape decides,
+ * the biggest first, and a cube that overlaps one already taken (its bezel, the panel behind it) is
+ * passed over.
+ */
+function findScreens(eye, reach) {
+  const found = [];
+  for (const c of posedCubes()) {
+    const f = cubeFrame(c);
+    const order = [0, 1, 2].sort((a, b) => f.len[a] - f.len[b]);
+    const [thin, a, b] = order;
+    if (f.len[a] < 0.03 || f.len[thin] > 0.5 * f.len[a]) continue;
+    let n = unit(f.e[thin]);
+    const toEye = sub(eye, f.mid);
+    const dist = Math.hypot(...toEye);
+    if (dist > reach || dist < 0.15) continue;
+    if (dot3(n, toEye) < 0) n = n.map(x => -x);
+    if (dot3(n, unit(toEye)) < 0.55 || f.mid[2] < eye[2] + 0.1 || f.mid[1] > eye[1]) continue;
+    const area = f.len[a] * f.len[b];
+    if (area < 0.002 || area > 0.25 || f.len[b] / f.len[a] > 2.5) continue;
+    // Across is whichever edge lies more along x; the screen is centred on the face towards the eye.
+    const across = Math.abs(f.e[a][0]) / f.len[a] >= Math.abs(f.e[b][0]) / f.len[b] ? a : b;
+    const up = across === a ? b : a;
+    const mid = add(f.mid, n.map(x => x * f.len[thin] / 2));
+    const tilt = Math.asin(Math.max(-1, Math.min(1, n[1]))) * 180 / Math.PI;
+    const yaw = Math.atan2(-n[0], -n[2]) * 180 / Math.PI;
+    if (Math.abs(yaw) > 60) continue;
+    found.push({ mid, width: f.len[across], height: f.len[up], tilt, yaw, area,
+      named: SCREEN_BONE.test(c.bone || "") });
+  }
+  // A panel with screens set into it is not a screen: whatever holds a smaller candidate goes.
+  const holds = (s, t) => t !== s && t.area < s.area * 0.7
+    && Math.abs(t.mid[0] - s.mid[0]) < s.width / 2 && Math.abs(t.mid[1] - s.mid[1]) < s.height / 2 + 0.05
+    && Math.abs(t.mid[2] - s.mid[2]) < s.height / 2 + 0.05;
+  const leaves = found.filter(s => !found.some(t => holds(s, t)));
+  const pool = leaves.some(s => s.named) ? leaves.filter(s => s.named) : leaves;
+  // Smallest first: a screen is the leaf, and what overlaps one it has already taken is its surround.
+  pool.sort((p, q) => p.area - q.area);
+  const kept = [];
+  for (const s of pool) {
+    if (kept.some(k => Math.hypot(...sub(k.mid, s.mid)) < (k.width + s.width) / 2)) continue;
+    kept.push(s);
+    if (kept.length >= 6) break;
+  }
+  return kept.sort((p, q) => p.mid[0] - q.mid[0]);
+}
+
+/** Pages for screens laid left to right: the middle one flies, the outer ones fight. */
+function pagesFor(screens) {
+  // A screen laid back flat between the knees is the engine page, as every file here has it.
+  const upright = screens.filter(s => s.tilt < 40);
+  const pages = pagesForRow(upright.length);
+  return screens.map(s => s.tilt < 40 ? pages[upright.indexOf(s)] : "eng");
+}
+function pagesForRow(count) {
+  if (count === 1) return ["pfd"];
+  if (count === 2) return ["radar", "sms"];
+  if (count === 3) return ["radar", "pfd", "sms"];
+  const out = [];
+  const ring = ["radar", "nav", "pfd", "sms", "eng", "map"];
+  for (let i = 0; i < count; i++) out.push(ring[i % ring.length]);
+  return out;
+}
+
+/** The little square cubes round a screen's edge, as its buttons. */
+function findButtons(d) {
+  const out = [];
+  for (const c of posedCubes()) {
+    const f = cubeFrame(c);
+    // A button is a pixel deep whatever the scale, so only its two smaller sides say it is small.
+    const side = [...f.len].sort((p, q) => p - q);
+    if (side[1] > Math.max(0.05, d.width * 0.25) || side[2] > Math.max(0.07, d.width * 0.4)) continue;
+    const [u, v, n] = displayLocal(d, f.mid);
+    if (Math.abs(n) > 0.07) continue;
+    const ou = Math.abs(u) / (d.width / 2), ov = Math.abs(v) / (d.height / 2);
+    if (ou > 1.45 || ov > 1.45 || (ou < 0.85 && ov < 0.85)) continue;
+    out.push(sub(f.mid, d.pos).map(round3));
+  }
+  return out;
+}
+
+/** Put the screens the model has in front of each crew member. */
+function autoDisplays() {
+  if (!state.cubes.length) return say("Drop a model in first");
+  snapshot();
+  const seats = ofKind("seat");
+  const crew = seats.length ? seats.map((s, i) => i) : [0];
+  const placed = [];
+  for (const i of crew) {
+    const eye = displayEye({ seat: i });
+    const screens = findScreens(eye, 1.25).filter(s => !placed.some(p => Math.hypot(...sub(p.pos, s.mid)) < 0.05));
+    const pages = pagesFor(screens);
+    screens.forEach((s, k) => {
+      const d = newDisplay(s.mid.map(round3), { name: "mfd" + (placed.length + 1), width: round3(s.width),
+        height: round3(s.height), tilt: Math.round(s.tilt * 10) / 10, yaw: Math.round(s.yaw * 10) / 10,
+        page: pages[k], seat: crew.length > 1 ? i : null });
+      d.buttons = findButtons(d);
+      placed.push(d);
+    });
+  }
+  if (!placed.length) return say("No screens found in front of the eye — try Standard three");
+  state.items = state.items.filter(i => i.kind !== "display").concat(placed);
+  state.sel = placed[0].id;
+  say(tr("%s screens, %s buttons", placed.length, placed.reduce((s, d) => s + d.buttons.length, 0)));
+  refresh();
+}
+
+/** The three screens GenericCockpit puts in front of the eye of a machine that writes none. */
+function standardDisplays() {
+  snapshot();
+  const EYE = [0, 14.5, 13], seat = state.tab === "display" && selected() && selected().kind === "display"
+    ? selected().seat : null;
+  const eye = displayEye({ seat });
+  const screens = [[[-3.446, 10.384, 2.641], 3.9, 3.1, "nav"], [[-0.004, 9.414, 2.883], 2.6, 4.6, "pfd"],
+    [[3.446, 10.384, 2.641], 3.9, 3.1, "sms"]];
+  const made = screens.map(([c, w, h, page], k) => newDisplay(
+    [eye[0] + (c[0] - EYE[0]) / 16, eye[1] + (c[1] - EYE[1]) / 16, eye[2] + (EYE[2] - c[2]) / 16].map(round3),
+    { name: "mfd" + (k + 1), width: round3(w / 16), height: round3(h / 16), tilt: 14, page, seat }));
+  state.items = state.items.filter(i => !(i.kind === "display" && i.seat === seat)).concat(made);
+  state.sel = made[1].id;
+  refresh();
+}
+
+/** The first-person eye on the pilot's head, and the chase camera off the machine's size. */
+function autoCameras() {
+  snapshot();
+  const seat = ofKind("seat")[0];
+  if (seat) {
+    const eye = eyeOf(seat);
+    point("cockpit").pos = (eye ? eye.pos : [seat.pos[0], seat.pos[1] + 1.62 - crewDrop(), seat.pos[2]]).map(round3);
+  }
+  let lo = [0, 0, 0], hi = [0, 0, 0];
+  const pts = ofKind("box").length ? ofKind("box").flatMap(boxCorners) : posedCubes().flatMap(c => c.pts);
+  for (const p of pts) for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], p[j]); hi[j] = Math.max(hi[j], p[j]); }
+  const length = Math.max(hi[2] - lo[2], hi[0] - lo[0], 4);
+  const middle = state.chassis.height / 2;
+  point("chase").pos = [0, round3(Math.max(1.5, hi[1] * 0.75 + length * 0.08) - middle * 0),
+    round3(-(length * 0.55 + 4))];
+  say(tr("Eye on the pilot, chase camera %s blocks back", fixed(-point("chase").pos[2])));
+  refresh();
+}
+
+/** Every automatic step at once, for a machine that has just been dropped in. */
+function autoEverything() {
+  autoCameras();
+  if (state.kind === "aircraft" && state.cubes.length) autoDisplays();
+}
+
+function displayEditor(it) {
+  const seats = ofKind("seat");
+  return `<label>${tr("pos &mdash; the middle of the screen")}</label>
+      <div class="triple">${num("px","x",it.pos[0])}${num("py","y",it.pos[1])}${num("pz","z",it.pos[2])}</div>
+      <div class="pair">${num("dw","width",it.width,0.005)}${num("dh","height",it.height,0.005)}</div>
+      <div class="pair">${num("dt","tilt &mdash; top away from the pilot",it.tilt,1)}${num("dy","yaw &mdash; right",it.yaw,1)}</div>
+      <label>${tr("page shown at start")}</label><select id="f-page">${MFD_PAGES.map(p =>
+        `<option${p === it.page ? " selected" : ""}>${p}</option>`).join("")}</select><div class="sp"></div>
+      <label>${tr("seat that reads it")}</label><select id="f-dseat">
+        <option value=""${it.seat == null ? " selected" : ""}>${tr("any seat within reach")}</option>
+        ${seats.map((s, i) => `<option value="${i}"${it.seat === i ? " selected" : ""}>${i}: ${escapeHtml(s.name)}</option>`).join("")}
+      </select><div class="sp"></div>
+      <div class="muted" style="margin-bottom:6px">${tr("%s buttons round the edge", it.buttons.length)}</div>
+      <div class="row"><button id="f-dbtn" class="grow">${tr("Find buttons in the model")}</button>
+        <button id="f-dbtnrow" class="grow">${tr("Lay 6 a side")}</button>
+        <button id="f-dbtnclr">${tr("Clear buttons")}</button></div>`;
+}
+
+function wireDisplayEditor(el, it) {
+  const done = () => { mirrorTwin(it); refresh(); };
+  const page = el.querySelector("#f-page");
+  if (page) page.onchange = () => { snapshot(); it.page = page.value; done(); };
+  const seat = el.querySelector("#f-dseat");
+  if (seat) seat.onchange = () => { snapshot(); it.seat = seat.value === "" ? null : +seat.value; done(); };
+  const find = el.querySelector("#f-dbtn");
+  if (find) find.onclick = () => { snapshot(); it.buttons = findButtons(it); done(); };
+  const row = el.querySelector("#f-dbtnrow");
+  if (row) row.onclick = () => {
+    snapshot();
+    it.buttons = [];
+    for (const side of [-1, 1]) for (let k = 0; k < 6; k++) {
+      const v = (k - 2.5) / 2.5 * it.height * 0.38;
+      it.buttons.push(sub(displayPoint(it, side * it.width * 0.6, v, 0), it.pos).map(round3));
+    }
+    done();
+  };
+  const clr = el.querySelector("#f-dbtnclr");
+  if (clr) clr.onclick = () => { snapshot(); it.buttons = []; done(); };
+}
+
+/** The automatic steps, at the top of the panel whenever the MFD tab is open. */
+function displayTools() {
+  return `<div class="row" style="flex-wrap:wrap;gap:5px;margin-bottom:8px">
+      <button id="a-mfd" class="grow">${tr("Find screens in the model")}</button>
+      <button id="a-mfd3" class="grow">${tr("Standard three")}</button>
+      <button id="a-cams" class="grow">${tr("Eye and chase camera")}</button>
+      <button id="a-all" class="grow">${tr("Do it all")}</button></div>`;
+}
+function wireDisplayTools(el) {
+  const on = (id, f) => { const b = el.querySelector("#" + id); if (b) b.onclick = f; };
+  on("a-mfd", autoDisplays); on("a-mfd3", standardDisplays); on("a-cams", autoCameras); on("a-all", autoEverything);
+}
+
+function takeDisplays(doc) {
+  state.items = state.items.filter(i => i.kind !== "display");
+  const list = doc.camera && Array.isArray(doc.camera.displays) ? doc.camera.displays : [];
+  list.forEach((d, k) => {
+    const pos = vec(d.pos, [0, 0, 0]);
+    state.items.push(newDisplay(pos, {
+      name: "mfd" + (k + 1),
+      width: typeof d.width === "number" ? d.width : 0.22, height: typeof d.height === "number" ? d.height : 0.22,
+      tilt: typeof d.tilt === "number" ? d.tilt : 20, yaw: typeof d.yaw === "number" ? d.yaw : 0,
+      page: d.page || "pfd", seat: typeof d.seat === "number" ? d.seat : null,
+      buttons: (Array.isArray(d.buttons) ? d.buttons : []).map(b => sub(vec(b, pos), pos)),
+      said: Object.keys(d),
+    }));
+  });
+}
+
+/** camera.displays, leaving out each figure the codec would assume. */
+function displaysJson() {
+  return ofKind("display").map(d => {
+    const o = { pos: d.pos.map(round3) };
+    const said = k => (d.said || []).includes(k);
+    if (d.width !== 0.22 || said("width")) o.width = round3(d.width);
+    if (d.height !== 0.22 || said("height")) o.height = round3(d.height);
+    if (d.tilt !== 20 || said("tilt")) o.tilt = round3(d.tilt);
+    if (d.yaw || said("yaw")) o.yaw = round3(d.yaw);
+    if (d.page !== "pfd" || said("page")) o.page = d.page;
+    if (d.buttons.length) o.buttons = displayButtons(d).map(p => p.map(round3));
+    if (d.seat != null) o.seat = d.seat;
+    return o;
+  });
+}
+
+/* ================================================================== *
+ * The pilot's view: first and third person, in perspective
+ * ================================================================== */
+
+const pov = { mode: "off", yaw: 0, pitch: 0, drag: null };
+
+/** The camera of each view: where it stands and which way it looks, in the machine's axes. */
+function povCamera() {
+  if (pov.mode === "first") {
+    const sel = selected();
+    const seats = ofKind("seat");
+    const seat = sel && sel.kind === "seat" ? sel : sel && sel.kind === "eye" ? byId(sel.seat)
+      : sel && sel.kind === "display" && sel.seat != null ? seats[sel.seat] : null;
+    const eye = seat && eyeOf(seat) ? pointAt(eyeOf(seat)) : point("cockpit").pos;
+    return { at: eye, yaw: pov.yaw, pitch: pov.pitch };
+  }
+  return { at: chasePos(), yaw: pov.yaw, pitch: pov.pitch - (state.chassis.tilt || 0) };
+}
+
+/** The six faces of a cube by corner index: bit 0 is x, bit 1 is y, bit 2 is z. */
+const CUBE_FACES = [[0, 2, 6, 4], [1, 5, 7, 3], [0, 4, 5, 1], [2, 3, 7, 6], [0, 1, 3, 2], [4, 6, 7, 5]];
+
+/**
+ * The model in perspective, face by face with the back faces culled, which is what the game does
+ * and what the orthographic pane does not need to: there the eye is never inside the machine. From
+ * a seat it is, and a cube drawn as its outline then covers the whole screen with the inside of the
+ * canopy. Faces are painted far to near by their middles, lit by how squarely they face the eye.
+ */
+function drawFaces(g, cubes, P, depth, eye, F) {
+  const NEAR = 0.04;
+  const own = { texture: state.texture, mips: state.mips, texSize: state.texSize };
+  const skinned = state.model === "texture";
+  const faces = [];
+  for (const c of cubes) {
+    const p = c.pts;
+    const centre = p.reduce((s, q) => add(s, q), [0, 0, 0]).map(n => n / 8);
+    const skin = c.skin || own;
+    // The patched faces when the model is in its skin and the sheet is to be had, else the six bare
+    // ones. A patched face is written as a corner and the two corners along its edges; the fourth
+    // is the one opposite, which in the corner bits is the other two folded onto the first.
+    const list = skinned && skin.texture && c.faces && c.faces.length
+      ? c.faces.map(f => ({ idx: [f.a, f.u, f.u ^ f.v ^ f.a, f.v], uv: f, skin }))
+      : CUBE_FACES.map(f => ({ idx: f, uv: null, skin: null }));
+    for (const face of list) {
+      const f = face.idx;
+      const a = p[f[0]], b = p[f[1]], d = p[f[3]];
+      let n = unit([
+        (b[1] - a[1]) * (d[2] - a[2]) - (b[2] - a[2]) * (d[1] - a[1]),
+        (b[2] - a[2]) * (d[0] - a[0]) - (b[0] - a[0]) * (d[2] - a[2]),
+        (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0])]);
+      const mid = f.reduce((s, i) => add(s, p[i]), [0, 0, 0]).map(v => v / 4);
+      if (dot3(n, sub(mid, centre)) < 0) n = n.map(v => -v);
+      const toEye = sub(eye, mid);
+      // A face level with the middle is a panel with no thickness: both its sides are the near side.
+      if (dot3(n, toEye) <= 0 && Math.abs(dot3(n, sub(mid, centre))) > 1e-6) continue;
+      if (f.some(i => depth(p[i]) <= NEAR)) continue;
+      faces.push({ c, f, uv: face.uv, skin: face.skin, z: -dot3(toEye, F), lit: Math.abs(dot3(n, unit(toEye))) });
+    }
+  }
+  faces.sort((x, y) => y.z - x.z);
+  const pale = TH.pale;
+  const was = g.imageSmoothingEnabled;
+  g.imageSmoothingQuality = "high";
+  for (const { c, f, uv, skin, lit } of faces) {
+    const s = f.map(i => P(c.pts[i]));
+    if (uv) { paintQuad(g, s, uv, skin, lit, pale); continue; }
+    const light = pale ? 88 - lit * 30 : 20 + lit * 34;
+    g.fillStyle = `hsl(${c.hue}, ${pale ? 40 : 30}%, ${light}%)`;
+    g.strokeStyle = `hsl(${c.hue}, 34%, ${light + (pale ? -14 : 10)}%)`;
+    g.lineWidth = 0.6;
+    g.beginPath();
+    g.moveTo(s[0][0], s[0][1]);
+    for (let i = 1; i < 4; i++) g.lineTo(s[i][0], s[i][1]);
+    g.closePath();
+    g.fill(); g.stroke();
+  }
+  g.globalAlpha = 1;
+  g.imageSmoothingEnabled = was;
+}
+
+/**
+ * One patch of the sheet onto a four-cornered face seen in perspective, as two triangles each
+ * carried by its own affine transform. A perspective quad is not a parallelogram, so the one
+ * transform the flat pane uses (drawSkin) cannot land all four corners; two triangles land six.
+ *
+ * @param s the four corners on screen, in the order origin, along u, opposite, along v
+ * @param uv the patch, as uvFaces writes it: sx sy sw sh in sheet units, sw and sh possibly negative
+ */
+function paintQuad(g, s, uv, skin, lit, pale) {
+  const mips = skin.mips;
+  const kx = skin.texture.naturalWidth / (skin.texSize[0] || 16);
+  const ky = skin.texture.naturalHeight / (skin.texSize[1] || 16);
+  const sx = uv.sx * kx, sy = uv.sy * ky, sw = uv.sw * kx, sh = uv.sh * ky;
+  const t = [[sx, sy], [sx + sw, sy], [sx + sw, sy + sh], [sx, sy + sh]];
+  // The copy of the sheet nearest the size the face is on screen, as drawSkin picks it.
+  const area = Math.abs((s[1][0] - s[0][0]) * (s[3][1] - s[0][1]) - (s[1][1] - s[0][1]) * (s[3][0] - s[0][0]))
+    + Math.abs((s[1][0] - s[2][0]) * (s[3][1] - s[2][1]) - (s[1][1] - s[2][1]) * (s[3][0] - s[2][0]));
+  if (area < 0.5) return;
+  const scale = Math.sqrt(area / Math.max(1, Math.abs(sw * sh)));
+  let level = scale >= 1 ? 0 : Math.round(Math.log2(1 / scale));
+  level = Math.max(0, Math.min(mips.length - 1, level));
+  while (level > 0 && (Math.abs(sw) < (1 << level) || Math.abs(sh) < (1 << level))) level--;
+  const k = 1 << level, img = mips[level];
+  g.imageSmoothingEnabled = scale < 1;
+
+  for (const tri of [[0, 1, 2], [0, 2, 3]]) {
+    const [p0, p1, p2] = tri.map(i => s[i]);
+    const [t0, t1, t2] = tri.map(i => [t[i][0] / k, t[i][1] / k]);
+    // The affine map that takes the three texture points onto the three screen points.
+    const det = (t1[0] - t0[0]) * (t2[1] - t0[1]) - (t2[0] - t0[0]) * (t1[1] - t0[1]);
+    if (Math.abs(det) < 1e-6) continue;
+    const a = ((p1[0] - p0[0]) * (t2[1] - t0[1]) - (p2[0] - p0[0]) * (t1[1] - t0[1])) / det;
+    const b = ((p1[1] - p0[1]) * (t2[1] - t0[1]) - (p2[1] - p0[1]) * (t1[1] - t0[1])) / det;
+    const cc = ((p2[0] - p0[0]) * (t1[0] - t0[0]) - (p1[0] - p0[0]) * (t2[0] - t0[0])) / det;
+    const dd = ((p2[1] - p0[1]) * (t1[0] - t0[0]) - (p1[1] - p0[1]) * (t2[0] - t0[0])) / det;
+    const e = p0[0] - a * t0[0] - cc * t0[1], ff = p0[1] - b * t0[0] - dd * t0[1];
+    // Grown a hair about its middle so the two triangles, and the faces beside them, overlap rather
+    // than leave a softened seam between them.
+    const cx = (p0[0] + p1[0] + p2[0]) / 3, cy = (p0[1] + p1[1] + p2[1]) / 3;
+    const grow = q => [q[0] + Math.sign(q[0] - cx) * SEAM, q[1] + Math.sign(q[1] - cy) * SEAM];
+    const [g0, g1, g2] = [p0, p1, p2].map(grow);
+    g.save();
+    g.beginPath(); g.moveTo(g0[0], g0[1]); g.lineTo(g1[0], g1[1]); g.lineTo(g2[0], g2[1]); g.closePath();
+    g.clip();
+    g.globalAlpha = 1;
+    g.transform(a, b, cc, dd, e, ff);
+    g.drawImage(img, 0, 0);
+    g.restore();
+  }
+  // The lighting over the top: a face square to the eye is lit, one seen edge on falls away.
+  const light = (lit - 0.6) * 0.5;
+  const shade = Math.min(0.45, Math.abs(light));
+  if (shade > 0.02) {
+    g.save();
+    g.beginPath(); g.moveTo(s[0][0], s[0][1]); for (let i = 1; i < 4; i++) g.lineTo(s[i][0], s[i][1]); g.closePath();
+    g.globalAlpha = shade;
+    g.fillStyle = (light > 0) !== !!pale ? "#ffffff" : "#000000";
+    g.fill();
+    g.restore();
+  }
+}
+
+function drawPov() {
+  const box = document.getElementById("pov");
+  if (!box) return;
+  box.style.display = pov.mode === "off" ? "none" : "";
+  document.querySelectorAll("[data-pov]").forEach(b => b.className = b.dataset.pov === pov.mode ? "on" : "");
+  if (pov.mode === "off") return;
+  const { g, w, h } = surface("cPov");
+  const c = povCamera();
+  const cy = Math.cos(deg(c.yaw)), sy = Math.sin(deg(c.yaw));
+  const cp = Math.cos(deg(c.pitch)), sp = Math.sin(deg(c.pitch));
+  // Forward is +z, right is +x (a file's +x is the machine's right), yaw to the right, pitch up.
+  const F = [sy * cp, sp, cy * cp], R = [cy, 0, -sy], U = [-sy * sp, cp, -cy * sp];
+  const f = (h / 2) / Math.tan(deg((state.chassis.fov || 70) / 2));
+  const depth = p => dot3(sub(p, c.at), F);
+  const P = p => {
+    const d = sub(p, c.at), z = Math.max(0.01, dot3(d, F));
+    return [w / 2 + dot3(d, R) / z * f, h / 2 - dot3(d, U) / z * f];
+  };
+  const NEAR = 0.04;
+  g.fillStyle = TH.ground; g.fillRect(0, 0, w, h);
+  // The horizon of the machine, so that a view with nothing in it still says which way is up.
+  const hz = P(add(c.at, [Math.sin(deg(c.yaw)) * 1000, 0, Math.cos(deg(c.yaw)) * 1000]));
+  g.fillStyle = "rgba(90,140,200,.12)"; g.fillRect(0, 0, w, Math.max(0, Math.min(h, hz[1])));
+  const inFront = pts => pts.every(p => depth(p) > NEAR);
+  drawFaces(g, posedCubes().concat(storeCubes()), P, depth, c.at, F);
+  if (state.shown.boxes && pov.mode === "third") {
+    g.strokeStyle = COLOURS.hull; g.globalAlpha = 0.5; g.lineWidth = 1;
+    for (const b of ofKind("box")) {
+      const k = boxCorners(b);
+      if (!inFront(k)) continue;
+      const s = k.map(P);
+      g.beginPath(); for (const [a, e] of LINKS) { g.moveTo(s[a][0], s[a][1]); g.lineTo(s[e][0], s[e][1]); } g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+  if (pov.mode === "third") for (const s of ofKind("seat")) if (depth(s.pos) > NEAR) crew(g, P, s, COLOURS.seat, false);
+  // The screens, and in first person the HUD glass in front of the eye.
+  const panes = ofKind("display").map(d => ({ d, k: displayCorners(d), col: d.id === state.sel ? TH.sel : COLOURS.display }));
+  if (pov.mode === "first" && state.kind === "aircraft") {
+    const e = point("cockpit").pos;
+    const glass = newDisplay([e[0], e[1] - HUD_GLASS.drop, e[2] + HUD_GLASS.ahead],
+      { width: HUD_GLASS.width, height: HUD_GLASS.height, tilt: 0, page: "hud" });
+    panes.push({ d: glass, k: displayCorners(glass), col: "#3be86a", glass: true });
+  }
+  for (const { d, k, col, glass } of panes) {
+    if (!inFront(k)) continue;
+    const s = k.map(P);
+    g.beginPath(); s.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath();
+    g.globalAlpha = glass ? 0.12 : 0.85; g.fillStyle = glass ? col : "#050a08"; g.fill();
+    g.globalAlpha = 1; g.strokeStyle = col; g.lineWidth = 1.5; g.stroke();
+    const m = P(d.pos);
+    g.fillStyle = col; g.textAlign = "center"; g.fillText(d.page.toUpperCase(), m[0], m[1] + 4); g.textAlign = "left";
+    for (const b of displayButtons(d)) if (depth(b) > NEAR) { const q = P(b); g.fillRect(q[0] - 1.5, q[1] - 1.5, 3, 3); }
+  }
+  if (pov.mode === "first") {
+    g.strokeStyle = "rgba(255,255,255,.7)"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(w / 2 - 6, h / 2); g.lineTo(w / 2 + 6, h / 2); g.moveTo(w / 2, h / 2 - 6); g.lineTo(w / 2, h / 2 + 6); g.stroke();
+  }
+  g.fillStyle = TH.wire;
+  g.fillText(tr(pov.mode === "first" ? "first person" : "third person") + "  " + tr("fov %s°", state.chassis.fov || 70)
+    + "  " + c.at.map(n => fixed(n)).join(" "), 8, h - 8);
+}
+
+function wirePov() {
+  const box = document.getElementById("pov");
+  if (!box) return;
+  document.querySelectorAll("[data-pov]").forEach(b => b.onclick = () => { pov.mode = b.dataset.pov; pov.yaw = 0; pov.pitch = 0; drawPov(); });
+  const cv = document.getElementById("cPov");
+  cv.onmousedown = e => { pov.drag = [e.clientX, e.clientY, pov.yaw, pov.pitch]; e.preventDefault(); };
+  window.addEventListener("mousemove", e => {
+    if (!pov.drag) return;
+    pov.yaw = pov.drag[2] + (e.clientX - pov.drag[0]) * 0.3;
+    pov.pitch = Math.max(-89, Math.min(89, pov.drag[3] - (e.clientY - pov.drag[1]) * 0.3));
+    drawPov();
+  });
+  window.addEventListener("mouseup", () => { pov.drag = null; });
+  cv.ondblclick = () => { pov.yaw = 0; pov.pitch = 0; drawPov(); };
+}
+
+function refresh() { renderTabs(); renderList(); renderEditor(); renderFacts(); draw(); }
 /** The same, without rebuilding the field the user is typing or dragging in. */
 function refreshLive() { renderList(); draw(); liveNumbers(); }
 
@@ -4691,7 +5481,7 @@ function renderTabs() {
   const el = document.getElementById("tabs");
   el.innerHTML = "";
   for (const t of TABS) {
-    if (t.key === "pylon" && state.kind !== "aircraft") continue;
+    if ((t.key === "pylon" || t.key === "display") && state.kind !== "aircraft") continue;
     const b = document.createElement("button");
     b.textContent = tr(t.name);
     b.title = t.hot;
@@ -4934,14 +5724,16 @@ function bindStorePanel(it) {
 function renderEditor() {
   const el = document.getElementById("editor");
   const it = selected();
+  const tools = state.tab === "display" && state.kind === "aircraft" ? displayTools() : "";
   if (!it || !relevant(it)) {
-    el.innerHTML = '<div class="muted">'
+    el.innerHTML = tools + '<div class="muted">'
       + tr("Nothing selected. Click one in a pane or in the list; <kbd>Tab</kbd> walks through them.")
       + '</div>';
+    wireDisplayTools(el);
     return;
   }
 
-  let html = "";
+  let html = tools;
   if (it.kind !== "point" && it.kind !== "eye") {
     html += `<label>${tr("name")}</label><input id="f-name" value="${escapeHtml(it.name || "")}"><div class="sp"></div>`;
   } else if (it.kind === "eye") {
@@ -4996,6 +5788,8 @@ function renderEditor() {
       <label class="row"><input id="f-wingtip" type="checkbox" style="width:auto"${it.wingtip ? " checked" : ""}>
         <span>${tr("wingtip &mdash; the tip rail, and nothing else")}</span></label>`
       + storePanel(it);
+  } else if (it.kind === "display") {
+    html += displayEditor(it);
   } else if (it.kind === "eye") {
     html += `<label>${tr("pos")}</label>
       <div class="triple">${num("px","x",it.pos[0])}${num("py","y",it.pos[1])}${num("pz","z",it.pos[2])}</div>`;
@@ -5047,6 +5841,8 @@ function renderEditor() {
     html += `<div id="note"></div>`;
   }
   el.innerHTML = html;
+  wireDisplayTools(el);
+  if (it.kind === "display") wireDisplayEditor(el, it);
 
   const name = document.getElementById("f-name");
   if (name) name.oninput = () => { it.name = name.value; renderList(); draw(); };
@@ -5081,9 +5877,9 @@ function renderEditor() {
   if (addEye) addEye.onclick = () => {
     snapshot();
     // Where this crew member's head actually is: 1.62 above their feet, and their feet are
-    // CREW_DROP under the seat. So it starts on the head drawn in the pane rather than a little
+    // crewDrop() under the seat. So it starts on the head drawn in the pane rather than a little
     // above it, and is dragged from there to wherever the hatch is.
-    const eye = newEye(it.id, [it.pos[0], round3(it.pos[1] + 1.62 - CREW_DROP), it.pos[2]]);
+    const eye = newEye(it.id, [it.pos[0], round3(it.pos[1] + 1.62 - crewDrop()), it.pos[2]]);
     state.items.push(eye);
     state.sel = eye.id;
     refresh();
@@ -5126,6 +5922,7 @@ function renderEditor() {
     sx:["size",0], sy:["size",1], sz:["size",2],
     rx:["rotation",0], ry:["rotation",1], rz:["rotation",2],
     px:["pos",0], py:["pos",1], pz:["pos",2],
+    dw:["width"], dh:["height"], dt:["tilt"], dy:["yaw"],
     plate0:["plate",0], plate1:["plate",1], plate2:["plate",2],
     plate3:["plate",3], plate4:["plate",4], plate5:["plate",5],
   };
@@ -5140,7 +5937,7 @@ function renderEditor() {
       if (prop === "pos" && it.kind === "point" && it.spec && !placed(it)) it.pos = derived(it.key).slice();
       // A box with no armour has no figures to write one into until the first is typed.
       if (prop === "plate" && !it.plate) it.plate = [0, 0, 0, 0, 0, 0];
-      it[prop][idx] = n;
+      if (idx === undefined) it[prop] = n; else it[prop][idx] = n;
       mirrorTwin(it);
       refreshLive();
     };
@@ -5951,6 +6748,7 @@ const MOVING_MOUNTS = [
   ["bay_left", "bay_left"], ["bay_left_2", "bay_left"], ["bay_left_3", "bay_left"],
   ["bay_right", "bay_right"], ["bay_right_2", "bay_right"], ["bay_right_3", "bay_right"],
   ["nozzle", "nozzle"], ["nozzle_left", "nozzle"], ["nozzle_right", "nozzle"],
+  ["nozzle_left_2", "nozzle"], ["nozzle_right_2", "nozzle"],
   ["wing_left", "wing_left"], ["wing_right", "wing_right"],
 ];
 
@@ -7830,7 +8628,7 @@ function dropPreview(quiet) {
 
 function generate() {
   if (!state.cubes.length) return say("Drop a model in first");
-  $("autobox").open = true;
+  showPanel("autobox");
 
   state.auto.minCube = Math.max(0, parseFloat($("a-min").value) || 0);
   state.auto.maxBoxes = Math.max(1, parseInt($("a-max").value, 10) || 1);
@@ -8068,6 +8866,10 @@ $("b-add").onclick = () => {
   if (state.tab === "box") it = newBox("part" + (ofKind("box").length + 1), [0, 1, 0], [2, 1, 2]);
   else if (state.tab === "pylon") it = newPylon("pylon" + (ofKind("pylon").length + 1), [0, 1, 0]);
   else if (state.tab === "seat") it = newSeat([0, 1, 0]);
+  else if (state.tab === "display") {
+    const e = displayEye(null);
+    it = newDisplay([round3(e[0]), round3(e[1] - 0.4), round3(e[2] + 0.5)], { name: "mfd" + (ofKind("display").length + 1) });
+  }
   else return;
   if (it.kind === "seat") it.name = ofKind("seat").length === 0 ? "driver" : "seat" + (ofKind("seat").length + 1);
   state.items.push(it);
@@ -8395,6 +9197,8 @@ function exportMachine() {
   // under `camera`. Cleared rather than carried through, so a file written before the move does not
   // keep a key nothing reads.
   delete doc.camera.pod;
+  if (state.kind === "aircraft" && ofKind("display").length) doc.camera.displays = displaysJson();
+  else delete doc.camera.displays;
   if (c.tilt) doc.camera.tilt = round3(c.tilt); else delete doc.camera.tilt;
 
   if (doc.model) doc.model = ordered(doc.model, MODEL_ORDER);
@@ -9097,7 +9901,7 @@ async function openArms(kind, id) {
   takeArms(doc, kind, id);
   renderArmoury();
   armsWhere();
-  $("armsbox").open = true;
+  showPanel("armsbox");
   say(tr("%s — %s", id, tr(kind + "|a kind of file")));
 }
 
@@ -9327,6 +10131,7 @@ function takeJson(doc, name) {
     if (typeof doc.armament.recoil === "number") c.recoil = doc.armament.recoil;
     c.main = doc.armament.main || "";
   }
+  takeDisplays(doc);
   if (doc.camera) {
     point("chase").pos = vec(doc.camera.pos, point("chase").pos);
     point("cockpit").pos = vec(doc.camera.cockpit, point("cockpit").pos);
@@ -9384,6 +10189,70 @@ function takeJson(doc, name) {
 const drop = $("drop"), fileInput = $("file");
 drop.onclick = () => fileInput.click();
 fileInput.onchange = () => { readFiles([...fileInput.files]); fileInput.value = ""; };
+/* ---- the rail: one panel at a time, picked down the left edge ---- */
+
+const PANEL_KEYS = { machinebox: "1", bonesbox: "2", autobox: "3", chassisbox: "4", specbox: "5",
+  armsbox: "6", packbox: "7", gunsbox: "8", posebox: "9", exportbox: "0", legendbox: "" };
+
+function renderRail() {
+  const rail = $("rail");
+  rail.innerHTML = "";
+  for (const d of document.querySelectorAll("#panels > details")) {
+    const b = document.createElement("button");
+    const sum = d.querySelector("summary");
+    b.dataset.panel = d.id;
+    b.innerHTML = sum.innerHTML
+      + (PANEL_KEYS[d.id] ? `<kbd>${PANEL_KEYS[d.id]}</kbd>` : "");
+    b.className = d.classList.contains("show") ? "on" : "";
+    b.onclick = () => showPanel(d.id);
+    rail.appendChild(b);
+  }
+}
+
+/** Bring one panel to the front. Everything that used to open a panel for its own reasons calls this. */
+function showPanel(id) {
+  for (const d of document.querySelectorAll("#panels > details")) {
+    const on = d.id === id;
+    d.classList.toggle("show", on);
+    if (on) d.open = true;
+  }
+  for (const b of document.querySelectorAll("#rail button")) b.classList.toggle("on", b.dataset.panel === id);
+  try { localStorage.setItem("ashvehicles.panel", id); } catch (err) { /* nothing to be done */ }
+}
+
+/** The figures that decide most, on the right where they are always in view. Each one jumps to its editor. */
+function renderFacts() {
+  const el = $("facts");
+  if (!el) return;
+  const v3 = p => p.map(n => fixed(n)).join(" ");
+  const rows = [];
+  const go = (tab, id) => () => { state.tab = tab; if (id) state.sel = id; refresh(); };
+  const seats = ofKind("seat"), eyes = seats.filter(s => eyeOf(s)).length;
+  rows.push(["model scale", String(state.scale), () => $("f-scale").focus()]);
+  rows.push(["plain hitbox", fixed(state.chassis.width) + " × " + fixed(state.chassis.height), () => showPanel("chassisbox")]);
+  rows.push(["boxes", String(ofKind("box").length), go("box")]);
+  rows.push(["cockpit eye", v3(point("cockpit").pos), go("point", point("cockpit").id)]);
+  rows.push(["chase camera", v3(point("chase").pos) + (state.chassis.tilt ? " ↓" + state.chassis.tilt + "°" : ""), go("point", point("chase").id)]);
+  rows.push(["seats", seats.length ? tr("%s, %s with an eye", seats.length, eyes) : "—", go("seat", seats[0] && seats[0].id)]);
+  if (state.kind === "aircraft") {
+    const py = ofKind("pylon");
+    rows.push(["stations", py.length ? py.length + " (" + py.filter(p => p.fixed).length + " " + tr("fixed") + ")" : "—", go("pylon", py[0] && py[0].id)]);
+    const ds = ofKind("display");
+    rows.push(["MFD", ds.length ? ds.length + " (" + ds.map(d => d.page).join(" ") + ")" : tr("none — the common cockpit"), go("display", ds[0] && ds[0].id)]);
+  } else {
+    rows.push(["turret ring", v3(point("ring").pos), go("point", point("ring").id)]);
+    rows.push(["trunnion", v3(point("trunnion").pos) + (state.chassis.barrel ? "  L " + fixed(state.chassis.barrel) : ""), go("point", point("trunnion").id)]);
+  }
+  el.innerHTML = rows.map(([k, v], i) => `<span class="k">${tr(k)}</span><span class="v" data-fact="${i}">${escapeHtml(v)}</span>`).join("");
+  el.querySelectorAll("[data-fact]").forEach(x => x.onclick = rows[+x.dataset.fact][2]);
+}
+
+$("t-write").onclick = () => library.dir ? (state.editing === "arms" ? writeArms() : writeBack()) : $("e-save").onclick();
+$("t-export").onclick = () => { showPanel("exportbox"); $("e-machine").onclick(); };
+$("t-save").onclick = () => { if (!out().value.trim()) $("e-machine").onclick(); $("e-save").onclick(); };
+$("t-help").onclick = () => { renderHelp(); $("help").classList.toggle("on"); };
+document.querySelectorAll("[data-fwd]").forEach(b => b.onclick = () => $(b.dataset.fwd).click());
+
 $("b-files").onclick = () => fileInput.click();
 $("b-folder").onclick = () => pickFolder();
 $("b-reread").onclick = () => reread();
@@ -9425,7 +10294,7 @@ const NOT_MODEL = /\/(weapons?|items?|blocks?|particles)\//i;
 const FILE_CAP = 6000;
 
 /** What is worth carrying out of a folder at all: the files, the machines, and the sheets. */
-const WANTED = /\.(json|png)$/i;
+const WANTED = /\.(json|png|bbmodel)$/i;
 
 /**
  * The folder that is open.
@@ -9454,6 +10323,15 @@ function scanFolder(records) {
     if (!found.has(id)) found.set(id, { id, kind: "", geo: null, data: null, tex: null });
     return found.get(id);
   };
+
+  // A Blockbench project is the model and the sheet in one, and wins over the two it stands for.
+  for (const r of records) {
+    const name = r.path.split("/").pop();
+    const bb = name.match(/^(.+)\.bbmodel$/i);
+    if (!bb || NOT_MODEL.test("/" + r.path)) continue;
+    const e = at(bb[1]);
+    e.geo = r; e.tex = r;
+  }
 
   for (const r of records) {
     const name = r.path.split("/").pop();
@@ -9597,7 +10475,8 @@ async function openMachine(id) {
   if (!e.tex) dropTexture();
 
   const files = [];
-  for (const rec of [e.geo, e.data, e.tex]) {
+  // A .bbmodel is both the model and the sheet, and is read the once.
+  for (const rec of [e.geo, e.data, e.tex === e.geo ? null : e.tex]) {
     if (!rec) continue;
     try { files.push(await grab(rec)); }
     catch (err) { say(tr("Could not read %s: %s", rec.path, err.message)); }
@@ -9920,10 +10799,10 @@ function readFiles(files) {
   if (!files.length) return;
   for (const f of files.filter(f => /^image\//i.test(f.type) || /\.png$/i.test(f.name))) readTexture(f);
 
-  const json = files.filter(f => /\.json$/i.test(f.name));
+  const json = files.filter(f => /\.(json|bbmodel)$/i.test(f.name));
   if (!json.length) return;
-  const geo = json.filter(f => /\.geo\.json$/i.test(f.name));
-  const rest = json.filter(f => !/\.geo\.json$/i.test(f.name));
+  const geo = json.filter(f => /\.(geo\.json|bbmodel)$/i.test(f.name));
+  const rest = json.filter(f => !/\.(geo\.json|bbmodel)$/i.test(f.name));
   const read = f => new Promise(resolve => {
     const r = new FileReader();
     r.onload = () => resolve({ name: f.name, text: String(r.result) });
@@ -9936,14 +10815,23 @@ function readFiles(files) {
       try { doc = JSON.parse(f.text); }
       catch (err) { say(tr("Could not read %s: %s", f.name, err.message)); continue; }
 
+      let sheet = "";
+      if (/\.bbmodel$/i.test(f.name)) {
+        const bb = bbmodelToGeo(doc);
+        f.text = bb.geo;
+        doc = JSON.parse(bb.geo);
+        sheet = bb.tex;
+      }
+
       if (doc["minecraft:geometry"]) {
-        const id = f.name.replace(/\.geo\.json$/i, "");
+        const id = f.name.replace(/\.(geo\.json|bbmodel)$/i, "");
         if (id) { state.id = id; $("f-id").value = id; }
         const typed = parseFloat($("f-scale").value);
         if (!Number.isNaN(typed) && typed > 0) state.scale = typed;
         try { loadGeo(f.text); } catch (err) { say(err.message); continue; }
         frameAll();
         renderBones();
+        if (sheet) takeSheet(sheet, f.name);
         say(tr("%s cubes, %s bones", state.cubes.length, state.bones.length));
       } else {
         // A weapon, a rack or a pod is not a machine and would be read as a very empty one: it has
@@ -9954,7 +10842,7 @@ function readFiles(files) {
           arms.pick = "";
           takeArms(doc, kind, f.name.replace(/\.json$/i, ""));
           armsWhere();
-          $("armsbox").open = true;
+          showPanel("armsbox");
           say(tr("%s — %s", arms.id, tr(kind + "|a kind of file")));
         } else {
           takeJson(doc, f.name);
@@ -10022,6 +10910,27 @@ $("f-kind").onchange = e => {
  * The model's own figures, and the one mistake that ruins everything
  * ================================================================== */
 
+/**
+ * How big the boxes are against the model, as the ratio of their longer horizontal spans. The model
+ * is measured without its rotors, which the boxes never cover: a helicopter's rotor disc is twice
+ * the width of its hull, and read whole it called every helicopter's scale wrong.
+ */
+function boxToModelRatio(boxes) {
+  // Only the rotors are left out, not the undercarriage: a bomber's outrigger wheels sit at the
+  // wingtips, and without them the model reads narrower than the boxes that cover them.
+  const skipped = new Set(["rotor", "tail_rotor"].map(r => state.roles[r]).filter(Boolean));
+  const body = extentOf(state.cubes.filter(c => !skipped.has(c.bone))) || state.bounds;
+  // The boxes as they stand, corners and all: a swept wing's box read as an upright slab is wider
+  // than the wing, and a bomber's worth of them read the model a tenth too small.
+  const blo = [1e9, 1e9, 1e9], bhi = [-1e9, -1e9, -1e9];
+  for (const b of boxes) for (const p of boxCorners(b)) for (let j = 0; j < 3; j++) {
+    blo[j] = Math.min(blo[j], p[j]); bhi[j] = Math.max(bhi[j], p[j]);
+  }
+  const mSpan = Math.max(body.hi[0]-body.lo[0], body.hi[2]-body.lo[2]);
+  const bSpan = Math.max(bhi[0]-blo[0], bhi[2]-blo[2]);
+  return bSpan / (mSpan || 1);
+}
+
 function modelInfo() {
   const el = $("modelinfo");
   if (!state.bounds) { el.textContent = tr("no model loaded"); return; }
@@ -10052,11 +10961,7 @@ function modelInfo() {
   // dragging will ever make it fit. The boxes say how big the machine really is, so ask them.
   const boxes = state.items.filter(i => i.kind === "box");
   if (boxes.length) {
-    const blo = [0,1,2].map(j => Math.min(...boxes.map(b => b.offset[j] - b.size[j]/2)));
-    const bhi = [0,1,2].map(j => Math.max(...boxes.map(b => b.offset[j] + b.size[j]/2)));
-    const mSpan = Math.max(hi[0]-lo[0], hi[2]-lo[2]);
-    const bSpan = Math.max(bhi[0]-blo[0], bhi[2]-blo[2]);
-    const ratio = bSpan / (mSpan || 1);
+    const ratio = boxToModelRatio(boxes);
     if (ratio > 1.08 || ratio < 0.93) {
       const want = round3(state.scale * ratio);
       html += `<br><span class="warn">${tr("The model is %s&times; the size of the boxes. The scale "
@@ -10068,11 +10973,8 @@ function modelInfo() {
 
   const fix = $("fixscale");
   if (fix) fix.onclick = () => {
-    const blo = [0,1,2].map(j => Math.min(...boxes.map(b => b.offset[j] - b.size[j]/2)));
-    const bhi = [0,1,2].map(j => Math.max(...boxes.map(b => b.offset[j] + b.size[j]/2)));
-    const mSpan = Math.max(hi[0]-lo[0], hi[2]-lo[2]);
-    const bSpan = Math.max(bhi[0]-blo[0], bhi[2]-blo[2]);
-    state.scale = round3(state.scale * (bSpan / (mSpan || 1)));
+    const ratio = boxToModelRatio(boxes);
+    state.scale = round3(state.scale * ratio);
     $("f-scale").value = state.scale;
     if (state.geoText) loadGeo(state.geoText);
     frameAll(); draw();
@@ -10324,9 +11226,12 @@ window.addEventListener("keydown", e => {
     case "p": if (state.kind === "aircraft") { state.tab = "pylon"; refresh(); } break;
     case "s": state.tab = "seat"; refresh(); break;
     case "c": state.tab = "point"; refresh(); break;
+    case "1": case "2": case "3": case "4": case "5": case "6": case "7": case "8": case "9": case "0":
+      if (!e.ctrlKey && !e.altKey) { const id = Object.keys(PANEL_KEYS).find(k => PANEL_KEYS[k] === e.key); if (id) showPanel(id); }
+      break;
     case "n": $("b-add").onclick(); break;
     case "d": if (e.shiftKey) $("b-dup").onclick(); break;
-    case "m": if (e.shiftKey) $("b-mirror").onclick(); break;
+    case "m": if (e.shiftKey) $("b-mirror").onclick(); else if (state.kind === "aircraft") { state.tab = "display"; refresh(); } break;
     case "y": $("b-sym").onclick(); break;
     case "w": if (state.kind === "aircraft") $("b-stores").onclick(); break;
     case "x": (e.shiftKey ? $("b-marks") : $("b-boxes")).onclick(); break;
@@ -10461,6 +11366,7 @@ function renderGuns() {
   if (!el) return;
   const air = state.kind === "aircraft";
   $("gunsbox").querySelector("summary").textContent = tr(air ? "Crew guns" : "Extra barrels");
+  renderRail();
 
   el.innerHTML = air ? gunsAircraftHtml() : gunsGroundHtml();
   wireGuns(el, air);
@@ -11217,6 +12123,9 @@ armsWhere();
 autoReport();
 modelInfo();
 renderHelp();
+renderRail();
+(() => { let kept = null; try { kept = localStorage.getItem("ashvehicles.panel"); } catch (err) { /* none kept */ } showPanel(kept && $(kept) ? kept : "machinebox"); })();
+wirePov();
 refresh();
 renderClip();
 setOsnap(false);

@@ -11,6 +11,7 @@ import java.util.function.Predicate;
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.vehicle.Hitbox;
 
+import net.minecraft.core.SectionPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.damagesource.DamageSource;
@@ -18,6 +19,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkSource;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -596,9 +599,70 @@ public final class Hitboxes {
             return;
         }
 
+        carry(machine, from, shift, turn, bounds,
+                machine.level().getEntities(machine, bounds.inflate(1.0), Hitboxes::carriable));
+    }
+
+    /**
+     * 運搬と轢きを、周りの物の検索1回で済ませる。
+     *
+     * <p>2つは別の判定であり、それぞれの箱も別——轢きは走ってきた分だけ後ろへ広げて探す——だが、どちらも
+     * 同じ述語で同じ場所の物を集める。機体ごと毎tick2回レベルへ問うていたのを、広い方の箱で1回にし、
+     * 運搬の側はその中から元の箱に重なる物だけを見る。各判定が見る相手は従来と1つも変わらない。
+     *
+     * @param runOver 轢きを判定するか（サーバーのみ）
+     * @param carry 運搬を判定するか
+     */
+    static void carryAndRunOver(VehicleEntityBase machine, Vec3 from, Vec3 shift, float turn,
+            boolean runOver, boolean carry) {
+        AABB bounds = machine.placedBounds();
+
+        if (bounds == null) {
+            return;
+        }
+
+        AABB carried = bounds.inflate(1.0);
+        boolean hurting = runOver && shift.length() > RUN_OVER_FLOOR;
+
+        if (!hurting && !carry) {
+            return;
+        }
+
+        AABB area = hurting ? carried.expandTowards(shift.scale(-1.0)) : carried;
+        List<Entity> found = machine.level().getEntities(machine, area, Hitboxes::carriable);
+
+        if (found.isEmpty()) {
+            return;
+        }
+
+        if (hurting) {
+            runOver(machine, shift, found);
+        }
+
+        if (!carry) {
+            return;
+        }
+
+        if (hurting) {
+            List<Entity> within = new ArrayList<>(found.size());
+
+            for (Entity rider : found) {
+                if (rider.getBoundingBox().intersects(carried)) {
+                    within.add(rider);
+                }
+            }
+
+            found = within;
+        }
+
+        carry(machine, from, shift, turn, bounds, found);
+    }
+
+    private static void carry(VehicleEntityBase machine, Vec3 from, Vec3 shift, float turn, AABB bounds,
+            List<Entity> riders) {
         Vec3 now = machine.position();
 
-        for (Entity rider : machine.level().getEntities(machine, bounds.inflate(1.0), Hitboxes::carriable)) {
+        for (Entity rider : riders) {
             if (rider.getRootVehicle() == machine || rides(machine, rider)) {
                 continue;
             }
@@ -676,13 +740,18 @@ public final class Hitboxes {
             return;
         }
 
+        // 走ってきた分だけ後ろへ広げて探す。1tickに十数ブロック進む機体では、終点の箱だけを見ると
+        // 通り過ぎた相手が丸ごと網から漏れる。
+        runOver(machine, shift, machine.level().getEntities(machine,
+                bounds.inflate(1.0).expandTowards(shift.scale(-1.0)), Hitboxes::carriable));
+    }
+
+    private static void runOver(VehicleEntityBase machine, Vec3 shift, List<Entity> victims) {
+        double speed = shift.length();
         float damage = (float) ((speed - RUN_OVER_FLOOR) * RUN_OVER_RATE);
         DamageSource source = machine.runOverSource();
 
-        // 走ってきた分だけ後ろへ広げて探す。1tickに十数ブロック進む機体では、終点の箱だけを見ると
-        // 通り過ぎた相手が丸ごと網から漏れる。
-        for (Entity victim : machine.level().getEntities(machine,
-                bounds.inflate(1.0).expandTowards(shift.scale(-1.0)), Hitboxes::carriable)) {
+        for (Entity victim : victims) {
             // 運んでいる物は轢かない。貨物室の中に立っている乗客の体は、当然その機体の箱の中にある——
             // 数えれば、輸送機は離陸してから着陸するまで自分の乗客を毎秒轢き続ける。
             if (!(victim instanceof LivingEntity) || victim.getRootVehicle() == machine
@@ -1135,6 +1204,47 @@ public final class Hitboxes {
         }
 
         return found;
+    }
+
+    /**
+     * その点を中心とする半径の立方体の中に、ブロックが1つも無いか。
+     *
+     * <p>ブロックを1つも引かない。各 chunk が「最も高い空でない区画」を数値として持っているので、立方体の
+     * 底がその上面より上なら、その chunk にはこの範囲に入る物が無い。持っていない chunk は「空ではない」
+     * と答える——ここは早期に抜けるための問いであり、抜けなければ従来の箱ごとの判定へ進むだけなので、
+     * 偽の「空いている」を返さないことだけが守るべき約束だ。
+     */
+    static boolean onlyAirAround(Level level, Vec3 centre, double radius) {
+        int minX = SectionPos.blockToSectionCoord(Mth.floor(centre.x - radius));
+        int maxX = SectionPos.blockToSectionCoord(Mth.floor(centre.x + radius));
+        int minZ = SectionPos.blockToSectionCoord(Mth.floor(centre.z - radius));
+        int maxZ = SectionPos.blockToSectionCoord(Mth.floor(centre.z + radius));
+        double floor = centre.y - radius;
+        ChunkSource chunks = level.getChunkSource();
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                ChunkAccess chunk = chunks.getChunkNow(x, z);
+
+                if (chunk == null) {
+                    return false;
+                }
+
+                int filled = chunk.getHighestFilledSectionIndex();
+
+                if (filled < 0) {
+                    continue;
+                }
+
+                int ceiling = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(filled) + 1);
+
+                if (floor < ceiling) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /** 世界のある範囲で判定する価値のある全ブロック面を、素の直方体として。 */

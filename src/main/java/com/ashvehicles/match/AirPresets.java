@@ -45,6 +45,11 @@ import net.minecraft.world.phys.Vec3;
  * <p><b>自国の物を先に選ぶ</b>（2026-09-14 追加）。機体の {@code airframe.nation} と {@code stores_from}、兵装と
  * ポッドの {@code nation} を突き合わせ、自国の物で1発も吊れないときだけ他国の物に下りる。国籍が無かった頃は
  * 軽い方が勝つ規則のせいで MiG-29 も Su-57 も AIM-120 を吊っていた。
+ *
+ * <p><b>倉が先</b>（2026-11-04）。どの機体も倉の中のステーションから先に埋める。ステルス機
+ * （{@link AirLoadout#hidesStores}）では外のステーションを、倉がその役割の物を1発も取れなかったときと、吊る兵装が
+ * 要るポッド（レーザー誘導の照準ポッド）にしか使わない。デコイとジャマーのポッドは外に付けない——フレアと
+ * チャフは機体が自前で持っている。AI の積み方（{@code AirLoadout.equip}）と同じ線引き。
  */
 public final class AirPresets {
     /** 左右の対と見なす、ハードポイントの位置のずれ（ブロック）。{@code AirLoadout} と同じ値。 */
@@ -199,37 +204,71 @@ public final class AirPresets {
         }
 
         boolean rotor = definition.rotor().isPresent();
+        boolean stealthy = AirLoadout.hidesStores(definition);
         int main;
+
+        pylons = AirLoadout.bayFirst(definition, pylons);
+        specials = AirLoadout.bayFirst(definition, specials);
+
+        // 誰も要らないポッド（デコイ・ジャマー）を付けてよい場所。ステルス機は倉の中だけ。
+        List<Integer> spare = stealthy ? AirLoadout.inside(definition, specials) : specials;
+        Kind groundKind = rotor ? Kind.ROCKET : Kind.BOMB;
 
         switch (role) {
             case AIR -> {
-                pod(plan, specials, EquipmentDefinition.Kind.DECOY);
-                main = hangBest(plan, tips, Kind.AAM, WeaponDefinition.Guidance.Seeker.HEAT)
-                        + hangBest(plan, pylons, Kind.AAM, WeaponDefinition.Guidance.Seeker.RADAR);
-                pod(plan, specials, EquipmentDefinition.Kind.JAMMER);
+                pod(plan, spare, EquipmentDefinition.Kind.DECOY);
+                main = stealthy
+                        ? hangBays(plan, pylons, outsideAndTips(definition, pylons, tips), Kind.AAM,
+                                WeaponDefinition.Guidance.Seeker.RADAR)
+                        : hangBest(plan, tips, Kind.AAM, WeaponDefinition.Guidance.Seeker.HEAT)
+                                + hangBest(plan, pylons, Kind.AAM, WeaponDefinition.Guidance.Seeker.RADAR);
+                pod(plan, spare, EquipmentDefinition.Kind.JAMMER);
             }
             case GENERAL -> {
-                List<Integer> outer = outerPair(definition, pylons);
-                List<Integer> rest = new ArrayList<>(pylons);
+                List<Integer> source = stealthy ? AirLoadout.inside(definition, pylons) : pylons;
+                List<Integer> outer = outerPair(definition, source);
+                List<Integer> rest = new ArrayList<>(source);
 
                 rest.removeAll(outer);
-                pod(plan, specials, EquipmentDefinition.Kind.DECOY);
-                hangBest(plan, tips, Kind.AAM, WeaponDefinition.Guidance.Seeker.HEAT);
+                pod(plan, spare, EquipmentDefinition.Kind.DECOY);
+
+                if (!stealthy) {
+                    hangBest(plan, tips, Kind.AAM, WeaponDefinition.Guidance.Seeker.HEAT);
+                }
 
                 int air = hangBest(plan, outer, Kind.AAM, WeaponDefinition.Guidance.Seeker.RADAR);
-                int ground = hangBest(plan, rest, rotor ? Kind.ROCKET : Kind.BOMB, null);
+                int ground = hangBest(plan, rest, groundKind, null);
+
+                // 倉が取れなかった方だけ外へ。外の組も同じ割り方（一番外の対に空対空、残りに地上の物）。
+                if (stealthy && (air <= 0 || ground <= 0)) {
+                    List<Integer> out = AirLoadout.outside(definition, pylons);
+                    List<Integer> outOuter = outerPair(definition, out);
+                    List<Integer> outRest = new ArrayList<>(out);
+
+                    outRest.removeAll(outOuter);
+
+                    if (air <= 0) {
+                        air = hangBest(plan, outOuter.isEmpty() ? tips : outOuter, Kind.AAM,
+                                WeaponDefinition.Guidance.Seeker.RADAR);
+                    }
+
+                    if (ground <= 0) {
+                        ground = hangBest(plan, outRest, groundKind, null);
+                    }
+                }
 
                 // 空と地上の両方を持って初めて汎用。片方しか吊れない機体では、対空か爆撃と同じ物になる。
                 main = air > 0 && ground > 0 ? air + ground : 0;
             }
-            case STRIKE -> main = ground(plan, tips, pylons, specials, Kind.AGM);
-            case ROCKETS -> main = ground(plan, tips, pylons, specials, Kind.ROCKET);
+            case STRIKE -> main = ground(plan, tips, pylons, specials, spare, stealthy, Kind.AGM);
+            case ROCKETS -> main = ground(plan, tips, pylons, specials, spare, stealthy, Kind.ROCKET);
             // 回転翼機は爆弾を吊らない（AI も同じ、{@code AirLoadout.equip}）。
-            case BOMBS -> main = rotor ? 0 : ground(plan, tips, pylons, specials, Kind.BOMB);
-            case PRECISION -> main = rotor ? 0 : ground(plan, tips, pylons, specials, Kind.GUIDED_BOMB);
-            case NUCLEAR -> main = rotor ? 0 : nuclear(plan, aircraft, pylons, specials);
+            case BOMBS -> main = rotor ? 0 : ground(plan, tips, pylons, specials, spare, stealthy, Kind.BOMB);
+            case PRECISION -> main = rotor ? 0
+                    : ground(plan, tips, pylons, specials, spare, stealthy, Kind.GUIDED_BOMB);
+            case NUCLEAR -> main = rotor ? 0 : nuclear(plan, aircraft, pylons, spare);
             case CLEAN -> {
-                pod(plan, specials, EquipmentDefinition.Kind.DECOY);
+                pod(plan, spare, EquipmentDefinition.Kind.DECOY);
                 main = 1;
             }
             default -> main = 0;
@@ -286,17 +325,53 @@ public final class AirPresets {
      * <p>ポッドを先に付けるのは重さの取り合いで負けさせないため。照準ポッドの無いレーザー誘導爆弾は撃てない
      * （{@code WeaponMounts.missingPod}）ので、爆弾に重さを使い切られたら全部が荷物になる。デコイも同じで、
      * 後に回すと爆弾とロケットが搭載可能重量を食い切り、A-10 や F-16 がフレア無しで出ていた。
+     *
+     * <p>ステルス機では要るポッドを、実際に吊ることになる組——倉がその分類を取れるなら倉——の候補からだけ決める。
+     * 倉の物のために外へ照準ポッドを提げるのはよいが、使わない外の兵装のために提げはしない。
+     *
+     * @param spare 誰も要らないポッド（デコイ）を付けてよい special ステーション
      */
     private static int ground(Plan plan, List<Integer> tips, List<Integer> pylons, List<Integer> specials,
-            Kind kind) {
-        for (ResourceLocation weapon : candidates(plan.definition, pylons, kind)) {
+            List<Integer> spare, boolean stealthy, Kind kind) {
+        List<Integer> bays = AirLoadout.inside(plan.definition, pylons);
+        List<Integer> source = stealthy && !candidates(plan.definition, bays, kind).isEmpty() ? bays : pylons;
+
+        for (ResourceLocation weapon : candidates(plan.definition, source, kind)) {
             Definitions.weapon(weapon).requires().ifPresent(needed -> pod(plan, specials, needed));
         }
 
-        pod(plan, specials, EquipmentDefinition.Kind.DECOY);
-        hangBest(plan, tips, Kind.AAM, WeaponDefinition.Guidance.Seeker.HEAT);
+        pod(plan, spare, EquipmentDefinition.Kind.DECOY);
 
-        return hangBest(plan, pylons, kind, null);
+        if (!stealthy) {
+            hangBest(plan, tips, Kind.AAM, WeaponDefinition.Guidance.Seeker.HEAT);
+
+            return hangBest(plan, pylons, kind, null);
+        }
+
+        return hangBays(plan, pylons, AirLoadout.outside(plan.definition, pylons), kind, null);
+    }
+
+    /**
+     * 倉の中に吊り、倉が1発も取れなかったときだけ {@code fallback}（倉の外）へ。ステルス機の吊り方。
+     *
+     * @return 吊れた数
+     */
+    private static int hangBays(Plan plan, List<Integer> slots, List<Integer> fallback, Kind kind,
+            @Nullable WeaponDefinition.Guidance.Seeker preferred) {
+        List<Integer> bays = AirLoadout.inside(plan.definition, slots);
+        int hung = bays.isEmpty() ? 0 : hangBest(plan, bays, kind, preferred);
+
+        return hung > 0 ? hung : hangBest(plan, fallback, kind, preferred);
+    }
+
+    /** 倉の外の翼下と翼端。ステルス機が倉に空対空ミサイルを1発も吊れなかったときの行き先。 */
+    private static List<Integer> outsideAndTips(AircraftDefinition definition, List<Integer> pylons,
+            List<Integer> tips) {
+        List<Integer> out = AirLoadout.outside(definition, pylons);
+
+        out.addAll(tips);
+
+        return out;
     }
 
     /**

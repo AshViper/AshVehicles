@@ -3,6 +3,8 @@ package com.ashvehicles.sensor;
 import javax.annotation.Nullable;
 
 import com.ashvehicles.entity.VehicleEntityBase;
+import com.ashvehicles.entity.VehiclePart;
+import com.ashvehicles.entity.VehicleProjectile;
 
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -70,6 +72,29 @@ public enum Iff {
         }
 
         return mine.isAlliedTo(theirs) ? FRIEND : HOSTILE;
+    }
+
+    /**
+     * 撃つべきでない相手か。シーカーの候補と引き金の門番が訊く。
+     *
+     * <p>{@link #between} と違い、答えるのは見えている物そのものではなくその持ち主だ。当たり判定の箱は
+     * 機体の、飛んでいる弾は撃った機体の所属を名乗る——箱や弾自身はどのチームにも入っていないので、
+     * そのまま訊けば味方の翼も味方のミサイルも {@link #UNKNOWN} になる。
+     */
+    public static boolean friendly(Entity interrogator, Entity contact) {
+        return between(interrogator, answering(contact)) == FRIEND;
+    }
+
+    private static Entity answering(Entity contact) {
+        if (contact instanceof VehiclePart part && part.getParent() != null) {
+            return part.getParent();
+        }
+
+        if (contact instanceof VehicleProjectile shot && shot.firedFrom() != null) {
+            return shot.firedFrom();
+        }
+
+        return contact;
     }
 
     /**

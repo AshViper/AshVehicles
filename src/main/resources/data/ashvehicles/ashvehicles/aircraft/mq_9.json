@@ -1,76 +1,105 @@
 {
   "hitbox": {
-    "width": 7.667,
-    "height": 2.875,
+    "width": 8.0,
+    "height": 3.0,
     "tracking_range": 14,
     "ghost_range": 0,
     "boxes": [
       {
-        "name": "hull",
-        "offset": [0.0, 1.707, -0.359],
-        "size": [20.125, 0.359, 1.438]
+        "name": "fuselage",
+        "offset": [
+          0.0,
+          2.2,
+          0.3
+        ],
+        "size": [
+          1.1,
+          1.1,
+          9.4
+        ]
       },
       {
-        "name": "hull_2",
-        "offset": [0.0, 1.797, -0.719],
-        "size": [0.719, 0.719, 7.906]
+        "name": "lwing",
+        "offset": [
+          -5.14,
+          2.1,
+          -0.23
+        ],
+        "size": [
+          9.44,
+          0.4,
+          1.9
+        ]
       },
       {
-        "name": "hull_3",
-        "offset": [0.0, 1.797, -0.629],
-        "size": [1.078, 0.359, 7.906]
+        "name": "rwing",
+        "offset": [
+          5.14,
+          2.1,
+          -0.23
+        ],
+        "size": [
+          9.44,
+          0.4,
+          1.9
+        ]
       },
       {
-        "name": "hull_4",
-        "offset": [0.889, 2.671, -4.133],
-        "size": [0.359, 2.156, 1.078],
-        "rotation": [0.0, 0.0, 45.0]
+        "name": "ltail",
+        "offset": [
+          -1.03,
+          2.74,
+          -3.3
+        ],
+        "size": [
+          0.15,
+          2.4,
+          0.8
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -45.0
+        ]
       },
       {
-        "name": "hull_5",
-        "offset": [-0.889, 2.671, -4.133],
-        "size": [0.359, 2.156, 1.078],
-        "rotation": [0.0, 0.0, -45.0]
+        "name": "rtail",
+        "offset": [
+          1.03,
+          2.74,
+          -3.3
+        ],
+        "size": [
+          0.15,
+          2.4,
+          0.8
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          45.0
+        ]
       },
       {
-        "name": "hull_6",
-        "offset": [0.0, 0.719, -4.133],
-        "size": [0.359, 1.438, 1.078]
-      },
-      {
-        "name": "hull_7",
-        "offset": [0.0, 2.246, 1.887],
-        "size": [0.719, 0.359, 1.797]
-      },
-      {
-        "name": "hull_8",
-        "offset": [0.0, 2.156, 1.528],
-        "size": [0.359, 0.359, 2.156]
-      },
-      {
-        "name": "hull_9",
-        "offset": [0.0, 2.336, 1.887],
-        "size": [0.359, 0.359, 1.438]
-      },
-      {
-        "name": "hull_10",
-        "offset": [0.0, 1.797, -5.031],
-        "size": [0.359, 0.359, 0.719]
-      },
-      {
-        "name": "hull_11",
-        "offset": [-0.899, 1.977, -5.031],
-        "size": [1.797, 0.359, 0.048]
-      },
-      {
-        "name": "hull_12",
-        "offset": [0.899, 1.618, -5.031],
-        "size": [1.797, 0.359, 0.048]
+        "name": "vfin",
+        "offset": [
+          0.0,
+          1.25,
+          -3.5
+        ],
+        "size": [
+          0.14,
+          1.25,
+          1.0
+        ]
       }
     ]
   },
   "model": {
-    "scale": 5.75
+    "scale": 1.0,
+    "propellers": [
+      "prop"
+    ]
   },
   "engine": {
     "max_thrust": 0.0072,
@@ -95,7 +124,7 @@
     "induced_drag": 0.00025,
     "lateral_drag": 0.15,
     "ground_effect": 0.3,
-    "span": 19.263
+    "span": 19.7
   },
   "handling": {
     "pitch_rate": 0.55,
@@ -135,8 +164,16 @@
     "lift_bonus": 0.5
   },
   "camera": {
-    "pos": [0.0, 5.75, -21.083],
-    "cockpit": [0.0, 2.013, 2.779]
+    "pos": [
+      0.0,
+      4.5,
+      -18.0
+    ],
+    "cockpit": [
+      0.0,
+      2.2,
+      4.6
+    ]
   },
   "sound": {
     "engine": "ashvehicles:engine.prop",
@@ -167,28 +204,38 @@
   "hardpoints": [
     {
       "name": "inner_left",
-      "pos": [-3.067, 1.438, -0.287],
+      "pos": [-1.6, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "inner_right",
-      "pos": [3.067, 1.438, -0.287],
+      "pos": [1.6, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "outer_left",
-      "pos": [-5.558, 1.438, -0.287],
+      "pos": [-3.8, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "outer_right",
-      "pos": [5.558, 1.438, -0.287],
+      "pos": [3.8, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "sensor",
-      "pos": [0.0, 1.054, 2.108],
+      "pos": [0.0, 1.45, 4.1],
       "kind": "special"
+    },
+    {
+      "name": "middle_left",
+      "pos": [-2.7, 1.48, -0.13],
+      "kind": "weapon"
+    },
+    {
+      "name": "middle_right",
+      "pos": [2.7, 1.48, -0.13],
+      "kind": "weapon"
     }
   ]
 }

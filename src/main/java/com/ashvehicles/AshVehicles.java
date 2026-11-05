@@ -49,6 +49,7 @@ public class AshVehicles {
         // この MOD の中身は registry パッケージにある
         ModEntities.ENTITY_TYPES.register(modEventBus);
         ModBlocks.BLOCKS.register(modEventBus);
+        ModItems.ARMOR_MATERIALS.register(modEventBus);
         ModItems.ITEMS.register(modEventBus);
         ModParticles.PARTICLE_TYPES.register(modEventBus);
         ModMenus.MENUS.register(modEventBus);

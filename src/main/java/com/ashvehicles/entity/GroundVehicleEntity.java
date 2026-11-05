@@ -26,7 +26,11 @@ import com.ashvehicles.weapon.TurretStations;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
 
+import com.ashvehicles.particle.TintedParticleOption;
+import com.ashvehicles.registry.ModParticles;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.nbt.CompoundTag;
@@ -343,6 +347,16 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
     /** これ未満の速度は0扱い。車両は停止しており、停止させたままにすべき。 */
     private static final float STANDSTILL = 1.0E-4F;
+    /** 砂埃が立ち始める速さ（ブロック/tick）。 */
+    private static final double DUST_SPEED = 0.15;
+    /** 排気の色。軽油の黒煙。 */
+    private static final int EXHAUST_COLOUR = 0x2E2B28;
+    /** 水上で立つ飛沫の色。 */
+    private static final int SPRAY_COLOUR = com.ashvehicles.particle.Effects.SPRAY;
+    /** 損傷で煙を吹き始める耐久の割合。 */
+    private static final float SMOKING_HEALTH = 0.5F;
+    /** 火を吹き始める割合。 */
+    private static final float BURNING_HEALTH = 0.2F;
 
     /**
      * 操舵輪が1tickで振れる量を、全舵角に対する割合で。
@@ -495,6 +509,11 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
     /** 車体座標系での砲塔の指向と、その前tick値。 */
     private float turretYaw;
     private float turretYawO;
+    /** 前の tick に見た装填カウンタと速さ。クライアントの演出が発砲と加速を読むためだけに持つ。 */
+    private int reloadSeen;
+    private double speedSeen;
+    /** 巻き上げる砂埃の今の色。-1 はまだ無い。{@link com.ashvehicles.particle.Effects#settle} 参照。 */
+    private int dustColour = -1;
     private float gunPitch;
     private float gunPitchO;
     /**
@@ -1374,6 +1393,113 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
      * そこから下がるので、「いつ撃ったか」という1つの値から両方が作れる。弾が出た瞬間に後座し、後座時間を
      * かけて復座する。それが後座の見え方であり、復座が遅い側の半分だ。
      */
+    /**
+     * 走る車両の周りの細かい演出。走行の砂埃、排気煙、発砲の爆風、損傷の煙と火。全部クライアントだけで撒く。
+     *
+     * <p>発砲は装填カウンタが跳ね上がった tick として読む。{@link #getRecoil} と同じ値で、送信を足さない。
+     */
+    private void spawnDriveEffects() {
+        int reload = this.getReload();
+        boolean fired = reload > this.reloadSeen;
+        this.reloadSeen = reload;
+
+        RandomSource random = this.level().random;
+        double half = Math.max(this.getBbWidth() * 0.5, 0.8);
+
+        // 損傷。残骸も燃え続ける。
+        float health = this.isWrecked() ? 0.0F : this.getHealthFraction();
+
+        if (health < SMOKING_HEALTH && random.nextFloat() < 0.6F) {
+            float damage = 1.0F - health / SMOKING_HEALTH;
+            Vec3 top = this.position().add(random.nextGaussian() * half * 0.4, this.getBbHeight() * 0.8,
+                    random.nextGaussian() * half * 0.4);
+            int grey = damage > 0.6F ? 0x1E1C1A : 0x55524E;
+
+            this.level().addParticle(ModParticles.BLAST_SMOKE.get().of(grey, 0.8F + damage * 1.4F),
+                    top.x, top.y, top.z, random.nextGaussian() * 0.02, 0.08 + damage * 0.08,
+                    random.nextGaussian() * 0.02);
+
+            if (health < BURNING_HEALTH && random.nextFloat() < 0.5F) {
+                this.level().addParticle(ModParticles.FIRE.get().of(0xFFA040, 0.6F + damage * 0.6F),
+                        top.x, top.y - 0.3, top.z, 0.0, 0.04, 0.0);
+            }
+        }
+
+        if (this.isWrecked()) {
+            return;
+        }
+
+        double speed = Math.abs(this.getSpeed());
+        boolean ship = this.getStats().isShip();
+
+        // 地面の色。船は水面。
+        BlockPos below = BlockPos.containing(this.getX(), this.getY() - 0.2, this.getZ());
+        BlockState surface = this.level().getBlockState(below);
+        // 砂埃は下のブロックの色にしない（Effects.DUST の注記と同じ理由）。空気（地図の色 0）の上では立たない。
+        int ground = ship || !surface.getFluidState().isEmpty() ? SPRAY_COLOUR
+                : surface.getMapColor(this.level(), below).col == 0 ? 0
+                : com.ashvehicles.particle.Effects.DUST;
+
+        if (ground != 0) {
+            this.dustColour = com.ashvehicles.particle.Effects.settle(this.dustColour, ground);
+            ground = this.dustColour;
+        }
+
+        // 走行の砂埃。車体の後ろ両側、左右の足回りから。
+        if (speed > DUST_SPEED && ground != 0 && (this.onGround() || ship)) {
+            double strength = Math.min((speed - DUST_SPEED) / 0.6, 1.0);
+            // 足元から立つ薄い埃であって土煙の壁ではない。全速でも 1 tick に1粒ほど。
+            int puffs = (int) (strength * 1.2 + random.nextDouble() * 0.6);
+            TintedParticleOption dust = ModParticles.BLAST_SMOKE.get().of(ground, (float) (0.3 + strength * 0.4));
+            Vec3 back = Attitude.nose(this.attitude).scale(-Math.signum(this.getSpeed()));
+
+            for (int i = 0; i < puffs; i++) {
+                int side = random.nextBoolean() ? 1 : -1;
+                Vec3 at = this.position().add(Attitude.toWorld(this.attitude,
+                        new Vec3(side * half * 0.8, 0.2, 0.0))).add(back.scale(half));
+
+                this.level().addParticle(dust, at.x, at.y, at.z,
+                        back.x * 0.05 + random.nextGaussian() * 0.03, 0.03 + random.nextDouble() * 0.04,
+                        back.z * 0.05 + random.nextGaussian() * 0.03);
+            }
+        }
+
+        // 排気。踏み込んでいる間と、走り出す瞬間に濃く吹く。
+        float drive = Math.abs(this.getInput().drive());
+        double accel = Math.abs(speed - this.speedSeen);
+        this.speedSeen = speed;
+        float exhaust = Math.min(0.15F + drive * 0.4F + (float) (accel * 20.0), 1.0F);
+
+        if (!ship && random.nextFloat() < exhaust) {
+            Vec3 pipe = this.position().add(Attitude.toWorld(this.attitude,
+                    new Vec3(0.0, this.getBbHeight() * 0.6, -half)));
+
+            this.level().addParticle(ModParticles.MOTOR_SMOKE.get().of(EXHAUST_COLOUR, 0.4F + exhaust * 0.6F),
+                    pipe.x, pipe.y, pipe.z,
+                    random.nextGaussian() * 0.02, 0.05 + exhaust * 0.05, random.nextGaussian() * 0.02);
+        }
+
+        // 発砲の爆風が銃口の下の地面から輪になって巻き上げる砂埃。銃口の煙は全ての銃と同じく
+        // client.GunSmoke が弾から撒く（ここでも撒くと主砲だけ二重になっていた）。
+        if (fired) {
+            Vec3 muzzle = this.getMuzzle(1.0F);
+            double ground0 = this.getY();
+
+            if (ground != 0 && muzzle.y - ground0 < 4.0) {
+                TintedParticleOption dust = ModParticles.BLAST_SMOKE.get().of(ground, 1.4F);
+
+                for (int i = 0; i < 14; i++) {
+                    double angle = random.nextDouble() * Math.PI * 2.0;
+                    double cos = Math.cos(angle);
+                    double sin = Math.sin(angle);
+
+                    this.level().addParticle(dust, muzzle.x + cos * 0.5, ground0 + 0.2, muzzle.z + sin * 0.5,
+                            cos * 0.35, 0.02 + random.nextDouble() * 0.03, sin * 0.35);
+                }
+            }
+        }
+    }
+
     public float getRecoil(float partialTick) {
         GroundVehicleDefinition.Armament armament = this.getStats().armament();
         int ticks = Math.max(armament.recoilTicks(), 1);
@@ -1999,6 +2125,7 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
         // 例外ではない——砲手の視線を読めるのはサーバーしかないからだ。{@link TurretStations} 参照。
         if (this.level().isClientSide) {
             this.turrets.clientTick();
+            this.spawnDriveEffects();
         }
 
         // AI が動かしている車両は、この tick の操作をここで決める。人の操作がパケットで届くのと同じ位置
@@ -2421,6 +2548,13 @@ public class GroundVehicleEntity extends VehicleEntityBase implements GeoEntity 
 
         Vec3 asked = forward.scale(this.speed).add(sideways.scale(drift));
         Vec3 allowed = this.getStats().isShip() ? this.limitAfloat(asked) : this.limitToShape(asked);
+
+        // 運転は move() を通らないので、他の機体の箱もここで止める。四隅のプローブだけでは間を抜けて
+        // 相手の車体へめり込んだ。Hitboxes.betweenMachines 参照。
+        if (!(this.level().isClientSide && !this.isControlledByLocalInstance())) {
+            allowed = Hitboxes.betweenMachines(this, allowed,
+                    this.getStats().isShip() ? 0.0 : this.getStats().suspension().climbHeight());
+        }
 
         this.horizontalCollision = allowed.x != asked.x || allowed.z != asked.z;
         this.setDeltaMovement(allowed.x, this.fallSpeed, allowed.z);

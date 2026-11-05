@@ -14,6 +14,7 @@ import org.joml.Vector3f;
 import com.ashvehicles.aircraft.AircraftDefinition;
 import com.ashvehicles.entity.AircraftEntity;
 import com.ashvehicles.entity.DesignationEntity;
+import com.ashvehicles.client.ghost.GhostRenderDispatcher;
 import com.ashvehicles.item.HmdItem;
 import com.ashvehicles.sensor.Contact;
 import com.ashvehicles.sensor.Iff;
@@ -24,6 +25,7 @@ import com.ashvehicles.vehicle.VehicleShape;
 import com.ashvehicles.weapon.EquipmentDefinition;
 import com.ashvehicles.weapon.WeaponDefinition;
 import com.ashvehicles.weapon.WeaponMounts;
+import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
@@ -34,6 +36,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -89,7 +92,53 @@ public final class CockpitDisplays {
     /** レーダー頁の表示距離。到達距離に掛ける割合で、RNG のボタンが変える。 */
     private static float rangeScale = 1.0F;
 
+    /** 描いている画面の番号と、頁を札の内側へ縮めた変換。TGP 頁が映像の位置を画面の画素で控えるため。 */
+    private static int drawing;
+    private static float pageLeft;
+    private static float pageTop;
+    private static float pageShrink = 1.0F;
+    /** 画面ごとの、ポッド映像の四角（画面の画素）と、そこに映っている映像の割合。見て押すと振る先。 */
+    private static float[][] videos = new float[0][];
+
+    /** Iris の下で、遅いステージから描いている最中。{@link CockpitLatePass} 参照。 */
+    static boolean late;
+
     private CockpitDisplays() {
+    }
+
+    /**
+     * 模型と一緒には描かず、{@link CockpitLatePass} に任せるか。シェーダーパックはエンティティの段で渡した物を
+     * 自分の合成パスへ通すので、全光量の画面と文字がパックの照明と影で暗く潰れ、半透明の板は消える。
+     */
+    private static boolean deferred() {
+        return GhostRenderDispatcher.shadersInUse() && !late;
+    }
+
+    /**
+     * TGP 頁の映像の上を見て押した。その点が中心へ来るようにポッドを振る。映像の外なら false。
+     *
+     * @param x 画面の画素（{@link CockpitControls#cursor} と同じ）
+     */
+    static boolean slewTo(int display, float x, float y) {
+        if (display >= videos.length || videos[display] == null) {
+            return false;
+        }
+
+        float[] video = videos[display];
+
+        if (x < video[0] || x > video[2] || y < video[1] || y > video[3]) {
+            return false;
+        }
+
+        // 映像の四角の中で -1〜1、そこに映っている割合を掛けて、半視野の角度へ。
+        float sx = ((x - video[0]) / (video[2] - video[0]) * 2.0F - 1.0F) * video[4];
+        float sy = ((y - video[1]) / (video[3] - video[1]) * 2.0F - 1.0F) * video[5];
+        float half = PodFeed.field() / 2.0F;
+        float halfY = (float) Math.toDegrees(Math.atan(Math.tan(Math.toRadians(half))
+                * PodFeed.HEIGHT / PodFeed.WIDTH));
+        PodCamera.turn(sx * half, sy * halfY);
+
+        return true;
     }
 
     /** 自分が一人称で乗っているなら、その機体の画面を全部描く。姿勢を掛ける前の、機体原点の座標系で呼ぶ。 */
@@ -98,11 +147,11 @@ public final class CockpitDisplays {
         Minecraft minecraft = Minecraft.getInstance();
 
         if (minecraft.player == null || minecraft.player.getVehicle() != aircraft
-                || !minecraft.options.getCameraType().isFirstPerson()) {
+                || !minecraft.options.getCameraType().isFirstPerson() || deferred()) {
             return;
         }
 
-        List<VehicleChassis.Display> displays = aircraft.getStats().camera().displays().orElse(List.of());
+        List<VehicleChassis.Display> displays = GenericCockpit.displays(aircraft);
 
         if (displays.isEmpty()) {
             return;
@@ -155,6 +204,16 @@ public final class CockpitDisplays {
             matrix = new Matrix4f(screen).translate(left, top, 0.0F).scale(shrink, shrink, 1.0F);
             heightPx = Math.max(16, Math.round((height - top - bottom) / shrink));
             rangeScale = CockpitControls.rangeScale(aircraft, index);
+            drawing = index;
+            pageLeft = left;
+            pageTop = top;
+            pageShrink = shrink;
+
+            if (videos.length < displays.size()) {
+                videos = Arrays.copyOf(videos, displays.size());
+            }
+
+            videos[index] = null;
 
             switch (CockpitControls.page(aircraft, index, display)) {
                 case "nav" -> nav(aircraft, attitude);
@@ -225,7 +284,8 @@ public final class CockpitDisplays {
         Minecraft minecraft = Minecraft.getInstance();
 
         if (minecraft.player == null || minecraft.player.getVehicle() != aircraft
-                || !minecraft.options.getCameraType().isFirstPerson() || HmdItem.isWorn(minecraft.player)) {
+                || !minecraft.options.getCameraType().isFirstPerson() || HmdItem.isWorn(minecraft.player)
+                || deferred()) {
             return;
         }
 
@@ -1292,16 +1352,54 @@ public final class CockpitDisplays {
         float span = PodCamera.PITCH_DOWN_LIMIT - PodCamera.PITCH_UP_LIMIT;
         int horizon = top + Math.round((bottom - top) * -PodCamera.PITCH_UP_LIMIT / span);
 
-        // ジンバルの向けられる範囲。縦の線が機首、横の線が水平。
-        outline(left, top, right, bottom, DIM);
-        fill(cx, top + 1, cx + 1, bottom - 1, 0x603BE86A);
-        fill(left + 1, horizon, right - 1, horizon + 1, 0x603BE86A);
-        layer();
-
         float yaw = PodCamera.gimbalYaw();
         float pitch = PodCamera.gimbalPitch();
-        int x = cx - Math.round(yaw / PodCamera.YAW_LIMIT * ((right - left) / 2.0F - 3.0F));
-        int y = top + 2 + Math.round((pitch - PodCamera.PITCH_UP_LIMIT) / span * (bottom - top - 4));
+        int x;
+        int y;
+
+        if (PodFeed.request(aircraft)) {
+            // ポッドの映像。十字線は映像の中心で、ボールが向いている所。マークを追っていればそこに居る。
+            float[] spans = video(left, top, right, bottom);
+            videos[drawing] = new float[] {pageLeft + left * pageShrink, pageTop + top * pageShrink,
+                    pageLeft + right * pageShrink, pageTop + bottom * pageShrink, spans[0], spans[1]};
+            layer();
+            String setting = PodFeed.fieldName() + " " + PodFeed.modeName();
+            text(setting, left + 2, top + 2, GREEN);
+            outline(left, top, right, bottom, DIM);
+            x = cx;
+            y = (top + bottom) / 2;
+            int gap = 7;
+            line(left + 2, y, x - gap, y, GREEN);
+            line(x + gap, y, right - 2, y, GREEN);
+            line(x, top + 2, x, y - gap, GREEN);
+            line(x, y + gap, x, bottom - 2, GREEN);
+
+            // ジンバルの向きは隅の小さな図で。縦の線が機首、横の線が水平。
+            int gw = 22;
+            int gh = 14;
+            int gl = right - 3 - gw;
+            int gt = bottom - 3 - gh;
+            fill(gl, gt, gl + gw, gt + gh, 0xA0050A08);
+            layer();
+            outline(gl, gt, gl + gw, gt + gh, DIM);
+            fill(gl + gw / 2, gt + 1, gl + gw / 2 + 1, gt + gh - 1, 0x603BE86A);
+            int gz = gt + Math.round(gh * -PodCamera.PITCH_UP_LIMIT / span);
+            fill(gl + 1, gz, gl + gw - 1, gz + 1, 0x603BE86A);
+            layer();
+            int dx = gl + gw / 2 - Math.round(yaw / PodCamera.YAW_LIMIT * (gw / 2.0F - 2.0F));
+            int dy = gt + 1 + Math.round((pitch - PodCamera.PITCH_UP_LIMIT) / span * (gh - 2));
+            fill(dx - 1, dy - 1, dx + 1, dy + 1, mark != null && limited ? AMBER : WHITE);
+            layer();
+        } else {
+            // ジンバルの向けられる範囲。縦の線が機首、横の線が水平。
+            outline(left, top, right, bottom, DIM);
+            fill(cx, top + 1, cx + 1, bottom - 1, 0x603BE86A);
+            fill(left + 1, horizon, right - 1, horizon + 1, 0x603BE86A);
+            layer();
+
+            x = cx - Math.round(yaw / PodCamera.YAW_LIMIT * ((right - left) / 2.0F - 3.0F));
+            y = top + 2 + Math.round((pitch - PodCamera.PITCH_UP_LIMIT) / span * (bottom - top - 4));
+        }
 
         if (mark == null) {
             line(x - 4, y, x + 4, y, WHITE);
@@ -1646,7 +1744,16 @@ public final class CockpitDisplays {
         //
         // バッファは四角ごとに取り直す。文字が別の描画型を求めると、即時描画の MultiBufferSource は前の型の
         // バッファを閉じる。握ったままのバッファに書くと "Not building!" でゲームが落ちる。
-        quads = buffers.getBuffer(RenderType.textBackground());
+        //
+        // Iris の下（遅い段）では textBackground が1枚も出ず、文字とテクスチャを貼った四角だけが残った。そこでは
+        // 文字と同じ描画型で白い1画素を貼って塗る。文字の型は不透明度 0.1 未満を捨てるので、薄い色は底上げする。
+        if (late) {
+            quads = buffers.getBuffer(RenderType.text(white()));
+            colour = Math.max(colour >>> 24, 0x1A) << 24 | colour & 0xFFFFFF;
+        } else {
+            quads = buffers.getBuffer(RenderType.textBackground());
+        }
+
         vertex(x0, y0, colour);
         vertex(x1, y1, colour);
         vertex(x2, y2, colour);
@@ -1658,8 +1765,60 @@ public final class CockpitDisplays {
         layer -= 0.02F;
     }
 
+    /**
+     * ポッドの映像（{@link PodFeed#TEXTURE}）を四角へ貼る。四角の比に合わせて映像の中央を切り抜く。
+     *
+     * @return 映像のうち四角に映っている割合（横・縦）
+     */
+    private static float[] video(float left, float top, float right, float bottom) {
+        float aspect = (right - left) / (bottom - top);
+        float feed = PodFeed.aspect();
+        float uSpan = aspect < feed ? aspect / feed : 1.0F;
+        float vSpan = aspect < feed ? 1.0F : feed / aspect;
+        float u0 = 0.5F - uSpan / 2.0F;
+        float u1 = 0.5F + uSpan / 2.0F;
+        float vTop = 0.5F - vSpan / 2.0F;
+        float vBottom = 0.5F + vSpan / 2.0F;
+
+        quads = buffers.getBuffer(RenderType.text(PodFeed.TEXTURE));
+        videoVertex(left, top, u0, vTop);
+        videoVertex(left, bottom, u0, vBottom);
+        videoVertex(right, bottom, u1, vBottom);
+        videoVertex(right, top, u1, vTop);
+        videoVertex(right, top, u1, vTop);
+        videoVertex(right, bottom, u1, vBottom);
+        videoVertex(left, bottom, u0, vBottom);
+        videoVertex(left, top, u0, vTop);
+        layer -= 0.02F;
+
+        return new float[] {uSpan, vSpan};
+    }
+
+    private static void videoVertex(float x, float y, float u, float v) {
+        quads.addVertex(matrix, x, y, -layer).setColor(0xFFFFFFFF).setUv(u, v).setLight(LIGHT);
+    }
+
     private static void vertex(float x, float y, int colour) {
-        quads.addVertex(matrix, x, y, -layer).setColor(colour).setLight(LIGHT);
+        VertexConsumer vertex = quads.addVertex(matrix, x, y, -layer).setColor(colour).setLight(LIGHT);
+
+        if (late) {
+            vertex.setUv(0.5F, 0.5F);
+        }
+    }
+
+    private static final ResourceLocation WHITE_PIXEL = ResourceLocation.fromNamespaceAndPath("ashvehicles", "mfd_white");
+    private static boolean whiteMade;
+
+    /** 白い1画素のテクスチャ。遅い段で四角を文字の描画型で塗るため。初めて要った時に作る。 */
+    private static ResourceLocation white() {
+        if (!whiteMade) {
+            NativeImage pixel = new NativeImage(1, 1, false);
+            pixel.setPixelRGBA(0, 0, 0xFFFFFFFF);
+            Minecraft.getInstance().getTextureManager().register(WHITE_PIXEL, new DynamicTexture(pixel));
+            whiteMade = true;
+        }
+
+        return WHITE_PIXEL;
     }
 
     private static void text(String text, int x, int y, int colour) {

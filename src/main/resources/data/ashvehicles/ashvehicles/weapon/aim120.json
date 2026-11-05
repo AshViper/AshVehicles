@@ -21,8 +21,8 @@
     "explosion": 3.7,
     "tracer": "FFEFC0",
     "trail": {
-      "colour": "DCDAD4",
-      "exhaust": "8E887E",
+      "colour": "FFFFFF",
+      "exhaust": "FFFFFF",
       "density": 1.8,
       "size": 1.05
     }

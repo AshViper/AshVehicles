@@ -78,14 +78,18 @@ def classpath():
     artifacts = [path for path in glob.glob(os.path.join(moddev, "artifacts", "neoforge-*.jar"))
                  if not re.search(r"-(sources|merged|client-extra.*)\.jar$", os.path.basename(path))]
     legacy = os.path.join(moddev, "clientLegacyClasspath.txt")
+    values = properties()
+
+    # NeoForge を上げた後は古い版の jar も残る。gradle.properties が名指しする版を採り、無ければ最新。
+    wanted = [path for path in artifacts
+              if os.path.basename(path) == "neoforge-%s.jar" % values.get("neo_version", "")]
+    artifacts = wanted or sorted(artifacts, key=lambda path: [int(n) for n in re.findall(r"\d+", os.path.basename(path))])[-1:]
 
     if len(artifacts) != 1 or not os.path.exists(legacy):
         sys.exit("build/moddev has no single NeoForge jar and client classpath: run a Gradle build once")
 
     with open(legacy, encoding="utf-8") as f:
         path = [artifacts[0]] + [line.strip() for line in f if line.strip()]
-
-    values = properties()
 
     with open(os.path.join(REPO, "build.gradle"), encoding="utf-8") as f:
         for line in f:

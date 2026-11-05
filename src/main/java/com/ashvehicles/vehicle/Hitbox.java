@@ -58,8 +58,15 @@ public final class Hitbox {
     private final Vec3 half;
     /** 箱自身の3軸を世界座標の単位ベクトルで。正規直交なので転置がそのまま逆変換になる。 */
     private final Vec3[] axes;
-    /** {@link #sweep} が試す15方向。変わらないので一度だけ計算する。 */
-    private final Vec3[] directions;
+    /**
+     * {@link #sweep} が試す15方向。変わらないので一度だけ計算する——ただし<b>初めて要った時に</b>。
+     *
+     * <p>箱は毎tick、機体の箱の数だけ両側で組み直される（{@code tickParts}）が、その大半は検索用の
+     * {@link #reach} しか読まれずに捨てられる。9本の外積と正規化をそこで払うのは無駄なので、掃引か重なり
+     * を初めて問われた時に作る。平行移動と拡縮の写し（{@link #move} {@link #grow}）は軸が同じなので、
+     * 作ってあればそれを引き継ぐ。
+     */
+    private Vec3[] directions;
     private final AABB reach;
 
     public Hitbox(Vec3 centre, Vec3 size, Quaternionf rotation) {
@@ -70,7 +77,6 @@ public final class Hitbox {
         this.axes = new Vec3[] {
                 column(matrix, 0), column(matrix, 1), column(matrix, 2)
         };
-        this.directions = directions(WORLD, this.axes);
 
         // 箱が世界の各軸方向へ届く距離。自分の各軸が「半長×その軸のその方向成分」だけ寄与する。
         double x = this.span(this.half, 0);
@@ -102,6 +108,18 @@ public final class Hitbox {
      */
     public AABB reach() {
         return this.reach;
+    }
+
+    /** 世界の軸との間で試す方向。初回に作る。{@link #directions} 参照。 */
+    private Vec3[] worldDirections() {
+        Vec3[] found = this.directions;
+
+        if (found == null) {
+            found = directions(WORLD, this.axes);
+            this.directions = found;
+        }
+
+        return found;
     }
 
     /** 全周に余裕を付けた同じ箱。掠りを許す判定はこの形で要求する。 */
@@ -286,7 +304,7 @@ public final class Hitbox {
     public double sweep(AABB box, Vec3 motion) {
         Vec3 half = new Vec3(box.getXsize() * 0.5, box.getYsize() * 0.5, box.getZsize() * 0.5);
 
-        return this.sweep(box.getCenter(), half, WORLD, this.directions, motion);
+        return this.sweep(box.getCenter(), half, WORLD, this.worldDirections(), motion);
     }
 
     /**
@@ -418,7 +436,7 @@ public final class Hitbox {
         Vec3 half = new Vec3(box.getXsize() * 0.5, box.getYsize() * 0.5, box.getZsize() * 0.5);
         Vec3 between = this.centre.subtract(box.getCenter());
 
-        for (Vec3 direction : this.directions) {
+        for (Vec3 direction : this.worldDirections()) {
             double spread = spread(direction, WORLD, half) + spread(direction, this.axes, this.half);
 
             if (Math.abs(direction.dot(between)) > spread) {

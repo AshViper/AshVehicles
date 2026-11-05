@@ -152,7 +152,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0))),
                     Optional.empty(), Optional.empty(), Optional.empty(), List.of()),
             new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true, Optional.empty(),
-                    0.0F, 0.0F),
+                    0.0F, 0.0F, Optional.empty()),
             new Surface(20, 0.5F, 0.4F),
             VehicleChassis.CameraMount.DEFAULT,
             VehicleChassis.Sound.DEFAULT,
@@ -244,6 +244,13 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
          */
         public static final String NOZZLE_LEFT = "nozzle_left";
         public static final String NOZZLE_RIGHT = "nozzle_right";
+        /**
+         * 片側に2つ目のノズルを持つ機体のための同じ物。ハリアーは胴体の両脇に前後2つずつ、計4つのノズルを
+         * 持ち、それぞれが自分の軸で回る——1つのボーンにまとめると前後の2つが1点を中心に公転してしまう。
+         * 番号の付け方は兵装倉の扉（{@code bay_left_2}）と同じで、振れる角度も他のノズルと共通。
+         */
+        public static final String NOZZLE_LEFT_2 = "nozzle_left_2";
+        public static final String NOZZLE_RIGHT_2 = "nozzle_right_2";
         /**
          * ヘリコプターのメインローター。自分のマスト回り——つまり機体が何をしていようとモデルの垂直軸回り
          * ——に回る。アニメーションではなくここで名指しするのは、これが一連の動きではなく1つの角度だから。
@@ -765,7 +772,10 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      * 外側の箱の縁。だから既存のファイルは1行も足さずに今までどおり飛ぶ。
      *
      * @param cone ベイパーコーンの中心。機体座標系（x 右、y 上、z 機首）。空なら原点の上 1.5・前 2.0
-     * @param coneRadius コーンの半径（ブロック）。粒はこの 0.7〜1.0 倍の円周上に置かれる
+     * @param coneRadius コーンの平均半径（ブロック）。殻の形は書いても書かなくても当たり判定の箱を正面へ
+     *                   投影した輪郭（胴体と主翼の付け根を包む横に潰れた殻）で、この値はその縮尺だけを
+     *                   決める。0 なら箱の輪郭のまま（全機の既定。2026-11-03 から。形の作り方は
+     *                   {@code entity.VapourShape}）
      * @param coneSpeed コーンが出始める速度。その機体の最大速度に対する割合。実機の遷音速に相当するので、
      *                  1 に近づけるほど「最高速度でだけ出る」になる
      * @param vortex 右翼端の渦の出る位置。機体座標系。左翼端は x を反転した鏡像で、翼が対称だから2点を
@@ -775,7 +785,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
     public record Effects(Optional<Vec3> cone, float coneRadius, float coneSpeed,
             Optional<Vec3> vortex, float vortexLoad) {
         public static final Effects DEFAULT =
-                new Effects(Optional.empty(), 3.0F, 0.88F, Optional.empty(), 2.5F);
+                new Effects(Optional.empty(), 0.0F, 0.88F, Optional.empty(), 2.5F);
 
         public static final Codec<Effects> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Vec3.CODEC.optionalFieldOf("cone").forGetter(Effects::cone),
@@ -1257,11 +1267,21 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      *                    尻を下ろすときに回る点でもある。姿勢を原点周りに回すと機体全体が
      *                    {@code stancePivot × sin(groundStance)} だけ持ち上がって車輪が地面から浮くので、
      *                    描画がその分だけ模型を下げる（{@code AircraftRenderer.applyBodyMotion}）。
-     *                    {@code groundStance} が0なら読まれない
+     *                    {@code groundStance} が0なら読まれない。<b>前輪の接地点でもよい。</b>自転車式の
+     *                    AV-8B は主脚が後ろにあって引き起こせないので、前脚を長くして最初から機首上げで立つ
+     *                    （6.24 度、支点は前輪の z）。そのときは {@code tailWheel} を false と書く
+     * @param tailWheel 操向輪が後ろにあるか（尾輪式）。地上旋回の操向輪の向きと、主脚を軸に回るときの
+     *                  主脚の前後（{@code AircraftEntity.gearPivot}）がこれで裏返る。省略すると
+     *                  「機首上げで立つなら尾輪式」——機首上げの姿勢が尾輪式にしか無かった頃の読み方
      */
     public record Undercarriage(int cycleTicks, float dragPenalty, float rollingFriction, float brakeFriction,
             float lateralFriction, float steerRate, float steerFade, float climbHeight, boolean retractable,
-            Optional<Float> landingSpeed, float groundStance, float stancePivot) {
+            Optional<Float> landingSpeed, float groundStance, float stancePivot, Optional<Boolean> tailWheel) {
+
+        /** 操向輪が主脚より後ろにあるか。{@code tail_wheel} を書かなければ機首上げで立つ機体がそう。 */
+        public boolean steersFromBehind() {
+            return this.tailWheel.orElse(this.groundStance > 0.0F);
+        }
 
         /**
          * 車輪が地面に着くまで模型を下げる量（ブロック）。
@@ -1299,7 +1319,8 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.BOOL.optionalFieldOf("retractable", true).forGetter(Undercarriage::retractable),
                 Codec.FLOAT.optionalFieldOf("landing_speed").forGetter(Undercarriage::landingSpeed),
                 Codec.FLOAT.optionalFieldOf("ground_stance", 0.0F).forGetter(Undercarriage::groundStance),
-                Codec.FLOAT.optionalFieldOf("stance_pivot", 0.0F).forGetter(Undercarriage::stancePivot)
+                Codec.FLOAT.optionalFieldOf("stance_pivot", 0.0F).forGetter(Undercarriage::stancePivot),
+                Codec.BOOL.optionalFieldOf("tail_wheel").forGetter(Undercarriage::tailWheel)
         ).apply(instance, Undercarriage::new));
     }
 

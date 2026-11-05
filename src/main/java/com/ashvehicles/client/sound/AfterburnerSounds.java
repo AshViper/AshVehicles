@@ -8,6 +8,7 @@ import javax.annotation.Nullable;
 
 import com.ashvehicles.AshVehicles;
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.entity.VehicleEntityBase;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SoundInstance;
@@ -59,6 +60,8 @@ public final class AfterburnerSounds {
      * 高い成分に頼っている割合が小さい。
      */
     private static final float DULLING = 0.30F;
+    /** 乗っている機体のバーナーと見なす、点火位置までの距離。 */
+    private static final double OWN_RANGE = 16.0;
 
     /** この種のイベント名に共通する末尾。{@link ModSounds#AFTERBURNER_ROLE} 参照。 */
     private static final String SUFFIX = "." + ModSounds.AFTERBURNER_ROLE;
@@ -119,11 +122,31 @@ public final class AfterburnerSounds {
             }
         }
 
+        // 自分の乗る機体のバーナーを一人称で聞くなら、操縦席の録音を絞って鳴らす。
+        Vec3 at = new Vec3(sound.getX(), sound.getY(), sound.getZ());
+        boolean cockpit = inOwnCockpit(at);
+        float gain = AircraftEntity.AFTERBURNER_VOLUME;
+
+        if (cockpit) {
+            recording = EngineSounds.cockpitSound(sounds, recording);
+            gain *= EngineSounds.COCKPIT_GAIN;
+        }
+
         // 着くまで待つ必要があれば Arrivals が預かり、ここへは null が返る（＝この音を今は鳴らすな）。
-        event.setSound(Arrivals.send(recording, sound.getSource(),
-                new Vec3(sound.getX(), sound.getY(), sound.getZ()),
-                AircraftEntity.AFTERBURNER_VOLUME, AircraftEntity.AFTERBURNER_LIGHT_PITCH,
+        event.setSound(Arrivals.send(recording, sound.getSource(), at, gain, AircraftEntity.AFTERBURNER_LIGHT_PITCH,
                 AircraftEntity.AFTERBURNER_CARRY, DULLING));
+    }
+
+    /**
+     * この点火が、このクライアントのプレイヤーが一人称で乗っている機体から出たか。イベントは機体を
+     * 名指さないので、乗っている機体の近くで鳴ったかで判断する。
+     */
+    private static boolean inOwnCockpit(Vec3 at) {
+        Minecraft minecraft = Minecraft.getInstance();
+
+        return minecraft.player != null && minecraft.player.getRootVehicle() instanceof VehicleEntityBase vehicle
+                && vehicle.position().distanceToSqr(at) < OWN_RANGE * OWN_RANGE
+                && EngineSoundInstance.inCockpit(vehicle);
     }
 
     /** MOD のバーナーイベントか。{@code engine.afterburner} か、機体名を冠した物。 */

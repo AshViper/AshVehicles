@@ -18,6 +18,7 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 
 import com.ashvehicles.entity.AircraftEntity;
+import com.ashvehicles.item.GSuitItem;
 
 /**
  * パイロットに掛かる荷重。機体ではなく<em>中の人間</em>の側の限界。
@@ -33,12 +34,14 @@ import com.ashvehicles.entity.AircraftEntity;
  *
  * <h2>数値</h2>
  *
- * <p>耐えられる荷重は耐Gスーツ込みで見ている。{@link #TOLERANCE}——10G——までは何時間でも平気、そこから
- * 上は超えた分に比例して溜まっていき、満ちれば暗転。12G の引きっぱなしでおよそ2.5秒、15G なら1秒強。
- * 抜けるのは緩めてから3秒ほどで、そちらは変えていない。
+ * <p>耐えられる荷重はパイロットが着ている物で決まる（{@link GSuitItem#tolerance}）。素で 7G、耐Gスーツの
+ * ズボンで 11G、上下とも着て 13G。そこまでは何時間でも平気、そこから上は超えた分に比例して溜まって
+ * いき、満ちれば暗転。限界の 2G 上を引きっぱなしでおよそ2.5秒、5G 上なら1秒強。抜けるのは緩めてから
+ * 3秒ほど。
  *
- * <p><b>10G は機体の耐Gより高い。</b>この艦隊で最も丈夫な F-15 と F-16 で 9G なので、ここへ届くのは
- * 機体を壊しながら引いている間だけになる。詳しくは {@link #TOLERANCE}。
+ * <p><b>素の 7G は機体の耐Gより低い。</b>この艦隊で最も丈夫な F-15 と F-16 で 9G なので、スーツ無しでは
+ * 機体の限界まで引く前に視界が曇る。上下を着れば 13G で、そこへ届くのは機体を壊しながら引いている間
+ * だけになる。
  *
  * <p>負のGは別勘定にする。人間は下向きの荷重に遥かに弱く、限界は数字が小さいだけでなく症状も違う——
  * 血が頭へ抜けるので視界は暗くなるのではなく赤くなる。だから溜める袋も色も分けてある。
@@ -54,24 +57,16 @@ public final class PilotLoad implements LayeredDraw.Layer {
             ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "pilot_load");
 
     /**
-     * これ以下の荷重なら何時間でも平気。ここを超えて初めて溜まり始める。
-     *
-     * <p>10（2026-09-06、5.5 から）。<b>この数字は機体の耐Gより高い。</b>艦隊の最高は F-15 と F-16 の
-     * 9G で、{@code checkStructuralLoad} はそこを超えた分だけ機体を痛めつける。つまりパイロットの視界が
-     * 曇るのは、機体を壊しながら引いている間だけになる——耐Gを超えて引き続けられる者にしか起きない症状
-     * であり、通常の空戦機動では一度も現れない。それが意図であるなら正しい値だ。
-     * 「引く」ことに人間側の代償を持たせ直したいなら、7〜8 あたりが機体の限界の手前に入る。
-     */
-    private static final float TOLERANCE = 10.0F;
-
-    /**
      * これより下（負側）へ振ると赤い方が溜まり始める。人間は下向きの荷重に遥かに弱い。
+     *
+     * <p>正側の限界（{@link GSuitItem#tolerance}）と違い、耐Gスーツを着ても変わらない。袋が締めるのは脚と
+     * 腹で、血を頭へ押し戻す側の荷重には何もしない。
      *
      * <p><b>これまで一度も成立していなかった。</b>{@code AircraftEntity.getLoadFactor} が絶対値を
      * 返していたので、押し込んでも読みは正のままで、赤化の条件に届く値が存在しなかった。2026-09-06 に
      * 荷重へ符号を戻して初めて生きた条件になっている。
      *
-     * <p>−3（−1.5 から）。正側を 10 にしたので、そのままでは負側だけが日常の機動で発火する。実機の
+     * <p>−3（−1.5 から）。正側を 10 にした時に（今は素 7・スーツで 13）、負側だけが日常の機動で発火しないように。実機の
      * 赤化（血が頭へ抜けて視界が赤らむ）の始まりは −2 から −3 あたりで、正側との比も人間の実際の
      * 耐性差に近い。宙返りの頂点を越える程度は 0 から −1 なので、ここへ届くのは意図して押し込んだ時だけだ。
      */
@@ -80,9 +75,9 @@ public final class PilotLoad implements LayeredDraw.Layer {
     /**
      * 超過1Gあたり1tickで溜まる量。
      *
-     * <p>{@link #TOLERANCE} を 10 にしたので、超過が出るのは機体の耐Gを越えて引いている間だけになった。
-     * その状況は長く続かない——機体が先に壊れる——ので、溜まる速さは上げてある。12G で約 2.5 秒、
-     * 15G なら 1 秒強で塞がる。0.0042 のままだと 12G で 20 秒かかり、その前に主翼が外れる。
+     * <p>限界を 10 にした時（2026-09-06）に、超過が出るのは機体の耐Gを越えて引いている間だけになったので
+     * 溜まる速さを上げた。限界の 2G 上で約 2.5 秒、5G 上なら 1 秒強で塞がる。限界が着る物で変わる
+     * ようになった今も（{@link GSuitItem#tolerance}）、超過1Gあたりの速さは同じ。
      */
     private static final float STRAIN_PER_G = 0.020F;
 
@@ -154,9 +149,11 @@ public final class PilotLoad implements LayeredDraw.Layer {
         }
 
         float load = aircraft.getLoadFactor(aircraft.getDeltaMovement());
+        // 着ている物で毎tick読み直す。飛びながら脱ぐことはできないが、乗る前に着替えた分はそのまま効く。
+        float tolerance = GSuitItem.tolerance(minecraft.player);
 
-        if (load > TOLERANCE) {
-            strain = Math.min(strain + (load - TOLERANCE) * STRAIN_PER_G, 1.0F);
+        if (load > tolerance) {
+            strain = Math.min(strain + (load - tolerance) * STRAIN_PER_G, 1.0F);
         } else {
             strain = Math.max(strain - RELIEF, 0.0F);
         }

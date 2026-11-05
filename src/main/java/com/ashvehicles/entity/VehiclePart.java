@@ -143,11 +143,20 @@ public class VehiclePart extends PartEntity<Entity> {
         AABB reach = box.reach();
 
         this.hitbox = box;
-        this.dimensions = EntityDimensions.scalable(
-                (float) Math.max(reach.getXsize(), reach.getZsize()), (float) reach.getYsize());
-        this.setPos(reach.getCenter().x, reach.minY, reach.getCenter().z);
-        // 最後に設定する。setPos は箱をエンティティ自身の幅で正方形に均してしまい、一方向に長いパーツ
-        // では「見つけるための箱」として正しくなくなる。
+
+        float width = (float) Math.max(reach.getXsize(), reach.getZsize());
+        float height = (float) reach.getYsize();
+
+        // 寸法は変わらない tick の方が多い。同じ値なら組み直さない。
+        if (this.dimensions == null || this.dimensions.width() != width || this.dimensions.height() != height) {
+            this.dimensions = EntityDimensions.scalable(width, height);
+        }
+
+        // setPos ではなく setPosRaw。setPos は位置を置いた後に箱をエンティティ自身の幅で正方形に均し、
+        // それをすぐ下で上書きする——一方向に長いパーツでは「見つけるための箱」として正しくないからだ。
+        // 均した箱は1度も読まれないので、作らない。パーツはレベルの区画に登録されておらず、setPos が
+        // 他にすること（区画への移動通知）も無い。
+        this.setPosRaw((reach.minX + reach.maxX) * 0.5, reach.minY, (reach.minZ + reach.maxZ) * 0.5);
         this.setBoundingBox(reach);
     }
 
@@ -186,6 +195,17 @@ public class VehiclePart extends PartEntity<Entity> {
     public boolean hurt(DamageSource source, float amount) {
         if (this.isInvulnerableTo(source) || (this.isPylon() && VehicleEntityBase.knuckles(source) == null)) {
             return false;
+        }
+
+        // どの箱に当たったかを親に教える。エンジンの箱への打撃はエンジンへ行く（AircraftEntity.damageEngine）。
+        if (this.getParent() instanceof AircraftEntity aircraft) {
+            aircraft.struckPart = this;
+
+            try {
+                return aircraft.hurt(source, amount);
+            } finally {
+                aircraft.struckPart = null;
+            }
         }
 
         return this.getParent().hurt(source, amount);

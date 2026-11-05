@@ -301,15 +301,18 @@ public final class VehicleChassis {
      *                <p>自前の目を持たない座席はこの目を使う。座席が目を持てるようになる以前は、全機体の
      *                ファイルがこれだけを書いていた——{@link Seat} 参照
      */
-    public record CameraMount(Vec3 pos, float tilt, Vec3 cockpit, Optional<List<Display>> displays) {
+    public record CameraMount(Vec3 pos, float tilt, Vec3 cockpit, Optional<List<Display>> displays,
+            boolean genericCockpit) {
         public static final CameraMount DEFAULT =
-                new CameraMount(new Vec3(0.0, 2.5, -24.0), 0.0F, new Vec3(0.0, 2.5, 3.4), Optional.empty());
+                new CameraMount(new Vec3(0.0, 2.5, -24.0), 0.0F, new Vec3(0.0, 2.5, 3.4), Optional.empty(), true);
 
         public static final Codec<CameraMount> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Vec3.CODEC.fieldOf("pos").forGetter(CameraMount::pos),
                 Codec.FLOAT.optionalFieldOf("tilt", 0.0F).forGetter(CameraMount::tilt),
                 Vec3.CODEC.fieldOf("cockpit").forGetter(CameraMount::cockpit),
-                Display.CODEC.listOf().optionalFieldOf("displays").forGetter(CameraMount::displays)
+                Display.CODEC.listOf().optionalFieldOf("displays").forGetter(CameraMount::displays),
+                // displays を書かない機体に共通の操縦席を出すか。爆撃機やレシプロ機は false にしている。
+                Codec.BOOL.optionalFieldOf("generic_cockpit", true).forGetter(CameraMount::genericCockpit)
         ).apply(instance, CameraMount::new));
 
         // 照準ポッド用の3つ目のカメラは意図的に置いていない。あの映像が撮られるのは機体上の場所では
@@ -332,9 +335,17 @@ public final class VehicleChassis {
      *             {@code sms}（兵装）・{@code eng}（推力・燃料・機体の状態）。押しボタンで切り替わる
      * @param buttons 画面の縁の押しボタン（模型の小さな四角）の中心。機体軸でブロック単位。役割は位置から
      *                決まる——{@link com.ashvehicles.client.CockpitControls} 参照
+     * @param seat この画面を見る座席の番号（0 が操縦席）。空なら席を問わず、目から手の届く距離にある席が
+     *             見る。複座機の前席の画面を後席から 2 ブロック先に浮かべないため——
+     *             {@link com.ashvehicles.client.GenericCockpit#displays} 参照
      */
     public record Display(Vec3 pos, float width, float height, float tilt, float yaw, String page,
-            List<Vec3> buttons) {
+            List<Vec3> buttons, Optional<Integer> seat) {
+        public Display(Vec3 pos, float width, float height, float tilt, float yaw, String page,
+                List<Vec3> buttons) {
+            this(pos, width, height, tilt, yaw, page, buttons, Optional.empty());
+        }
+
         public static final Codec<Display> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 Vec3.CODEC.fieldOf("pos").forGetter(Display::pos),
                 Codec.FLOAT.optionalFieldOf("width", 0.22F).forGetter(Display::width),
@@ -342,7 +353,8 @@ public final class VehicleChassis {
                 Codec.FLOAT.optionalFieldOf("tilt", 20.0F).forGetter(Display::tilt),
                 Codec.FLOAT.optionalFieldOf("yaw", 0.0F).forGetter(Display::yaw),
                 Codec.STRING.optionalFieldOf("page", "pfd").forGetter(Display::page),
-                Vec3.CODEC.listOf().optionalFieldOf("buttons", List.of()).forGetter(Display::buttons)
+                Vec3.CODEC.listOf().optionalFieldOf("buttons", List.of()).forGetter(Display::buttons),
+                Codec.INT.optionalFieldOf("seat").forGetter(Display::seat)
         ).apply(instance, Display::new));
     }
 

@@ -530,7 +530,7 @@ public class BlastStageParticle extends WeaponParticle {
      * 火球のこの段階分。開ききるまでの各 tick で、その時点の火球表面に粒を置く。
      *
      * <p>1つの大きな粒を膨らませるのではなく、外へ向かう殻を毎tick置き直す。膨らむ1枚の板は近くで見ると板だが、
-     * 外へ出ていく粒の群れはどの距離から見ても膨らむ塊に見える。{@link BlastParticle} 自身も生涯で成長するので、
+     * 外へ出ていく粒の群れはどの距離から見ても膨らむ塊に見える。{@code SmokeCloud} の火球 自身も生涯で成長するので、
      * 2つの成長が重なって最初の2〜3tickに集中する。
      *
      * @param step 0 から {@link #OPENS_OVER} 未満まで。0 が起爆の瞬間の核
@@ -878,7 +878,9 @@ public class BlastStageParticle extends WeaponParticle {
             double sin = Math.sin(turn);
 
             this.level.addParticle(
-                    ModParticles.CLOUD.get().of(this.ground, (float) (this.capWide * INFLOW_GRAIN)),
+                    // 煙なので地面の色ではなく土煙の白（Effects.DUST の注記）。地面の色は土の塊だけが持つ。
+                    ModParticles.CLOUD.get().of(com.ashvehicles.particle.Effects.DUST,
+                            (float) (this.capWide * INFLOW_GRAIN)),
                     this.x + cos * reach,
                     this.y + this.random.nextDouble() * this.capWide * SURGE_LOW * 0.5,
                     this.z + sin * reach,
