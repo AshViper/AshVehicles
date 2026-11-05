@@ -4223,7 +4223,13 @@ const CREW_HANG = 1.501;
  * ever turned about Y and {@code (0, 0.6, 0)} does not care. On a machine standing level — which is
  * the only way this pane draws one — the two are the same thing.
  */
-const CREW_DROP = 0.6;
+const CREW_DROP_VANILLA = 0.6;
+
+/** {@code AircraftEntity.PLAYER_RIDER_LIFT}: aircraft put a player back up this much along their own up. */
+const CREW_LIFT_AIRCRAFT = 0.2;
+
+/** The drop that applies to the machine being edited. Ground vehicles keep vanilla's whole 0.6. */
+const crewDrop = () => CREW_DROP_VANILLA - (state.kind === "aircraft" ? CREW_LIFT_AIRCRAFT : 0);
 
 /** A radian angle as the degrees {@link Rx} and its two friends want. */
 const rad = r => r * 180 / Math.PI;
@@ -4238,13 +4244,13 @@ const rad = r => r * 180 / Math.PI;
  * forward. The right arm at model x −5 comes out on the right, and the face at −z comes out forward,
  * which is the check that it is the right way round.
  *
- * <p>And the feet are {@link CREW_DROP} below the seat, which is the whole of why this figure used
+ * <p>And the feet are {@link crewDrop} below the seat, which is the whole of why this figure used
  * to sit too high.
  */
 function crewPoint(m, yaw, seat) {
   const r = -m[0] / 16, u = CREW_HANG - m[1] / 16, f = -m[2] / 16;
   const t = apply(Ry(yaw), [r, 0, f]);
-  return [seat[0] + t[0], seat[1] + u - CREW_DROP, seat[2] + t[2]];
+  return [seat[0] + t[0], seat[1] + u - crewDrop(), seat[2] + t[2]];
 }
 
 /**
@@ -4308,7 +4314,7 @@ function crew(g, P, it, col, on) {
   // that. It looks out of the seat's own eye if it has one and the machine's `camera.cockpit` if it
   // has not, both of which are their own points under Points.
   const dir = apply(Ry(yaw), [0, 0, 1]);
-  const eye = [p[0], p[1] + 1.62 - CREW_DROP, p[2]];
+  const eye = [p[0], p[1] + 1.62 - crewDrop(), p[2]];
   const a = P(eye), b = P([eye[0] + dir[0] * 0.9, eye[1], eye[2] + dir[2] * 0.9]);
   g.beginPath(); g.arc(a[0], a[1], 3, 0, Math.PI * 2); g.stroke();
   g.globalAlpha = 0.6;
@@ -5142,7 +5148,7 @@ function autoCameras() {
   const seat = ofKind("seat")[0];
   if (seat) {
     const eye = eyeOf(seat);
-    point("cockpit").pos = (eye ? eye.pos : [seat.pos[0], seat.pos[1] + 1.62 - CREW_DROP, seat.pos[2]]).map(round3);
+    point("cockpit").pos = (eye ? eye.pos : [seat.pos[0], seat.pos[1] + 1.62 - crewDrop(), seat.pos[2]]).map(round3);
   }
   let lo = [0, 0, 0], hi = [0, 0, 0];
   const pts = ofKind("box").length ? ofKind("box").flatMap(boxCorners) : posedCubes().flatMap(c => c.pts);
@@ -5871,9 +5877,9 @@ function renderEditor() {
   if (addEye) addEye.onclick = () => {
     snapshot();
     // Where this crew member's head actually is: 1.62 above their feet, and their feet are
-    // CREW_DROP under the seat. So it starts on the head drawn in the pane rather than a little
+    // crewDrop() under the seat. So it starts on the head drawn in the pane rather than a little
     // above it, and is dragged from there to wherever the hatch is.
-    const eye = newEye(it.id, [it.pos[0], round3(it.pos[1] + 1.62 - CREW_DROP), it.pos[2]]);
+    const eye = newEye(it.id, [it.pos[0], round3(it.pos[1] + 1.62 - crewDrop()), it.pos[2]]);
     state.items.push(eye);
     state.sel = eye.id;
     refresh();

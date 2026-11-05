@@ -39,3 +39,9 @@ run-client2/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Local junk ###
+__pycache__/
+*.pyc
+*.stackdump
+tool/ai/check/logs/

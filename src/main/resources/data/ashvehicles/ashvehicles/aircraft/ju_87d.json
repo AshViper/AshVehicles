@@ -904,10 +904,10 @@
     "crash_speed": 2.2,
     "explosion_power": 2,
     "seats": [
-      [0.0, 2.0, 0.55],
+      [0.0, 1.897, 0.415],
       {
         "pos": [0.0, 1.95, -0.3],
-        "eye": [0.0, 3.1, -0.45]
+        "eye": [0.0, 2.97, -0.3]
       }
     ],
     "max_g": 6
@@ -932,7 +932,7 @@
   "camera": {
     "generic_cockpit": false,
     "pos": [0.0, 3.6, -12.5],
-    "cockpit": [0.0, 3.2, 0.65]
+    "cockpit": [0.0, 3.226, 0.515]
   },
   "sound": {
     "engine": "ashvehicles:engine.prop",
@@ -960,40 +960,44 @@
   "hardpoints": [
     {
       "name": "crutch",
-      "pos": [0.0, 1.1, 0.9],
+      "pos": [0.0, 1.23, 0.9],
       "kind": "weapon"
     },
     {
       "name": "pylon_left_inner",
-      "pos": [-2.6, 1.076, 0.15],
+      "pos": [-2.6, 1.246, 0.8],
       "kind": "weapon"
     },
     {
       "name": "pylon_right_inner",
-      "pos": [2.6, 1.076, 0.15],
+      "pos": [2.6, 1.246, 0.8],
       "kind": "weapon"
     },
     {
       "name": "pylon_left_outer",
-      "pos": [-3.9, 1.076, 0.1],
+      "pos": [-3.9, 1.463, 0.709],
       "kind": "weapon"
     },
     {
       "name": "pylon_right_outer",
-      "pos": [3.9, 1.076, 0.1],
+      "pos": [3.9, 1.463, 0.709],
       "kind": "weapon"
     },
     {
       "name": "gun_left",
       "pos": [-2.008, 1.898, 1.97],
       "fixed": "ashvehicles:mg3",
-      "ammunition": ["ashvehicles:machine_gun_ap", "ashvehicles:machine_gun_ball"]
+      "ammunition": [
+        "ashvehicles:machine_gun_ap", "ashvehicles:machine_gun_ball"
+      ]
     },
     {
       "name": "gun_right",
       "pos": [2.008, 1.898, 1.97],
       "fixed": "ashvehicles:mg3",
-      "ammunition": ["ashvehicles:machine_gun_ap", "ashvehicles:machine_gun_ball"]
+      "ammunition": [
+        "ashvehicles:machine_gun_ap", "ashvehicles:machine_gun_ball"
+      ]
     }
   ]
 }

@@ -3237,13 +3237,13 @@
     "crash_speed": 2.2,
     "explosion_power": 6,
     "seats": [
-      [-0.617, 2.328, 10.26],
+      [-0.617, 2.762, 10.117],
       {
-        "pos": [0.57, 1.33, 5.795],
+        "pos": [0.57, 1.278, 5.795],
         "eye": [-3.648, 2.166, 5.804]
       },
       {
-        "pos": [0.57, 1.33, -4.275],
+        "pos": [0.57, 1.278, -4.275],
         "eye": [-4.408, 2.119, -4.266]
       }
     ],
@@ -3267,7 +3267,7 @@
   "camera": {
     "generic_cockpit": false,
     "pos": [0.0, 9.5, -24.747],
-    "cockpit": [-0.617, 3.847, 10.26]
+    "cockpit": [-0.617, 4.048, 10.217]
   },
   "sound": {
     "engine": "ashvehicles:engine.prop",
@@ -3304,9 +3304,7 @@
       "pos": [-3.648, 1.501, 5.804],
       "fixed": "ashvehicles:gau_13",
       "ammunition": [
-        "ashvehicles:autocannon_apfsds",
-        "ashvehicles:autocannon_he",
-        "ashvehicles:autocannon_heat"
+        "ashvehicles:autocannon_apfsds", "ashvehicles:autocannon_he", "ashvehicles:autocannon_heat"
       ]
     },
     {
@@ -3314,18 +3312,17 @@
       "pos": [-4.408, 1.454, -4.266],
       "fixed": "ashvehicles:m102",
       "ammunition": [
-        "ashvehicles:howitzer_he",
-        "ashvehicles:howitzer_heat"
+        "ashvehicles:howitzer_he", "ashvehicles:howitzer_heat"
       ]
     },
     {
       "name": "sensor_left",
-      "pos": [-1.14, 1.045, 8.55],
+      "pos": [-12.5, 4.235, 0.313],
       "kind": "special"
     },
     {
       "name": "sensor_right",
-      "pos": [1.14, 1.045, 8.55],
+      "pos": [12.5, 4.235, 0.313],
       "kind": "special"
     }
   ],

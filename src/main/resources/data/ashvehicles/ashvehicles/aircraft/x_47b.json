@@ -1472,7 +1472,8 @@
     "chaff": 120,
     "interval_ticks": 6,
     "reload_ticks": 300,
-    "speed": 0.35,
+    "speed": 0.35
+,
     "salvo": 2,
     "spread": 100
   },
@@ -1503,7 +1504,7 @@
     },
     {
       "name": "sensor",
-      "pos": [0.0, 1.1, 3.2],
+      "pos": [0.0, 1.399, 3.2],
       "kind": "special"
     }
   ]

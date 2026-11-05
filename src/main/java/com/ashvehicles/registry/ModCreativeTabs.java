@@ -74,6 +74,8 @@ public final class ModCreativeTabs {
         shelf.item(ModItems.WRENCH);
         shelf.item(ModItems.FUEL_CAN);
         shelf.item(ModItems.HMD);
+        shelf.item(ModItems.G_SUIT_VEST);
+        shelf.item(ModItems.G_SUIT_TROUSERS);
         shelf.item(ModItems.DRONE_TERMINAL);
         shelf.item(ModItems.TARGET_DRONE);
         shelf.item(ModItems.BLAST_WAND);

@@ -1867,12 +1867,23 @@ public abstract class VehicleEntityBase extends VehicleEntity implements PartHos
         // 貨物は席に着いていない。乗り入れて止まった所にいる。
         Vec3 offset = passenger instanceof VehicleEntityBase cargo
                 ? cargo.getHoldOffset()
-                : this.getSeatOffset(this.getSeatIndex(passenger));
+                : this.getSeatOffset(this.getSeatIndex(passenger)).add(0, this.riderLift(passenger), 0);
 
         Quaternionf attitude = this.getAttitude();
         Vec3 drop = passenger.getVehicleAttachmentPoint(this);
 
         return Attitude.toWorld(attitude, offset).add(drop).subtract(Attitude.toWorld(attitude, drop));
+    }
+
+    /**
+     * 搭乗者を座席の点から機体の上方向へ持ち上げる量。座席の値（定義ファイル）とは別に、型ごとに一律で効く。
+     *
+     * <p>置く位置そのものを上げるので、当たり判定・降車位置・描かれるモデルが一緒に動く。描画側
+     * （{@code client/PassengerTiltHandler}）も同じ値を足す。一人称視点は座席の {@code eye} か
+     * {@code camera.cockpit} から解くので、これでは動かない。
+     */
+    public double riderLift(Entity passenger) {
+        return 0;
     }
 
     /**

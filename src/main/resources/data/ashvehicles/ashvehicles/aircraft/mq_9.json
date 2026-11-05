@@ -204,48 +204,38 @@
   "hardpoints": [
     {
       "name": "inner_left",
-      "pos": [
-        -1.578,
-        1.41,
-        0.196
-      ],
+      "pos": [-1.6, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "inner_right",
-      "pos": [
-        1.578,
-        1.41,
-        0.196
-      ],
+      "pos": [1.6, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "outer_left",
-      "pos": [
-        -3.016,
-        1.41,
-        0.196
-      ],
+      "pos": [-3.8, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "outer_right",
-      "pos": [
-        3.016,
-        1.41,
-        0.196
-      ],
+      "pos": [3.8, 1.48, -0.13],
       "kind": "weapon"
     },
     {
       "name": "sensor",
-      "pos": [
-        0.0,
-        1.1,
-        4.1
-      ],
+      "pos": [0.0, 1.45, 4.1],
       "kind": "special"
+    },
+    {
+      "name": "middle_left",
+      "pos": [-2.7, 1.48, -0.13],
+      "kind": "weapon"
+    },
+    {
+      "name": "middle_right",
+      "pos": [2.7, 1.48, -0.13],
+      "kind": "weapon"
     }
   ]
 }

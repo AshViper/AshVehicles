@@ -800,7 +800,7 @@ public record WeaponDefinition(Type type, boolean item, int ammo, Optional<AmmoK
     public record Trail(int colour, int exhaust, float density, float size, Optional<Flame> flame) {
         /** {@code "trail": true} としか書かない兵装ファイルが得る値。 */
         public static final Trail DEFAULT =
-                new Trail(0xD8D5CD, 0x9A958B, 2.0F, 1.0F, Optional.empty());
+                new Trail(0xFFFFFF, 0xFFFFFF, 2.0F, 1.0F, Optional.empty());
 
         public static final Codec<Trail> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 COLOUR.optionalFieldOf("colour", DEFAULT.colour()).forGetter(Trail::colour),

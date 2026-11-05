@@ -2056,7 +2056,7 @@
       "canopy": 22
     },
     "seats": [
-      [0.0, 1.129, 2.709]
+      [0.0, 0.967, 2.739]
     ]
   },
   "landing_gear": {
@@ -2076,7 +2076,7 @@
   "camera": {
     "generic_cockpit": false,
     "pos": [0.0, 3.898, -10.791],
-    "cockpit": [0.0, 2.149, 2.789]
+    "cockpit": [0.0, 2.277, 2.839]
   },
   "sound": {
     "volume": 1,
@@ -2098,22 +2098,22 @@
   "hardpoints": [
     {
       "name": "pylon1_left",
-      "pos": [-1.82, 0.721, 0.36],
+      "pos": [-1.82, 0.897, 0.551],
       "kind": "weapon"
     },
     {
       "name": "pylon1_right",
-      "pos": [1.82, 0.721, 0.36],
+      "pos": [1.82, 0.897, 0.551],
       "kind": "weapon"
     },
     {
       "name": "pylon2_left",
-      "pos": [-2.57, 0.721, -0.73],
+      "pos": [-2.57, 0.845, -0.582],
       "kind": "weapon"
     },
     {
       "name": "pylon2_right",
-      "pos": [2.57, 0.721, -0.73],
+      "pos": [2.57, 0.845, -0.582],
       "kind": "weapon"
     },
     {

@@ -190,6 +190,11 @@ public final class AirLoadout {
      * <p>出撃するたびに {@code match/Bots} がこれで積む。撃つ物の尽きた AI は自爆して出直すので（{@code AirPilot}）、
      * 積み方は出撃のたびに空の様子へ合わせ直される。
      *
+     * <p><b>倉が先</b>（2026-11-04）。倉を持つ機体はまず倉の中のステーションへ吊る。ステルス機（{@link #hidesStores}）は
+     * そこで止め、外のステーションは倉が1発も取れなかった分類にだけ使う。ポッドも外には付けない——フレアとチャフは
+     * どの機体も自前で持ち（{@code AircraftDefinition.Countermeasures}）、AI は照準ポッドの要る誘導爆弾を使わない。外に
+     * 吊った物は1つごとに {@code signature.store} を断面積に足すので、F-22 は探知される距離が10%から半分を超える。
+     *
      * @param hostile 敵の陣営の航空機の数（{@code Bots.enemyAircraft}）
      */
     public static void equip(AircraftEntity aircraft, int hostile) {
@@ -209,55 +214,156 @@ public final class AirLoadout {
             }
         }
 
+        boolean stealthy = hidesStores(definition);
+        List<Integer> pods = stealthy ? inside(definition, specials) : bayFirst(definition, specials);
         ResourceLocation decoy = decoyPod(definition);
 
-        if (!specials.isEmpty() && ModItems.equipment().containsKey(decoy)) {
-            mounts.fitEquipmentAt(specials.get(0), decoy);
+        if (!pods.isEmpty() && ModItems.equipment().containsKey(decoy)) {
+            mounts.fitEquipmentAt(pods.get(0), decoy);
         }
 
-        if (specials.size() > 1 && ModItems.equipment().containsKey(TARGETING_POD)) {
-            mounts.fitEquipmentAt(specials.get(1), TARGETING_POD);
+        if (pods.size() > 1 && ModItems.equipment().containsKey(TARGETING_POD)) {
+            mounts.fitEquipmentAt(pods.get(1), TARGETING_POD);
         }
 
         boolean rotor = definition.rotor().isPresent();
-        List<List<Integer>> pairs = mirrored(definition, pylons);
         int count = hostile <= 0 ? 0 : rotor ? 1 : !isFighter(definition) ? 0 : hostile >= MANY_HOSTILE ? 2 : 1;
-        Set<Integer> air = airPairs(definition, pairs, count);
 
-        for (int slot : tips) {
-            hang(aircraft, definition, slot, Store.AAM);
+        if (!stealthy) {
+            for (int slot : tips) {
+                hang(aircraft, definition, slot, Store.AAM);
+            }
+
+            arm(aircraft, definition, bayFirst(definition, pylons), count, !rotor);
+
+            return;
         }
 
-        for (int at : air) {
-            for (int slot : pairs.get(at)) {
+        Armed bays = arm(aircraft, definition, inside(definition, pylons), count, !rotor);
+        boolean air = count > 0 && !bays.air();
+        boolean bombs = bays.bombsWanted() && !bays.bombs();
+
+        if (!air && !bombs) {
+            return;
+        }
+
+        if (air) {
+            for (int slot : tips) {
                 hang(aircraft, definition, slot, Store.AAM);
             }
         }
 
-        if (rotor) {
-            return;
+        arm(aircraft, definition, outside(definition, pylons), air ? count : 0, bombs);
+    }
+
+    /** {@link #arm} が吊った物。爆弾は吊るつもりの対があったか（{@code bombsWanted}）と、実際に吊れたか。 */
+    private record Armed(boolean air, boolean bombsWanted, boolean bombs) {
+    }
+
+    /**
+     * その weapon パイロンの組を左右の対に分け、中心線から遠い対から {@code count} 対へ空対空ミサイル、{@code bombs} なら
+     * 残りの対へ自由落下爆弾。
+     */
+    private static Armed arm(AircraftEntity aircraft, AircraftDefinition definition, List<Integer> pylons, int count,
+            boolean bombs) {
+        List<List<Integer>> pairs = mirrored(definition, pylons);
+        Set<Integer> air = airPairs(definition, pairs, count);
+        boolean aam = false;
+
+        for (int at : air) {
+            for (int slot : pairs.get(at)) {
+                aam |= hang(aircraft, definition, slot, Store.AAM);
+            }
         }
+
+        if (!bombs) {
+            return new Armed(aam, false, false);
+        }
+
+        boolean wanted = false;
+        boolean hung = false;
 
         for (int at = 0; at < pairs.size(); at++) {
             if (air.contains(at)) {
                 continue;
             }
 
+            wanted = true;
+
             for (int slot : pairs.get(at)) {
-                hang(aircraft, definition, slot, Store.BOMB);
+                hung |= hang(aircraft, definition, slot, Store.BOMB);
             }
         }
+
+        return new Armed(aam, wanted, hung);
     }
 
-    /** パイロン1本に、その分類の物を吊りたい順に試して吊る。何も吊れなければ、付けたラックも外して空に戻す。 */
-    private static void hang(AircraftEntity aircraft, AircraftDefinition definition, int slot, Store wanted) {
+    /**
+     * 外に吊った物が断面積に乗る、倉を持つ機体か。{@code signature.radar} が1未満の機体だけ——1以上の側は探知距離が
+     * 頭打ちで、何を吊っても見つかる距離は変わらない（B-52・B-1・Tu-95 は倉の後に翼下も埋める）。
+     */
+    public static boolean hidesStores(AircraftDefinition definition) {
+        if (definition.signature().radar() >= 1.0F) {
+            return false;
+        }
+
+        for (AircraftDefinition.Hardpoint hardpoint : definition.hardpoints()) {
+            if (hardpoint.internal() && hardpoint.isPylon()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** 組のうち倉の中のステーション。順は保つ。 */
+    public static List<Integer> inside(AircraftDefinition definition, List<Integer> slots) {
+        List<Integer> found = new ArrayList<>();
+
+        for (int slot : slots) {
+            if (definition.hardpoints().get(slot).internal()) {
+                found.add(slot);
+            }
+        }
+
+        return found;
+    }
+
+    /** 組のうち倉の外のステーション。順は保つ。 */
+    public static List<Integer> outside(AircraftDefinition definition, List<Integer> slots) {
+        List<Integer> found = new ArrayList<>();
+
+        for (int slot : slots) {
+            if (!definition.hardpoints().get(slot).internal()) {
+                found.add(slot);
+            }
+        }
+
+        return found;
+    }
+
+    /** 倉の中を先に、続いて外。それぞれの中の順は保つ。 */
+    public static List<Integer> bayFirst(AircraftDefinition definition, List<Integer> slots) {
+        List<Integer> ordered = inside(definition, slots);
+
+        ordered.addAll(outside(definition, slots));
+
+        return ordered;
+    }
+
+    /**
+     * パイロン1本に、その分類の物を吊りたい順に試して吊る。何も吊れなければ、付けたラックも外して空に戻す。
+     *
+     * @return 何か吊れたか
+     */
+    private static boolean hang(AircraftEntity aircraft, AircraftDefinition definition, int slot, Store wanted) {
         WeaponMounts mounts = aircraft.getWeapons();
 
         for (ResourceLocation weapon : ranked(definition, Loadout.choicesFor(definition, slot), wanted)) {
             Loadout order = new Loadout(aircraft.getAircraftId(), List.of(new Loadout.Entry(slot, weapon, PAIR)));
 
             if (order.apply(aircraft) > 0) {
-                return;
+                return true;
             }
 
             // 重さが尽きたか、前に付いたラックがこの種類を受けない。空のラックを残したまま次を試すと、次の物も同じ
@@ -266,6 +372,8 @@ public final class AirLoadout {
                 mounts.strip(slot);
             }
         }
+
+        return false;
     }
 
     /**

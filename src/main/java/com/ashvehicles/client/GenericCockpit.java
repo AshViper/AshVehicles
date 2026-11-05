@@ -16,6 +16,10 @@ import net.minecraft.world.phys.Vec3;
  * {@link #EYE} で座席の目へ合わせるので、機体ごとに書くことは無い。機体へ {@code camera.displays} を
  * 書けばこちらは消える。
  * 要らない機体は {@code camera.generic_cockpit: false} で外す。
+ *
+ * <p>同梱の機体は全員の席の画面を書いてある（{@code tool/mfd/place.py} がこの3枚を当たり判定箱の計器盤の面へ
+ * 載せた物）。この決まった位置は計器盤の形を知らないので、機体によっては盤に埋まり、0.8 ブロック手前に浮き、
+ * ヘリの客席では宙に出ていた。これが出るのはパックの機体だけ。
  */
 public final class GenericCockpit {
     /** 画面の位置を測った模型の中で目が来る点。Blockbench の画素。 */

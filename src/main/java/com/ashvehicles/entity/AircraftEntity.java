@@ -97,6 +97,17 @@ import software.bernie.geckolib.util.GeckoLibUtil;
  * {@link com.ashvehicles.network.AircraftInputPayload} で送り、サーバーが同期データへ複製して他全員へ渡す。
  */
 public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
+    /**
+     * 航空機に乗るプレイヤーを座席の点から上げる量。足は座席の 0.6 下ではなく 0.4 下に来る
+     * （seat-point-is-not-the-riders-feet）。2026-11-05、乗員が沈んで見えたので 0.2 上げた。
+     */
+    public static final double PLAYER_RIDER_LIFT = 0.2;
+
+    @Override
+    public double riderLift(Entity passenger) {
+        return passenger instanceof Player ? PLAYER_RIDER_LIFT : 0;
+    }
+
     /** エンジン出力設定（0〜1）。他クライアントがエンジンのアニメーションを回せるよう同期する。 */
     /** エンジンの健全度（1 が無傷、0 が停止）。機体の耐久とは別に持つ。{@link #damageEngine} 参照。 */
     private static final EntityDataAccessor<Float> DATA_ENGINE =
@@ -195,6 +206,12 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     private AircraftDefinition boosted;
     private AircraftDefinition boostedFrom;
     private static final EntityDataAccessor<Boolean> DATA_GEAR_DOWN =
+            SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
+    /**
+     * 胴体着陸して腹で地面に寝ているか。立てるのはサーバーだけ（{@link #tickGear}）。立っている間は脚が出ず、
+     * 推力が出ず、機体は {@link #bellyDrop} だけ沈んで腹が地面に着く。畳む（シフト＋レンチ）と下りる。
+     */
+    private static final EntityDataAccessor<Boolean> DATA_BELLY =
             SynchedEntityData.defineId(AircraftEntity.class, EntityDataSerializers.BOOLEAN);
     /**
      * 揚力系のセレクタ（装備機のみ）。ノズルはファイルが指定する転換時間をかけて動く。
@@ -568,6 +585,25 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 意味は無い——着陸ではなく、脚を出したまま地面に衝突しているだけだ。
      */
     private static final double TOUCHDOWN_SINK = 0.25;
+    /**
+     * 胴体着陸として生き残れる水平の速さ。許容接地速度に対する倍率。
+     *
+     * <p>脚を出した着陸には速さの上限が無い（浅い沈下なら滑走と同じに読む）が、腹には上限を置く。置かなければ
+     * 脚を上げて地面を掠めた音速の機体が「胴体着陸」になる。1.5 倍は既定の 200km/h で 300km/h——ジェットの
+     * 進入速度は収まり、低空の高速航過は収まらない。
+     */
+    private static final double BELLY_SPEED = 1.5;
+    /** 腹で滑る間、前後と左右の速さを1tickごとにどれだけ残すか。2.8 ブロック/tick で降りれば約90ブロック滑る。 */
+    private static final double BELLY_FRICTION = 0.97;
+    private static final double BELLY_SCRUB = 0.8;
+    /** これより遅く腹で滑っている機体は止まる（ブロック/tick）。掛け算の摩擦は0に届かない。 */
+    private static final double BELLY_STOP = 0.03;
+    /** 腹へ沈むのに掛かる tick 数。接地した後に脚の高さぶんを落ちる時間で、遅すぎると宙に浮いて見える。 */
+    private static final float BELLY_SETTLE_TICKS = 6.0F;
+    /** 腹の下のこれより低いブロックは擦って越える（ブロック、素の直方体の底から）。ハーフブロックと雪は越える。 */
+    private static final double BELLY_SCRAPE = 0.5;
+    /** 胴体着陸が機体に与える打撃。最大耐久に対する割合で、これで尽きることはない（最後の1点は残す）。 */
+    private static final float BELLY_DAMAGE = 0.25F;
     /** 尾部が滑走路を擦る前に車輪が許す機首上げ姿勢。 */
     private static final float GROUND_PITCH_LIMIT = 15.0F;
     /** 前脚から主脚までの半分（機体の幅に対する割合）。F-16（幅6）で 2.1、実機の脚間 4 m の半分。 */
@@ -879,6 +915,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     /** 降着装置の展開度。0が上げロック、1が下げロック。 */
     private float gearProgress = 1.0F;
     private float gearProgressO = 1.0F;
+    /** 腹へ沈んだ量。0が脚の高さ、1が腹が地面に着いた所。{@link #DATA_BELLY} を両側で同じ速さで追う。 */
+    private float bellyProgress;
+    private float bellyProgressO;
+    /** {@link #bellyDrop} の答えと、それを出した形状。定義の再読み込みで形状が変われば測り直す。 */
+    private double bellyDrop;
+    @Nullable
+    private VehicleShape bellyShape;
     /** 兵装倉の扉の開き量。0が閉、1が全開。 */
     private float bayProgress;
     private float bayProgressO;
@@ -1287,8 +1330,78 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     public float stanceSink(float partialTick) {
         float rise = this.getStats().landingGear().stanceRise();
+        float stance = rise == 0.0F ? 0.0F : rise * this.getGearProgress(partialTick);
+        float belly = Mth.lerp(partialTick, this.bellyProgressO, this.bellyProgress);
 
-        return rise == 0.0F ? 0.0F : rise * this.getGearProgress(partialTick);
+        // 胴体着陸。原点（素の直方体）は脚の高さのまま地面に立っているので、腹が地面に着くまで機体の側を下げる。
+        // 尾輪式の沈み込みと同じ道を通すので、箱・座席・カメラ・銃口・模型が一緒に下がる。
+        return belly == 0.0F ? stance : stance + (float) this.bellyDrop() * belly;
+    }
+
+    /**
+     * 脚を上げた機体の腹が、原点（脚の接地点）からどれだけ上にあるか（ブロック）。
+     *
+     * <p>機体側の箱（{@code mount} が hull の物）の角のうち最も低い y。可動部（ハッチ・倉の扉・可変翼・ノズル）
+     * は開けば腹より下へ出るので数えない。パイロンの箱は形状に入っていない。箱を持たない機体は0——沈まない。
+     */
+    private double bellyDrop() {
+        VehicleShape shape = this.getShape();
+
+        if (shape != this.bellyShape) {
+            this.bellyShape = shape;
+            this.bellyDrop = lowestHullPoint(shape.boxes(), this.getStats().hitbox().height());
+        }
+
+        return this.bellyDrop;
+    }
+
+    /** 機体側の箱の角の最も低い y（機体座標）。0 から {@code ceiling} に収める。 */
+    static double lowestHullPoint(List<VehicleShape.Box> boxes, double ceiling) {
+        double lowest = Double.POSITIVE_INFINITY;
+        Vector3f corner = new Vector3f();
+
+        for (VehicleShape.Box box : boxes) {
+            if (box.mount() != VehicleShape.Mount.HULL) {
+                continue;
+            }
+
+            Quaternionf turn = box.orientation();
+            Vec3 size = box.size();
+
+            for (int i = 0; i < 8; i++) {
+                corner.set(((i & 1) == 0 ? -0.5F : 0.5F) * (float) size.x,
+                        ((i & 2) == 0 ? -0.5F : 0.5F) * (float) size.y,
+                        ((i & 4) == 0 ? -0.5F : 0.5F) * (float) size.z);
+                turn.transform(corner);
+                lowest = Math.min(lowest, box.offset().y + corner.y());
+            }
+        }
+
+        return Double.isInfinite(lowest) ? 0.0 : Mth.clamp(lowest, 0.0, Math.max(ceiling, 0.0));
+    }
+
+    /** 胴体着陸して腹で寝ているか。 */
+    public boolean isBellied() {
+        return this.entityData.get(DATA_BELLY);
+    }
+
+    /**
+     * 腹が地面に触れる形態か。胴体着陸していて、ひっくり返っていないこと。{@link #onWheels} の対で、滑る摩擦・
+     * 擦って越える床の線・推力の遮断がこれを訊く。
+     */
+    private boolean onBelly() {
+        return this.isBellied() && this.getLiftVector().y > UPRIGHT;
+    }
+
+    /**
+     * この機体が胴体着陸できるか。固定翼機で、人が飛ばしているか誰も飛ばしていないこと。
+     *
+     * <p>ヘリは除く——脚を上げて降りても腹で滑る速さを持たず、従来どおり接地で脚が出る。AI も除く。腹で寝た機体
+     * から AI が降りる手段は無く、試合の席を1つ永久に塞ぐ。AI の機体は従来どおり（遅ければ脚が出る、速ければ
+     * 墜落）。
+     */
+    private boolean canBellyLand() {
+        return this.getStats().rotor().isEmpty() && !this.isBotDriven();
     }
 
     /** 機体内での箱自身の角度、後部ハッチの箱ならその開き角、次にワールド内での機体の角度。 */
@@ -1450,6 +1563,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         builder.define(DATA_VELOCITY, new Vector3f());
         builder.define(DATA_BODY_RATE, new Vector3f());
         builder.define(DATA_GEAR_DOWN, true);
+        builder.define(DATA_BELLY, false);
         builder.define(DATA_BAY_OPEN, false);
         builder.define(DATA_RAMP_OPEN, false);
         builder.define(DATA_LIGHTS, (byte) (LIGHT_NAV | LIGHT_BEACON));
@@ -2290,8 +2404,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 引き込まない機体では常に拒否する。
      */
     public void toggleGear() {
+        // 腹で寝ている機体の脚は、自分の重さの下では出ない。
         if (this.level().isClientSide || !this.getStats().landingGear().retractable()
-                || (this.isGearDown() && this.onGround())) {
+                || (this.isGearDown() && this.onGround()) || this.isBellied()) {
             return;
         }
 
@@ -2414,6 +2529,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         if (this.level().isClientSide) {
             this.smokeEngine();
+            this.scrapeBelly();
         }
 
         this.tickGear();
@@ -2998,7 +3114,18 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
                 && this.getLiftVector().y > UPRIGHT
                 && (impactVelocity.y > -safe * TOUCHDOWN_SINK || impactVelocity.length() <= safe);
 
-        if (landing) {
+        // 胴体着陸。脚が上がっていて、正立していて、沈下が脚で降りるのと同じだけ浅く、そして水平の速さが
+        // BELLY_SPEED に収まっていること。腹で寝た後の毎tickもここを通る——滑っている間も地面との衝突は続く。
+        // 遅い方の救済（「許容接地速度以下なら何でも可」）は腹には無い。真下へ落ちた機体の腹は脚のように
+        // 受け止めない。
+        boolean belly = !landing
+                && this.canBellyLand()
+                && this.gearProgress <= 0.5F
+                && this.getLiftVector().y > UPRIGHT
+                && impactVelocity.y > -safe * TOUCHDOWN_SINK
+                && impactVelocity.horizontalDistance() <= safe * BELLY_SPEED;
+
+        if (landing || belly) {
             // 無事に降りた。だがその後に何かへ突っ込むことは依然としてありうる。衝突が実際に奪った速度で測る
             // ——move() は阻まれた軸を既に0にしている——ので、翼端が滑走路灯を掠めたり、幅6ブロックの箱の角が
             // ブロックの縁に引っ掛かったりしても、本来通り何も起きない。
@@ -3376,6 +3503,15 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
 
         float commandedYaw = this.input.yaw() * handling.yawRate() * (control + vectored * NOZZLE_YAW_SHARE);
 
+        // 腹で地面に寝た機体の舵は何も動かさない。姿勢は地面が決める（bellyTick）。
+        boolean belly = rolling && this.onBelly();
+
+        if (belly) {
+            commandedPitch = 0.0F;
+            commandedRoll = 0.0F;
+            commandedYaw = 0.0F;
+        }
+
         // 機動の補助。エアブレーキを握ったまま舵を切り切ると（ピッチ・ロール・ヨーのどれも、どちら向きでも）、
         // その軸の効きが上がり、尾翼も機首を戻そうとしなくなる。機首を決め打ちで回すのではなく効きを足すだけ
         // なので、迎角リミッターは残り、引けるGは機体と速度が決める。減速はブレーキの抗力がそのまま担う。
@@ -3426,7 +3562,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         // 地上でレバーが下から 1/4 に収まっている間、その位置は推力ではなく速度を意味する。エンジンは
         // ここでは何も押さず、押すのは groundTick の taxi だ。両方が働くと、速度指令が指したその上へ推力が
         // 積まれて機体は結局加速していく——つまり速度指令が何も指せなくなる。
-        double thrust = taxiing ? 0.0 : vtol == null
+        // 胴体着陸した機体のエンジンは押さない。吸気口とノズルは地面に擦られ、プロペラは地面を叩いた。押させると
+        // 腹で走るそりになり、腹から離陸できてしまう。
+        double thrust = taxiing || this.isBellied() ? 0.0 : vtol == null
                 ? definition.engine().maxThrust()
                 : Mth.lerp(lifting, definition.engine().maxThrust(), vtol.liftThrust());
 
@@ -4293,6 +4431,10 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * 主翼が荷重を受け持つ、というのが持つ価値のある効果の全てで、その両方はここで本物だ。
      */
     private Vec3 groundTick(Vec3 motion, boolean taxiing) {
+        if (this.onBelly()) {
+            return this.bellyTick(motion);
+        }
+
         // 姿勢を決めるのはパイロットではなく車輪であり、車輪が載っているのは地面だ。翼は地面に沿い、機首はその
         // 線から尾部が許す最大の機首上げまでのどこかに収まる。
         Slope slope = this.groundSlope();
@@ -4371,6 +4513,51 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
     }
 
     /**
+     * 腹で滑る1tick。{@link #groundTick} の胴体着陸版。
+     *
+     * <p>姿勢は地面の傾きへ、尾輪式の機首上げも無しで寝かせる——脚の無い腹は模型の巡航姿勢のまま地面に着く。
+     * 寄せ方は脚と同じばね（{@link #settleOnGear}）で、沈下の一撃もそのまま効く。パイロットの舵は地面に着いた
+     * 腹を動かせないので、ピッチ・ロール・ヨーの角速度はここで捨てる（{@link #wingFlightTick} も同じ理由で
+     * 舵を通さない）。
+     *
+     * <p>摩擦はタイヤのような前後と左右の差をほとんど持たない。腹は転がらないので、前へも {@link #BELLY_FRICTION}
+     * で削られ、横へはそれより強く削られる。ブレーキは何も足さない。止まった機体はそこで止まり、二度と走らない
+     * ——推力は {@link #wingFlightTick} が切っている。
+     *
+     * <p>そして車輪と同じく1tick分の重さで床へ押し付け続ける。でないと接地フラグが1tickおきに抜け、抜けた
+     * tick には飛行の分岐が回る。
+     */
+    private Vec3 bellyTick(Vec3 motion) {
+        Slope slope = this.groundSlope();
+
+        this.pitchVelocity = 0.0F;
+        this.rollVelocity = 0.0F;
+        this.yawVelocity = 0.0F;
+        this.settleOnGear(-slope.pitch(), slope.bank(), motion);
+
+        Vec3 heading = this.getNoseVector();
+        Vec3 forwards = new Vec3(heading.x, 0.0, heading.z);
+        Vec3 ground = new Vec3(motion.x, 0.0, motion.z);
+
+        if (forwards.lengthSqr() > 1.0E-8) {
+            forwards = forwards.normalize();
+
+            Vec3 sideways = new Vec3(-forwards.z, 0.0, forwards.x);
+
+            ground = forwards.scale(ground.dot(forwards) * BELLY_FRICTION)
+                    .add(sideways.scale(ground.dot(sideways) * BELLY_SCRUB));
+        } else {
+            ground = ground.scale(BELLY_SCRUB);
+        }
+
+        if (ground.lengthSqr() < BELLY_STOP * BELLY_STOP) {
+            ground = Vec3.ZERO;
+        }
+
+        return new Vec3(ground.x, Math.max(motion.y, -GRAVITY), ground.z);
+    }
+
+    /**
      * 地上で向きを変えた分だけ、主脚を軸に回るよう原点をずらす水平移動。
      *
      * <p>原点のまわりに回すと機首と尾が逆へ振れ、機体がその場で独楽のように回る。実機は操向輪（前輪式なら
@@ -4383,7 +4570,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         }
 
         double width = Math.max(this.getStats().hitbox().width(), 1.0F);
-        double arm = width * GEAR_BASE * (this.getStats().landingGear().groundStance() > 0.0F ? -1.0 : 1.0);
+        double arm = width * GEAR_BASE * (this.getStats().landingGear().steersFromBehind() ? -1.0 : 1.0);
         float now = (float) Math.toRadians(this.getYRot());
         float before = (float) Math.toRadians(this.getYRot() - turned);
 
@@ -5088,10 +5275,20 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * <p>全損機は除く。残骸に降着装置は無いし、脚を伸ばしながら滑っていく残骸は誰も望んでいない。
      */
     private void tickGear() {
-        if (!this.level().isClientSide && !this.isGearDown() && !this.isWrecked() && this.onGround()) {
-            this.entityData.set(DATA_GEAR_DOWN, true);
+        if (!this.level().isClientSide && !this.isGearDown() && !this.isWrecked() && !this.isBellied()
+                && this.onGround()) {
+            // 脚が半分より上がっていれば、地面に着いたのは腹だ。墜落ではなかったこと（速さと沈下）は操縦側の
+            // detectCrash が既に決めている。ここまで来た機体は生き残った。
+            if (this.gearProgress <= 0.5F && this.canBellyLand()) {
+                this.bellyLanded();
+            } else {
+                this.entityData.set(DATA_GEAR_DOWN, true);
+            }
         }
 
+        this.bellyProgressO = this.bellyProgress;
+        this.bellyProgress = approach(this.bellyProgress, this.isBellied() ? 1.0F : 0.0F,
+                1.0F / BELLY_SETTLE_TICKS);
         this.gearProgressO = this.gearProgress;
         this.gearProgress = approach(this.gearProgress, this.isGearDown() ? 1.0F : 0.0F,
                 1.0F / Math.max(this.getGearCycleTicks(), 1));
@@ -5104,6 +5301,26 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.rampProgressO = this.rampProgress;
         this.rampProgress = approach(this.rampProgress, this.isRampOpen() ? 1.0F : 0.0F,
                 1.0F / this.getRampCycleTicks());
+    }
+
+    /**
+     * 腹で地面に着いた。サーバーのみ、1度だけ。
+     *
+     * <p>機体は壊れるが落ちはしない。{@link #BELLY_DAMAGE} だけ削り、最後の1点は残す——胴体着陸は乗員を連れて
+     * 帰るための選択で、それで機体が残骸になるなら墜落と変わらない。吊っていた物は腹と一緒に擦られるが、
+     * 外しはしない（レンチで降ろせる）。
+     */
+    private void bellyLanded() {
+        this.entityData.set(DATA_BELLY, true);
+
+        float blow = Math.min(this.getMaxHealth() * BELLY_DAMAGE, this.getHealth() - 1.0F);
+
+        if (blow > 0.0F) {
+            this.wound(blow);
+        }
+
+        this.level().playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.ANVIL_LAND,
+                this.getSoundSource(), 4.0F, 0.5F);
     }
 
 
@@ -5786,6 +6003,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      */
     @Override
     protected void onWrecked() {
+        // 残骸は腹で寝ている機体ではない。転がりと地形への当たりは残骸の側（wreckTick）が持っており、腹の
+        // 沈み込みと床の線を持ち込むとそちらの前提が崩れる。
+        this.entityData.set(DATA_BELLY, false);
         this.setThrottle(0.0F);
         this.thrustLevel = 0.0F;
         this.reheatCommanded = false;
@@ -6788,6 +7008,13 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
      * させるので、車輪より下の地面は依然として機体を支え、そこへの降下は到達速度が何であれ依然として「到達」だ。
      */
     private double scrapeLine() {
+        // 腹で寝た機体の腹は床に接している（stanceSink が原点の高さまで下げた）。床を数えると腹の箱が地面に
+        // 重なった瞬間から limitToShape があらゆる向きの移動を止める。腹は床を擦って滑る物なので、素の直方体の
+        // 底から BELLY_SCRAPE までは越える。
+        if (this.onBelly()) {
+            return this.getBoundingBox().minY + BELLY_SCRAPE;
+        }
+
         if (!this.onWheels()) {
             return Hitboxes.UNDERSIDE_NONE;
         }
@@ -6928,6 +7155,46 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         return super.wound(amount);
     }
 
+    /**
+     * 腹で滑る機体が擦り出す火花と土煙。クライアントのみ。腹の前後に散らし、速いほど多い。
+     *
+     * <p>速さは {@code getVelocity}——操縦していない側にも同期されている値——から読む。
+     */
+    private void scrapeBelly() {
+        if (!this.isBellied() || this.isWrecked() || this.bellyProgress < 1.0F) {
+            return;
+        }
+
+        Vec3 velocity = this.getVelocity();
+        double speed = velocity.horizontalDistance();
+
+        if (speed < BELLY_STOP * 2.0) {
+            return;
+        }
+
+        RandomSource random = this.level().random;
+        Vec3 nose = this.getNoseVector();
+        Vec3 right = Attitude.right(this.attitude);
+        double length = Math.max(this.getStats().hitbox().width(), 1.0F) * 0.6;
+        int count = Math.min(1 + (int) (speed * 3.0), 8);
+
+        for (int i = 0; i < count; i++) {
+            Vec3 at = this.position()
+                    .add(nose.scale((random.nextDouble() - 0.5) * length))
+                    .add(right.scale((random.nextDouble() - 0.5) * length * 0.3))
+                    .add(0.0, 0.1, 0.0);
+            Vec3 kick = velocity.scale(-0.2).add(random.nextGaussian() * 0.15, 0.1 + random.nextDouble() * 0.2,
+                    random.nextGaussian() * 0.15);
+
+            this.level().addParticle(ParticleTypes.CRIT, at.x, at.y, at.z, kick.x, kick.y, kick.z);
+
+            if (random.nextInt(3) == 0) {
+                this.level().addParticle(ParticleTypes.LARGE_SMOKE, at.x, at.y, at.z,
+                        velocity.x * 0.1, 0.03, velocity.z * 0.1);
+            }
+        }
+    }
+
     /** 傷んだエンジンが吹く煙と火。クライアントのみ。機体の後ろ寄りから出す。 */
     private void smokeEngine() {
         float engine = this.getEngineHealth();
@@ -6944,6 +7211,30 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         if (engine < ENGINE_BURNING) {
             this.level().addParticle(ParticleTypes.FLAME, at.x, at.y, at.z, 0.0, 0.02, 0.0);
         }
+    }
+
+    /**
+     * 畳んだ機体は脚を下ろして戻る。胴体着陸した機体を回収する手段がこれで、置き直せば車輪で立つ。
+     * 耐久は畳んだ時のまま持ち越す。
+     */
+    @Override
+    public ItemStack packedItem() {
+        ItemStack stack = super.packedItem();
+        net.minecraft.world.item.component.CustomData data =
+                stack.get(net.minecraft.core.component.DataComponents.ENTITY_DATA);
+
+        if (data != null) {
+            CompoundTag tag = data.copyTag();
+
+            if (tag.getBoolean("Belly")) {
+                tag.remove("Belly");
+                tag.putBoolean("GearDown", true);
+                stack.set(net.minecraft.core.component.DataComponents.ENTITY_DATA,
+                        net.minecraft.world.item.component.CustomData.of(tag));
+            }
+        }
+
+        return stack;
     }
 
     @Override
@@ -6968,6 +7259,9 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         this.entityData.set(DATA_GEAR_DOWN, !tag.contains("GearDown") || tag.getBoolean("GearDown"));
         this.gearProgress = this.isGearDown() ? 1.0F : 0.0F;
         this.gearProgressO = this.gearProgress;
+        this.entityData.set(DATA_BELLY, tag.getBoolean("Belly"));
+        this.bellyProgress = this.isBellied() ? 1.0F : 0.0F;
+        this.bellyProgressO = this.bellyProgress;
         this.entityData.set(DATA_VTOL, tag.getBoolean("Vtol"));
         this.vtolProgress = this.isVtolSelected() ? 1.0F : 0.0F;
         this.vtolProgressO = this.vtolProgress;
@@ -7021,6 +7315,7 @@ public class AircraftEntity extends VehicleEntityBase implements GeoEntity {
         tag.putInt("Flares", this.getCountermeasures(true));
         tag.putInt("Chaff", this.getCountermeasures(false));
         tag.putBoolean("GearDown", this.isGearDown());
+        tag.putBoolean("Belly", this.isBellied());
         tag.putBoolean("FlapsDown", this.isFlapsDown());
         tag.putBoolean("BayOpen", this.isBayOpen());
         tag.putBoolean("RampOpen", this.isRampOpen());

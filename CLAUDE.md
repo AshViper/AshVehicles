@@ -28,9 +28,14 @@ gradlew runData      # データ生成（定義の検証はこれで通す）
 | `mixin/` (25) | `ashvehicles.mixins.json`。チャンク送信・生成・描画順に手を入れている |
 | `network/` (21) `registry/` (8) `data/` (6) | パケット、登録、定義読み込みとコンテンツパック |
 | `tool/vehicle-editor.html` | 機体定義のブラウザエディタ。当たり判定箱・パイロン・座席と目・カメラ・MFD（`camera.displays`、模型から自動検出）を1画面で置き、一人称／三人称の透視プレビューを持つ（`vehicle-editor-drives-headless`） |
+| `docs/texture-guide.md` | テクスチャの書き方の手引き（他の AI にも渡せる自己完結版）。ゲームが読む規則・画風・手順・合格基準。画風の癖を変えたらここと `textures-are-pixel-art-panels` の両方を直す |
 | `tool/dump_definitions.py` | 定義ファイルから実装一覧（機体・兵装の数値表）を Obsidian の `データ/` に生成 |
 | `tool/geo_to_bbmodel.py` | 書き出し済みの geo.json・png・animation.json を `bbmodel/<種類>/<id>.bbmodel` 1つにまとめる（ゲームが読むのと逆向き） |
 | `tool/make_weapon_icon.py` | 兵装の geo から 16×16 のアイテムアイコンを起こす。手描きの下地 |
+| `tool/pylons/` | 航空機の外部ステーションを当たり判定箱から置き直す。実機の配置は `layouts.py`（機体ごとの並びと翼幅方向の位置）、高さ・翼弦方向・翼端レールは `apply_layouts.py` が箱の面から測る。確かめは `audit.py`（`pylons-sit-on-the-hitbox-skin`） |
+| `tool/gear/` | 航空機の降着装置。`ground.py` が脚を下ろした車輪の最下点を −0.01 に揃え（脚ごと平行移動か脚柱を伸ばす）、`solve.py` が格納した脚が当たり判定箱の中に隠れる角を解き（今の軸と向きは保つ）、`apply.py` が `gear_up`/`gear_down` の両方へ書く。扉は `doors.py`、監査は `audit.py`、絵は `views.py`/`legview.py`。順番は接地が先（`gear-stows-inside-the-hitbox`） |
+| `tool/seats/` | 航空機の座席（`airframe.seats`）と一人称の目（`camera.cockpit`・座席の `eye`）を模型の座面・背もたれ・天蓋・グレアシールドから置き直す。実機の乗員配置は `crew.py`、測って書くのは `place.py`（目が先、体は頭が天蓋に収まるまで沈める）。確かめは `audit.py` と断面図の `views.py`。目を動かしたら `tool/mfd/place.py --apply` → `place.py --displays-only`（`seats-and-eyes-are-placed-from-the-model`） |
+| `tool/mfd/` | 画面を書いていない航空機の MFD を `camera.displays` に置く。模型の画面キューブ、無ければ汎用の3枚を当たり判定箱の計器盤の面へ（`place.py`）。盤の無い客席には `generic_cockpit: false`。ボタンは模型の四角、無ければ縁の内側のソフトキー。座席や目を動かしたら再実行。確かめは `audit.py`（`mfds-sit-on-the-hitbox-panel`） |
 | `tool/ai/` | 戦闘 AI の学習の段取りをゲームの外で回す Python（版の比較 `evaluate.py`・次の候補 `propose_version.py`・学習用 CSV `export_dataset.py`・覚えた地図の画像 `map_memory.py`）、覚えた地図と戦闘をワールドの地形に重ねて見るブラウザのビューア `viewer/index.html`、判断ロジックの合成試験 `check/`、判断の層と AI の航空機を JS に写した代理の試合（会場は自動生成か Minecraft のワールド）を Worker で並列に回して版のパラメータを進化させるブラウザの学習器 `trainer/`（`browser-trainer-evolves-versions-in-a-proxy-sim`。ゲームの式を変えたら `trainer/sim/` も直し `trainer/build_data.py` を打ち直す） |
 
 **コンテンツは定義ファイル駆動**。`src/main/resources/data/ashvehicles/ashvehicles/` に（名前空間の直下に置かないのは他 MOD との衝突のため。`definition-folders-are-namespaced-by-mod`） aircraft 42 / vehicle 23（うち艦 2） / weapon 42 / ammunition 10 / rack 5 / equipment 3。**登録の本体は Java ではなく定義ファイル**なので、新規追加はまずここを見る（`what-a-new-machine-needs` / `what-a-new-weapon-needs`）。模型は **`assets/…/bbmodel/<種類>/<id>.bbmodel`**（同梱の 102 模型はすべてこれ。テクスチャとアニメーションも兼ね、geo.json・png・animation.json は 2026-11-03 に削除した）。他に `assets/…/geo/entity/<id>.geo.json` か `assets/…/obj/entity/<id>.obj`（Blockbench の画面の向きのまま、`o` がボーン名。蝶番と親子は横の `<id>.bones.json`）、または `assets/…/bbmodel/entity/<id>.bbmodel` 1つ（テクスチャとアニメーションも兼ねる。`bbmodel-files-stand-in-for-geo-texture-and-animation`）。

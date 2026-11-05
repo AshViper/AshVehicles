@@ -70,7 +70,8 @@ public final class PassengerTiltHandler {
         // そちらであって、ずれていたのは機体だけだった。
         Vec3 seat = aircraft.getSeatOffset(aircraft.getSeatIndex(rider));
         Vec3 drop = rider.getVehicleAttachmentPoint(aircraft);
-        poseStack.translate(-seat.x, seat.y - drop.y, seat.z);
+        // 置く側が足す持ち上げ（{@link AircraftEntity#riderLift}）もここで同じだけ足す。
+        poseStack.translate(-seat.x, seat.y + aircraft.riderLift(rider) - drop.y, seat.z);
 
         // 方位を打ち消す。軸は機体ではなく座席。搭乗者は機体と共に傾くが、顔は自分が見ている方を向いたまま。
         poseStack.mulPose(Axis.YP.rotationDegrees(Attitude.heading(attitude)));

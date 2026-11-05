@@ -3944,10 +3944,10 @@
     "crash_speed": 2.5,
     "explosion_power": 3.5,
     "seats": [
-      [0.0, 2.659, 5.015],
+      [0.0, 2.504, 5.031],
       {
-        "pos": [0.0, 2.732, 3.446],
-        "eye": [0.0, 3.752, 3.526]
+        "pos": [0.0, 2.714, 3.461],
+        "eye": [0.0, 3.974, 3.561]
       }
     ],
     "max_g": 9,
@@ -3972,7 +3972,7 @@
   },
   "camera": {
     "pos": [0.0, 4.1, -14.4],
-    "cockpit": [0.0, 3.679, 5.095],
+    "cockpit": [0.0, 3.761, 5.131],
     "displays": [
       {
         "pos": [-0.239, 3.234, 5.791],
@@ -4184,74 +4184,74 @@
   "hardpoints": [
     {
       "name": "pylon1_left",
-      "pos": [-2.46, 2.122, -1.49],
+      "pos": [-2.46, 2.122, -2.0],
       "kind": "weapon"
     },
     {
       "name": "pylon1_right",
-      "pos": [2.46, 2.122, -1.49],
+      "pos": [2.46, 2.122, -2.0],
       "kind": "weapon"
     },
     {
       "name": "pylon2_left",
-      "pos": [-3.69, 2.122, -2.1],
+      "pos": [-3.69, 2.122, -2.744],
       "kind": "weapon"
     },
     {
       "name": "pylon2_right",
-      "pos": [3.69, 2.122, -2.1],
+      "pos": [3.69, 2.122, -2.744],
       "kind": "weapon"
     },
     {
       "name": "pylon3_left",
-      "pos": [-4.92, 2.122, -2.72],
+      "pos": [-4.92, 2.122, -3.573],
       "kind": "weapon"
     },
     {
       "name": "pylon3_right",
-      "pos": [4.92, 2.122, -2.72],
+      "pos": [4.92, 2.122, -3.573],
       "kind": "weapon"
     },
     {
       "name": "wingtip_left",
-      "pos": [-7.25, 2.277, -4.98],
+      "pos": [-7.249, 2.388, -4.978],
       "wingtip": true,
       "kind": "weapon"
     },
     {
       "name": "wingtip_right",
-      "pos": [7.25, 2.277, -4.98],
+      "pos": [7.249, 2.388, -4.978],
       "wingtip": true,
       "kind": "weapon"
     },
     {
       "name": "pylon5_left",
-      "pos": [-1.23, 0.722, -1.59],
+      "pos": [-1.0, 0.812, -3.2],
       "kind": "weapon"
     },
     {
       "name": "pylon5_right",
-      "pos": [1.23, 0.722, -1.59],
+      "pos": [1.0, 0.812, -3.2],
       "kind": "weapon"
     },
     {
       "name": "centre_fore",
-      "pos": [0.0, 1.706, -0.6],
+      "pos": [0.0, 1.767, -1.2],
       "kind": "weapon"
     },
     {
       "name": "centre_aft",
-      "pos": [0.0, 1.665, -3.2],
+      "pos": [0.0, 1.66, -5.6],
       "kind": "weapon"
     },
     {
       "name": "sensor_left",
-      "pos": [-1.23, 0.942, -0.31],
+      "pos": [-1.0, 0.954, 0.0],
       "kind": "special"
     },
     {
       "name": "sensor_right",
-      "pos": [1.23, 0.942, -0.31],
+      "pos": [1.0, 0.954, 0.0],
       "kind": "special"
     },
     {

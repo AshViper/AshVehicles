@@ -2247,7 +2247,7 @@
     "crash_speed": 2.6,
     "explosion_power": 3,
     "seats": [
-      [0.0, 1.5, 2.95]
+      [0.0, 1.434, 2.883]
     ],
     "max_g": 6.5,
     "ejection": {
@@ -2271,7 +2271,7 @@
   },
   "camera": {
     "pos": [0.0, 3.5, -12.0],
-    "cockpit": [0.0, 2.75, 3.0],
+    "cockpit": [0.0, 2.687, 2.983],
     "displays": [
       { "pos": [-0.191, 2.372, 3.467], "width": 0.122, "height": 0.122, "tilt": 15, "page": "nav", "buttons": [[-0.265, 2.316, 3.473], [-0.265, 2.336, 3.479], [-0.265, 2.355, 3.483], [-0.265, 2.375, 3.489], [-0.265, 2.394, 3.494], [-0.265, 2.415, 3.499], [-0.241, 2.438, 3.506], [-0.2, 2.438, 3.506], [-0.22, 2.438, 3.506], [-0.179, 2.438, 3.506], [-0.159, 2.438, 3.506], [-0.139, 2.438, 3.506]] },
       { "pos": [0.0, 2.383, 3.478], "width": 0.122, "height": 0.122, "tilt": 15, "page": "pfd", "buttons": [[-0.073, 2.326, 3.483], [-0.073, 2.346, 3.488], [-0.073, 2.365, 3.494], [-0.073, 2.386, 3.499], [-0.073, 2.405, 3.504], [-0.073, 2.424, 3.51], [0.073, 2.326, 3.483], [0.073, 2.346, 3.488], [0.073, 2.386, 3.499], [0.073, 2.365, 3.494], [0.073, 2.405, 3.504], [0.073, 2.424, 3.51]] },
@@ -2298,48 +2298,48 @@
   },
   "hardpoints": [
     {
-      "name": "pylon1",
-      "pos": [-1.85, 1.585, -0.35],
+      "name": "pylon1_left",
+      "pos": [-1.85, 1.822, -0.758],
       "kind": "weapon"
     },
     {
-      "name": "pylon1_copy",
-      "pos": [-2.85, 1.585, -0.7],
+      "name": "pylon2_left",
+      "pos": [-2.9, 1.761, -1.107],
       "kind": "weapon"
     },
     {
-      "name": "pylon1_copy_copy",
-      "pos": [-3.85, 1.585, -1.1],
+      "name": "pylon3_left",
+      "pos": [-3.95, 1.698, -1.475],
       "kind": "weapon"
     },
     {
-      "name": "pylon1_copy_copy_copy",
-      "pos": [-4.9, 1.65, -1.4],
+      "name": "pylon4_left",
+      "pos": [-4.95, 1.655, -1.672],
       "kind": "weapon"
     },
     {
-      "name": "pylon1_copy",
-      "pos": [1.9, 1.585, -0.4],
+      "name": "pylon1_right",
+      "pos": [1.85, 1.822, -0.758],
       "kind": "weapon"
     },
     {
-      "name": "pylon1_copy_copy",
-      "pos": [2.95, 1.585, -0.8],
+      "name": "pylon2_right",
+      "pos": [2.9, 1.761, -1.107],
       "kind": "weapon"
     },
     {
-      "name": "pylon1_copy_copy_copy",
-      "pos": [3.95, 1.585, -1.25],
+      "name": "pylon3_right",
+      "pos": [3.95, 1.698, -1.475],
       "kind": "weapon"
     },
     {
-      "name": "pylon1_copy_copy_copy_copy",
-      "pos": [4.95, 1.65, -1.5],
+      "name": "pylon4_right",
+      "pos": [4.95, 1.655, -1.672],
       "kind": "weapon"
     },
     {
       "name": "sensor",
-      "pos": [0.0, 1.6, 1.8],
+      "pos": [0.0, 0.971, 1.8],
       "kind": "special"
     },
     {
@@ -2349,6 +2349,16 @@
       "ammunition": [
         "ashvehicles:autocannon_apfsds", "ashvehicles:autocannon_he", "ashvehicles:autocannon_heat"
       ]
+    },
+    {
+      "name": "pylon5_left",
+      "pos": [-5.85, 1.616, -1.827],
+      "kind": "weapon"
+    },
+    {
+      "name": "pylon5_right",
+      "pos": [5.85, 1.616, -1.827],
+      "kind": "weapon"
     }
   ]
 }

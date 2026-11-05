@@ -1771,7 +1771,7 @@ function AVTrainerData(AV) {
     "nation": "us",
     "mass": 430.0
    },
-   "bombSlots": 16,
+   "bombSlots": 14,
    "bombPayload": 5840.0,
    "aam": {
     "id": "aim9",
@@ -1795,7 +1795,7 @@ function AVTrainerData(AV) {
     "mass": 85.0
    },
    "aamTips": 0,
-   "aamPylons": 8
+   "aamPylons": 7
   },
   {
    "id": "f_16",
@@ -1927,7 +1927,7 @@ function AVTrainerData(AV) {
     "nation": "us",
     "mass": 430.0
    },
-   "bombSlots": 14,
+   "bombSlots": 18,
    "bombPayload": 6468.0,
    "aam": {
     "id": "aim9",
@@ -1951,7 +1951,7 @@ function AVTrainerData(AV) {
     "mass": 85.0
    },
    "aamTips": 2,
-   "aamPylons": 7
+   "aamPylons": 9
   },
   {
    "id": "f_22",
@@ -2161,7 +2161,7 @@ function AVTrainerData(AV) {
     "nation": "us",
     "mass": 430.0
    },
-   "bombSlots": 16,
+   "bombSlots": 14,
    "bombPayload": 6784.0,
    "aam": {
     "id": "aim9",
@@ -2185,7 +2185,7 @@ function AVTrainerData(AV) {
     "mass": 85.0
    },
    "aamTips": 0,
-   "aamPylons": 8
+   "aamPylons": 7
   },
   {
    "id": "fa_18e",
@@ -2239,7 +2239,7 @@ function AVTrainerData(AV) {
     "nation": "us",
     "mass": 430.0
    },
-   "bombSlots": 20,
+   "bombSlots": 18,
    "bombPayload": 6440.0,
    "aam": {
     "id": "aim9",
@@ -2262,8 +2262,8 @@ function AVTrainerData(AV) {
     "nation": "us",
     "mass": 85.0
    },
-   "aamTips": 0,
-   "aamPylons": 10
+   "aamTips": 2,
+   "aamPylons": 9
   },
   {
    "id": "jas_39",
@@ -2317,7 +2317,7 @@ function AVTrainerData(AV) {
     "nation": "us",
     "mass": 430.0
    },
-   "bombSlots": 14,
+   "bombSlots": 10,
    "bombPayload": 4240.0,
    "aam": {
     "id": "aim9",
@@ -2340,8 +2340,8 @@ function AVTrainerData(AV) {
     "nation": "us",
     "mass": 85.0
    },
-   "aamTips": 0,
-   "aamPylons": 7
+   "aamTips": 2,
+   "aamPylons": 5
   },
   {
    "id": "ju_87d",
@@ -2707,7 +2707,7 @@ function AVTrainerData(AV) {
     "nation": "ru",
     "mass": 500.0
    },
-   "bombSlots": 12,
+   "bombSlots": 16,
    "bombPayload": 7200.0,
    "aam": {
     "id": "r73",
@@ -2731,7 +2731,7 @@ function AVTrainerData(AV) {
     "mass": 105.0
    },
    "aamTips": 0,
-   "aamPylons": 6
+   "aamPylons": 8
   },
   {
    "id": "p_51",
@@ -2941,7 +2941,7 @@ function AVTrainerData(AV) {
     "nation": "ru",
     "mass": 500.0
    },
-   "bombSlots": 16,
+   "bombSlots": 20,
    "bombPayload": 3520.0,
    "aam": {
     "id": "r73",
@@ -2965,7 +2965,7 @@ function AVTrainerData(AV) {
     "mass": 105.0
    },
    "aamTips": 0,
-   "aamPylons": 8
+   "aamPylons": 10
   },
   {
    "id": "su_27",
@@ -3019,7 +3019,7 @@ function AVTrainerData(AV) {
     "nation": "ru",
     "mass": 500.0
    },
-   "bombSlots": 20,
+   "bombSlots": 16,
    "bombPayload": 4800.0,
    "aam": {
     "id": "r73",
@@ -3042,8 +3042,8 @@ function AVTrainerData(AV) {
     "nation": "ru",
     "mass": 105.0
    },
-   "aamTips": 0,
-   "aamPylons": 10
+   "aamTips": 2,
+   "aamPylons": 8
   },
   {
    "id": "su_30sm",
@@ -3198,7 +3198,7 @@ function AVTrainerData(AV) {
     "nation": "ru",
     "mass": 105.0
    },
-   "aamTips": 0,
+   "aamTips": 2,
    "aamPylons": 10
   },
   {
@@ -3276,7 +3276,7 @@ function AVTrainerData(AV) {
     "nation": "ru",
     "mass": 105.0
    },
-   "aamTips": 0,
+   "aamTips": 2,
    "aamPylons": 10
   },
   {
@@ -3331,7 +3331,7 @@ function AVTrainerData(AV) {
     "nation": "ru",
     "mass": 500.0
    },
-   "bombSlots": 16,
+   "bombSlots": 12,
    "bombPayload": 8000.0,
    "aam": {
     "id": "r73",
@@ -3355,7 +3355,7 @@ function AVTrainerData(AV) {
     "mass": 105.0
    },
    "aamTips": 0,
-   "aamPylons": 8
+   "aamPylons": 6
   },
   {
    "id": "tu_95",

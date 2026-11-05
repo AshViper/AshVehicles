@@ -166,7 +166,7 @@ public class AircraftModel extends VehicleGeoModel<AircraftEntity> {
                     aircraft.getThrottle(),
                     // 尾輪式の操向輪は後ろにあるので、旋回の外へ前を向ける。
                     aircraft.getWheelSteer(partialTick)
-                            * (aircraft.getStats().landingGear().groundStance() > 0.0F ? -1.0F : 1.0F),
+                            * (aircraft.getStats().landingGear().steersFromBehind() ? -1.0F : 1.0F),
                     aircraft.getWheelSpin(partialTick));
         }
 

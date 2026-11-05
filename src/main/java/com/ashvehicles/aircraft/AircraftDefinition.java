@@ -152,7 +152,7 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                     List.of(VehicleChassis.Seat.at(new Vec3(0.0, 0.5, 0.0))),
                     Optional.empty(), Optional.empty(), Optional.empty(), List.of()),
             new Undercarriage(40, 0.6F, 0.995F, 0.85F, 0.55F, 1.1F, 1.2F, 1.05F, true, Optional.empty(),
-                    0.0F, 0.0F),
+                    0.0F, 0.0F, Optional.empty()),
             new Surface(20, 0.5F, 0.4F),
             VehicleChassis.CameraMount.DEFAULT,
             VehicleChassis.Sound.DEFAULT,
@@ -1267,11 +1267,21 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
      *                    尻を下ろすときに回る点でもある。姿勢を原点周りに回すと機体全体が
      *                    {@code stancePivot × sin(groundStance)} だけ持ち上がって車輪が地面から浮くので、
      *                    描画がその分だけ模型を下げる（{@code AircraftRenderer.applyBodyMotion}）。
-     *                    {@code groundStance} が0なら読まれない
+     *                    {@code groundStance} が0なら読まれない。<b>前輪の接地点でもよい。</b>自転車式の
+     *                    AV-8B は主脚が後ろにあって引き起こせないので、前脚を長くして最初から機首上げで立つ
+     *                    （6.24 度、支点は前輪の z）。そのときは {@code tailWheel} を false と書く
+     * @param tailWheel 操向輪が後ろにあるか（尾輪式）。地上旋回の操向輪の向きと、主脚を軸に回るときの
+     *                  主脚の前後（{@code AircraftEntity.gearPivot}）がこれで裏返る。省略すると
+     *                  「機首上げで立つなら尾輪式」——機首上げの姿勢が尾輪式にしか無かった頃の読み方
      */
     public record Undercarriage(int cycleTicks, float dragPenalty, float rollingFriction, float brakeFriction,
             float lateralFriction, float steerRate, float steerFade, float climbHeight, boolean retractable,
-            Optional<Float> landingSpeed, float groundStance, float stancePivot) {
+            Optional<Float> landingSpeed, float groundStance, float stancePivot, Optional<Boolean> tailWheel) {
+
+        /** 操向輪が主脚より後ろにあるか。{@code tail_wheel} を書かなければ機首上げで立つ機体がそう。 */
+        public boolean steersFromBehind() {
+            return this.tailWheel.orElse(this.groundStance > 0.0F);
+        }
 
         /**
          * 車輪が地面に着くまで模型を下げる量（ブロック）。
@@ -1309,7 +1319,8 @@ public record AircraftDefinition(VehicleChassis.Hitbox hitbox, VehicleChassis.Mo
                 Codec.BOOL.optionalFieldOf("retractable", true).forGetter(Undercarriage::retractable),
                 Codec.FLOAT.optionalFieldOf("landing_speed").forGetter(Undercarriage::landingSpeed),
                 Codec.FLOAT.optionalFieldOf("ground_stance", 0.0F).forGetter(Undercarriage::groundStance),
-                Codec.FLOAT.optionalFieldOf("stance_pivot", 0.0F).forGetter(Undercarriage::stancePivot)
+                Codec.FLOAT.optionalFieldOf("stance_pivot", 0.0F).forGetter(Undercarriage::stancePivot),
+                Codec.BOOL.optionalFieldOf("tail_wheel").forGetter(Undercarriage::tailWheel)
         ).apply(instance, Undercarriage::new));
     }
 

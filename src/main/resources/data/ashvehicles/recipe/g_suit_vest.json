@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "L": {
+      "item": "minecraft:leather"
+    },
+    "M": {
+      "item": "ashvehicles:machine_parts"
+    }
+  },
+  "pattern": [
+    "L L",
+    "LML",
+    "LLL"
+  ],
+  "result": {
+    "count": 1,
+    "id": "ashvehicles:g_suit_vest"
+  }
+}

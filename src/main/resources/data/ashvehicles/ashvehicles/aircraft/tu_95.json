@@ -8372,16 +8372,11 @@
     "crash_speed": 2.2,
     "explosion_power": 8,
     "seats": [
-      [
-        -0.555,
-        4.156,
-        17.33
-      ],
-      [
-        0.555,
-        4.156,
-        17.33
-      ]
+      [-0.555, 3.983, 17.245],
+      {
+        "pos": [0.555, 3.983, 17.245],
+        "eye": [0.555, 5.31, 17.345]
+      }
     ],
     "max_g": 2.5,
     "ejection": {
@@ -8411,11 +8406,7 @@
       13.714,
       -31.58
     ],
-    "cockpit": [
-      -0.555,
-      5.176,
-      17.41
-    ]
+    "cockpit": [-0.555, 5.31, 17.345]
   },
   "sound": {
     "engine": "ashvehicles:engine.prop",
@@ -8448,98 +8439,58 @@
   "hardpoints": [
     {
       "name": "bay1_left",
-      "pos": [
-        -0.353,
-        3.29,
-        2.35
-      ],
+      "pos": [-0.353, 3.29, 2.35],
       "internal": true,
       "kind": "weapon"
     },
     {
       "name": "bay1_right",
-      "pos": [
-        0.353,
-        3.29,
-        2.35
-      ],
+      "pos": [0.353, 3.29, 2.35],
       "internal": true,
       "kind": "weapon"
     },
     {
       "name": "bay2_left",
-      "pos": [
-        -0.353,
-        3.29,
-        0
-      ],
+      "pos": [-0.353, 3.29, 0.0],
       "internal": true,
       "kind": "weapon"
     },
     {
       "name": "bay2_right",
-      "pos": [
-        0.353,
-        3.29,
-        0
-      ],
+      "pos": [0.353, 3.29, 0.0],
       "internal": true,
       "kind": "weapon"
     },
     {
       "name": "bay3_left",
-      "pos": [
-        -0.353,
-        3.29,
-        -2.35
-      ],
+      "pos": [-0.353, 3.29, -2.35],
       "internal": true,
       "kind": "weapon"
     },
     {
       "name": "bay3_right",
-      "pos": [
-        0.353,
-        3.29,
-        -2.35
-      ],
+      "pos": [0.353, 3.29, -2.35],
       "internal": true,
       "kind": "weapon"
     },
     {
       "name": "pylon1_left",
-      "pos": [
-        -3.525,
-        4.07,
-        5.35
-      ],
+      "pos": [-3.52, 4.07, 6.003],
       "kind": "weapon"
     },
     {
       "name": "pylon1_right",
-      "pos": [
-        3.525,
-        4.07,
-        5.35
-      ],
+      "pos": [3.52, 4.07, 6.003],
       "kind": "weapon"
     },
     {
       "name": "pylon2_left",
-      "pos": [
-        -9.1,
-        3.84,
-        1.82
-      ],
+      "pos": [-9.1, 3.857, 3.343],
       "kind": "weapon"
     },
     {
       "name": "pylon2_right",
-      "pos": [
-        9.1,
-        3.84,
-        1.82
-      ],
+      "pos": [9.1, 3.857, 3.343],
       "kind": "weapon"
     }
   ]

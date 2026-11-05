@@ -17,6 +17,7 @@ import com.ashvehicles.item.CapturePointItem;
 import com.ashvehicles.item.DroneTerminalItem;
 import com.ashvehicles.item.EquipmentItem;
 import com.ashvehicles.item.FuelItem;
+import com.ashvehicles.item.GSuitItem;
 import com.ashvehicles.item.GroundVehicleItem;
 import com.ashvehicles.item.HmdItem;
 import com.ashvehicles.item.RackItem;
@@ -92,6 +93,28 @@ public final class ModItems {
 
     public static final DeferredItem<HmdItem> HMD =
             ITEMS.registerItem("hmd", HmdItem::new, new Item.Properties().stacksTo(1));
+
+    /**
+     * 耐Gスーツの素材。防御は0（服であって装甲ではない）。描くのはバニラの防具レイヤーで、
+     * {@code textures/models/armor/g_suit_layer_1.png}（ベスト）と {@code _layer_2.png}（ズボン）。
+     */
+    public static final DeferredHolder<ArmorMaterial, ArmorMaterial> G_SUIT_MATERIAL =
+            ARMOR_MATERIALS.register("g_suit", () -> new ArmorMaterial(
+                    new EnumMap<>(Map.of(ArmorItem.Type.CHESTPLATE, 0, ArmorItem.Type.LEGGINGS, 0)), 0,
+                    SoundEvents.ARMOR_EQUIP_LEATHER, () -> Ingredient.EMPTY,
+                    List.of(new ArmorMaterial.Layer(ResourceLocation.fromNamespaceAndPath(AshVehicles.MODID, "g_suit"))),
+                    0f, 0f));
+
+    /**
+     * 耐Gスーツの上下。着た分だけパイロットが耐えられる正のGが上がる（素 7G、上下で 13G。
+     * {@link GSuitItem} 参照）。
+     */
+    public static final DeferredItem<GSuitItem> G_SUIT_VEST =
+            ITEMS.registerItem("g_suit_vest", properties -> new GSuitItem(ArmorItem.Type.CHESTPLATE, properties),
+                    new Item.Properties().stacksTo(1));
+    public static final DeferredItem<GSuitItem> G_SUIT_TROUSERS =
+            ITEMS.registerItem("g_suit_trousers", properties -> new GSuitItem(ArmorItem.Type.LEGGINGS, properties),
+                    new Item.Properties().stacksTo(1));
 
     /**
      * 標的ドローンの投入器。これも機体に付く物ではなく、撃つ相手を空へ上げる道具。
@@ -185,7 +208,8 @@ public final class ModItems {
      * <p>データパックの兵装がこの名前を名乗ったら、争いになる前に負けてもらう。機体や弾薬と同じ扱いだが、
      * こちらは登録が先に済んでいるので、防がないと名前の二重登録でゲームが上がらなくなる。
      */
-    private static final Set<String> FIXED_NAMES = Set.of("wrench", "fuel_can", "target_drone",
+    private static final Set<String> FIXED_NAMES = Set.of("wrench", "fuel_can", "hmd", "g_suit_vest",
+            "g_suit_trousers", "drone_terminal", "target_drone",
             "blast_wand", "tab_divider", "vehicle_workbench", "team_spawn", "capture_point",
             "steel_plate", "machine_parts", "circuit_board", "armor_plate", "engine", "jet_engine", "avionics",
             "seeker", "rocket_motor", "fuze", "high_explosive");
